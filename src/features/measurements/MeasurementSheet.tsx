@@ -1,0 +1,174 @@
+import { useState } from 'react';
+import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { BottomSheet } from '@/components/BottomSheet';
+import { Icon } from '@/components/Icon';
+import { IconButton } from '@/components/IconButton';
+import { Txt } from '@/components/Txt';
+import { hexA } from '@/lib/color';
+import { MEAS_META } from '@/lib/measurements';
+import { fontFamily } from '@/theme/fonts';
+import { useAppStore } from '@/store/useAppStore';
+import { useTheme } from '@/theme/useTheme';
+import type { MeasurementKind } from '@/types/models';
+
+function midnight(offsetDays: number): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - offsetDays);
+  return d.getTime();
+}
+
+const ONE_DAY = 86400000;
+
+export function MeasurementSheet() {
+  const sheet = useAppStore((s) => s.measurementSheet);
+  const editingId = useAppStore((s) => s.editingMeasurementId);
+  if (!sheet) return null;
+  return <Inner key={`${sheet.kind}-${editingId ?? 'new'}`} kind={sheet.kind} editingId={editingId} />;
+}
+
+function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string | null }) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+  const measurements = useAppStore((s) => s.measurements);
+  const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
+  const saveMeasurement = useAppStore((s) => s.saveMeasurement);
+  const deleteMeasurement = useAppStore((s) => s.deleteMeasurement);
+  const close = useAppStore((s) => s.closeMeasurementSheet);
+
+  const meta = MEAS_META[kind];
+  const editing = editingId ? measurements.find((m) => m.id === editingId) : null;
+  const [value, setValue] = useState(editing ? String(editing.value) : '');
+  const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
+  const [notes, setNotes] = useState(editing?.notes ?? '');
+
+  const today = midnight(0);
+  const isToday = dateMs === today;
+  const dateLabel =
+    dateMs === today
+      ? 'Today'
+      : dateMs === midnight(1)
+        ? 'Yesterday'
+        : new Date(dateMs).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const stepDay = (delta: number) => setDateMs((d) => Math.min(today, d + delta * ONE_DAY));
+
+  const onSave = () => {
+    const v = parseFloat(value.replace(',', '.'));
+    if (Number.isNaN(v)) {
+      close();
+      return;
+    }
+    saveMeasurement(v, dateMs, notes.trim() || undefined);
+  };
+
+  return (
+    <BottomSheet onClose={close}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 14, flexShrink: 0 }}>
+        <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: hexA(meta.color, t.dark ? 0.2 : 0.16), alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="chart" color={meta.color} size={22} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Txt weight={800} size={20} tracking={-0.3}>
+            {editingId ? 'Edit' : 'Log'} {meta.label.toLowerCase()}
+          </Txt>
+          {childFirst ? (
+            <Txt weight={500} size={13} color={t.dim}>
+              for {childFirst}
+            </Txt>
+          ) : null}
+        </View>
+        <IconButton name="close" onPress={close} size={20} />
+      </View>
+
+      <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
+        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+          Value
+        </Txt>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 16, paddingHorizontal: 16, marginBottom: 6 }}>
+          <TextInput
+            value={value}
+            onChangeText={setValue}
+            placeholder="0"
+            placeholderTextColor={t.faint}
+            keyboardType="decimal-pad"
+            autoFocus={!editing}
+            style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+          />
+          {meta.unit ? (
+            <Txt weight={600} size={16} color={t.dim}>
+              {meta.unit}
+            </Txt>
+          ) : null}
+        </View>
+        <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 16 }}>
+          Unit follows your Baby Buddy server settings.
+        </Txt>
+
+        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+          Date
+        </Txt>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: isToday ? 16 : 8 }}>
+          <Pressable
+            onPress={() => stepDay(-1)}
+            style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Icon name="chevron-left" color={t.text} size={22} />
+          </Pressable>
+          <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
+            <Txt weight={700} size={15.5}>
+              {dateLabel}
+            </Txt>
+          </View>
+          <Pressable
+            onPress={() => stepDay(1)}
+            disabled={isToday}
+            style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', opacity: isToday ? 0.4 : 1 }}
+          >
+            <Icon name="chevron-right" color={t.text} size={22} />
+          </Pressable>
+        </View>
+        {!isToday && (
+          <Pressable onPress={() => setDateMs(today)} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+            <Txt weight={600} size={13} color={meta.color}>
+              Jump to today
+            </Txt>
+          </Pressable>
+        )}
+
+        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+          Notes (optional)
+        </Txt>
+        <TextInput
+          value={notes}
+          onChangeText={setNotes}
+          placeholder="Add a note…"
+          placeholderTextColor={t.faint}
+          style={{ minHeight: 48, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, paddingHorizontal: 14, fontSize: 14.5, fontFamily: fontFamily(500), color: t.text, marginBottom: 8 }}
+        />
+      </ScrollView>
+
+      <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
+        {editingId && (
+          <Pressable
+            onPress={() => deleteMeasurement(editingId)}
+            style={{ height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
+          >
+            <Txt weight={800} size={16} color="#E2725B">
+              Delete
+            </Txt>
+          </Pressable>
+        )}
+        <Pressable
+          onPress={onSave}
+          style={{ flex: 1, height: 58, borderRadius: 18, backgroundColor: meta.color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(meta.color, 0.35)}` }}
+        >
+          <Txt weight={800} size={17.5} color={t.onActivity}>
+            {editingId ? 'Save changes' : `Save ${meta.short.toLowerCase()}`}
+          </Txt>
+        </Pressable>
+      </View>
+    </BottomSheet>
+  );
+}
