@@ -110,7 +110,7 @@ const ENDPOINT: Record<ActivityType, string> = {
   tummy: 'tummy-times',
 };
 
-function normalizeServerUrl(raw: string): string {
+export function normalizeServerUrl(raw: string): string {
   let url = raw.trim().replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
   return url;
