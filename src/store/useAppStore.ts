@@ -26,6 +26,13 @@ import { ApiError } from '@/api/client';
 import { makeSeed } from '@/data/seed';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
+import {
+  loadServers,
+  persistServers,
+  removeServer,
+  upsertServer,
+  type SavedServer,
+} from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { derivedField, nextStartSide, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
@@ -51,6 +58,8 @@ interface AppState {
   hydrating: boolean;
   /** number of writes queued offline (for the banner) */
   queueCount: number;
+  /** servers the user has connected to before (one-tap retry list) */
+  savedServers: SavedServer[];
 
   // ui / theme
   themeMode: ThemeMode;
@@ -94,6 +103,7 @@ interface AppActions {
   connect: (serverUrl: string, token: string) => Promise<void>;
   enterDemo: () => void;
   disconnect: () => void;
+  forgetServer: (serverUrl: string) => void;
   flushQueue: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
 
@@ -147,6 +157,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   connectError: null,
   hydrating: true,
   queueCount: 0,
+  savedServers: [],
 
   themeMode: 'dark',
   offline: false,
@@ -200,6 +211,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
     const savedTimers = await loadTimers();
+    let savedServers = await loadServers();
+    // Migration: ensure the active real server is in the retry list for users
+    // who connected before the saved-servers feature existed.
+    if (conn && !conn.demo && conn.serverUrl) {
+      savedServers = upsertServer(savedServers, {
+        serverUrl: conn.serverUrl,
+        token: conn.token,
+        lastUsedAt: Date.now(),
+      });
+      void persistServers(savedServers);
+    }
+    set({ savedServers }); // merges; later set() calls in this fn keep it
     if (!conn) {
       set({ hydrating: false, queueCount: q.length, timers: savedTimers });
       return;
@@ -248,8 +271,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const conn: Connection = { demo: false, serverUrl, token };
     try {
       const data = await loadFromServer(conn);
-      set({ connection: conn, connected: true, connecting: false, ...data });
+      const savedServers = upsertServer(get().savedServers, {
+        serverUrl,
+        token,
+        lastUsedAt: Date.now(),
+      });
+      set({ connection: conn, connected: true, connecting: false, savedServers, ...data });
       void saveConnection(conn);
+      void persistServers(savedServers);
       void get().flushQueue();
     } catch (e) {
       set({
@@ -291,6 +320,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       selectedChildId: '',
       queueCount: 0,
     });
+  },
+  forgetServer: (serverUrl) => {
+    const next = removeServer(get().savedServers, serverUrl);
+    set({ savedServers: next });
+    void persistServers(next);
+    get().showToast('Removed');
   },
   flushQueue: async () => {
     const s = get();
