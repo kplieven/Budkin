@@ -1,0 +1,9 @@
+node_modules/
+.expo/
+dist/
+android/
+ios/
+web-build/
+design_handoff_baby_buddy/
+.git/
+*.log

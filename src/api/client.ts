@@ -1,0 +1,371 @@
+/**
+ * Typed Baby Buddy REST API client.
+ *
+ * Baby Buddy is Django REST Framework at `<server>/api/`, token auth
+ * (`Authorization: Token <key>`), JSON only, LimitOffset pagination, ISO 8601
+ * datetimes. Note the non-obvious resource slugs: diaper changes are `changes`
+ * and tummy time is `tummy-times`.
+ *
+ * Docs: https://docs.baby-buddy.net/api/
+ */
+
+import type {
+  ActivityType,
+  Child,
+  DiaperColor,
+  DiaperEntry,
+  Entry,
+  FeedMethod,
+  FeedType,
+  FeedingEntry,
+  Measurement,
+  MeasurementKind,
+  PumpingEntry,
+  SleepEntry,
+  TummyEntry,
+} from '@/types/models';
+
+export class ApiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+interface Paginated<T> {
+  count: number;
+  next: string | null;
+  previous: string | null;
+  results: T[];
+}
+
+const toISO = (ms: number) => new Date(ms).toISOString();
+const fromISO = (s: string) => new Date(s).getTime();
+
+// Measurements use a date-only field ('YYYY-MM-DD').
+const toDateStr = (ms: number) => {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const fromDateStr = (s: string) => {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1).getTime();
+};
+
+const MEAS_ENDPOINT: Record<MeasurementKind, string> = {
+  weight: 'weight',
+  height: 'height',
+  head: 'head-circumference',
+  bmi: 'bmi',
+};
+const MEAS_FIELD: Record<MeasurementKind, string> = {
+  weight: 'weight',
+  height: 'height',
+  head: 'head_circumference',
+  bmi: 'bmi',
+};
+
+// --- enum <-> API string mappings (Baby Buddy uses human-readable strings) ---
+const FEED_TYPE_TO_API: Record<FeedType, string> = {
+  breast: 'breast milk',
+  formula: 'formula',
+  fortified: 'fortified breast milk',
+  solid: 'solid food',
+};
+const FEED_TYPE_FROM_API: Record<string, FeedType> = {
+  'breast milk': 'breast',
+  formula: 'formula',
+  'fortified breast milk': 'fortified',
+  'solid food': 'solid',
+};
+const FEED_METHOD_TO_API: Record<FeedMethod, string> = {
+  left: 'left breast',
+  right: 'right breast',
+  both: 'both breasts',
+  bottle: 'bottle',
+  parent: 'parent fed',
+  self: 'self fed',
+};
+const FEED_METHOD_FROM_API: Record<string, FeedMethod> = {
+  'left breast': 'left',
+  'right breast': 'right',
+  'both breasts': 'both',
+  bottle: 'bottle',
+  'parent fed': 'parent',
+  'self fed': 'self',
+};
+
+/** Fallback avatar tints for children fetched from a server (API has no color). */
+const CHILD_COLORS = ['#EBA06A', '#9F94D4', '#6FC0A6', '#E6BE5E', '#EA958A'];
+
+/** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times). */
+const ENDPOINT: Record<ActivityType, string> = {
+  feeding: 'feedings',
+  sleep: 'sleep',
+  diaper: 'changes',
+  pumping: 'pumping',
+  tummy: 'tummy-times',
+};
+
+function normalizeServerUrl(raw: string): string {
+  let url = raw.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
+  return url;
+}
+
+export class BabybuddyClient {
+  private readonly apiBase: string;
+  private readonly token: string;
+
+  constructor(serverUrl: string, token: string) {
+    this.apiBase = normalizeServerUrl(serverUrl) + '/api';
+    this.token = token.trim();
+  }
+
+  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+    let res: Response;
+    try {
+      res = await fetch(`${this.apiBase}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Token ${this.token}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          ...(init?.headers ?? {}),
+        },
+      });
+    } catch {
+      throw new ApiError(0, "Couldn't reach server. Check the URL and your connection.");
+    }
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        throw new ApiError(res.status, 'Invalid token for this server.');
+      }
+      let detail = '';
+      try {
+        const body = await res.text();
+        if (body) detail = ' ' + body.slice(0, 300);
+      } catch {
+        /* ignore body read errors */
+      }
+      throw new ApiError(res.status, `Request failed (${res.status}).${detail}`);
+    }
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
+  }
+
+  /** Validate the token + reachability. */
+  async getProfile(): Promise<unknown> {
+    return this.request('/profile/');
+  }
+
+  async listChildren(): Promise<Child[]> {
+    const data = await this.request<Paginated<any>>('/children/?limit=100');
+    return data.results.map((c, i) => ({
+      id: String(c.id),
+      first: c.first_name ?? '',
+      last: c.last_name ?? '',
+      birth: c.birth_date ? fromISO(c.birth_date) : Date.now(),
+      color: CHILD_COLORS[i % CHILD_COLORS.length],
+      slug: c.slug,
+      picture: c.picture ?? null,
+    }));
+  }
+
+  async listFeedings(childId: string, limit = 50): Promise<FeedingEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/feedings/?child=${childId}&ordering=-start&limit=${limit}`,
+    );
+    return data.results.map((f) => ({
+      id: `feeding-${f.id}`,
+      serverId: f.id,
+      childId,
+      type: 'feeding',
+      start: fromISO(f.start),
+      end: f.end ? fromISO(f.end) : null,
+      feedType: FEED_TYPE_FROM_API[f.type] ?? 'breast',
+      method: FEED_METHOD_FROM_API[f.method] ?? 'left',
+      amount: f.amount != null ? Number(f.amount) : null,
+      tags: (f.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
+  async listSleep(childId: string, limit = 50): Promise<SleepEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/sleep/?child=${childId}&ordering=-start&limit=${limit}`,
+    );
+    return data.results.map((s) => ({
+      id: `sleep-${s.id}`,
+      serverId: s.id,
+      childId,
+      type: 'sleep',
+      start: fromISO(s.start),
+      end: s.end ? fromISO(s.end) : null,
+      nap: s.nap === true || s.nap === 'true',
+      tags: (s.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
+  async listChanges(childId: string, limit = 50): Promise<DiaperEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/changes/?child=${childId}&ordering=-time&limit=${limit}`,
+    );
+    return data.results.map((c) => ({
+      id: `diaper-${c.id}`,
+      serverId: c.id,
+      childId,
+      type: 'diaper',
+      time: fromISO(c.time),
+      wet: !!c.wet,
+      solid: !!c.solid,
+      color: (c.color || null) as DiaperColor | null,
+      amount: c.amount != null ? Number(c.amount) : null,
+      tags: (c.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
+  async listPumping(childId: string, limit = 50): Promise<PumpingEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/pumping/?child=${childId}&ordering=-start&limit=${limit}`,
+    );
+    return data.results.map((p) => ({
+      id: `pumping-${p.id}`,
+      serverId: p.id,
+      childId,
+      type: 'pumping',
+      start: p.start ? fromISO(p.start) : fromISO(p.time),
+      end: p.end ? fromISO(p.end) : null,
+      amount: p.amount != null ? Number(p.amount) : null,
+      tags: (p.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
+  async listTummy(childId: string, limit = 50): Promise<TummyEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/tummy-times/?child=${childId}&ordering=-start&limit=${limit}`,
+    );
+    return data.results.map((t) => ({
+      id: `tummy-${t.id}`,
+      serverId: t.id,
+      childId,
+      type: 'tummy',
+      start: fromISO(t.start),
+      end: t.end ? fromISO(t.end) : null,
+      milestone: t.milestone || undefined,
+      tags: (t.tags ?? []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)),
+    }));
+  }
+
+  private buildBody(entry: Entry): Record<string, unknown> {
+    const child = entry.childId;
+    const tags = entry.tags ?? [];
+    switch (entry.type) {
+      case 'feeding':
+        return {
+          child,
+          start: toISO(entry.start),
+          end: toISO(entry.end ?? entry.start),
+          type: FEED_TYPE_TO_API[entry.feedType],
+          method: FEED_METHOD_TO_API[entry.method],
+          amount: entry.amount,
+          tags,
+        };
+      case 'sleep':
+        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), tags };
+      case 'diaper':
+        return {
+          child,
+          time: toISO(entry.time),
+          wet: entry.wet,
+          solid: entry.solid,
+          color: entry.color ?? '',
+          amount: entry.amount ?? null,
+          tags,
+        };
+      case 'pumping':
+        return {
+          child,
+          start: toISO(entry.start),
+          end: toISO(entry.end ?? entry.start),
+          amount: entry.amount,
+          tags,
+        };
+      case 'tummy':
+        return {
+          child,
+          start: toISO(entry.start),
+          end: toISO(entry.end ?? entry.start),
+          milestone: entry.milestone ?? '',
+          tags,
+        };
+    }
+  }
+
+  /** Create an entry on the server; returns the new server id. */
+  async createEntry(entry: Entry): Promise<number | undefined> {
+    const res = await this.request<{ id?: number }>(`/${ENDPOINT[entry.type]}/`, {
+      method: 'POST',
+      body: JSON.stringify(this.buildBody(entry)),
+    });
+    return res?.id;
+  }
+
+  /** Update an existing entry on the server (requires entry.serverId). */
+  async updateEntry(entry: Entry): Promise<void> {
+    if (entry.serverId == null) return;
+    await this.request(`/${ENDPOINT[entry.type]}/${entry.serverId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(this.buildBody(entry)),
+    });
+  }
+
+  /** Delete an entry on the server by type + server id. */
+  async deleteEntry(type: ActivityType, serverId: number): Promise<void> {
+    await this.request(`/${ENDPOINT[type]}/${serverId}/`, { method: 'DELETE' });
+  }
+
+  // ---- measurements (weight / height / head circumference / BMI) ----
+
+  async listMeasurements(kind: MeasurementKind, childId: string, limit = 50): Promise<Measurement[]> {
+    const field = MEAS_FIELD[kind];
+    const data = await this.request<Paginated<any>>(
+      `/${MEAS_ENDPOINT[kind]}/?child=${childId}&ordering=-date&limit=${limit}`,
+    );
+    return data.results.map((r) => ({
+      id: `${kind}-${r.id}`,
+      serverId: r.id,
+      childId,
+      kind,
+      value: Number(r[field]),
+      date: fromDateStr(r.date),
+      notes: r.notes || undefined,
+    }));
+  }
+
+  private measBody(m: Measurement): Record<string, unknown> {
+    return { child: m.childId, date: toDateStr(m.date), [MEAS_FIELD[m.kind]]: m.value, notes: m.notes ?? '' };
+  }
+
+  async createMeasurement(m: Measurement): Promise<number | undefined> {
+    const res = await this.request<{ id?: number }>(`/${MEAS_ENDPOINT[m.kind]}/`, {
+      method: 'POST',
+      body: JSON.stringify(this.measBody(m)),
+    });
+    return res?.id;
+  }
+
+  async updateMeasurement(m: Measurement): Promise<void> {
+    if (m.serverId == null) return;
+    await this.request(`/${MEAS_ENDPOINT[m.kind]}/${m.serverId}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(this.measBody(m)),
+    });
+  }
+
+  async deleteMeasurement(kind: MeasurementKind, serverId: number): Promise<void> {
+    await this.request(`/${MEAS_ENDPOINT[kind]}/${serverId}/`, { method: 'DELETE' });
+  }
+}

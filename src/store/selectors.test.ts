@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+
+import { lastFeedEndMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import type { Entry } from '@/types/models';
+import type { TimeEntryState } from '@/types/timeEntry';
+
+const NOW = 1_700_000_000_000;
+const M = 60000;
+
+describe('teEnd / teStart / teDurationMin', () => {
+  it('point shape derives from agoMin + nudge', () => {
+    const te: TimeEntryState = { shape: 'point', agoMin: 15, nudge: 0, tags: [] };
+    expect(teEnd(te, NOW)).toBe(NOW - 15 * M);
+    expect(teEnd({ ...te, nudge: 5 }, NOW)).toBe(NOW - 10 * M);
+    expect(teStart(te, NOW)).toBeNull();
+  });
+  it('interval default: end + lasted, start derived', () => {
+    const te: TimeEntryState = { shape: 'interval', order: ['end', 'lasted', 'start'], endAgoMin: 0, durationMin: 20, tags: [] };
+    expect(teEnd(te, NOW)).toBe(NOW);
+    expect(teStart(te, NOW)).toBe(NOW - 20 * M);
+    expect(teDurationMin(te, NOW)).toBe(20);
+  });
+  it('interval: start + lasted, end derived', () => {
+    const te: TimeEntryState = { shape: 'interval', order: ['start', 'lasted', 'end'], startAbs: NOW - 30 * M, durationMin: 20, tags: [] };
+    expect(teStart(te, NOW)).toBe(NOW - 30 * M);
+    expect(teEnd(te, NOW)).toBe(NOW - 10 * M);
+  });
+  it('ongoing ends at now (live), duration grows from start', () => {
+    const te: TimeEntryState = { shape: 'interval', ongoing: true, order: ['end', 'start', 'lasted'], startAbs: NOW - 30 * M, tags: [] };
+    expect(teEnd(te, NOW)).toBe(NOW);
+    expect(teStart(te, NOW)).toBe(NOW - 30 * M);
+    expect(teDurationMin(te, NOW)).toBe(30);
+  });
+});
+
+describe('anchors', () => {
+  const entries: Entry[] = [
+    { id: 'f', childId: 'c1', type: 'feeding', start: NOW - 90 * M, end: NOW - 60 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
+    { id: 's', childId: 'c1', type: 'sleep', start: NOW - 240 * M, end: NOW - 120 * M, nap: true, tags: [] },
+  ];
+  it('lastFeedEndMinAgo', () => {
+    expect(lastFeedEndMinAgo(entries, NOW)).toBe(60);
+    expect(lastFeedEndMinAgo([], NOW)).toBeNull();
+  });
+  it('lastWakeMinAgo', () => {
+    expect(lastWakeMinAgo(entries, NOW)).toBe(120);
+  });
+});
+
+describe('nextStartSide', () => {
+  const feed = (method: 'left' | 'right' | 'both', tags: string[]): Entry => ({
+    id: 'f', childId: 'c1', type: 'feeding', start: NOW, end: NOW + 1, feedType: 'breast', method, amount: null, tags,
+  });
+  it('defaults to left with no history', () => {
+    expect(nextStartSide([])).toBe('left');
+  });
+  it('alternates from the last feed (both + side tag)', () => {
+    expect(nextStartSide([feed('both', ['left'])])).toBe('right');
+    expect(nextStartSide([feed('both', ['right'])])).toBe('left');
+  });
+  it('alternates from a single-side method', () => {
+    expect(nextStartSide([feed('left', [])])).toBe('right');
+  });
+});

@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" rx="22" fill="#16110E"/><path d="M50 74s-22-14-22-31a12.5 12.5 0 0 1 22-8 12.5 12.5 0 0 1 22 8c0 17-22 31-22 31z" fill="#EC9A66"/></svg>
+</template>
+</helmet>
+
+<div style="width:max-content;min-width:100%;min-height:100vh;box-sizing:border-box;padding:48px;background:#e7e5df;font-family:'Figtree',system-ui,sans-serif;color:#3A2E24">
+
+  <!-- INTRO -->
+  <div style="max-width:760px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+      <div style="width:52px;height:52px;border-radius:16px;background:#D17A45;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 22px rgba(209,122,69,0.35)"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10z" fill="#fff"/></svg></div>
+      <div>
+        <div style="font-size:32px;font-weight:800;letter-spacing:-0.8px;line-height:1">Baby Buddy</div>
+        <div style="font-size:15px;font-weight:600;color:#7C6C5C;margin-top:3px">One-handed, dark-first activity logging · iOS + Android</div>
+      </div>
+    </div>
+    <p style="font-size:15px;line-height:1.6;color:#5C4E40;margin:0 0 8px">A warm, friendly client for a self-hosted Baby Buddy server, built for the 3am reality: log a feeding, sleep or diaper in 1–3 thumb taps, in the dark, while holding a baby. Tap anything below — the frames are <b>live and interactive</b>: start the timer, open a log sheet, switch children, toggle night/offline mode in Settings.</p>
+  </div>
+
+  <!-- ============ DESIGN SYSTEM ============ -->
+  <div style="margin:34px 0 14px;font-size:13px;font-weight:800;color:#8A7766;text-transform:uppercase;letter-spacing:1.4px">Design system</div>
+  <div style="display:flex;gap:24px;align-items:flex-start;flex-wrap:nowrap">
+
+    <!-- palette -->
+    <div style="flex:none;width:430px;background:#fff;border-radius:18px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:14px">Palette</div>
+      <div style="font-size:12px;font-weight:700;color:#A89684;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Night (default)</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#16110E;border:1px solid #00000014"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">bg</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#221B16"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">surface</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#2C231C"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">chip</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#F3EBE1"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">text</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#EC9A66"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">primary</div></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:#A89684;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Daylight</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#F6EDE3;border:1px solid #00000014"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">bg</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#FFFCF8;border:1px solid #00000014"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">surface</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#F1E6D8"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">chip</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#3A2E24"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">text</div></div>
+        <div style="flex:1"><div style="height:46px;border-radius:11px;background:#D17A45"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">primary</div></div>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:#A89684;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:8px">Activity colors</div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div style="height:40px;border-radius:11px;background:#F0A878"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">Feed</div></div>
+        <div style="flex:1"><div style="height:40px;border-radius:11px;background:#A99EDC"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">Sleep</div></div>
+        <div style="flex:1"><div style="height:40px;border-radius:11px;background:#6FC0A6"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">Diaper</div></div>
+        <div style="flex:1"><div style="height:40px;border-radius:11px;background:#E6BE5E"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">Pump</div></div>
+        <div style="flex:1"><div style="height:40px;border-radius:11px;background:#EA958A"></div><div style="font-size:10.5px;color:#7C6C5C;margin-top:5px;font-weight:600">Tummy</div></div>
+      </div>
+    </div>
+
+    <!-- type + components on dark -->
+    <div style="flex:none;width:330px;background:#fff;border-radius:18px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:14px">Type · Figtree</div>
+      <div style="font-size:30px;font-weight:800;letter-spacing:-0.7px;line-height:1.05">Display 30/800</div>
+      <div style="font-size:21px;font-weight:700;letter-spacing:-0.3px;margin-top:8px">Title 21/700</div>
+      <div style="font-size:15px;font-weight:500;margin-top:8px;color:#5C4E40">Body 15/500 — calm, legible at arm's length in low light.</div>
+      <div style="font-size:12px;font-weight:700;color:#A89684;text-transform:uppercase;letter-spacing:0.8px;margin-top:10px">Label 12/700 caps</div>
+      <div style="font-size:13px;font-weight:700;color:#A89684;text-transform:uppercase;letter-spacing:0.6px;margin:18px 0 8px">Components</div>
+      <div style="background:#16110E;border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:11px">
+        <div style="height:48px;border-radius:15px;background:#EC9A66;color:#2A170B;font-weight:800;font-size:15px;display:flex;align-items:center;justify-content:center">Primary action</div>
+        <div style="display:flex;gap:7px">
+          <div style="padding:9px 14px;border-radius:12px;background:#F0A878;color:#1A120B;font-weight:700;font-size:13px">Now</div>
+          <div style="padding:9px 14px;border-radius:12px;background:#2C231C;color:#F3EBE1;font-weight:700;font-size:13px;border:1.5px solid #ffffff12">15m</div>
+          <div style="padding:9px 14px;border-radius:12px;background:#2C231C;color:#F3EBE1;font-weight:700;font-size:13px;border:1.5px solid #ffffff12">30m</div>
+          <div style="padding:9px 14px;border-radius:12px;background:#2C231C;color:#F3EBE1;font-weight:700;font-size:13px;border:1.5px solid #ffffff12">Custom</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:11px;background:#221B16;border:1.5px solid #ffffff12;border-radius:14px;padding:11px 13px">
+          <div style="width:34px;height:34px;border-radius:10px;background:#F0A87829;display:flex;align-items:center;justify-content:center"><svg width="18" height="18" viewBox="0 0 24 24"><path d="M8 8.5c0-1 .8-1.8 1.8-1.8h4.4c1 0 1.8.8 1.8 1.8V19a3 3 0 0 1-3 3h-2a3 3 0 0 1-3-3z" fill="#F0A878"/><rect x="9" y="2" width="6" height="2.6" rx="1.2" fill="#F0A878"/></svg></div>
+          <div style="flex:1"><div style="color:#F3EBE1;font-weight:700;font-size:14px">Feeding · 18 min</div><div style="color:#B4A492;font-size:12px;font-weight:500">Breast · left</div></div>
+          <div style="color:#B4A492;font-weight:600;font-size:13px">1h ago</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- principles -->
+    <div style="flex:none;width:300px;background:#fff;border-radius:18px;padding:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)">
+      <div style="font-size:16px;font-weight:800;margin-bottom:14px">Principles</div>
+      <div style="display:flex;flex-direction:column;gap:13px;font-size:13.5px;line-height:1.45;color:#5C4E40">
+        <div><b style="color:#3A2E24">1–3 taps.</b> Smart defaults (now, last-used type/method, alternating breast) mean the common log is one tap to open, one to save.</div>
+        <div><b style="color:#3A2E24">Thumb zone.</b> Primary actions live in the lower half; Save spans the bottom of every sheet.</div>
+        <div><b style="color:#3A2E24">Color = recognition.</b> Each activity keeps its color across cards, timeline and timers — readable half-asleep.</div>
+        <div><b style="color:#3A2E24">Never type a time.</b> One reusable time-entry component with relative chips & anchors replaces wheel pickers.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HOME + PLATFORMS ============ -->
+  <div style="margin:42px 0 14px;font-size:13px;font-weight:800;color:#8A7766;text-transform:uppercase;letter-spacing:1.4px">Home — the heart of one-handed use · both platforms</div>
+  <div style="display:flex;gap:40px;align-items:flex-start">
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">iOS · Night</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="home" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Android · Night</div>
+      <x-import component="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" hint-size="412px,892px">
+        <dc-import name="BabyBuddyApp" platform="android" theme="dark" start="home" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">iOS · Daylight</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="light" start="home" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+  </div>
+
+  <!-- ============ TIME ENTRY IN CONTEXT ============ -->
+  <div style="margin:42px 0 6px;font-size:13px;font-weight:800;color:#8A7766;text-transform:uppercase;letter-spacing:1.4px">The reusable time-entry component, in context</div>
+  <div style="max-width:740px;margin-bottom:16px;font-size:14px;line-height:1.55;color:#5C4E40">Two shapes, one component. <b style="color:#3A2E24">Interval</b> events (feeding, sleep, pumping, tummy) offer “Last 15/30/45m”, combinable <i>Ended</i> + <i>Lasted</i> rows, a back-dated live timer, and smart anchors. <b style="color:#3A2E24">Point-in-time</b> events (diaper) use one-tap “ago” chips. Every flow shows a plain-language readout and a ±5m nudge — no wheel pickers.</div>
+  <div style="display:flex;gap:40px;align-items:flex-start">
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Feeding — interval + defaults</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="feeding" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Sleep — “woke up / still sleeping”</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="sleep" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Diaper — point-in-time + offline</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="diaper" offline="{{ true }}" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+  </div>
+
+  <!-- ============ SCREENS & STATES ============ -->
+  <div style="margin:42px 0 14px;font-size:13px;font-weight:800;color:#8A7766;text-transform:uppercase;letter-spacing:1.4px">Screens &amp; states</div>
+  <div style="display:flex;gap:40px;align-items:flex-start">
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Onboarding — connect server</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="light" start="onboarding" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Active timer — stop &amp; save as…</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="timers" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">History — reverse-chronological</div>
+      <x-import component="AndroidDevice" from="./android-frame.jsx" dark="{{ true }}" hint-size="412px,892px">
+        <dc-import name="BabyBuddyApp" platform="android" theme="dark" start="timeline" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+    <div style="flex:none">
+      <div style="font-size:13px;font-weight:700;color:#5C4E40;margin-bottom:12px">Offline — clearly flagged &amp; queued</div>
+      <x-import component="IOSDevice" from="./ios-frame.jsx" dark="{{ true }}" hint-size="402px,874px">
+        <dc-import name="BabyBuddyApp" platform="ios" theme="dark" start="home" offline="{{ true }}" hint-size="100%,100%" style="height:100%;width:100%;display:block"></dc-import>
+      </x-import>
+    </div>
+  </div>
+
+  <div style="height:24px"></div>
+</div>
+</x-dc>
+</body>
+</html>
