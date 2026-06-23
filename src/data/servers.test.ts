@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as SecureStore from 'expo-secure-store';
 
 import {
   loadServers,
@@ -14,9 +15,6 @@ vi.mock('expo-secure-store', () => ({
   getItemAsync: vi.fn(async (k: string) => mem.store.get(k) ?? null),
   setItemAsync: vi.fn(async (k: string, v: string) => {
     mem.store.set(k, v);
-  }),
-  deleteItemAsync: vi.fn(async (k: string) => {
-    mem.store.delete(k);
   }),
 }));
 
@@ -80,5 +78,15 @@ describe('persistence', () => {
     const list = [srv('https://a.lan'), srv('https://b.lan')];
     await persistServers(list);
     expect(await loadServers()).toEqual(list);
+  });
+
+  it('returns [] when stored value is not an array', async () => {
+    mem.store.set('babybuddy.servers.v1', JSON.stringify({ not: 'array' }));
+    expect(await loadServers()).toEqual([]);
+  });
+
+  it('swallows storage errors on persist', async () => {
+    vi.mocked(SecureStore.setItemAsync).mockRejectedValueOnce(new Error('platform'));
+    await expect(persistServers([srv('https://a.lan')])).resolves.toBeUndefined();
   });
 });
