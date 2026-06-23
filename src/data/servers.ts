@@ -29,7 +29,9 @@ export const MAX_SERVERS = 6;
 export async function loadServers(): Promise<SavedServer[]> {
   try {
     const s = await SecureStore.getItemAsync(KEY);
-    return s ? (JSON.parse(s) as SavedServer[]) : [];
+    if (!s) return [];
+    const parsed = JSON.parse(s);
+    return Array.isArray(parsed) ? (parsed as SavedServer[]) : [];
   } catch {
     return [];
   }
