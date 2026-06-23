@@ -11,6 +11,7 @@ import type { Entry, Timer } from '@/types/models';
 const h = vi.hoisted(() => ({
   q: [] as unknown[],
   timers: [] as unknown[],
+  servers: [] as unknown[],
   pushed: [] as unknown[],
   updated: [] as unknown[],
   deleted: [] as unknown[],
@@ -24,6 +25,19 @@ vi.mock('@/data/storage', () => ({
   saveConnection: vi.fn(async () => {}),
   loadConnection: vi.fn(async () => null),
   clearConnection: vi.fn(async () => {}),
+}));
+
+vi.mock('@/data/servers', () => ({
+  loadServers: vi.fn(async () => h.servers),
+  persistServers: vi.fn(async (list: unknown[]) => {
+    h.servers = list;
+  }),
+  // simple URL-equality stand-ins (the store tests use identical URLs)
+  upsertServer: (list: any[], server: any) => {
+    const rest = list.filter((s) => s.serverUrl !== server.serverUrl);
+    return [server, ...rest].slice(0, 6);
+  },
+  removeServer: (list: any[], url: string) => list.filter((s) => s.serverUrl !== url),
 }));
 
 vi.mock('@/data/queue', () => ({
@@ -89,6 +103,7 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   h.q = [];
   h.timers = [];
+  h.servers = [];
   h.pushed = [];
   h.updated = [];
   h.deleted = [];
@@ -117,6 +132,7 @@ beforeEach(() => {
     te: { shape: 'interval', nudge: 0, tags: [] },
     queueCount: 0,
     toast: null,
+    savedServers: [],
   });
 });
 
@@ -465,5 +481,34 @@ describe('edit a running timer', () => {
     expect(s().sheet).toBeNull();
     expect(s().timers).toHaveLength(1);
     expect(s().fromTimerId).toBeNull();
+  });
+});
+
+describe('saved servers', () => {
+  it('connect adds the connected server to the retry list', async () => {
+    useAppStore.setState({ savedServers: [], connected: false });
+    await s().connect('https://a.lan', 'tok');
+    expect(s().savedServers.map((x) => x.serverUrl)).toContain('https://a.lan');
+    expect(h.servers).toHaveLength(1); // persisted
+  });
+
+  it('forgetServer removes a server, persists, and toasts', () => {
+    useAppStore.setState({
+      savedServers: [
+        { serverUrl: 'https://a.lan', token: 't', lastUsedAt: 1 },
+        { serverUrl: 'https://b.lan', token: 't', lastUsedAt: 2 },
+      ],
+    });
+    s().forgetServer('https://a.lan');
+    expect(s().savedServers.map((x) => x.serverUrl)).toEqual(['https://b.lan']);
+    expect(h.servers).toEqual([{ serverUrl: 'https://b.lan', token: 't', lastUsedAt: 2 }]);
+    expect(s().toast).toBe('Removed');
+  });
+
+  it('hydrate loads saved servers and migrates the active connection', async () => {
+    h.servers = [];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    await s().hydrate();
+    expect(s().savedServers.map((x) => x.serverUrl)).toContain('http://x');
   });
 });
