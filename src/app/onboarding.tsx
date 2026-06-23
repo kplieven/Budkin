@@ -9,6 +9,7 @@ import { fontFamily } from '@/theme/fonts';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
+import type { SavedServer } from '@/data/servers';
 import { useTheme } from '@/theme/useTheme';
 
 export default function Onboarding() {
@@ -22,10 +23,22 @@ export default function Onboarding() {
   const connectError = useAppStore((s) => s.connectError);
   const connect = useAppStore((s) => s.connect);
   const enterDemo = useAppStore((s) => s.enterDemo);
+  const savedServers = useAppStore((s) => s.savedServers);
+  const forgetServer = useAppStore((s) => s.forgetServer);
+  const [pendingUrl, setPendingUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (connected) router.replace('/(tabs)');
   }, [connected]);
+
+  // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
+  // fields ready to fix) and reuses the normal connect action.
+  const tryServer = (srv: SavedServer) => {
+    setUrl(srv.serverUrl);
+    setToken(srv.token);
+    setPendingUrl(srv.serverUrl);
+    connect(srv.serverUrl, srv.token);
+  };
 
   const input = {
     height: 54,
@@ -67,6 +80,60 @@ export default function Onboarding() {
       <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, lineHeight: 22 }}>
         Baby Buddy runs on your own server. Paste its address and an access token to start logging.
       </Txt>
+
+      {savedServers.length > 0 && (
+        <View style={{ marginTop: 26 }}>
+          <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
+            PREVIOUSLY CONNECTED
+          </Txt>
+          {savedServers.map((srv) => {
+            const host = srv.serverUrl.replace(/^https?:\/\//, '');
+            const busy = pendingUrl === srv.serverUrl && connecting;
+            return (
+              <Pressable
+                key={srv.serverUrl}
+                onPress={() => tryServer(srv)}
+                disabled={connecting}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  minHeight: 60,
+                  borderRadius: 15,
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line2,
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  marginBottom: 10,
+                }}
+              >
+                <Icon name="clock" color={t.dim} size={20} />
+                <View style={{ flex: 1 }}>
+                  <Txt weight={600} size={15} numberOfLines={1}>
+                    {host}
+                  </Txt>
+                  <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                    {'••••'}
+                    {srv.token.slice(-4)}
+                  </Txt>
+                </View>
+                {busy ? (
+                  <ActivityIndicator color={t.dim} />
+                ) : (
+                  <Pressable
+                    onPress={() => forgetServer(srv.serverUrl)}
+                    hitSlop={10}
+                    style={{ padding: 6 }}
+                  >
+                    <Icon name="close" color={t.faint} size={18} />
+                  </Pressable>
+                )}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
 
       <View style={{ marginTop: 26 }}>
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
@@ -127,7 +194,7 @@ export default function Onboarding() {
       </View>
 
       <Pressable
-        onPress={() => connect(url, token)}
+        onPress={() => { setPendingUrl(null); connect(url, token); }}
         disabled={connecting}
         style={[
           {
