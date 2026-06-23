@@ -510,5 +510,16 @@ describe('saved servers', () => {
     vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
     await s().hydrate();
     expect(s().savedServers.map((x) => x.serverUrl)).toContain('http://x');
+    expect(h.servers.map((x: any) => x.serverUrl)).toContain('http://x');
+  });
+
+  it('a failed connect does not save the server', async () => {
+    useAppStore.setState({ savedServers: [], connected: false });
+    h.servers = [];
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('net'));
+    await s().connect('https://bad.lan', 'tok');
+    expect(s().connectError).toBeTruthy();
+    expect(s().savedServers).toEqual([]);
+    expect(h.servers).toEqual([]); // persistServers never called
   });
 });
