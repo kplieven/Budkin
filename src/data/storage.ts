@@ -1,36 +1,27 @@
 /**
- * Persisted connection (server URL + token, or demo flag) via expo-secure-store.
- * All calls are guarded so unsupported platforms (e.g. web) degrade to no-ops
- * rather than crashing.
+ * Persisted connection (server URL + token, or demo flag). Native: secure-store
+ * (Keychain/Keystore); web: localStorage — see secureKv / secureKv.web.
  */
 
-import * as SecureStore from 'expo-secure-store';
-
 import type { Connection } from '@/data/repository';
+import { kvGet, kvRemove, kvSet } from '@/data/secureKv';
 
 const KEY = 'babybuddy.connection.v1';
 
 export async function saveConnection(c: Connection): Promise<void> {
-  try {
-    await SecureStore.setItemAsync(KEY, JSON.stringify(c));
-  } catch {
-    /* unsupported platform — skip persistence */
-  }
+  await kvSet(KEY, JSON.stringify(c));
 }
 
 export async function loadConnection(): Promise<Connection | null> {
+  const s = await kvGet(KEY);
+  if (!s) return null;
   try {
-    const s = await SecureStore.getItemAsync(KEY);
-    return s ? (JSON.parse(s) as Connection) : null;
+    return JSON.parse(s) as Connection;
   } catch {
     return null;
   }
 }
 
 export async function clearConnection(): Promise<void> {
-  try {
-    await SecureStore.deleteItemAsync(KEY);
-  } catch {
-    /* ignore */
-  }
+  await kvRemove(KEY);
 }

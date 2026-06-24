@@ -4,13 +4,12 @@
  * Distinct from the single active connection in `storage.ts`: this is the list
  * of servers the user has successfully connected to, surfaced as one-tap retry
  * rows on the onboarding page. Tokens are stored, consistent with how the active
- * token is already stored. All SecureStore calls are guarded so unsupported
- * platforms (e.g. web) degrade to no-ops rather than crashing.
+ * token is already stored. Persistence goes through secureKv (secure-store on
+ * native, localStorage on web), which no-ops on unsupported platforms.
  */
 
-import * as SecureStore from 'expo-secure-store';
-
 import { normalizeServerUrl } from '@/api/client';
+import { kvGet, kvSet } from '@/data/secureKv';
 
 export interface SavedServer {
   /** server URL as the user entered it (used for display + reconnect) */
@@ -27,9 +26,9 @@ const KEY = 'babybuddy.servers.v1';
 export const MAX_SERVERS = 6;
 
 export async function loadServers(): Promise<SavedServer[]> {
+  const s = await kvGet(KEY);
+  if (!s) return [];
   try {
-    const s = await SecureStore.getItemAsync(KEY);
-    if (!s) return [];
     const parsed = JSON.parse(s);
     return Array.isArray(parsed) ? (parsed as SavedServer[]) : [];
   } catch {
@@ -38,11 +37,7 @@ export async function loadServers(): Promise<SavedServer[]> {
 }
 
 export async function persistServers(list: SavedServer[]): Promise<void> {
-  try {
-    await SecureStore.setItemAsync(KEY, JSON.stringify(list));
-  } catch {
-    /* unsupported platform — skip persistence */
-  }
+  await kvSet(KEY, JSON.stringify(list));
 }
 
 /**
