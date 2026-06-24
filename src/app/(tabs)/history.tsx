@@ -6,12 +6,15 @@ import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ActivityRow } from '@/features/activity/ActivityRow';
 import { groupByDay } from '@/features/activity/groupByDay';
+import { DesktopPage } from '@/shell/DesktopPage';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 export default function History() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const desktop = useDesktopShell();
   const entries = useAppStore((s) => s.entries);
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
@@ -19,6 +22,39 @@ export default function History() {
   const openEdit = useAppStore((s) => s.openEdit);
 
   const groups = groupByDay(entries, now);
+
+  const body =
+    entries.length === 0 ? (
+      <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
+        <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="list" color={t.faint} size={34} />
+        </View>
+        <Txt weight={700} size={18}>
+          Nothing logged yet
+        </Txt>
+        <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 240, lineHeight: 20 }}>
+          Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.
+        </Txt>
+      </View>
+    ) : (
+      groups.map((g) => (
+        <View key={g.label} style={{ marginBottom: 18 }}>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 9, textTransform: 'uppercase' }}>
+            {g.label}
+          </Txt>
+          {/* Desktop: two-up grid (web handoff). Phone: single column. */}
+          <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 11 } : { gap: 8 }}>
+            {g.items.map((e) => (
+              <View key={e.id} style={desktop ? { flexBasis: '48%', flexGrow: 1, minWidth: 280 } : undefined}>
+                <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
+              </View>
+            ))}
+          </View>
+        </View>
+      ))
+    );
+
+  if (desktop) return <DesktopPage maxWidth={760}>{body}</DesktopPage>;
 
   return (
     <ScrollView
@@ -33,33 +69,7 @@ export default function History() {
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>
       </View>
-
-      {entries.length === 0 ? (
-        <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
-          <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="list" color={t.faint} size={34} />
-          </View>
-          <Txt weight={700} size={18}>
-            Nothing logged yet
-          </Txt>
-          <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 240, lineHeight: 20 }}>
-            Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.
-          </Txt>
-        </View>
-      ) : (
-        groups.map((g) => (
-          <View key={g.label} style={{ marginBottom: 18 }}>
-            <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 9, textTransform: 'uppercase' }}>
-              {g.label}
-            </Txt>
-            <View style={{ gap: 8 }}>
-              {g.items.map((e) => (
-                <ActivityRow key={e.id} entry={e} now={now} onPress={() => openEdit(e.id)} />
-              ))}
-            </View>
-          </View>
-        ))
-      )}
+      {body}
     </ScrollView>
   );
 }

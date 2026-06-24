@@ -6,6 +6,8 @@ import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { DesktopPage } from '@/shell/DesktopPage';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -14,6 +16,7 @@ const dateLabel = (ms: number) => new Date(ms).toLocaleDateString();
 export default function Growth() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const desktop = useDesktopShell();
   const measurements = useAppStore((s) => s.measurements);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
@@ -22,20 +25,8 @@ export default function Growth() {
 
   const recent = [...measurements].sort((a, b) => b.date - a.date);
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
-        <Txt weight={800} size={27} tracking={-0.6}>
-          Growth
-        </Txt>
-        <Pressable onPress={openSwitcher}>
-          <Avatar child={child} size={38} radius={12} fontSize={16} />
-        </Pressable>
-      </View>
-
+  const body = (
+    <>
       {/* latest value cards */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
         {MEAS_KINDS.map((kind) => {
@@ -145,6 +136,25 @@ export default function Growth() {
           })}
         </View>
       )}
+    </>
+  );
+
+  if (desktop) return <DesktopPage maxWidth={640}>{body}</DesktopPage>;
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
+        <Txt weight={800} size={27} tracking={-0.6}>
+          Growth
+        </Txt>
+        <Pressable onPress={openSwitcher}>
+          <Avatar child={child} size={38} radius={12} fontSize={16} />
+        </Pressable>
+      </View>
+      {body}
     </ScrollView>
   );
 }
