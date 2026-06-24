@@ -50,9 +50,12 @@ interface BottomSheetProps {
   onClose: () => void;
   children: ReactNode;
   maxHeightRatio?: number;
+  /** Desktop dialog placement: a centered modal (default) or a bottom-left
+   *  anchored popover (e.g. the child switcher). Ignored in phone sheet mode. */
+  anchor?: 'center' | 'bottom-left';
 }
 
-export function BottomSheet({ onClose, children, maxHeightRatio = 0.92 }: BottomSheetProps) {
+export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor = 'center' }: BottomSheetProps) {
   const t = useTheme();
   const { width, height } = useWindowDimensions();
   const dialog = useDesktopShell();
@@ -129,6 +132,7 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92 }: Bottom
   );
 
   if (dialog) {
+    const popover = anchor === 'bottom-left';
     return (
       <View
         style={{
@@ -138,8 +142,8 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92 }: Bottom
           right: 0,
           bottom: 0,
           zIndex: 40,
-          alignItems: 'center',
-          justifyContent: 'center',
+          alignItems: popover ? 'flex-start' : 'center',
+          justifyContent: popover ? 'flex-end' : 'center',
           padding: 24,
         }}
       >
@@ -157,8 +161,8 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92 }: Bottom
         >
           <View
             style={{
-              width: Math.min(560, width - 48),
-              maxHeight: height * 0.88,
+              width: popover ? 340 : Math.min(560, width - 48),
+              maxHeight: height * (popover ? 0.7 : 0.88),
               borderRadius: 26,
               overflow: 'hidden',
               backgroundColor: t.bg,
