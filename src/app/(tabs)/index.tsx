@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -9,6 +9,8 @@ import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
 import { hexA } from '@/lib/color';
 import { ageStr } from '@/lib/format';
+import { showRail } from '@/shell/breakpoints';
+import { TimelineRail } from '@/shell/TimelineRail';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -17,6 +19,7 @@ export default function Home() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
+  const { width } = useWindowDimensions();
   const now = useAppStore((s) => s.now);
   const offline = useAppStore((s) => s.offline);
   const queueCount = useAppStore((s) => s.queueCount);
@@ -27,9 +30,12 @@ export default function Home() {
   // chrome, so the main region scrolls just the dashboard body.
   if (desktop) {
     return (
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
-        <DashboardContent layout="desktop" />
-      </ScrollView>
+      <View style={{ flex: 1, flexDirection: 'row' }}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
+          <DashboardContent layout="desktop" />
+        </ScrollView>
+        {showRail(width) && <TimelineRail />}
+      </View>
     );
   }
 
