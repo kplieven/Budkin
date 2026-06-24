@@ -1,6 +1,7 @@
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AmountScale } from '@/components/AmountScale';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
@@ -177,30 +178,8 @@ export function LogSheet() {
             {showIntake && (
               <>
                 <FieldLabel>Intake — 1 to 10 (optional)</FieldLabel>
-                <View style={{ flexDirection: 'row', gap: 4, marginBottom: 16 }}>
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-                    const sel = te.amount === n;
-                    return (
-                      <Pressable
-                        key={n}
-                        onPress={() => setTE({ amount: n })}
-                        style={{
-                          flex: 1,
-                          height: 42,
-                          borderRadius: 10,
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          backgroundColor: sel ? color : t.chip,
-                          borderWidth: 1.5,
-                          borderColor: sel ? color : t.line,
-                        }}
-                      >
-                        <Txt weight={700} size={13.5} color={sel ? t.onActivity : t.text}>
-                          {n}
-                        </Txt>
-                      </Pressable>
-                    );
-                  })}
+                <View style={{ marginBottom: 16 }}>
+                  <AmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
                 </View>
               </>
             )}
@@ -248,9 +227,9 @@ export function LogSheet() {
                 </View>
               </>
             )}
-            <FieldLabel>Amount (optional)</FieldLabel>
+            <FieldLabel>Amount — 1 to 10 (optional)</FieldLabel>
             <View style={{ marginBottom: 16 }}>
-              <Stepper value={te.amount ?? 0} unit="" onMinus={() => adjustAmount(-1)} onPlus={() => adjustAmount(1)} />
+              <AmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
             </View>
           </>
         )}
