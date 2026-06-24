@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .bbw-scroll::-webkit-scrollbar { width: 8px; }
+  .bbw-scroll::-webkit-scrollbar-thumb { background: rgba(140,120,100,0.28); border-radius: 99px; }
+  .bbw-scroll::-webkit-scrollbar-track { background: transparent; }
+  @keyframes bbwFade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes bbwPop { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  @keyframes bbwPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  @keyframes bbwToast { 0% { opacity:0; transform: translate(-50%, 10px);} 10%{opacity:1; transform:translate(-50%,0);} 90%{opacity:1; transform:translate(-50%,0);} 100%{opacity:0; transform:translate(-50%,-6px);} }
+</style>
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><rect width="100" height="100" rx="22" fill="#16110E"/><path d="M50 74s-22-14-22-31a12.5 12.5 0 0 1 22-8 12.5 12.5 0 0 1 22 8c0 17-22 31-22 31z" fill="#EC9A66"/></svg>
+</template>
+</helmet>
+
+<div style="{{ rootStyle }}">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <div style="{{ sidebarStyle }}">
+    <div style="display:flex;align-items:center;gap:11px;padding:4px 6px 26px">
+      <div style="{{ logoStyle }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.5-7 10-7 10z" fill="{{ t.onPrimary }}"/></svg></div>
+      <div style="font-size:19px;font-weight:800;letter-spacing:-0.4px">Baby Buddy</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <sc-for list="{{ navItems }}" as="n" hint-placeholder-count="4">
+        <div onClick="{{ n.onClick }}" style="{{ n.style }}">
+          <span style="display:flex;width:22px;height:22px;flex:none">{{ n.icon }}</span>
+          <span style="{{ n.labelStyle }}">{{ n.label }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="flex:1"></div>
+
+    <div onClick="{{ h.openSwitcher }}" style="{{ sideChildStyle }}">
+      <div style="{{ avatarStyle }}">{{ childInitial }}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ childName }}</div>
+        <div style="font-size:12px;font-weight:500;color:{{ t.dim }}">{{ childAge }}</div>
+      </div>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" style="opacity:.5;flex:none"><path d="M8 9l4 4 4-4M8 15l4-4 4 4" stroke="{{ t.dim }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+  </div>
+
+  <!-- ===================== MAIN ===================== -->
+  <div style="{{ mainStyle }}">
+
+    <!-- TOP BAR -->
+    <div style="{{ topBarStyle }}">
+      <div style="min-width:0">
+        <div style="font-size:13px;font-weight:700;color:{{ t.faint }};text-transform:uppercase;letter-spacing:1px">{{ greeting }}</div>
+        <div style="font-size:26px;font-weight:800;letter-spacing:-0.6px;margin-top:2px">{{ screenTitle }}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <sc-if value="{{ offline }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ offlinePillStyle }}"><span style="width:8px;height:8px;border-radius:99px;background:#E2B554;display:inline-block"></span>Offline · {{ queueLabel }} queued</div>
+        </sc-if>
+        <div style="{{ clockStyle }}">{{ clockLabel }}</div>
+        <div onClick="{{ h.toggleTheme }}" style="{{ iconBtnStyle }}">{{ themeToggleIcon }}</div>
+      </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div style="{{ dashGridStyle }}">
+
+        <!-- LEFT column -->
+        <div class="bbw-scroll" style="{{ dashLeftStyle }}">
+
+          <!-- status strip -->
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px">
+            <sc-for list="{{ statusItems }}" as="st" hint-placeholder-count="3">
+              <div style="{{ st.style }}">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <span style="width:9px;height:9px;border-radius:99px;background:{{ st.color }};display:inline-block"></span>
+                  <span style="font-size:12px;font-weight:700;color:{{ t.dim }};text-transform:uppercase;letter-spacing:0.4px">{{ st.label }}</span>
+                </div>
+                <div style="font-size:30px;font-weight:800;letter-spacing:-0.8px;margin-top:12px;line-height:1">{{ st.value }}</div>
+                <div style="font-size:13px;font-weight:500;color:{{ t.faint }};margin-top:4px">{{ st.sub }}</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- running timer -->
+          <sc-if value="{{ hasTimers }}" hint-placeholder-val="{{ true }}">
+            <div onClick="{{ h.goTimers }}" style="{{ timerBannerStyle }}">
+              <span style="width:12px;height:12px;border-radius:99px;background:{{ runningTimerColor }};animation:bbwPulse 1.6s ease-in-out infinite;display:inline-block;flex:none"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12.5px;font-weight:700;color:{{ t.dim }};text-transform:uppercase;letter-spacing:0.5px">{{ runningTimerLabel }} running</div>
+                <div style="font-size:30px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-1px;margin-top:2px;color:{{ runningTimerColor }}">{{ runningTimerElapsed }}</div>
+              </div>
+              <div onClick="{{ h.stopRunning }}" style="{{ timerStopBtnStyle }}">Stop &amp; save</div>
+            </div>
+          </sc-if>
+
+          <!-- log activity -->
+          <div style="font-size:14px;font-weight:800;color:{{ t.faint }};text-transform:uppercase;letter-spacing:1px;margin:4px 2px 0">Log activity</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:14px">
+            <sc-for list="{{ logTiles }}" as="a" hint-placeholder-count="6">
+              <div onClick="{{ a.onClick }}" style="{{ a.cardStyle }}" style-hover="{{ a.hoverStyle }}">
+                <div style="{{ a.iconWrap }}">{{ a.icon }}</div>
+                <div style="font-size:18px;font-weight:700;letter-spacing:-0.3px;margin-top:14px">{{ a.label }}</div>
+                <div style="font-size:13px;font-weight:500;color:{{ t.dim }};margin-top:2px">{{ a.hint }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+
+        <!-- RIGHT timeline rail -->
+        <sc-if value="{{ showRail }}" hint-placeholder-val="{{ true }}">
+          <div style="{{ railStyle }}">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;padding:0 2px 14px">
+              <span style="font-size:16px;font-weight:800;letter-spacing:-0.3px">Recent activity</span>
+              <span onClick="{{ h.goHistory }}" style="font-size:13px;font-weight:700;color:{{ t.primary }};cursor:pointer">All</span>
+            </div>
+            <div class="bbw-scroll" style="{{ railScrollStyle }}">
+              <sc-for list="{{ railGroups }}" as="g" hint-placeholder-count="2">
+                <div style="margin-bottom:16px">
+                  <div style="font-size:11.5px;font-weight:700;color:{{ t.faint }};text-transform:uppercase;letter-spacing:0.7px;margin:0 2px 9px">{{ g.label }}</div>
+                  <div style="display:flex;flex-direction:column;gap:8px">
+                    <sc-for list="{{ g.items }}" as="e" hint-placeholder-count="4">
+                      <div style="{{ e.rowStyle }}">
+                        <div style="{{ e.iconWrap }}">{{ e.icon }}</div>
+                        <div style="flex:1;min-width:0">
+                          <div style="font-size:14.5px;font-weight:700;letter-spacing:-0.2px">{{ e.title }}</div>
+                          <div style="font-size:12.5px;font-weight:500;color:{{ t.dim }};margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ e.detail }}</div>
+                        </div>
+                        <div style="text-align:right;flex:none">
+                          <div style="font-size:13px;font-weight:700;font-variant-numeric:tabular-nums">{{ e.time }}</div>
+                          <div style="font-size:11.5px;font-weight:500;color:{{ t.faint }};margin-top:1px">{{ e.ago }}</div>
+                        </div>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <!-- HISTORY -->
+    <sc-if value="{{ isHistory }}" hint-placeholder-val="{{ false }}">
+      <div class="bbw-scroll" style="{{ pageScrollStyle }}">
+        <div style="max-width:760px">
+          <sc-for list="{{ railGroups }}" as="g" hint-placeholder-count="2">
+            <div style="margin-bottom:26px">
+              <div style="font-size:13px;font-weight:800;color:{{ t.faint }};text-transform:uppercase;letter-spacing:0.8px;margin:0 2px 12px">{{ g.label }}</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+                <sc-for list="{{ g.items }}" as="e" hint-placeholder-count="4">
+                  <div style="{{ e.rowStyle }}">
+                    <div style="{{ e.iconWrap }}">{{ e.icon }}</div>
+                    <div style="flex:1;min-width:0">
+                      <div style="font-size:15.5px;font-weight:700;letter-spacing:-0.2px">{{ e.title }}</div>
+                      <div style="font-size:13px;font-weight:500;color:{{ t.dim }};margin-top:1px">{{ e.detail }}</div>
+                    </div>
+                    <div style="text-align:right;flex:none">
+                      <div style="font-size:14px;font-weight:700;font-variant-numeric:tabular-nums">{{ e.time }}</div>
+                      <div style="font-size:12px;font-weight:500;color:{{ t.faint }};margin-top:1px">{{ e.ago }}</div>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- TIMERS -->
+    <sc-if value="{{ isTimers }}" hint-placeholder-val="{{ false }}">
+      <div class="bbw-scroll" style="{{ pageScrollStyle }}">
+        <sc-if value="{{ timersEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ emptyStyle }}">
+            <div style="{{ emptyArtStyle }}"><svg width="34" height="34" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="13" r="8" stroke="{{ t.faint }}" stroke-width="2.2"/><path d="M12 9v4l2.5 2" stroke="{{ t.faint }}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <div style="font-size:19px;font-weight:700;margin-top:8px">No timers running</div>
+            <div style="font-size:14px;color:{{ t.dim }};max-width:320px;text-align:center;line-height:1.5;margin-top:6px">Start a timer and save it later as a feeding, sleep, pumping or tummy time — even back-dated.</div>
+          </div>
+        </sc-if>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;max-width:760px">
+          <sc-for list="{{ timerCards }}" as="tm" hint-placeholder-count="1">
+            <div style="{{ tm.cardStyle }}">
+              <div style="display:flex;align-items:center;gap:11px;margin-bottom:16px">
+                <div style="{{ tm.iconWrap }}">{{ tm.icon }}</div>
+                <div style="flex:1"><div style="font-size:16px;font-weight:700">{{ tm.name }}</div><div style="font-size:12.5px;font-weight:500;color:{{ t.dim }}">started {{ tm.startedLabel }}</div></div>
+                <span style="width:11px;height:11px;border-radius:99px;background:{{ tm.color }};animation:bbwPulse 1.6s ease-in-out infinite"></span>
+              </div>
+              <div style="font-size:58px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-2px;text-align:center;color:{{ tm.color }};line-height:1">{{ tm.elapsed }}</div>
+              <div style="display:flex;gap:10px;margin-top:20px">
+                <div onClick="{{ tm.onDiscard }}" style="{{ tm.discardStyle }}">Discard</div>
+                <div onClick="{{ tm.onSave }}" style="{{ tm.saveStyle }}">{{ tm.saveLabel }}</div>
+              </div>
+              <div style="display:flex;gap:7px;margin-top:11px;justify-content:center;flex-wrap:wrap">
+                <sc-for list="{{ tm.saveAsChips }}" as="c" hint-placeholder-count="4">
+                  <div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- SETTINGS -->
+    <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div class="bbw-scroll" style="{{ pageScrollStyle }}">
+        <div style="max-width:560px">
+          <div style="font-size:13px;font-weight:800;color:{{ t.faint }};text-transform:uppercase;letter-spacing:0.8px;margin:0 2px 11px">Appearance</div>
+          <div style="{{ groupStyle }}">
+            <div onClick="{{ h.toggleTheme }}" style="{{ settingRowStyle }}">
+              <span style="flex:1;font-size:16px;font-weight:600">Night mode</span>
+              <div style="{{ switchTrackStyle }}"><div style="{{ switchKnobStyle }}"></div></div>
+            </div>
+            <div onClick="{{ h.toggleOffline }}" style="{{ settingRowLastStyle }}">
+              <span style="flex:1;font-size:16px;font-weight:600">Simulate offline</span>
+              <div style="{{ switchTrackStyleB }}"><div style="{{ switchKnobStyleB }}"></div></div>
+            </div>
+          </div>
+          <div style="font-size:13px;font-weight:800;color:{{ t.faint }};text-transform:uppercase;letter-spacing:0.8px;margin:26px 2px 11px">Server</div>
+          <div style="{{ groupStyle }}">
+            <div style="{{ settingRowStyle }}">
+              <div style="flex:1"><div style="font-size:16px;font-weight:600">babybuddy.home.lan</div><div style="font-size:13px;color:{{ t.dim }};margin-top:2px">Connected · token ••••3f9a</div></div>
+              <span style="width:9px;height:9px;border-radius:99px;background:#5FB39B"></span>
+            </div>
+            <div style="{{ settingRowLastStyle }}">
+              <span style="flex:1;font-size:16px;font-weight:600;color:{{ t.primary }}">Reconnect / change server</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+
+  <!-- ===================== LOG MODAL ===================== -->
+  <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ h.closeSheet }}" style="{{ scrimStyle }}"></div>
+    <div style="{{ modalStyle }}">
+      <div style="display:flex;align-items:center;gap:13px;padding:22px 24px 16px;border-bottom:1px solid {{ t.line }}">
+        <div style="{{ sheetIconWrap }}">{{ sheetIcon }}</div>
+        <div style="flex:1"><div style="font-size:21px;font-weight:800;letter-spacing:-0.4px">{{ sheetTitle }}</div><div style="font-size:13px;font-weight:500;color:{{ t.dim }}">{{ sheetSubtitle }}</div></div>
+        <div onClick="{{ h.closeSheet }}" style="{{ iconBtnStyle }}"><svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="{{ t.dim }}" stroke-width="2.4" stroke-linecap="round"/></svg></div>
+      </div>
+
+      <div class="bbw-scroll" style="{{ modalBodyStyle }}">
+
+        <!-- SLEEP shortcuts -->
+        <sc-if value="{{ isSleep }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:10px;margin-bottom:8px">
+            <div onClick="{{ h.sleepWoke }}" style="{{ sleepShortcutA }}"><div style="font-size:15px;font-weight:700">Woke up now</div><div style="font-size:12px;font-weight:500;color:{{ t.dim }};margin-top:1px">ended this nap</div></div>
+            <div onClick="{{ h.sleepStillSleeping }}" style="{{ sleepShortcutB }}"><div style="font-size:15px;font-weight:700">Still sleeping</div><div style="font-size:12px;font-weight:500;color:{{ t.dim }};margin-top:1px">start a live timer</div></div>
+          </div>
+        </sc-if>
+
+        <!-- FEEDING -->
+        <sc-if value="{{ isFeeding }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ fieldLabelStyle }}">Type</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+            <sc-for list="{{ feedTypeChips }}" as="c" hint-placeholder-count="4"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+          </div>
+          <div style="{{ fieldLabelRowStyle }}"><span>Method</span><span style="font-size:12.5px;font-weight:600;color:{{ t.primary }}">{{ methodHint }}</span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+            <sc-for list="{{ feedMethodChips }}" as="c" hint-placeholder-count="4"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+          </div>
+          <sc-if value="{{ showAmount }}" hint-placeholder-val="{{ false }}">
+            <div style="{{ fieldLabelStyle }}">Amount (optional)</div>
+            <div style="{{ stepperStyle }}">
+              <div onClick="{{ h.amtMinus }}" style="{{ stepBtnStyle }}">−</div>
+              <div style="flex:1;text-align:center"><span style="font-size:26px;font-weight:800;font-variant-numeric:tabular-nums">{{ amountValue }}</span><span style="font-size:15px;font-weight:600;color:{{ t.dim }};margin-left:4px">ml</span></div>
+              <div onClick="{{ h.amtPlus }}" style="{{ stepBtnStyle }}">+</div>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- DIAPER -->
+        <sc-if value="{{ isDiaper }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ fieldLabelStyle }}">Contents</div>
+          <div style="display:flex;gap:10px;margin-bottom:18px">
+            <div onClick="{{ h.toggleWet }}" style="{{ wetToggleStyle }}"><div style="font-size:22px">💧</div><div style="font-size:14.5px;font-weight:700;margin-top:2px">Wet</div></div>
+            <div onClick="{{ h.toggleSolid }}" style="{{ solidToggleStyle }}"><div style="font-size:22px">💩</div><div style="font-size:14.5px;font-weight:700;margin-top:2px">Solid</div></div>
+          </div>
+          <sc-if value="{{ diaperSolid }}" hint-placeholder-val="{{ false }}">
+            <div style="{{ fieldLabelStyle }}">Color</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px">
+              <sc-for list="{{ colorChips }}" as="c" hint-placeholder-count="4"><div onClick="{{ c.onClick }}" style="{{ c.style }}"><span style="width:14px;height:14px;border-radius:99px;background:{{ c.swatch }};display:inline-block;border:1px solid {{ t.line2 }}"></span>{{ c.label }}</div></sc-for>
+            </div>
+          </sc-if>
+        </sc-if>
+
+        <!-- PUMPING -->
+        <sc-if value="{{ isPumping }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ fieldLabelStyle }}">Amount</div>
+          <div style="{{ stepperStyle }}">
+            <div onClick="{{ h.amtMinus }}" style="{{ stepBtnStyle }}">−</div>
+            <div style="flex:1;text-align:center"><span style="font-size:26px;font-weight:800;font-variant-numeric:tabular-nums">{{ amountValue }}</span><span style="font-size:15px;font-weight:600;color:{{ t.dim }};margin-left:4px">ml</span></div>
+            <div onClick="{{ h.amtPlus }}" style="{{ stepBtnStyle }}">+</div>
+          </div>
+          <div style="height:18px"></div>
+        </sc-if>
+
+        <!-- TUMMY -->
+        <sc-if value="{{ isTummy }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ fieldLabelStyle }}">Milestone (optional)</div>
+          <div style="{{ inputStyleSm }}"><span style="color:{{ t.faint }}">e.g. lifted head, rolled over…</span></div>
+          <div style="height:18px"></div>
+        </sc-if>
+
+        <!-- TIME ENTRY -->
+        <div style="{{ timeBlockStyle }}">
+          <div style="display:flex;align-items:center;gap:11px;margin-bottom:14px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex:none"><circle cx="12" cy="12" r="8.5" stroke="{{ curColor }}" stroke-width="2"/><path d="M12 8v4l2.5 1.6" stroke="{{ curColor }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div style="flex:1"><div style="font-size:18px;font-weight:800;letter-spacing:-0.3px">{{ teResult }}</div><div style="font-size:12.5px;font-weight:500;color:{{ t.dim }}">{{ teResultSub }}</div></div>
+          </div>
+
+          <sc-if value="{{ teInterval }}" hint-placeholder-val="{{ false }}">
+            <sc-if value="{{ teLive }}" hint-placeholder-val="{{ false }}">
+              <div style="{{ liveNoteStyle }}">
+                <span style="width:9px;height:9px;border-radius:99px;background:{{ curColor }};animation:bbwPulse 1.5s infinite;display:inline-block"></span>
+                <span style="flex:1;font-size:13.5px;font-weight:600">Live timer — started {{ teStartLabel }}, still going</span>
+                <span onClick="{{ h.liveOff }}" style="font-size:13px;font-weight:700;color:{{ t.primary }};cursor:pointer">Set end</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ teNotLive }}" hint-placeholder-val="{{ true }}">
+              <div style="{{ teSubLabel }}">Quick — ended just now</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+                <sc-for list="{{ lastPresetChips }}" as="c" hint-placeholder-count="3"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+              </div>
+              <div style="{{ teSubLabel }}">Ended</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                <sc-for list="{{ endedChips }}" as="c" hint-placeholder-count="3"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+              </div>
+              <div style="{{ teSubLabel }}">Lasted</div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+                <sc-for list="{{ lastedChips }}" as="c" hint-placeholder-count="4"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+              </div>
+            </sc-if>
+            <div style="{{ teSubLabel }}">Smart anchors</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <sc-for list="{{ anchorChips }}" as="c" hint-placeholder-count="2"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+              <sc-if value="{{ teNotLive }}" hint-placeholder-val="{{ true }}">
+                <div onClick="{{ h.liveOn }}" style="{{ liveToggleChip }}">▶ Start live timer</div>
+              </sc-if>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ tePoint }}" hint-placeholder-val="{{ false }}">
+            <div style="{{ teSubLabel }}">When</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+              <sc-for list="{{ agoChips }}" as="c" hint-placeholder-count="6"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+            </div>
+            <div style="{{ teSubLabel }}">Smart anchors</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+              <sc-for list="{{ anchorChips }}" as="c" hint-placeholder-count="2"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;align-items:center;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid {{ t.line }}">
+            <span style="font-size:12.5px;font-weight:600;color:{{ t.dim }};flex:1">{{ nudgeLabel }}</span>
+            <div onClick="{{ h.nudgeMinus }}" style="{{ nudgeBtnStyle }}">−5m</div>
+            <div onClick="{{ h.nudgePlus }}" style="{{ nudgeBtnStyle }}">+5m</div>
+          </div>
+        </div>
+
+        <div style="{{ fieldLabelStyle }}">Tags</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <sc-for list="{{ tagChips }}" as="c" hint-placeholder-count="3"><div onClick="{{ c.onClick }}" style="{{ c.style }}">{{ c.label }}</div></sc-for>
+        </div>
+      </div>
+
+      <div style="{{ saveBarStyle }}">
+        <div onClick="{{ h.closeSheet }}" style="{{ cancelBtnStyle }}">Cancel</div>
+        <div onClick="{{ h.save }}" style="{{ saveBtnStyle }}">{{ saveBtnLabel }}</div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===================== CHILD SWITCHER ===================== -->
+  <sc-if value="{{ showChildSwitcher }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ h.closeSwitcher }}" style="{{ scrimStyle }}"></div>
+    <div style="{{ switcherStyle }}">
+      <div style="font-size:18px;font-weight:800;padding:6px 6px 16px">Who are you logging for?</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ childRows }}" as="ch" hint-placeholder-count="2">
+          <div onClick="{{ ch.onClick }}" style="{{ ch.style }}">
+            <div style="{{ ch.avatar }}">{{ ch.initial }}</div>
+            <div style="flex:1"><div style="font-size:16px;font-weight:700">{{ ch.name }}</div><div style="font-size:13px;font-weight:500;color:{{ t.dim }}">{{ ch.age }}</div></div>
+            <sc-if value="{{ ch.selected }}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="{{ t.primary }}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></sc-if>
+          </div>
+        </sc-for>
+        <div style="{{ addChildRowStyle }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="{{ t.primary }}" stroke-width="2.6" stroke-linecap="round"/></svg><span style="font-weight:700;color:{{ t.primary }};font-size:15px">Add a child</span></div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- TOAST -->
+  <sc-if value="{{ toastVisible }}" hint-placeholder-val="{{ false }}">
+    <div style="{{ toastStyle }}">{{ toastMsg }}</div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:940},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;offline&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;showRail&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    const now = Date.now();
+    const M = 60000;
+    this.state = {
+      theme: props.theme === 'light' ? 'light' : 'dark',
+      offline: props.offline === true || props.offline === 'true',
+      screen: 'dashboard',
+      selectedChildId: 'c1',
+      showChildSwitcher: false,
+      sheet: null,
+      now,
+      toast: null,
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: [
+        { id: 't1', activity: 'sleep', name: 'Sleep', start: now - 27 * M, saveAs: 'sleep' },
+      ],
+      children: [
+        { id: 'c1', first: 'Mira', last: 'Okafor', birth: now - 86 * 24 * 3600000, color: '#EBA06A' },
+        { id: 'c2', first: 'Theo', last: 'Okafor', birth: now - 86 * 24 * 3600000, color: '#9F94D4' },
+      ],
+      entries: [
+        { id: 'e1', type: 'feeding', start: now - 96 * M, end: now - 78 * M, feedType: 'breast', method: 'right', amount: null },
+        { id: 'e2', type: 'diaper', time: now - 41 * M, wet: true, solid: false },
+        { id: 'e3', type: 'pumping', start: now - 150 * M, end: now - 133 * M, amount: 90 },
+        { id: 'e4', type: 'feeding', start: now - 235 * M, end: now - 220 * M, feedType: 'formula', method: 'bottle', amount: 120 },
+        { id: 'e5', type: 'sleep', start: now - 300 * M, end: now - 182 * M, nap: true },
+        { id: 'e6', type: 'diaper', time: now - 250 * M, wet: true, solid: true, color: 'yellow' },
+        { id: 'e7', type: 'tummy', start: now - 330 * M, end: now - 322 * M, milestone: 'Lifted head' },
+      ],
+      te: {},
+    };
+  }
+  componentDidMount() {
+    this._iv = setInterval(() => this.setState({ now: Date.now() }), 1000);
+  }
+  componentWillUnmount() { clearInterval(this._iv); if (this._toastIv) clearTimeout(this._toastIv); }
+
+  hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+  fmtClock(ms) { const d = new Date(ms); let h = d.getHours(), m = d.getMinutes(); const ap = h < 12 ? 'AM' : 'PM'; h = h % 12; if (h === 0) h = 12; return `${h}:${String(m).padStart(2, '0')} ${ap}`; }
+  fmtDur(min) { min = Math.max(0, Math.round(min)); if (min < 60) return `${min} min`; const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m` : `${h}h`; }
+  fmtAgo(ms) { const min = Math.round((this.state.now - ms) / 60000); if (min < 1) return 'just now'; if (min < 60) return `${min}m ago`; const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h ${m}m ago` : `${h}h ago`; }
+  fmtAgoShort(min) { if (min < 60) return `${min}m`; const h = Math.floor(min / 60), m = min % 60; return m ? `${h}h${m}m` : `${h}h`; }
+  ageStr(birth) { const days = Math.floor((this.state.now - birth) / 86400000); if (days < 14) return `${days} days old`; const w = Math.floor(days / 7); if (w < 14) return `${w} weeks old`; const mo = Math.floor(days / 30.4); return `${mo} months old`; }
+
+  theme() {
+    const dark = this.state.theme === 'dark';
+    return dark ? {
+      dark: true, bg: '#16110E', bg2: '#221B16', bg3: '#2C231C', bg4: '#3A2E25',
+      line: 'rgba(255,255,255,0.07)', line2: 'rgba(255,255,255,0.13)',
+      text: '#F3EBE1', dim: '#B4A492', faint: '#7C6F61',
+      primary: '#EC9A66', onPrimary: '#2A170B', shadow: '0 18px 50px rgba(0,0,0,0.55)',
+    } : {
+      dark: false, bg: '#F2E7DA', bg2: '#FFFCF8', bg3: '#F4EADD', bg4: '#E8DAC8',
+      line: 'rgba(58,46,36,0.10)', line2: 'rgba(58,46,36,0.18)',
+      text: '#3A2E24', dim: '#7C6C5C', faint: '#A89684',
+      primary: '#D17A45', onPrimary: '#FFFFFF', shadow: '0 18px 46px rgba(120,86,52,0.18)',
+    };
+  }
+  activities() {
+    const dark = this.state.theme === 'dark';
+    return {
+      feeding: { id: 'feeding', label: 'Feeding', shape: 'interval', color: dark ? '#F0A878' : '#D9854B' },
+      sleep: { id: 'sleep', label: 'Sleep', shape: 'interval', color: dark ? '#A99EDC' : '#7E6FC9' },
+      diaper: { id: 'diaper', label: 'Diaper', shape: 'point', color: dark ? '#6FC0A6' : '#3E9D80' },
+      pumping: { id: 'pumping', label: 'Pumping', shape: 'interval', color: dark ? '#E6BE5E' : '#C79A36' },
+      tummy: { id: 'tummy', label: 'Tummy time', shape: 'interval', color: dark ? '#EA958A' : '#D06E62' },
+    };
+  }
+  icon(type, color, size) {
+    size = size || 24;
+    const p = (d) => React.createElement('path', { d, fill: color });
+    const dark = this.state.theme === 'dark';
+    const innerStroke = dark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.6)';
+    let kids;
+    if (type === 'feeding') kids = [
+      React.createElement('rect', { key: 1, x: 9, y: 2, width: 6, height: 2.6, rx: 1.2, fill: color }),
+      React.createElement('rect', { key: 2, x: 10, y: 4.4, width: 4, height: 2.2, fill: color }),
+      React.createElement('path', { key: 3, d: 'M8 8.5c0-1 .8-1.8 1.8-1.8h4.4c1 0 1.8.8 1.8 1.8V19a3 3 0 0 1-3 3h-2a3 3 0 0 1-3-3z', fill: color }),
+      React.createElement('path', { key: 4, d: 'M11.5 11h3M11.5 14h3', stroke: innerStroke, strokeWidth: 1.4, strokeLinecap: 'round' }),
+    ];
+    else if (type === 'sleep') kids = [p('M12.5 3.2a7.5 7.5 0 1 0 8.3 11.4A6 6 0 0 1 12.5 3.2z')];
+    else if (type === 'diaper') kids = [p('M4.5 6.5h15c.6 0 1 .5.9 1.1l-1.3 6.6A6.5 6.5 0 0 1 5.9 14.2L4.6 7.6c-.1-.6.3-1.1.9-1.1z'), React.createElement('path', { key: 9, d: 'M9.5 7v3.5M14.5 7v3.5', stroke: innerStroke, strokeWidth: 1.6, strokeLinecap: 'round' })];
+    else if (type === 'pumping') kids = [p('M12 3.2c3.6 4.4 5.6 7.2 5.6 9.8a5.6 5.6 0 0 1-11.2 0c0-2.6 2-5.4 5.6-9.8z')];
+    else if (type === 'tummy') kids = [p('M12 3l1.9 5.2 5.6.3-4.4 3.5 1.5 5.4L12 17.6 7.9 20.1l1.5-5.4L5 14l5.6-.3z')];
+    else if (type === 'timer') kids = [React.createElement('circle', { key: 1, cx: 12, cy: 13, r: 7.6, fill: 'none', stroke: color, strokeWidth: 2 }), React.createElement('path', { key: 2, d: 'M12 9.5v4l2.4 1.7', fill: 'none', stroke: color, strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }), React.createElement('path', { key: 3, d: 'M9.5 3h5', fill: 'none', stroke: color, strokeWidth: 2, strokeLinecap: 'round' })];
+    return React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none' }, kids);
+  }
+  navIcon(id, on) {
+    const t = this.theme();
+    const c = on ? t.primary : t.faint;
+    let kids;
+    if (id === 'dashboard') kids = [React.createElement('path', { key: 1, d: 'M4 11l8-6 8 6v8a1 1 0 0 1-1 1h-4v-5h-6v5H5a1 1 0 0 1-1-1z', fill: on ? this.hexA(t.primary, 0.22) : 'none', stroke: c, strokeWidth: 2, strokeLinejoin: 'round' })];
+    else if (id === 'history') kids = [React.createElement('path', { key: 1, d: 'M5 6h14M5 12h14M5 18h9', stroke: c, strokeWidth: 2.2, strokeLinecap: 'round' })];
+    else if (id === 'timers') kids = [React.createElement('circle', { key: 1, cx: 12, cy: 13, r: 7.5, fill: on ? this.hexA(t.primary, 0.18) : 'none', stroke: c, strokeWidth: 2 }), React.createElement('path', { key: 2, d: 'M12 9.5v4l2.3 1.6', stroke: c, strokeWidth: 2, strokeLinecap: 'round', fill: 'none' }), React.createElement('path', { key: 3, d: 'M9.5 3h5', stroke: c, strokeWidth: 2, strokeLinecap: 'round' })];
+    else if (id === 'settings') kids = [React.createElement('circle', { key: 1, cx: 12, cy: 12, r: 3, fill: 'none', stroke: c, strokeWidth: 2 }), React.createElement('path', { key: 2, d: 'M12 3v2.5M12 18.5V21M4.2 7.5l2.2 1.3M17.6 15.2l2.2 1.3M19.8 7.5l-2.2 1.3M6.4 15.2l-2.2 1.3', stroke: c, strokeWidth: 2, strokeLinecap: 'round' })];
+    return React.createElement('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none' }, kids);
+  }
+
+  teStart() { const te = this.state.te; if (te.shape === 'point') return null; if (te.live) return this.state.now - (te.startAgoMin || 0) * 60000 + (te.nudge || 0) * 60000; const end = this.teEnd(); return end - (te.durationMin || 0) * 60000; }
+  teEnd() { const te = this.state.te; if (te.shape === 'point') return this.state.now - (te.agoMin || 0) * 60000 + (te.nudge || 0) * 60000; if (te.live) return this.state.now; return this.state.now - (te.endedAgoMin || 0) * 60000 + (te.nudge || 0) * 60000; }
+  selChild() { return this.state.children.find(c => c.id === this.state.selectedChildId); }
+  lastFeedEndMinAgo() { const f = this.state.entries.filter(e => e.type === 'feeding').sort((a, b) => b.end - a.end)[0]; return f ? Math.round((this.state.now - f.end) / 60000) : null; }
+  lastWakeMinAgo() { const s = this.state.entries.filter(e => e.type === 'sleep').sort((a, b) => b.end - a.end)[0]; return s ? Math.round((this.state.now - s.end) / 60000) : null; }
+
+  setTE(patch) { this.setState(s => ({ te: Object.assign({}, s.te, patch) })); }
+  openSheet(type) {
+    const act = this.activities()[type];
+    const last = this.state.lastFeed;
+    let te = { shape: act.shape, nudge: 0 };
+    if (act.shape === 'interval') { te.endedAgoMin = 0; te.durationMin = type === 'sleep' ? 90 : type === 'pumping' ? 15 : 18; te.live = false; }
+    else { te.agoMin = 0; }
+    if (type === 'feeding') { te.feedType = last.feedType || 'breast'; te.method = last.method === 'left' ? 'right' : (last.method === 'right' ? 'left' : (last.method || 'left')); te.amount = 60; }
+    if (type === 'pumping') { te.amount = 90; te.method = 'both'; }
+    if (type === 'diaper') { te.wet = true; te.solid = false; te.color = 'yellow'; }
+    if (type === 'sleep') { const hr = new Date().getHours(); te.nap = (hr >= 7 && hr < 19); }
+    te.tags = [];
+    this.setState({ sheet: { type }, te });
+  }
+  showToast(msg) { this.setState({ toast: msg }); if (this._toastIv) clearTimeout(this._toastIv); this._toastIv = setTimeout(() => this.setState({ toast: null }), 2400); }
+  save() {
+    const s = this.state, te = s.te, type = s.sheet.type;
+    const id = 'e' + Date.now();
+    let entry = { id, type, tags: te.tags };
+    if (te.shape === 'point') entry.time = this.teEnd();
+    else { entry.start = this.teStart(); entry.end = te.live ? null : this.teEnd(); }
+    if (type === 'feeding') { entry.feedType = te.feedType; entry.method = te.method; entry.amount = (te.feedType === 'breast' && te.method !== 'bottle') ? null : te.amount; }
+    if (type === 'pumping') { entry.amount = te.amount; entry.method = te.method; }
+    if (type === 'diaper') { entry.wet = te.wet; entry.solid = te.solid; entry.color = te.solid ? te.color : null; }
+    if (type === 'sleep') { entry.nap = te.nap; }
+    if (type === 'tummy') { entry.milestone = te.milestone; }
+    const patch = { entries: [entry, ...s.entries], sheet: null };
+    if (te.live && te.shape === 'interval') {
+      patch.timers = [{ id: 't' + Date.now(), activity: type, name: this.activities()[type].label, start: this.teStart(), saveAs: type }, ...s.timers];
+      patch.entries = s.entries;
+      this.showToast('Live timer started');
+    } else {
+      this.showToast(s.offline ? 'Saved · queued offline' : 'Saved');
+    }
+    if (type === 'feeding') patch.lastFeed = { feedType: te.feedType, method: te.method };
+    this.setState(patch);
+  }
+  stopTimer(id, saveAs) {
+    const s = this.state, tm = s.timers.find(x => x.id === id);
+    if (!tm) return;
+    const entry = { id: 'e' + Date.now(), type: saveAs, start: tm.start, end: Date.now(), tags: [] };
+    if (saveAs === 'feeding') { entry.feedType = 'breast'; entry.method = 'left'; entry.amount = null; }
+    if (saveAs === 'pumping') entry.amount = 90;
+    if (saveAs === 'sleep') entry.nap = new Date().getHours() >= 7 && new Date().getHours() < 19;
+    this.setState({ timers: s.timers.filter(x => x.id !== id), entries: [entry, ...s.entries] });
+    this.showToast(s.offline ? 'Saved · queued offline' : `Saved as ${this.activities()[saveAs].label.toLowerCase()}`);
+  }
+
+  napStatus() { const rs = this.state.timers.find(tm => tm.activity === 'sleep'); if (rs) return `napping ${this.fmtDur((this.state.now - rs.start) / 60000)}`; const s = this.state.entries.filter(e => e.type === 'sleep').sort((a, b) => b.end - a.end)[0]; return s ? `${this.fmtAgoShort(Math.round((this.state.now - s.end) / 60000))} ago` : 'Tap to log'; }
+  diaperStatus() { const d = this.state.entries.filter(e => e.type === 'diaper').sort((a, b) => b.time - a.time)[0]; return d ? `${this.fmtAgoShort(Math.round((this.state.now - d.time) / 60000))} ago` : 'Tap to log'; }
+  diaperAgoVal() { const d = this.state.entries.filter(e => e.type === 'diaper').sort((a, b) => b.time - a.time)[0]; return d ? this.fmtAgoShort(Math.round((this.state.now - d.time) / 60000)) : '—'; }
+  diaperAgoSub() { const d = this.state.entries.filter(e => e.type === 'diaper').sort((a, b) => b.time - a.time)[0]; if (!d) return 'none'; return d.solid ? 'ago · solid' : 'ago · wet'; }
+  relDayLabel(ms) { const d = new Date(ms), now = new Date(this.state.now); if (d.toDateString() === now.toDateString()) return 'Today, ' + this.fmtAgo(ms); return 'Yesterday'; }
+
+  buildTimeline(acts, t, dark) {
+    const s = this.state;
+    const items = s.entries.map(e => {
+      const time = e.time || e.end || e.start;
+      const col = acts[e.type] ? acts[e.type].color : t.primary;
+      let title = acts[e.type] ? acts[e.type].label : e.type, detail = '';
+      if (e.type === 'feeding') { const tl = { breast: 'Breast milk', formula: 'Formula', fortified: 'Fortified', solid: 'Solid food' }[e.feedType] || ''; const ml = { left: 'left breast', right: 'right breast', both: 'both', bottle: 'bottle', parent: 'parent fed', self: 'self fed' }[e.method] || ''; detail = [tl, ml, e.amount ? e.amount + 'ml' : '', e.end ? this.fmtDur((e.end - e.start) / 60000) : ''].filter(Boolean).join(' · '); }
+      else if (e.type === 'sleep') { detail = (e.nap ? 'Nap' : 'Night') + (e.end ? ' · ' + this.fmtDur((e.end - e.start) / 60000) : ' · ongoing'); }
+      else if (e.type === 'diaper') { detail = [e.wet ? 'Wet' : '', e.solid ? 'Solid' : '', e.color ? e.color : ''].filter(Boolean).join(' · ') || 'Dry'; }
+      else if (e.type === 'pumping') { detail = [e.amount ? e.amount + 'ml' : '', e.end ? this.fmtDur((e.end - e.start) / 60000) : ''].filter(Boolean).join(' · '); }
+      else if (e.type === 'tummy') { detail = [e.end ? this.fmtDur((e.end - e.start) / 60000) : '', e.milestone || ''].filter(Boolean).join(' · '); }
+      return {
+        time, key: e.id,
+        rowStyle: { display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 16 },
+        iconWrap: { width: 40, height: 40, borderRadius: 12, background: this.hexA(col, 0.16), display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
+        icon: this.icon(e.type, col, 21),
+        title, detail, timeLabel: this.fmtClock(time), agoLabel: this.fmtAgo(time),
+      };
+    }).sort((a, b) => b.time - a.time);
+    const now = new Date(this.state.now);
+    const groups = [];
+    items.forEach(it => {
+      const d = new Date(it.time);
+      const label = d.toDateString() === now.toDateString() ? 'Today' : (now - d < 2 * 86400000 ? 'Yesterday' : d.toLocaleDateString());
+      let g = groups.find(x => x.label === label);
+      if (!g) { g = { label, items: [] }; groups.push(g); }
+      g.items.push({ icon: it.icon, iconWrap: it.iconWrap, rowStyle: it.rowStyle, title: it.title, detail: it.detail, time: it.timeLabel, ago: it.agoLabel });
+    });
+    return groups;
+  }
+
+  renderVals() {
+    const s = this.state, t = this.theme(), acts = this.activities(), te = s.te;
+    const dark = t.dark;
+
+    const chip = (sel, color) => ({
+      padding: '10px 15px', borderRadius: 13, fontSize: 14, fontWeight: 700, cursor: 'pointer',
+      background: sel ? color : t.bg3, color: sel ? (dark ? '#1A120B' : '#fff') : t.text,
+      border: `1.5px solid ${sel ? color : t.line}`, whiteSpace: 'nowrap', userSelect: 'none',
+      display: 'inline-flex', alignItems: 'center', gap: 7, transition: 'all .12s',
+    });
+
+    const curType = s.sheet ? s.sheet.type : 'feeding';
+    const curAct = acts[curType] || acts.feeding;
+
+    // nav
+    const navDefs = [['dashboard', 'Dashboard'], ['history', 'History'], ['timers', 'Timers'], ['settings', 'Settings']];
+    const navItems = navDefs.map(([id, label]) => {
+      const on = s.screen === id;
+      return {
+        label, icon: this.navIcon(id, on),
+        labelStyle: { fontSize: 15, fontWeight: on ? 700 : 600, color: on ? t.text : t.dim },
+        style: { display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: 14, cursor: 'pointer', background: on ? this.hexA(t.primary, dark ? 0.14 : 0.1) : 'transparent', border: `1.5px solid ${on ? this.hexA(t.primary, 0.32) : 'transparent'}` },
+        onClick: () => this.setState({ screen: id }),
+      };
+    });
+
+    // status
+    const lastFeedAgo = this.lastFeedEndMinAgo();
+    const runningSleep = s.timers.find(tm => tm.activity === 'sleep');
+    const statBox = { background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 20, padding: '18px 20px 20px', boxShadow: dark ? 'none' : '0 1px 2px rgba(120,86,52,0.05)' };
+    const statusItems = [
+      { label: 'Last fed', color: acts.feeding.color, value: lastFeedAgo != null ? this.fmtAgoShort(lastFeedAgo) + ' ago' : '—', sub: lastFeedAgo != null ? 'right breast · 18 min' : 'no feeds yet', style: statBox },
+      { label: 'Sleep', color: acts.sleep.color, value: runningSleep ? this.fmtDur((s.now - runningSleep.start) / 60000) : '2h 38m', sub: runningSleep ? 'napping now' : 'total today', style: statBox },
+      { label: 'Diaper', color: acts.diaper.color, value: this.diaperAgoVal() + (this.diaperAgoVal() === '—' ? '' : ' ago'), sub: this.diaperAgoSub(), style: statBox },
+    ];
+
+    // log tiles
+    const tileCard = (a, hint) => ({
+      onClick: () => this.openSheet(a.id),
+      cardStyle: { background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 22, padding: '20px 20px 22px', cursor: 'pointer', display: 'flex', flexDirection: 'column', minHeight: 132, boxShadow: dark ? 'none' : '0 1px 2px rgba(120,86,52,0.05)', transition: 'transform .14s ease, border-color .14s ease, box-shadow .14s ease' },
+      hoverStyle: { transform: 'translateY(-3px)', borderColor: this.hexA(a.color, 0.55), boxShadow: dark ? `0 14px 34px rgba(0,0,0,0.45)` : `0 14px 30px rgba(120,86,52,0.14)` },
+      iconWrap: { width: 54, height: 54, borderRadius: 16, background: this.hexA(a.color, 0.16), display: 'flex', alignItems: 'center', justifyContent: 'center' },
+      icon: this.icon(a.id, a.color, 28), label: a.label, hint,
+    });
+    const logTiles = [
+      tileCard(acts.feeding, lastFeedAgo != null ? `${this.fmtAgoShort(lastFeedAgo)} ago · auto-alternates` : 'Tap to log'),
+      tileCard(acts.sleep, this.napStatus()),
+      tileCard(acts.diaper, this.diaperStatus()),
+      tileCard(acts.pumping, 'Tap to log'),
+      tileCard(acts.tummy, 'Tap to log'),
+      {
+        onClick: () => { this.setState(st => ({ timers: [{ id: 't' + Date.now(), activity: 'feeding', name: 'Feeding', start: Date.now(), saveAs: 'feeding' }, ...st.timers], screen: 'timers' })); this.showToast('Timer started'); },
+        cardStyle: { background: this.hexA(t.primary, dark ? 0.1 : 0.08), border: `1.5px dashed ${this.hexA(t.primary, 0.5)}`, borderRadius: 22, padding: '20px 20px 22px', cursor: 'pointer', display: 'flex', flexDirection: 'column', minHeight: 132, transition: 'transform .14s ease' },
+        hoverStyle: { transform: 'translateY(-3px)' },
+        iconWrap: { width: 54, height: 54, borderRadius: 16, background: this.hexA(t.primary, 0.18), display: 'flex', alignItems: 'center', justifyContent: 'center' },
+        icon: this.icon('timer', t.primary, 28), label: 'Start timer', hint: 'Save as any activity',
+      },
+    ];
+
+    // timeline
+    const railGroups = this.buildTimeline(acts, t, dark);
+
+    // timers
+    const timerColor = (a) => acts[a] ? acts[a].color : t.primary;
+    const saveOpts = ['feeding', 'sleep', 'pumping', 'tummy'];
+    const timerCards = s.timers.map(tm => {
+      const secs = Math.floor((s.now - tm.start) / 1000);
+      const mm = Math.floor(secs / 60), ss = secs % 60, hh = Math.floor(mm / 60);
+      const elapsed = hh > 0 ? `${hh}:${String(mm % 60).padStart(2, '0')}:${String(ss).padStart(2, '0')}` : `${mm}:${String(ss).padStart(2, '0')}`;
+      const col = timerColor(tm.saveAs);
+      return {
+        name: tm.name, color: col, elapsed, startedLabel: this.fmtAgo(tm.start),
+        iconWrap: { width: 40, height: 40, borderRadius: 12, background: this.hexA(col, 0.16), display: 'flex', alignItems: 'center', justifyContent: 'center' },
+        icon: this.icon(tm.saveAs, col, 22),
+        saveLabel: 'Stop & save as ' + acts[tm.saveAs].label.toLowerCase(),
+        cardStyle: { background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 24, padding: 24, boxShadow: t.shadow },
+        discardStyle: { flex: 1, height: 52, borderRadius: 15, background: t.bg3, color: t.dim, fontWeight: 700, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+        saveStyle: { flex: 2.2, height: 52, borderRadius: 15, background: col, color: dark ? '#1A120B' : '#fff', fontWeight: 800, fontSize: 14.5, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', textAlign: 'center', lineHeight: 1.1, padding: '0 8px' },
+        onSave: () => this.stopTimer(tm.id, tm.saveAs),
+        onDiscard: () => this.setState({ timers: s.timers.filter(x => x.id !== tm.id) }),
+        saveAsChips: saveOpts.map(o => ({ label: acts[o].label, onClick: () => this.setState({ timers: s.timers.map(x => x.id === tm.id ? { ...x, saveAs: o } : x) }), style: { ...chip(tm.saveAs === o, acts[o].color), padding: '6px 11px', fontSize: 12.5, borderRadius: 10 } })),
+      };
+    });
+
+    // sheet chips
+    const feedTypes = [['breast', 'Breast milk'], ['formula', 'Formula'], ['fortified', 'Fortified'], ['solid', 'Solid food']];
+    const feedMethods = [['left', 'Left'], ['right', 'Right'], ['both', 'Both'], ['bottle', 'Bottle'], ['parent', 'Parent fed'], ['self', 'Self fed']];
+    const feedTypeChips = feedTypes.map(([v, l]) => ({ label: l, style: chip(te.feedType === v, curAct.color), onClick: () => this.setTE({ feedType: v }) }));
+    const feedMethodChips = feedMethods.map(([v, l]) => ({ label: l, style: chip(te.method === v, curAct.color), onClick: () => this.setTE({ method: v }) }));
+    const colors = [['black', '#3A3330'], ['brown', '#7A5230'], ['green', '#6F8F4A'], ['yellow', '#D8B04A']];
+    const colorChips = colors.map(([v, sw]) => ({ label: v.charAt(0).toUpperCase() + v.slice(1), swatch: sw, style: chip(te.color === v, curAct.color), onClick: () => this.setTE({ color: v }) }));
+    const lastPresets = [15, 30, 45];
+    const lastPresetChips = lastPresets.map(m => ({ label: `Last ${m}m`, style: chip(!te.live && te.endedAgoMin === 0 && te.durationMin === m, curAct.color), onClick: () => this.setTE({ live: false, endedAgoMin: 0, durationMin: m, nudge: 0 }) }));
+    const endedOpts = [[0, 'Now'], [15, '15m ago'], [30, '30m ago'], [60, '1h ago']];
+    const endedChips = endedOpts.map(([m, l]) => ({ label: l, style: chip(!te.live && te.endedAgoMin === m, curAct.color), onClick: () => this.setTE({ live: false, endedAgoMin: m }) }));
+    const lastedOpts = curType === 'sleep' ? [20, 45, 90, 120] : [10, 20, 30, 45];
+    const lastedChips = lastedOpts.map(m => ({ label: this.fmtDur(m), style: chip(!te.live && te.durationMin === m, curAct.color), onClick: () => this.setTE({ live: false, durationMin: m }) }));
+    const agoOpts = [[0, 'Now'], [5, '5m'], [15, '15m'], [30, '30m'], [60, '1h'], [120, '2h']];
+    const agoChips = agoOpts.map(([m, l]) => ({ label: l, style: chip(te.agoMin === m, curAct.color), onClick: () => this.setTE({ agoMin: m, nudge: 0 }) }));
+    const anchorChips = [];
+    const lastFeed = this.lastFeedEndMinAgo();
+    const lastWake = this.lastWakeMinAgo();
+    if (te.shape === 'interval') {
+      if (lastFeed != null) anchorChips.push({ label: `Since last feed (${this.fmtAgoShort(lastFeed)})`, style: chip(false, curAct.color), onClick: () => this.setTE({ live: false, endedAgoMin: 0, durationMin: lastFeed, nudge: 0 }) });
+      if (curType === 'sleep' && lastWake != null) anchorChips.push({ label: `Since they woke (${this.fmtAgoShort(lastWake)})`, style: chip(false, curAct.color), onClick: () => this.setTE({ live: false, endedAgoMin: 0, durationMin: lastWake, nudge: 0 }) });
+    } else {
+      if (lastFeed != null) anchorChips.push({ label: `When last feed ended`, style: chip(false, curAct.color), onClick: () => this.setTE({ agoMin: lastFeed, nudge: 0 }) });
+      if (lastWake != null) anchorChips.push({ label: `When they woke`, style: chip(false, curAct.color), onClick: () => this.setTE({ agoMin: lastWake, nudge: 0 }) });
+    }
+    const tagOpts = ['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy'];
+    const tagChips = tagOpts.map(tg => ({ label: tg, style: { ...chip((te.tags || []).includes(tg), curAct.color), padding: '8px 13px', fontSize: 13.5 }, onClick: () => { const has = (te.tags || []).includes(tg); this.setTE({ tags: has ? te.tags.filter(x => x !== tg) : [...(te.tags || []), tg] }); } }));
+
+    // children
+    const childRows = s.children.map(c => ({
+      name: `${c.first} ${c.last}`, age: this.ageStr(c.birth), initial: c.first[0], selected: c.id === s.selectedChildId,
+      avatar: { width: 44, height: 44, borderRadius: 14, background: this.hexA(c.color, dark ? 0.3 : 0.22), color: c.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18 },
+      style: { display: 'flex', alignItems: 'center', gap: 13, padding: '12px 14px', borderRadius: 16, cursor: 'pointer', background: c.id === s.selectedChildId ? this.hexA(t.primary, dark ? 0.13 : 0.1) : t.bg3, border: `1.5px solid ${c.id === s.selectedChildId ? this.hexA(t.primary, 0.4) : t.line}` },
+      onClick: () => this.setState({ selectedChildId: c.id, showChildSwitcher: false }),
+    }));
+
+    const ch = this.selChild();
+    const startMs = this.teStart(), endMs = this.teEnd();
+    const hr = new Date(s.now).getHours();
+    const greeting = hr < 5 ? 'Still up' : hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : hr < 22 ? 'Good evening' : 'Late night';
+    const screenTitles = { dashboard: ch ? `${ch.first}'s day` : 'Dashboard', history: 'History', timers: 'Timers', settings: 'Settings' };
+
+    const h = {
+      openSwitcher: () => this.setState({ showChildSwitcher: true }),
+      closeSwitcher: () => this.setState({ showChildSwitcher: false }),
+      goHistory: () => this.setState({ screen: 'history' }),
+      goTimers: () => this.setState({ screen: 'timers' }),
+      stopRunning: () => { if (s.timers[0]) this.stopTimer(s.timers[0].id, s.timers[0].saveAs); },
+      closeSheet: () => this.setState({ sheet: null }),
+      save: () => this.save(),
+      toggleTheme: () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' }),
+      toggleOffline: () => this.setState({ offline: !s.offline }),
+      amtMinus: () => this.setTE({ amount: Math.max(0, (te.amount || 0) - 10) }),
+      amtPlus: () => this.setTE({ amount: (te.amount || 0) + 10 }),
+      toggleWet: () => this.setTE({ wet: !te.wet }),
+      toggleSolid: () => this.setTE({ solid: !te.solid }),
+      nudgeMinus: () => this.setTE({ nudge: (te.nudge || 0) - 5 }),
+      nudgePlus: () => this.setTE({ nudge: (te.nudge || 0) + 5 }),
+      liveOn: () => this.setTE({ live: true, startAgoMin: te.durationMin || 0, nudge: 0 }),
+      liveOff: () => this.setTE({ live: false, endedAgoMin: 0 }),
+      sleepWoke: () => this.setTE({ live: false, endedAgoMin: 0, durationMin: te.durationMin || 90 }),
+      sleepStillSleeping: () => this.setTE({ live: true, startAgoMin: te.durationMin || 30, nudge: 0 }),
+    };
+
+    const swTrack = (on) => ({ width: 50, height: 30, borderRadius: 99, background: on ? t.primary : t.bg4, position: 'relative', transition: 'all .15s', flex: 'none', cursor: 'pointer' });
+    const swKnob = (on) => ({ position: 'absolute', top: 3, left: on ? 23 : 3, width: 24, height: 24, borderRadius: 99, background: '#fff', transition: 'all .15s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)' });
+    const iconBtnStyle = { width: 42, height: 42, borderRadius: 13, background: t.bg2, border: `1.5px solid ${t.line}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: 'none', color: t.dim };
+    const showRail = this.props.showRail !== false;
+
+    const themeToggleIcon = dark
+      ? React.createElement('svg', { width: 21, height: 21, viewBox: '0 0 24 24', fill: 'none' }, React.createElement('path', { d: 'M20 14.5A8 8 0 0 1 9.5 4 7 7 0 1 0 20 14.5z', fill: t.dim }))
+      : React.createElement('svg', { width: 21, height: 21, viewBox: '0 0 24 24', fill: 'none' }, [React.createElement('circle', { key: 1, cx: 12, cy: 12, r: 4.5, fill: t.dim }), React.createElement('path', { key: 2, d: 'M12 2.5v2.5M12 19v2.5M4 12H1.5M22.5 12H20M5 5l1.7 1.7M17.3 17.3L19 19M19 5l-1.7 1.7M6.7 17.3L5 19', stroke: t.dim, strokeWidth: 2, strokeLinecap: 'round' })]);
+
+    return {
+      rootStyle: { height: '100vh', minHeight: 640, display: 'flex', background: t.bg, color: t.text, fontFamily: "'Figtree', system-ui, sans-serif", position: 'relative', overflow: 'hidden', WebkitFontSmoothing: 'antialiased' },
+      sidebarStyle: { width: 248, flex: 'none', display: 'flex', flexDirection: 'column', padding: '26px 18px 22px', borderRight: `1px solid ${t.line}`, background: dark ? '#13100D' : '#FBF4EB' },
+      logoStyle: { width: 38, height: 38, borderRadius: 12, background: t.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none', boxShadow: `0 6px 18px ${this.hexA(t.primary, 0.4)}` },
+      navItems,
+      sideChildStyle: { display: 'flex', alignItems: 'center', gap: 11, padding: '11px 12px', borderRadius: 16, background: t.bg2, border: `1.5px solid ${t.line}`, cursor: 'pointer' },
+      avatarStyle: { width: 40, height: 40, borderRadius: 13, background: ch ? this.hexA(ch.color, dark ? 0.32 : 0.22) : t.bg3, color: ch ? ch.color : t.text, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: 18, flex: 'none' },
+      t, h,
+      childName: ch ? `${ch.first} ${ch.last}` : '', childInitial: ch ? ch.first[0] : '', childAge: ch ? this.ageStr(ch.birth) : '',
+      mainStyle: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+      topBarStyle: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '24px 32px 18px', flex: 'none' },
+      greeting, screenTitle: screenTitles[s.screen] || '',
+      offline: s.offline, queueLabel: '2 entries',
+      offlinePillStyle: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 12, background: dark ? '#3A2E18' : '#FBEFD4', border: `1px solid ${this.hexA('#E2B554', 0.5)}`, color: t.text, fontSize: 12.5, fontWeight: 700 },
+      clockStyle: { fontSize: 14.5, fontWeight: 700, color: t.dim, fontVariantNumeric: 'tabular-nums', padding: '0 4px' },
+      clockLabel: this.fmtClock(s.now),
+      iconBtnStyle, themeToggleIcon,
+
+      isDashboard: s.screen === 'dashboard', isHistory: s.screen === 'history', isTimers: s.screen === 'timers', isSettings: s.screen === 'settings',
+      dashGridStyle: { flex: 1, minHeight: 0, display: 'flex', gap: 0, overflow: 'hidden' },
+      dashLeftStyle: { flex: 1, minWidth: 0, overflowY: 'auto', padding: '6px 32px 32px', display: 'flex', flexDirection: 'column', gap: 18 },
+      statusItems,
+      hasTimers: s.timers.length > 0,
+      runningTimerLabel: s.timers[0] ? acts[s.timers[0].saveAs].label : '', runningTimerColor: s.timers[0] ? timerColor(s.timers[0].saveAs) : t.primary,
+      runningTimerElapsed: s.timers[0] ? this.fmtDur((s.now - s.timers[0].start) / 60000) : '',
+      timerBannerStyle: { display: 'flex', alignItems: 'center', gap: 16, background: t.bg2, border: `1.5px solid ${this.hexA(s.timers[0] ? timerColor(s.timers[0].saveAs) : t.primary, 0.4)}`, borderRadius: 22, padding: '18px 22px', cursor: 'pointer', boxShadow: dark ? 'none' : '0 1px 2px rgba(120,86,52,0.05)' },
+      timerStopBtnStyle: { padding: '12px 20px', borderRadius: 14, background: s.timers[0] ? timerColor(s.timers[0].saveAs) : t.primary, color: dark ? '#1A120B' : '#fff', fontWeight: 800, fontSize: 14.5, cursor: 'pointer', flex: 'none' },
+      logTiles,
+      showRail,
+      railStyle: { width: 372, flex: 'none', borderLeft: `1px solid ${t.line}`, padding: '6px 24px 24px', display: 'flex', flexDirection: 'column', minHeight: 0, background: dark ? '#13100D' : '#FBF4EB' },
+      railScrollStyle: { flex: 1, overflowY: 'auto', minHeight: 0 },
+      railGroups,
+      pageScrollStyle: { flex: 1, overflowY: 'auto', padding: '6px 32px 32px' },
+      timersEmpty: s.timers.length === 0, timerCards,
+      emptyStyle: { display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0 28px' },
+      emptyArtStyle: { width: 76, height: 76, borderRadius: 22, background: t.bg3, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+      groupStyle: { background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 18, overflow: 'hidden' },
+      settingRowStyle: { display: 'flex', alignItems: 'center', padding: '16px 18px', borderBottom: `1px solid ${t.line}`, cursor: 'pointer' },
+      settingRowLastStyle: { display: 'flex', alignItems: 'center', padding: '16px 18px', cursor: 'pointer' },
+      switchTrackStyle: swTrack(dark), switchKnobStyle: swKnob(dark),
+      switchTrackStyleB: swTrack(s.offline), switchKnobStyleB: swKnob(s.offline),
+
+      // modal
+      sheetOpen: !!s.sheet,
+      scrimStyle: { position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 40, animation: 'bbwFade .2s ease', backdropFilter: 'blur(2px)', WebkitBackdropFilter: 'blur(2px)' },
+      modalStyle: { position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 41, width: 'min(560px, calc(100% - 48px))', maxHeight: '88%', background: t.bg, borderRadius: 26, boxShadow: t.shadow, display: 'flex', flexDirection: 'column', border: `1px solid ${t.line}`, animation: 'bbwPop .22s cubic-bezier(.2,.8,.2,1)' },
+      sheetIconWrap: { width: 46, height: 46, borderRadius: 14, background: this.hexA(curAct.color, dark ? 0.18 : 0.16), display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' },
+      sheetIcon: this.icon(curType, curAct.color, 25),
+      sheetTitle: `Log ${curAct.label.toLowerCase()}`, sheetSubtitle: ch ? `for ${ch.first}` : '',
+      modalBodyStyle: { overflowY: 'auto', overflowX: 'hidden', padding: '20px 24px 8px', flex: 1 },
+      curColor: curAct.color,
+      saveBarStyle: { display: 'flex', gap: 12, padding: '16px 24px 20px', borderTop: `1px solid ${t.line}` },
+      cancelBtnStyle: { width: 120, height: 54, borderRadius: 16, background: t.bg3, color: t.dim, fontSize: 16, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: 'none' },
+      saveBtnStyle: { flex: 1, height: 54, borderRadius: 16, background: curAct.color, color: dark ? '#1A120B' : '#fff', fontSize: 17, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: `0 8px 22px ${this.hexA(curAct.color, 0.35)}` },
+      saveBtnLabel: te.live && te.shape === 'interval' ? 'Start live timer' : `Save ${curAct.label.toLowerCase()}`,
+      isFeeding: curType === 'feeding', isDiaper: curType === 'diaper', isPumping: curType === 'pumping', isTummy: curType === 'tummy', isSleep: curType === 'sleep',
+      showAmount: curType === 'feeding' && (te.feedType !== 'breast' || te.method === 'bottle'),
+      diaperSolid: !!te.solid,
+      fieldLabelStyle: { fontSize: 13, fontWeight: 700, color: t.dim, marginBottom: 10, letterSpacing: 0.2 },
+      fieldLabelRowStyle: { fontSize: 13, fontWeight: 700, color: t.dim, marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' },
+      methodHint: (te.method === 'left' || te.method === 'right') ? '↔ auto-alternating' : '',
+      feedTypeChips, feedMethodChips, colorChips,
+      amountValue: te.amount || 0,
+      stepperStyle: { display: 'flex', alignItems: 'center', gap: 12, background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 16, padding: 8, marginBottom: 4 },
+      stepBtnStyle: { width: 56, height: 50, borderRadius: 12, background: t.bg3, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, fontWeight: 700, cursor: 'pointer', color: t.text, flex: 'none' },
+      wetToggleStyle: { flex: 1, padding: '15px 0', borderRadius: 16, textAlign: 'center', cursor: 'pointer', background: te.wet ? this.hexA(curAct.color, 0.16) : t.bg3, border: `2px solid ${te.wet ? curAct.color : t.line}` },
+      solidToggleStyle: { flex: 1, padding: '15px 0', borderRadius: 16, textAlign: 'center', cursor: 'pointer', background: te.solid ? this.hexA(curAct.color, 0.16) : t.bg3, border: `2px solid ${te.solid ? curAct.color : t.line}` },
+      inputStyleSm: { minHeight: 50, borderRadius: 14, background: t.bg2, border: `1.5px solid ${t.line}`, display: 'flex', alignItems: 'center', padding: '0 14px', fontSize: 14.5 },
+      sleepShortcutA: { flex: 1, padding: '14px 16px', borderRadius: 16, cursor: 'pointer', background: this.hexA(curAct.color, 0.14), border: `1.5px solid ${this.hexA(curAct.color, 0.4)}` },
+      sleepShortcutB: { flex: 1, padding: '14px 16px', borderRadius: 16, cursor: 'pointer', background: t.bg3, border: `1.5px solid ${t.line}` },
+      timeBlockStyle: { background: t.bg2, border: `1.5px solid ${t.line}`, borderRadius: 20, padding: 18, margin: '4px 0 18px' },
+      teInterval: te.shape === 'interval', tePoint: te.shape === 'point', teLive: !!te.live, teNotLive: !te.live,
+      teResult: te.shape === 'point' ? this.fmtClock(endMs) : `${this.fmtClock(startMs)} → ${te.live ? 'now' : this.fmtClock(endMs)}`,
+      teResultSub: te.shape === 'point' ? this.relDayLabel(endMs) : (te.live ? `running · ${this.fmtDur((s.now - startMs) / 60000)} so far` : `lasted ${this.fmtDur((endMs - startMs) / 60000)}`),
+      teStartLabel: this.fmtClock(startMs),
+      teSubLabel: { fontSize: 12, fontWeight: 700, color: t.faint, margin: '2px 0 8px', textTransform: 'uppercase', letterSpacing: 0.5 },
+      lastPresetChips, endedChips, lastedChips, agoChips, anchorChips,
+      liveNoteStyle: { display: 'flex', alignItems: 'center', gap: 9, background: this.hexA(curAct.color, 0.14), border: `1.5px solid ${this.hexA(curAct.color, 0.4)}`, borderRadius: 13, padding: '11px 13px', marginBottom: 10 },
+      liveToggleChip: { ...chip(false, curAct.color), border: `1.5px dashed ${this.hexA(t.primary, 0.5)}`, color: t.primary, background: this.hexA(t.primary, dark ? 0.1 : 0.07) },
+      nudgeLabel: te.shape === 'point' ? `Fine-tune time` : `Nudge`,
+      nudgeBtnStyle: { padding: '8px 14px', borderRadius: 11, background: t.bg3, border: `1.5px solid ${t.line}`, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', color: t.text },
+      tagChips,
+
+      showChildSwitcher: s.showChildSwitcher,
+      switcherStyle: { position: 'absolute', left: 24, bottom: 22, zIndex: 41, width: 340, background: t.bg, borderRadius: 22, boxShadow: t.shadow, padding: '18px 16px 16px', border: `1px solid ${t.line}`, animation: 'bbwPop .2s cubic-bezier(.2,.8,.2,1)' },
+      childRows,
+      addChildRowStyle: { display: 'flex', alignItems: 'center', gap: 9, justifyContent: 'center', padding: '14px', borderRadius: 16, border: `1.5px dashed ${this.hexA(t.primary, 0.45)}`, cursor: 'pointer', marginTop: 2 },
+
+      toastVisible: !!s.toast, toastMsg: s.toast || '',
+      toastStyle: { position: 'absolute', bottom: 30, left: '50%', transform: 'translateX(-50%)', zIndex: 60, background: dark ? '#F3EBE1' : '#3A2E24', color: dark ? '#3A2E24' : '#fff', padding: '13px 22px', borderRadius: 14, fontSize: 14.5, fontWeight: 700, boxShadow: '0 12px 36px rgba(0,0,0,0.4)', animation: 'bbwToast 2.4s ease forwards', whiteSpace: 'nowrap' },
+    };
+  }
+}
+</script>
+</body>
+</html>
