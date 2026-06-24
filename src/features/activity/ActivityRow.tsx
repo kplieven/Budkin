@@ -1,5 +1,6 @@
 import { Pressable, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL } from '@/lib/activities';
@@ -55,17 +56,21 @@ export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number
   return (
     <Pressable
       onPress={onPress}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingVertical: 13,
-        paddingHorizontal: 14,
-        backgroundColor: t.surface,
-        borderWidth: 1.5,
-        borderColor: t.line,
-        borderRadius: 18,
-      }}
+      style={(s) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingVertical: 13,
+          paddingHorizontal: 14,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          borderRadius: 18,
+          cursor: 'pointer',
+        },
+        isHovered(s) && { borderColor: hexA(color, 0.5) },
+      ]}
     >
       <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
         <Icon name={entry.type as IconName} color={color} size={21} />

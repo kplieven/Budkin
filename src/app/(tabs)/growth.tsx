@@ -2,6 +2,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
@@ -36,16 +37,20 @@ export default function Growth() {
             <Pressable
               key={kind}
               onPress={() => openMeasurement(kind)}
-              style={{
-                width: '47.8%',
-                flexGrow: 1,
-                backgroundColor: t.surface,
-                borderWidth: 1.5,
-                borderColor: t.line,
-                borderRadius: 20,
-                padding: 15,
-                minHeight: 96,
-              }}
+              style={(s) => [
+                {
+                  width: '47.8%',
+                  flexGrow: 1,
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 20,
+                  padding: 15,
+                  minHeight: 96,
+                  cursor: 'pointer',
+                },
+                isHovered(s) && { borderColor: hexA(meta.color, 0.5), boxShadow: t.shadow },
+              ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 }}>
                 <View style={{ width: 9, height: 9, borderRadius: 99, backgroundColor: meta.color }} />
@@ -103,17 +108,21 @@ export default function Growth() {
               <Pressable
                 key={m.id}
                 onPress={() => openEditMeasurement(m.id)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  paddingVertical: 13,
-                  paddingHorizontal: 14,
-                  backgroundColor: t.surface,
-                  borderWidth: 1.5,
-                  borderColor: t.line,
-                  borderRadius: 18,
-                }}
+                style={(s) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    paddingVertical: 13,
+                    paddingHorizontal: 14,
+                    backgroundColor: t.surface,
+                    borderWidth: 1.5,
+                    borderColor: t.line,
+                    borderRadius: 18,
+                    cursor: 'pointer',
+                  },
+                  isHovered(s) && { borderColor: hexA(meta.color, 0.5) },
+                ]}
               >
                 <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: hexA(meta.color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="chart" color={meta.color} size={20} />

@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, View, type ViewStyle } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
 import { Txt } from '@/components/Txt';
@@ -210,7 +211,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             startQuickTimer();
             router.navigate('/timers');
           }}
-          style={[
+          style={(s) => [
             {
               backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
               borderWidth: 1.5,
@@ -221,8 +222,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               paddingHorizontal: 15,
               minHeight: 104,
               gap: 3,
+              cursor: 'pointer',
             },
             tileStyle,
+            isHovered(s) && { borderColor: hexA(t.primary, 0.75), boxShadow: t.shadow },
           ]}
         >
           <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
@@ -259,7 +262,7 @@ function ActivityTile({
   return (
     <Pressable
       onPress={onPress}
-      style={[
+      style={(s) => [
         {
           backgroundColor: t.surface,
           borderWidth: 1.5,
@@ -269,8 +272,10 @@ function ActivityTile({
           paddingHorizontal: 15,
           minHeight: 104,
           gap: 3,
+          cursor: 'pointer',
         },
         widthStyle,
+        isHovered(s) && { borderColor: hexA(color, 0.55), boxShadow: t.shadow },
       ]}
     >
       <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
