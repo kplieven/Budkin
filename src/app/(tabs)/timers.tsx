@@ -7,12 +7,15 @@ import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtElapsedClock } from '@/lib/format';
+import { DesktopPage } from '@/shell/DesktopPage';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 export default function Timers() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const desktop = useDesktopShell();
   const timers = useAppStore((s) => s.timers);
   const now = useAppStore((s) => s.now);
   const stopTimer = useAppStore((s) => s.stopTimer);
@@ -22,15 +25,8 @@ export default function Timers() {
   const adjustTimerStart = useAppStore((s) => s.adjustTimerStart);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
-    >
-      <Txt weight={800} size={27} tracking={-0.6} style={{ paddingHorizontal: 2, paddingTop: 4, paddingBottom: 18 }}>
-        Timers
-      </Txt>
-
+  const body = (
+    <>
       {timers.length === 0 && (
         <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 14 }}>
           <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
@@ -45,20 +41,23 @@ export default function Timers() {
         </View>
       )}
 
-      <View style={{ gap: 14 }}>
+      <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 14 } : { gap: 14 }}>
         {timers.map((tm) => {
           const color = t.activity[tm.saveAs];
           return (
             <View
               key={tm.id}
-              style={{
-                backgroundColor: t.surface,
-                borderWidth: 1.5,
-                borderColor: t.line,
-                borderRadius: 24,
-                padding: 20,
-                boxShadow: t.shadow,
-              }}
+              style={[
+                {
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 24,
+                  padding: 20,
+                  boxShadow: t.shadow,
+                },
+                desktop && { flexBasis: 340, flexGrow: 1, minWidth: 320 },
+              ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                 <View style={{ width: 38, height: 38, borderRadius: 11, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
@@ -176,6 +175,20 @@ export default function Timers() {
           New timer
         </Txt>
       </Pressable>
+    </>
+  );
+
+  if (desktop) return <DesktopPage maxWidth={760}>{body}</DesktopPage>;
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+    >
+      <Txt weight={800} size={27} tracking={-0.6} style={{ paddingHorizontal: 2, paddingTop: 4, paddingBottom: 18 }}>
+        Timers
+      </Txt>
+      {body}
     </ScrollView>
   );
 }

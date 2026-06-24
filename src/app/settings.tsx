@@ -4,6 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
+import { DesktopPage } from '@/shell/DesktopPage';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -38,6 +40,7 @@ function Toggle({ on }: { on: boolean }) {
 export default function Settings() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const desktop = useDesktopShell();
   const themeMode = useAppStore((s) => s.themeMode);
   const simulateOffline = useAppStore((s) => s.simulateOffline);
   const networkOnline = useAppStore((s) => s.networkOnline);
@@ -72,18 +75,8 @@ export default function Settings() {
       ? `Connected · token ••••${connection.token.slice(-4)}`
       : 'Not connected';
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} />
-        <Txt weight={800} size={27} tracking={-0.6}>
-          Settings
-        </Txt>
-      </View>
-
+  const body = (
+    <>
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, marginTop: 4, textTransform: 'uppercase' }}>
         Appearance
       </Txt>
@@ -140,6 +133,23 @@ export default function Settings() {
           </Txt>
         </Pressable>
       </View>
+    </>
+  );
+
+  if (desktop) return <DesktopPage maxWidth={560}>{body}</DesktopPage>;
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
+        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} />
+        <Txt weight={800} size={27} tracking={-0.6}>
+          Settings
+        </Txt>
+      </View>
+      {body}
     </ScrollView>
   );
 }
