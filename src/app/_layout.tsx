@@ -1,6 +1,6 @@
 import { useFonts } from '@expo-google-fonts/figtree/useFonts';
 import { useNetworkState } from 'expo-network';
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -12,6 +12,8 @@ import { Toast } from '@/components/Toast';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
+import { DesktopShell } from '@/shell/DesktopShell';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
@@ -54,20 +56,32 @@ export default function RootLayout() {
 
 function RootLayoutNav() {
   const t = useTheme();
+  const desktop = useDesktopShell();
+  const segments = useSegments();
   const base = t.dark ? DarkTheme : DefaultTheme;
   const navTheme = { ...base, colors: { ...base.colors, background: t.bg } };
+
+  // On large screens, wrap the whole navigator in the sidebar shell so it
+  // persists across every route — including Settings, which lives outside the
+  // (tabs) group. Hidden on onboarding (a full-screen, pre-app route). Phone is
+  // untouched (useDesktopShell is false at phone widths), as is the Stack itself,
+  // so the cold-start deep-link nav structure is unchanged.
+  const showShell = desktop && segments[0] !== 'onboarding';
+  const stack = (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="onboarding" />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="settings" />
+    </Stack>
+  );
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider value={navTheme}>
           <View style={{ flex: 1, backgroundColor: t.bg }}>
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="onboarding" />
-              <Stack.Screen name="(tabs)" />
-              <Stack.Screen name="settings" />
-            </Stack>
+            {showShell ? <DesktopShell>{stack}</DesktopShell> : stack}
 
             {/* overlays rendered above the navigator and tab bar */}
             <ChildSwitcher />
