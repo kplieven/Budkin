@@ -1,0 +1,9 @@
+services:
+  babybuddy_mobile_web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    container_name: babybuddy_mobile_web
+    ports:
+      - "1235:80"
+    restart: unless-stopped

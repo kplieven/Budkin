@@ -2,10 +2,13 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { DesktopPage } from '@/shell/DesktopPage';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -14,6 +17,7 @@ const dateLabel = (ms: number) => new Date(ms).toLocaleDateString();
 export default function Growth() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
+  const desktop = useDesktopShell();
   const measurements = useAppStore((s) => s.measurements);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
@@ -22,20 +26,8 @@ export default function Growth() {
 
   const recent = [...measurements].sort((a, b) => b.date - a.date);
 
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
-        <Txt weight={800} size={27} tracking={-0.6}>
-          Growth
-        </Txt>
-        <Pressable onPress={openSwitcher}>
-          <Avatar child={child} size={38} radius={12} fontSize={16} />
-        </Pressable>
-      </View>
-
+  const body = (
+    <>
       {/* latest value cards */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
         {MEAS_KINDS.map((kind) => {
@@ -45,16 +37,20 @@ export default function Growth() {
             <Pressable
               key={kind}
               onPress={() => openMeasurement(kind)}
-              style={{
-                width: '47.8%',
-                flexGrow: 1,
-                backgroundColor: t.surface,
-                borderWidth: 1.5,
-                borderColor: t.line,
-                borderRadius: 20,
-                padding: 15,
-                minHeight: 96,
-              }}
+              style={(s) => [
+                {
+                  width: '47.8%',
+                  flexGrow: 1,
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 20,
+                  padding: 15,
+                  minHeight: 96,
+                  cursor: 'pointer',
+                },
+                isHovered(s) && { borderColor: hexA(meta.color, 0.5), boxShadow: t.shadow },
+              ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 }}>
                 <View style={{ width: 9, height: 9, borderRadius: 99, backgroundColor: meta.color }} />
@@ -112,17 +108,21 @@ export default function Growth() {
               <Pressable
                 key={m.id}
                 onPress={() => openEditMeasurement(m.id)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  paddingVertical: 13,
-                  paddingHorizontal: 14,
-                  backgroundColor: t.surface,
-                  borderWidth: 1.5,
-                  borderColor: t.line,
-                  borderRadius: 18,
-                }}
+                style={(s) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    paddingVertical: 13,
+                    paddingHorizontal: 14,
+                    backgroundColor: t.surface,
+                    borderWidth: 1.5,
+                    borderColor: t.line,
+                    borderRadius: 18,
+                    cursor: 'pointer',
+                  },
+                  isHovered(s) && { borderColor: hexA(meta.color, 0.5) },
+                ]}
               >
                 <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: hexA(meta.color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
                   <Icon name="chart" color={meta.color} size={20} />
@@ -145,6 +145,25 @@ export default function Growth() {
           })}
         </View>
       )}
+    </>
+  );
+
+  if (desktop) return <DesktopPage maxWidth={640}>{body}</DesktopPage>;
+
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
+        <Txt weight={800} size={27} tracking={-0.6}>
+          Growth
+        </Txt>
+        <Pressable onPress={openSwitcher}>
+          <Avatar child={child} size={38} radius={12} fontSize={16} />
+        </Pressable>
+      </View>
+      {body}
     </ScrollView>
   );
 }

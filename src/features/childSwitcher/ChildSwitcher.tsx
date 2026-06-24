@@ -1,4 +1,4 @@
-import { Pressable, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -23,11 +23,11 @@ export function ChildSwitcher() {
   if (!open) return null;
 
   return (
-    <BottomSheet onClose={closeSwitcher}>
-      <Txt weight={800} size={18} style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 14 }}>
+    <BottomSheet onClose={closeSwitcher} anchor="bottom-left">
+      <Txt weight={800} size={18} style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 14, flexShrink: 0 }}>
         Who are you logging for?
       </Txt>
-      <View style={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 10, gap: 8 }}>
+      <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: insets.bottom + 10, gap: 8 }}>
         {children.map((c) => {
           const selected = c.id === selectedId;
           return (
@@ -79,7 +79,7 @@ export function ChildSwitcher() {
             Add a child
           </Txt>
         </View>
-      </View>
+      </ScrollView>
     </BottomSheet>
   );
 }
