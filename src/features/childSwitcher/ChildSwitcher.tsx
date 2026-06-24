@@ -23,7 +23,7 @@ export function ChildSwitcher() {
   if (!open) return null;
 
   return (
-    <BottomSheet onClose={closeSwitcher}>
+    <BottomSheet onClose={closeSwitcher} anchor="bottom-left">
       <Txt weight={800} size={18} style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 14, flexShrink: 0 }}>
         Who are you logging for?
       </Txt>
