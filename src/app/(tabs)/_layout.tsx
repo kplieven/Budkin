@@ -1,6 +1,8 @@
 import { Tabs } from 'expo-router';
 
 import { AppTabBar } from '@/components/TabBar';
+import { DesktopShell } from '@/shell/DesktopShell';
+import { useDesktopShell } from '@/shell/useDesktopShell';
 
 // Anchor the group's initial route to Home so a deep link that lands directly on
 // a non-default tab (e.g. babybuddy://timer -> /timers on a cold start) builds a
@@ -8,6 +10,12 @@ import { AppTabBar } from '@/components/TabBar';
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
+  // Above the desktop breakpoint, swap the phone tab navigator for the sidebar
+  // shell. SSR-safe: useDesktopShell() returns false until after mount, so the
+  // static build and first paint always emit the phone layout (see the hook).
+  const desktop = useDesktopShell();
+  if (desktop) return <DesktopShell />;
+
   return (
     <Tabs
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: 'transparent' } }}
