@@ -2,6 +2,7 @@ import { router, usePathname, type Href } from 'expo-router';
 import { Pressable, View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
+import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ageStr } from '@/lib/format';
@@ -74,17 +75,21 @@ export function Sidebar() {
             <Pressable
               key={item.label}
               onPress={() => router.navigate(item.href)}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 12,
-                paddingVertical: 11,
-                paddingHorizontal: 13,
-                borderRadius: 14,
-                borderWidth: 1.5,
-                borderColor: active ? hexA(t.primary, 0.32) : 'transparent',
-                backgroundColor: active ? hexA(t.primary, t.dark ? 0.14 : 0.1) : 'transparent',
-              }}
+              style={(s) => [
+                {
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 12,
+                  paddingVertical: 11,
+                  paddingHorizontal: 13,
+                  borderRadius: 14,
+                  borderWidth: 1.5,
+                  borderColor: active ? hexA(t.primary, 0.32) : 'transparent',
+                  backgroundColor: active ? hexA(t.primary, t.dark ? 0.14 : 0.1) : 'transparent',
+                  cursor: 'pointer',
+                },
+                !active && isHovered(s) && { backgroundColor: t.dark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.035)' },
+              ]}
             >
               <Icon name={item.icon} color={active ? t.primary : t.faint} size={22} />
               <Txt weight={active ? 700 : 600} size={15} color={active ? t.text : t.dim}>
@@ -101,16 +106,20 @@ export function Sidebar() {
       {/* child card */}
       <Pressable
         onPress={openSwitcher}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 11,
-          padding: 11,
-          borderRadius: 16,
-          backgroundColor: t.surface,
-          borderWidth: 1.5,
-          borderColor: t.line,
-        }}
+        style={(s) => [
+          {
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 11,
+            padding: 11,
+            borderRadius: 16,
+            backgroundColor: t.surface,
+            borderWidth: 1.5,
+            borderColor: t.line,
+            cursor: 'pointer',
+          },
+          isHovered(s) && { borderColor: t.line2 },
+        ]}
       >
         <Avatar child={child} size={40} radius={13} fontSize={17} />
         <View style={{ flex: 1, minWidth: 0 }}>

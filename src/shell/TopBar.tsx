@@ -1,6 +1,8 @@
 import { usePathname } from 'expo-router';
 import { Pressable, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
+import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { greetingFor, screenTitleFor } from '@/shell/labels';
 import { useAppStore } from '@/store/useAppStore';
@@ -69,17 +71,20 @@ export function TopBar() {
         <Pressable
           onPress={toggleTheme}
           accessibilityLabel="Toggle theme"
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 13,
-            backgroundColor: t.chip,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          style={(s) => [
+            {
+              width: 42,
+              height: 42,
+              borderRadius: 13,
+              backgroundColor: t.chip,
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            },
+            isHovered(s) && { backgroundColor: t.elevated },
+          ]}
         >
-          {/* Handoff calls for moon/sun SVGs; emoji stand-in until those icons land. */}
-          <Txt size={18}>{t.dark ? '🌙' : '☀️'}</Txt>
+          <Icon name={t.dark ? 'moon' : 'sun'} color={t.text} size={20} />
         </Pressable>
       </View>
     </View>

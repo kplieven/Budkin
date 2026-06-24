@@ -26,7 +26,9 @@ export type IconName =
   | 'chevron-down'
   | 'chevron-right'
   | 'chevron-left'
-  | 'chart';
+  | 'chart'
+  | 'moon'
+  | 'sun';
 
 interface IconProps {
   name: IconName;
@@ -183,6 +185,24 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         <Svg {...common}>
           <Path d="M5 4v15h15" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
           <Path d="M8 14l3-3 2.5 2.5L19 8" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'moon':
+      return (
+        <Svg {...common}>
+          <Path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z" stroke={color} strokeWidth={2} strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'sun':
+      return (
+        <Svg {...common}>
+          <Circle cx={12} cy={12} r={4.2} stroke={color} strokeWidth={2} />
+          <Path
+            d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.2 5.2l1.4 1.4M17.4 17.4l1.4 1.4M18.8 5.2l-1.4 1.4M6.6 17.4l-1.4 1.4"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+          />
         </Svg>
       );
   }

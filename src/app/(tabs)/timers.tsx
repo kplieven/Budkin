@@ -56,7 +56,7 @@ export default function Timers() {
                   padding: 20,
                   boxShadow: t.shadow,
                 },
-                desktop && { flexBasis: 340, flexGrow: 1, minWidth: 320 },
+                desktop && { flexBasis: 340, flexGrow: 1, minWidth: 320, maxWidth: 440 },
               ]}
             >
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
