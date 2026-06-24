@@ -1,7 +1,6 @@
-import { Tabs } from 'expo-router';
+import { Slot, Tabs } from 'expo-router';
 
 import { AppTabBar } from '@/components/TabBar';
-import { DesktopShell } from '@/shell/DesktopShell';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 
 // Anchor the group's initial route to Home so a deep link that lands directly on
@@ -10,11 +9,12 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
-  // Above the desktop breakpoint, swap the phone tab navigator for the sidebar
-  // shell. SSR-safe: useDesktopShell() returns false until after mount, so the
-  // static build and first paint always emit the phone layout (see the hook).
   const desktop = useDesktopShell();
-  if (desktop) return <DesktopShell />;
+
+  // Desktop: the root layout already supplies the sidebar shell, so this group
+  // renders just the active tab screen (sidebar nav drives routing). Phone: the
+  // bottom tab navigator.
+  if (desktop) return <Slot />;
 
   return (
     <Tabs
