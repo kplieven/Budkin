@@ -35,7 +35,7 @@ function startPinned(te: TimeEntryState, now: number): number {
 
 /** Resulting end timestamp (ms); for ongoing entries this is `now` (live). */
 export function teEnd(te: TimeEntryState, now: number): number {
-  if (te.shape === 'point') return (te.absTime ?? now - (te.agoMin ?? 0) * M) + (te.nudge ?? 0) * M;
+  if (te.shape === 'point') return te.absTime ?? now - (te.agoMin ?? 0) * M;
   if (te.ongoing) return now;
   if (derivedField(te.order) === 'end') return startPinned(te, now) + (te.durationMin ?? 0) * M;
   return endPinned(te, now);
@@ -53,12 +53,6 @@ export function teDurationMin(te: TimeEntryState, now: number): number {
   if (te.shape === 'point') return 0;
   const s = teStart(te, now) ?? now;
   return Math.max(0, Math.round((teEnd(te, now) - s) / M));
-}
-
-/** Nudge is only meaningful when a *time* is derived (not when lasted is). */
-export function nudgeEnabled(te: TimeEntryState): boolean {
-  if (te.shape === 'point') return true;
-  return !te.ongoing && derivedField(te.order) !== 'lasted';
 }
 
 /** Suggested breast to start the next feed on — the opposite of last time. */

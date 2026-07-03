@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
+import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
@@ -23,7 +25,10 @@ export default function Timers() {
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
   const setTimerSaveAs = useAppStore((s) => s.setTimerSaveAs);
   const adjustTimerStart = useAppStore((s) => s.adjustTimerStart);
+  const setTimerStart = useAppStore((s) => s.setTimerStart);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  // timer id whose exact-start editor is expanded
+  const [exactFor, setExactFor] = useState<string | null>(null);
 
   const body = (
     <>
@@ -97,7 +102,28 @@ export default function Timers() {
                     </Txt>
                   </Pressable>
                 ))}
+                <Pressable
+                  onPress={() => setExactFor(exactFor === tm.id ? null : tm.id)}
+                  style={{
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
+                    borderRadius: 11,
+                    backgroundColor: exactFor === tm.id ? hexA(color, 0.16) : t.chip,
+                    borderWidth: 1.5,
+                    borderColor: exactFor === tm.id ? color : t.line,
+                  }}
+                >
+                  <Txt weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
+                    Exact…
+                  </Txt>
+                </Pressable>
               </View>
+
+              {exactFor === tm.id && (
+                <View style={{ marginTop: 12 }}>
+                  <TimeAdjuster mode="clock" value={tm.start} now={now} color={color} onChange={(ms) => setTimerStart(tm.id, ms)} />
+                </View>
+              )}
 
               <View style={{ flexDirection: 'row', gap: 9, marginTop: 14 }}>
                 <Pressable

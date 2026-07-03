@@ -2,22 +2,26 @@
  * The reusable Time-Entry component — the app's signature feature.
  *
  * INTERVAL: three quantities (Ended / Lasted / Started), but only the last two
- * the user touched stay active; the third is derived. Nudge fine-tunes the
- * derived *time* and is disabled when both start & end are pinned.
- * POINT (diaper): a single time via "When" chips + smart anchors + nudge.
+ * the user touched stay active; the third is derived. The chips are the fast
+ * path; every resolved value in the readout is tappable and expands an inline
+ * precise editor (exact clock time / exact minutes) that pins that quantity.
+ * POINT (diaper): a single time via "When" chips + smart anchors + the same
+ * precise editor.
  */
 
-import { Pressable, View } from 'react-native';
+import { useState } from 'react';
+import { View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
+import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
-import { fmtAgoShort, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
+import { dayGroupLabel, fmtAgoShort, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
 import {
+  derivedField,
   isActive,
   lastFeedEndMinAgo,
   lastWakeMinAgo,
-  nudgeEnabled,
   teDurationMin,
   teEnd,
   teStart,
@@ -50,6 +54,46 @@ const AGO_OPTS: [number, string][] = [
   [120, '2h'],
 ];
 
+type EditField = 'start' | 'end' | 'lasted' | 'when' | null;
+
+/** A readout value: tappable (dotted underline) unless disabled; dimmed when derived. */
+function Seg({
+  label,
+  color,
+  dimmed,
+  onPress,
+  size = 17,
+  weight = 800,
+}: {
+  label: string;
+  color: string;
+  dimmed?: boolean;
+  onPress?: () => void;
+  size?: number;
+  weight?: 500 | 700 | 800;
+}) {
+  const t = useTheme();
+  return (
+    <Txt
+      weight={weight}
+      size={size}
+      tracking={size >= 17 ? -0.3 : undefined}
+      color={dimmed ? t.dim : t.text}
+      onPress={onPress}
+      suppressHighlighting
+      style={
+        onPress && {
+          textDecorationLine: 'underline',
+          textDecorationStyle: 'dotted',
+          textDecorationColor: color,
+        }
+      }
+    >
+      {label}
+    </Txt>
+  );
+}
+
 export function TimeEntry({ type, color }: { type: ActivityType; color: string }) {
   const t = useTheme();
   const te = useAppStore((s) => s.te);
@@ -57,24 +101,21 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const entries = useAppStore((s) => s.entries);
   const setTE = useAppStore((s) => s.setTE);
   const setEnded = useAppStore((s) => s.setEnded);
+  const setEndedAbs = useAppStore((s) => s.setEndedAbs);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const setLasted = useAppStore((s) => s.setLasted);
   const setStartedAt = useAppStore((s) => s.setStartedAt);
-  const nudge = useAppStore((s) => s.nudge);
+
+  const [editing, setEditing] = useState<EditField>(null);
 
   const start = teStart(te, now);
   const end = teEnd(te, now);
   const isInterval = te.shape === 'interval';
   const duration = teDurationMin(te, now);
+  const derived = isInterval ? derivedField(te.order) : null;
 
-  const result = isInterval
-    ? `${fmtClock(start as number)} → ${te.ongoing ? 'now' : fmtClock(end)}`
-    : fmtClock(end);
-  const resultSub = isInterval
-    ? te.ongoing
-      ? `running · ${fmtDur(duration)} so far`
-      : `lasted ${fmtDur(duration)}`
-    : relDayLabel(end, now);
+  const endIsToday = new Date(end).toDateString() === new Date(now).toDateString();
+  const resultSub = isInterval ? `running · ${fmtDur(duration)} so far` : relDayLabel(end, now);
 
   const lastFeed = lastFeedEndMinAgo(entries, now);
   const lastWake = lastWakeMinAgo(entries, now);
@@ -83,23 +124,94 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const endActive = isActive(te.order, 'end');
   const lastedActive = isActive(te.order, 'lasted');
   const startActive = isActive(te.order, 'start');
-  const canNudge = nudgeEnabled(te);
   const hasAnchors = lastFeed != null || (type === 'sleep' && lastWake != null);
+
+  // Tapping a readout value pins it at its resolved value and toggles its editor.
+  const tap = (f: Exclude<EditField, null>) => {
+    if (editing === f) {
+      setEditing(null);
+      return;
+    }
+    if (f === 'start') setStartedAt(start as number);
+    else if (f === 'end') setEndedAbs(end);
+    else if (f === 'lasted') setLasted(Math.max(1, duration));
+    else setTE({ absTime: end });
+    setEditing(f);
+  };
+
+  // While editing, chips can hand a quantity back to "derived" (e.g. tapping a
+  // Lasted chip while the start editor is open) — the editor keeps pinning it,
+  // which is exactly what the accordion promises. Only `ongoing` invalidates
+  // the end/lasted editors.
+  const activeEditor = te.ongoing && (editing === 'end' || editing === 'lasted') ? null : editing;
 
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 16 }}>
-      {/* readout */}
+      {/* readout — each value is tappable for precise entry */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 13 }}>
         <Icon name="clock" color={color} size={18} />
         <View style={{ flex: 1 }}>
           <Txt weight={800} size={17} tracking={-0.3}>
-            {result}
+            {isInterval ? (
+              <>
+                <Seg label={fmtClock(start as number)} color={color} dimmed={derived === 'start'} onPress={() => tap('start')} />
+                {' → '}
+                {te.ongoing ? (
+                  'now'
+                ) : (
+                  <Seg label={fmtClock(end)} color={color} dimmed={derived === 'end'} onPress={() => tap('end')} />
+                )}
+              </>
+            ) : (
+              <Seg label={fmtClock(end)} color={color} onPress={() => tap('when')} />
+            )}
           </Txt>
           <Txt weight={500} size={12.5} color={t.dim}>
-            {resultSub}
+            {isInterval && !te.ongoing ? (
+              <>
+                {endIsToday ? '' : dayGroupLabel(end, now) + ' · '}
+                {'lasted '}
+                <Seg
+                  label={fmtDur(duration)}
+                  color={color}
+                  dimmed={derived === 'lasted'}
+                  onPress={() => tap('lasted')}
+                  size={12.5}
+                  weight={700}
+                />
+              </>
+            ) : (
+              resultSub
+            )}
           </Txt>
         </View>
       </View>
+
+      {/* precise editor (accordion) */}
+      {activeEditor === 'start' && (
+        <TimeAdjuster
+          mode="clock"
+          value={start as number}
+          now={now}
+          color={color}
+          onChange={(ms) => setStartedAt(!te.ongoing && endActive && derived === 'lasted' ? Math.min(ms, end) : ms)}
+        />
+      )}
+      {activeEditor === 'end' && (
+        <TimeAdjuster
+          mode="clock"
+          value={end}
+          now={now}
+          color={color}
+          onChange={(ms) => setEndedAbs(startActive && derived === 'lasted' ? Math.max(ms, start as number) : ms)}
+        />
+      )}
+      {activeEditor === 'lasted' && (
+        <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
+      )}
+      {activeEditor === 'when' && (
+        <TimeAdjuster mode="clock" value={end} now={now} color={color} onChange={(ms) => setTE({ absTime: ms })} />
+      )}
 
       {isInterval ? (
         <>
@@ -183,33 +295,6 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
           )}
         </>
       )}
-
-      {/* nudge */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: t.line }}>
-        <Txt weight={600} size={12.5} color={t.dim} style={{ flex: 1 }}>
-          {isInterval ? (canNudge ? 'Nudge time' : 'Nudge (set start or end to enable)') : 'Fine-tune time'}
-        </Txt>
-        {(['−5m', '+5m'] as const).map((label, i) => (
-          <Pressable
-            key={label}
-            disabled={!canNudge}
-            onPress={() => nudge(i === 0 ? -5 : 5)}
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: 11,
-              backgroundColor: t.chip,
-              borderWidth: 1.5,
-              borderColor: t.line,
-              opacity: canNudge ? 1 : 0.4,
-            }}
-          >
-            <Txt weight={700} size={13.5}>
-              {label}
-            </Txt>
-          </Pressable>
-        ))}
-      </View>
     </View>
   );
 }
