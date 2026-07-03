@@ -8,10 +8,10 @@ const NOW = 1_700_000_000_000;
 const M = 60000;
 
 describe('teEnd / teStart / teDurationMin', () => {
-  it('point shape derives from agoMin + nudge', () => {
-    const te: TimeEntryState = { shape: 'point', agoMin: 15, nudge: 0, tags: [] };
+  it('point shape derives from agoMin; absTime takes precedence', () => {
+    const te: TimeEntryState = { shape: 'point', agoMin: 15, tags: [] };
     expect(teEnd(te, NOW)).toBe(NOW - 15 * M);
-    expect(teEnd({ ...te, nudge: 5 }, NOW)).toBe(NOW - 10 * M);
+    expect(teEnd({ ...te, absTime: NOW - 47 * M }, NOW)).toBe(NOW - 47 * M);
     expect(teStart(te, NOW)).toBeNull();
   });
   it('interval default: end + lasted, start derived', () => {
@@ -24,6 +24,12 @@ describe('teEnd / teStart / teDurationMin', () => {
     const te: TimeEntryState = { shape: 'interval', order: ['start', 'lasted', 'end'], startAbs: NOW - 30 * M, durationMin: 20, tags: [] };
     expect(teStart(te, NOW)).toBe(NOW - 30 * M);
     expect(teEnd(te, NOW)).toBe(NOW - 10 * M);
+  });
+  it('interval: absolute end + lasted, start derived', () => {
+    const te: TimeEntryState = { shape: 'interval', order: ['end', 'lasted', 'start'], endAbs: NOW - 13 * M, durationMin: 37, tags: [] };
+    expect(teEnd(te, NOW)).toBe(NOW - 13 * M);
+    expect(teStart(te, NOW)).toBe(NOW - 50 * M);
+    expect(teDurationMin(te, NOW)).toBe(37);
   });
   it('ongoing ends at now (live), duration grows from start', () => {
     const te: TimeEntryState = { shape: 'interval', ongoing: true, order: ['end', 'start', 'lasted'], startAbs: NOW - 30 * M, tags: [] };

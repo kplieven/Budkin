@@ -3,15 +3,10 @@
  * All "now"-relative helpers take `now` (ms) explicitly so they stay pure.
  */
 
-/** "9:32 AM" */
+/** 24-hour clock, "14:47" / "09:05" */
 export function fmtClock(ms: number): string {
   const d = new Date(ms);
-  let h = d.getHours();
-  const m = d.getMinutes();
-  const ap = h < 12 ? 'AM' : 'PM';
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${String(m).padStart(2, '0')} ${ap}`;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** "20 min" / "1h 30m" / "1h" */
