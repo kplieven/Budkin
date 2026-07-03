@@ -5,10 +5,10 @@
  * start, end, lasted (duration) — but only TWO are ever "active". The user
  * picks values and we keep the **last two selected**; the third is derived.
  * `order` is the recency list (most-recent first); `order[2]` is the derived
- * one. Nudge shifts the derived *time* (greyed out when the derived one is
- * `lasted`, i.e. both start & end are pinned).
+ * one. Each quantity can also be pinned to a precise value by tapping its
+ * resolved readout (start/end → absolute ms, lasted → exact minutes).
  *
- * POINT shape (diaper) is a single timestamp via `agoMin`/`absTime` + `nudge`.
+ * POINT shape (diaper) is a single timestamp via `agoMin`/`absTime`.
  */
 
 import type { DiaperColor, FeedMethod, FeedType } from './models';
@@ -25,7 +25,7 @@ export interface TimeEntryState {
   order?: TimeField[];
   /** end as "minutes ago" (0 = now) when set relatively */
   endAgoMin?: number;
-  /** absolute end (ms), set when editing */
+  /** absolute end (ms), set when editing or via the precise editor */
   endAbs?: number;
   /** end not set yet (in progress) — saved as a running timer */
   ongoing?: boolean;
@@ -39,8 +39,6 @@ export interface TimeEntryState {
   // ---- point ----
   agoMin?: number;
   absTime?: number;
-  /** point-shape fine-tune (minutes) */
-  nudge?: number;
 
   // ---- activity fields ----
   feedType?: FeedType;
