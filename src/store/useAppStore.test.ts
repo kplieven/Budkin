@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAppStore } from '@/store/useAppStore';
-import { nudgeEnabled, teEnd, teStart } from '@/store/selectors';
+import { teEnd, teStart } from '@/store/selectors';
 import { loadConnection } from '@/data/storage';
 import { loadFromServer } from '@/data/repository';
 import { saveTimers } from '@/data/timers';
@@ -129,7 +129,7 @@ beforeEach(() => {
     fromTimerId: null,
     measurementSheet: null,
     editingMeasurementId: null,
-    te: { shape: 'interval', nudge: 0, tags: [] },
+    te: { shape: 'interval', tags: [] },
     queueCount: 0,
     toast: null,
     savedServers: [],
@@ -435,22 +435,51 @@ describe('adjustTimerStart', () => {
   });
 });
 
+describe('setTimerStart', () => {
+  it('sets an exact start, clamped to now', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 10 * M, saveAs: 'sleep' }],
+    });
+    s().setTimerStart('t1', NOW - 37 * M);
+    expect(s().timers[0].start).toBe(NOW - 37 * M);
+    s().setTimerStart('t1', Date.now() + 60 * M); // future → clamped
+    expect(s().timers[0].start).toBeLessThanOrEqual(Date.now());
+  });
+});
+
 describe('time-entry: keep last two selected', () => {
-  it('pinning Start derives Lasted and disables nudge (start+end both set)', () => {
+  it('pinning Start derives Lasted (start+end both set)', () => {
     s().openSheet('feeding'); // active {end, lasted}, derived start
-    expect(nudgeEnabled(s().te)).toBe(true);
     s().setStartedAt(NOW - 40 * M); // now active {start, end}, derived lasted
     expect(s().te.order?.[2]).toBe('lasted');
-    expect(nudgeEnabled(s().te)).toBe(false);
+    expect(teStart(s().te, NOW)).toBe(NOW - 40 * M);
+    expect(teEnd(s().te, NOW)).toBe(NOW);
   });
 
-  it('nudge shifts the derived start while End stays fixed', () => {
+  it('setEndedAbs pins an exact end and clears the relative pick', () => {
+    s().openSheet('feeding'); // end=now (agoMin 0), lasted=default, start derived
+    s().setEndedAbs(NOW - 13 * M);
+    expect(s().te.endAbs).toBe(NOW - 13 * M);
+    expect(s().te.endAgoMin).toBeUndefined();
+    expect(teEnd(s().te, NOW)).toBe(NOW - 13 * M);
+  });
+
+  it('with start+end both pinned, re-pinning one endpoint keeps the other fixed', () => {
     s().openSheet('feeding');
-    s().setLasted(20); // end=now, lasted=20, start derived
-    const before = teStart(s().te, NOW);
-    s().nudge(-5); // start 5 min earlier
-    expect(teStart(s().te, NOW)).toBe((before as number) - 5 * M);
-    expect(teEnd(s().te, NOW)).toBe(NOW); // end unchanged
+    s().setStartedAt(NOW - 40 * M);
+    s().setEndedAbs(NOW - 10 * M); // active {end, start}, derived lasted = 30
+    s().setStartedAt(NOW - 47 * M); // fine-tune start; end must not move
+    expect(teEnd(s().te, NOW)).toBe(NOW - 10 * M);
+    expect(teStart(s().te, NOW)).toBe(NOW - 47 * M);
+    expect(s().te.order?.[2]).toBe('lasted'); // lasted re-derives (37 min)
+  });
+
+  it('an Ended chip after setEndedAbs clears the absolute pin', () => {
+    s().openSheet('feeding');
+    s().setEndedAbs(NOW - 13 * M);
+    s().setEnded(15);
+    expect(s().te.endAbs).toBeUndefined();
+    expect(teEnd(s().te, NOW)).toBe(NOW - 15 * M);
   });
 });
 

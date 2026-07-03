@@ -34,7 +34,7 @@ import {
   type SavedServer,
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
-import { derivedField, nextStartSide, reorder, teEnd, teStart } from '@/store/selectors';
+import { nextStartSide, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -128,10 +128,10 @@ interface AppActions {
   toggleSolid: () => void;
   toggleTag: (tag: string) => void;
   setEnded: (agoMin: number) => void;
+  setEndedAbs: (ms: number) => void;
   setOngoing: () => void;
   setLasted: (min: number) => void;
   setStartedAt: (ms: number, anchor?: 'lastfeed' | 'wake') => void;
-  nudge: (delta: number) => void;
   sleepWoke: () => void;
   sleepStillSleeping: () => void;
   save: () => void;
@@ -139,6 +139,7 @@ interface AppActions {
   startQuickTimer: () => void;
   stopTimer: (id: string) => void;
   adjustTimerStart: (id: string, deltaMin: number) => void;
+  setTimerStart: (id: string, ms: number) => void;
   discardTimer: (id: string) => void;
   setTimerSaveAs: (id: string, saveAs: ActivityType) => void;
 
@@ -179,7 +180,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   measurements: [],
   lastFeed: { feedType: 'breast', method: 'left' },
 
-  te: { shape: 'interval', nudge: 0, tags: [] },
+  te: { shape: 'interval', tags: [] },
 
   // ---- ticking clock ----
   tick: (now) => set({ now }),
@@ -375,7 +376,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openSheet: (type) => {
     const last = get().lastFeed;
     const shape = ACTIVITY_SHAPE[type];
-    const te: TimeEntryState = { shape, nudge: 0, tags: [] };
+    const te: TimeEntryState = { shape, tags: [] };
     if (shape === 'interval') {
       te.endAgoMin = 0;
       te.durationMin = DEFAULT_DURATION_MIN[type];
@@ -412,7 +413,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const now = s.now;
     const te: TimeEntryState = {
       shape: entry.type === 'diaper' ? 'point' : 'interval',
-      nudge: 0,
       tags: entry.tags ?? [],
     };
     if (entry.type === 'diaper') {
@@ -426,7 +426,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (entry.end != null) {
         te.endAbs = entry.end;
         te.durationMin = Math.max(1, Math.round((entry.end - entry.start) / 60000));
-        te.order = ['end', 'lasted', 'start']; // derived start, so nudge can fine-tune start
+        te.order = ['end', 'lasted', 'start']; // start derived from the pinned end + duration
         te.ongoing = false;
       } else {
         te.ongoing = true;
@@ -579,6 +579,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({
       te: { ...s.te, endAgoMin: agoMin, endAbs: undefined, ongoing: false, order: reorder(s.te.order, 'end') },
     })),
+  setEndedAbs: (ms) =>
+    set((s) => ({
+      te: { ...s.te, endAbs: ms, endAgoMin: undefined, ongoing: false, order: reorder(s.te.order, 'end') },
+    })),
   setOngoing: () =>
     set((s) => {
       const startMs = teStart(s.te, s.now) ?? s.now;
@@ -596,15 +600,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   setStartedAt: (ms, anchor) =>
     set((s) => ({ te: { ...s.te, startAbs: ms, startAnchor: anchor, order: reorder(s.te.order, 'start') } })),
-  nudge: (delta) =>
-    set((s) => {
-      const te = s.te;
-      if (te.shape === 'point') return { te: { ...te, nudge: (te.nudge ?? 0) + delta } };
-      if (te.ongoing || derivedField(te.order) === 'lasted') return {}; // greyed: nothing to compute
-      const dur = te.durationMin ?? 0;
-      const newDur = derivedField(te.order) === 'start' ? dur - delta : dur + delta;
-      return { te: { ...te, durationMin: Math.max(0, newDur) } };
-    }),
   sleepWoke: () => get().setEnded(0),
   sleepStillSleeping: () => get().setOngoing(),
 
@@ -774,6 +769,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       timers: s.timers.map((t) =>
         t.id === id ? { ...t, start: Math.min(Date.now(), t.start + deltaMin * 60000) } : t,
       ),
+    })),
+  setTimerStart: (id, ms) =>
+    set((s) => ({
+      timers: s.timers.map((t) => (t.id === id ? { ...t, start: Math.min(Date.now(), ms) } : t)),
     })),
 
   showToast: (msg) => {
