@@ -15,11 +15,11 @@ const NOW = new Date(2026, 5, 22, 12, 0, 0).getTime(); // local noon
 const M = 60000;
 
 describe('fmtClock', () => {
-  it('formats 12h time with AM/PM', () => {
-    expect(fmtClock(new Date(2026, 0, 1, 9, 32).getTime())).toBe('9:32 AM');
-    expect(fmtClock(new Date(2026, 0, 1, 17, 5).getTime())).toBe('5:05 PM');
-    expect(fmtClock(new Date(2026, 0, 1, 0, 0).getTime())).toBe('12:00 AM');
-    expect(fmtClock(new Date(2026, 0, 1, 12, 0).getTime())).toBe('12:00 PM');
+  it('formats 24h time, zero-padded', () => {
+    expect(fmtClock(new Date(2026, 0, 1, 9, 32).getTime())).toBe('09:32');
+    expect(fmtClock(new Date(2026, 0, 1, 17, 5).getTime())).toBe('17:05');
+    expect(fmtClock(new Date(2026, 0, 1, 0, 0).getTime())).toBe('00:00');
+    expect(fmtClock(new Date(2026, 0, 1, 12, 0).getTime())).toBe('12:00');
   });
 });
 

@@ -2,85 +2,54 @@
  * Parsing for the precise time editor (TimeAdjuster). Pure — `now` is always
  * passed explicitly.
  *
- * Clock input is digits-first (number-pad friendly): "9" → 9:00, "93"/"930" →
- * 9:30, "1447" → 14:47, "2:47" → 2:47, with an optional trailing a/am/p/pm.
- * Ambiguous 12-hour input is resolved with the *most-recent-match* rule so the
- * user never has to type AM/PM: among the candidate instants on the chosen
- * day, pick the latest one that isn't in the future.
+ * Clock input is 24-hour and digits-first (number-pad friendly): "9" → 09:00,
+ * "14" → 14:00, "930" → 09:30, "1447" → 14:47, "2:47" → 02:47. 24h means there
+ * is no AM/PM ambiguity to resolve — the typed value is the time.
  */
 
 export interface ClockInput {
-  h: number; // 0-23 as typed (12h input keeps its literal hour, 1-12)
-  m: number;
-  /** set when the user typed an explicit am/pm suffix */
-  explicit12?: 'am' | 'pm';
+  h: number; // 0-23
+  m: number; // 0-59
 }
 
-/** Parse raw clock text. Returns null when the text isn't a valid time. */
+/** Parse raw 24h clock text. Returns null when it isn't a valid time. */
 export function parseClockInput(text: string): ClockInput | null {
-  const cleaned = text.trim().toLowerCase().replace(/\s+/g, '');
-  const sufMatch = cleaned.match(/(am?|pm?)$/);
-  const explicit12 = sufMatch ? (sufMatch[1].startsWith('a') ? 'am' : 'pm') : undefined;
-  const body = sufMatch ? cleaned.slice(0, -sufMatch[1].length) : cleaned;
-
+  const cleaned = text.trim().replace(/\s+/g, '');
   let h: number;
   let m: number;
-  const colon = body.match(/^(\d{1,2}):(\d{2})$/);
+
+  const colon = cleaned.match(/^(\d{1,2}):(\d{2})$/);
   if (colon) {
     h = Number(colon[1]);
     m = Number(colon[2]);
-  } else if (/^\d{1,4}$/.test(body)) {
-    if (body.length <= 2) {
-      // "9" → 9:00; "93" → 9:30 (single hour digit + tens of minutes)
-      const n = Number(body);
-      if (n <= 23) {
-        h = n;
-        m = 0;
-      } else {
-        h = Number(body[0]);
-        m = Number(body[1]) * 10;
-      }
+  } else if (/^\d{1,4}$/.test(cleaned)) {
+    if (cleaned.length <= 2) {
+      h = Number(cleaned); // "9" → 09:00, "14" → 14:00
+      m = 0;
     } else {
-      // "930" → 9:30, "1447" → 14:47
-      h = Number(body.slice(0, -2));
-      m = Number(body.slice(-2));
+      h = Number(cleaned.slice(0, -2)); // "930" → 09:30, "1447" → 14:47
+      m = Number(cleaned.slice(-2));
     }
   } else {
     return null;
   }
 
   if (h > 23 || m > 59) return null;
-  if (explicit12 && (h < 1 || h > 12)) return null;
-  return { h, m, explicit12 };
+  return { h, m };
 }
 
 /**
  * Resolve parsed clock input to an absolute timestamp on the day containing
- * `dayMs`, using the most-recent-match rule:
- * - explicit am/pm → that exact time (clamped to `now` if it'd be future);
- * - ambiguous h ≤ 12 → the latest of h / h+12 on that day that is ≤ `now`
- *   (for past days both qualify, so the PM reading wins);
- * - all candidates in the future (today) → clamp to `now`.
+ * `dayMs`. A logged time is never in the future: if the time on that day would
+ * be after `now` (only possible on today), roll back to the previous day — so
+ * typing "14:47" at 09:00 means 14:47 yesterday, its most recent occurrence,
+ * rather than silently snapping to now.
  */
 export function resolveClock(input: ClockInput, dayMs: number, now: number): number {
   const day = new Date(dayMs);
-  const at = (h: number) => new Date(day.getFullYear(), day.getMonth(), day.getDate(), h, input.m).getTime();
-
-  let candidates: number[];
-  if (input.explicit12) {
-    let h = input.h % 12;
-    if (input.explicit12 === 'pm') h += 12;
-    candidates = [at(h)];
-  } else if (input.h >= 1 && input.h <= 12) {
-    const h24: number[] = input.h === 12 ? [0, 12] : [input.h, input.h + 12];
-    candidates = h24.map(at);
-  } else {
-    candidates = [at(input.h)];
-  }
-
-  const past = candidates.filter((t) => t <= now);
-  if (past.length > 0) return Math.max(...past);
-  return Math.min(now, Math.min(...candidates));
+  let t = new Date(day.getFullYear(), day.getMonth(), day.getDate(), input.h, input.m).getTime();
+  if (t > now) t -= 86400000;
+  return t;
 }
 
 /** Parse duration text: "37", "1:35", "1h35", "1h", "45m" → minutes (≥ 1). */

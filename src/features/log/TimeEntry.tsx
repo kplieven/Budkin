@@ -10,7 +10,7 @@
  */
 
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
 import { Icon } from '@/components/Icon';
@@ -56,41 +56,49 @@ const AGO_OPTS: [number, string][] = [
 
 type EditField = 'start' | 'end' | 'lasted' | 'when' | null;
 
-/** A readout value: tappable (dotted underline) unless disabled; dimmed when derived. */
-function Seg({
+/**
+ * A tappable resolved value rendered as an inset pill (matches the chip
+ * vocabulary). Fills with the activity color while its editor is open; the
+ * derived quantity is dimmed.
+ */
+function ValuePill({
   label,
   color,
+  active,
   dimmed,
   onPress,
-  size = 17,
-  weight = 800,
+  big,
 }: {
   label: string;
   color: string;
+  active: boolean;
   dimmed?: boolean;
-  onPress?: () => void;
-  size?: number;
-  weight?: 500 | 700 | 800;
+  onPress: () => void;
+  big?: boolean;
 }) {
   const t = useTheme();
   return (
-    <Txt
-      weight={weight}
-      size={size}
-      tracking={size >= 17 ? -0.3 : undefined}
-      color={dimmed ? t.dim : t.text}
+    <Pressable
       onPress={onPress}
-      suppressHighlighting
-      style={
-        onPress && {
-          textDecorationLine: 'underline',
-          textDecorationStyle: 'dotted',
-          textDecorationColor: color,
-        }
-      }
+      style={{
+        paddingHorizontal: big ? 9 : 8,
+        paddingVertical: big ? 4 : 2,
+        borderRadius: 9,
+        backgroundColor: active ? color : t.chip,
+        borderWidth: 1.5,
+        borderColor: active ? color : t.line2,
+      }}
     >
-      {label}
-    </Txt>
+      <Txt
+        weight={800}
+        size={big ? 17 : 12.5}
+        tracking={big ? -0.3 : undefined}
+        color={active ? t.onActivity : dimmed ? t.dim : t.text}
+        style={{ fontVariant: ['tabular-nums'] }}
+      >
+        {label}
+      </Txt>
+    </Pressable>
   );
 }
 
@@ -147,43 +155,48 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
 
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 16 }}>
-      {/* readout — each value is tappable for precise entry */}
+      {/* readout — each resolved value is a tappable pill for precise entry */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 13 }}>
         <Icon name="clock" color={color} size={18} />
-        <View style={{ flex: 1 }}>
-          <Txt weight={800} size={17} tracking={-0.3}>
+        <View style={{ flex: 1, gap: 5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
             {isInterval ? (
               <>
-                <Seg label={fmtClock(start as number)} color={color} dimmed={derived === 'start'} onPress={() => tap('start')} />
-                {' → '}
+                <ValuePill big label={fmtClock(start as number)} color={color} active={activeEditor === 'start'} dimmed={derived === 'start'} onPress={() => tap('start')} />
+                <Txt weight={700} size={16} color={t.dim}>
+                  →
+                </Txt>
                 {te.ongoing ? (
-                  'now'
+                  <Txt weight={800} size={17} tracking={-0.3} color={t.dim}>
+                    now
+                  </Txt>
                 ) : (
-                  <Seg label={fmtClock(end)} color={color} dimmed={derived === 'end'} onPress={() => tap('end')} />
+                  <ValuePill big label={fmtClock(end)} color={color} active={activeEditor === 'end'} dimmed={derived === 'end'} onPress={() => tap('end')} />
                 )}
               </>
             ) : (
-              <Seg label={fmtClock(end)} color={color} onPress={() => tap('when')} />
+              <ValuePill big label={fmtClock(end)} color={color} active={activeEditor === 'when'} onPress={() => tap('when')} />
             )}
-          </Txt>
-          <Txt weight={500} size={12.5} color={t.dim}>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {isInterval && !te.ongoing ? (
               <>
-                {endIsToday ? '' : dayGroupLabel(end, now) + ' · '}
-                {'lasted '}
-                <Seg
-                  label={fmtDur(duration)}
-                  color={color}
-                  dimmed={derived === 'lasted'}
-                  onPress={() => tap('lasted')}
-                  size={12.5}
-                  weight={700}
-                />
+                {!endIsToday && (
+                  <Txt weight={500} size={12.5} color={t.dim}>
+                    {dayGroupLabel(end, now)} ·
+                  </Txt>
+                )}
+                <Txt weight={500} size={12.5} color={t.dim}>
+                  lasted
+                </Txt>
+                <ValuePill label={fmtDur(duration)} color={color} active={activeEditor === 'lasted'} dimmed={derived === 'lasted'} onPress={() => tap('lasted')} />
               </>
             ) : (
-              resultSub
+              <Txt weight={500} size={12.5} color={t.dim}>
+                {resultSub}
+              </Txt>
             )}
-          </Txt>
+          </View>
         </View>
       </View>
 
