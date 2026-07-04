@@ -457,6 +457,37 @@ describe('edit / delete entry', () => {
     await flush();
     expect(h.deleted).toHaveLength(1);
   });
+
+  it('deleteEntry shows an Undo toast and undoDelete restores + re-creates the entry', async () => {
+    seedFeeding();
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0);
+    expect(s().toast).toBe('Deleted');
+    expect(s().toastAction?.label).toBe('Undo');
+    await flush();
+    expect(h.deleted).toHaveLength(1); // the delete reached the server
+
+    s().undoDelete();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].id).toBe('feeding-1');
+    expect(s().toast).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1); // re-created server-side
+  });
+
+  it('undoDelete restores locally without a server round-trip for an offline delete', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0);
+    await flush();
+    expect(h.deleted).toHaveLength(0); // offline: the server was never touched
+
+    s().undoDelete();
+    expect(s().entries).toHaveLength(1);
+    await flush();
+    expect(h.pushed).toHaveLength(0); // nothing to re-create
+  });
 });
 
 describe('measurements', () => {

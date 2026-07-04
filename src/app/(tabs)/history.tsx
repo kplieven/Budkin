@@ -6,6 +6,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ActivityRow } from '@/features/activity/ActivityRow';
+import { SwipeableRow } from '@/features/activity/SwipeableRow';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -21,6 +22,7 @@ export default function History() {
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openEdit = useAppStore((s) => s.openEdit);
+  const deleteEntry = useAppStore((s) => s.deleteEntry);
 
   const groups = groupByDay(entries, now);
 
@@ -43,13 +45,20 @@ export default function History() {
           <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 9, textTransform: 'uppercase' }}>
             {g.label}
           </Txt>
-          {/* Desktop: two-up grid (web handoff). Phone: single column. */}
+          {/* Desktop: two-up grid (web handoff). Phone: single column with
+              swipe-to-delete (mouse-driven desktop keeps plain rows). */}
           <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 11 } : { gap: 8 }}>
-            {g.items.map((e) => (
-              <View key={e.id} style={desktop ? { flexBasis: '48%', flexGrow: 1, minWidth: 280 } : undefined}>
-                <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
-              </View>
-            ))}
+            {g.items.map((e) =>
+              desktop ? (
+                <View key={e.id} style={{ flexBasis: '48%', flexGrow: 1, minWidth: 280 }}>
+                  <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
+                </View>
+              ) : (
+                <SwipeableRow key={e.id} onDelete={() => deleteEntry(e.id)}>
+                  <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
+                </SwipeableRow>
+              ),
+            )}
           </View>
         </View>
       ))
