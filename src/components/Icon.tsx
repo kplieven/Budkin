@@ -12,6 +12,8 @@ export type IconName =
   | 'sleep'
   | 'diaper'
   | 'pumping'
+  | 'drop'
+  | 'solid'
   | 'tummy'
   | 'timer'
   | 'home'
@@ -82,6 +84,21 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
       return (
         <Svg {...common}>
           <Path d="M12 3.2c3.6 4.4 5.6 7.2 5.6 9.8a5.6 5.6 0 0 1-11.2 0c0-2.6 2-5.4 5.6-9.8z" fill={color} />
+        </Svg>
+      );
+    case 'drop':
+      return (
+        <Svg {...common}>
+          <Path d="M12 3.5c3.2 4.1 5 6.8 5 9.3a5 5 0 0 1-10 0c0-2.5 1.8-5.2 5-9.3z" fill={color} />
+        </Svg>
+      );
+    case 'solid':
+      return (
+        <Svg {...common}>
+          <Path
+            d="M4.5 18.5c0-3 1.6-5.2 3.9-6.1C8.2 9 10 6.6 12 6.6s3.8 2.4 3.6 5.8c2.3.9 3.9 3.1 3.9 6.1 0 .3-.2.5-.5.5h-14c-.3 0-.5-.2-.5-.5z"
+            fill={color}
+          />
         </Svg>
       );
     case 'tummy':
