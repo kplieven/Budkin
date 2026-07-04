@@ -137,7 +137,6 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const endActive = isActive(te.order, 'end');
   const lastedActive = isActive(te.order, 'lasted');
   const startActive = isActive(te.order, 'start');
-  const hasAnchors = lastFeed != null || (type === 'sleep' && lastWake != null);
 
   // Tapping a readout value pins it at its resolved value and toggles its editor.
   const tap = (f: Exclude<EditField, null>) => {
@@ -264,29 +263,31 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
             </>
           )}
 
-          {hasAnchors && (
-            <>
-              <SubLabel>Started</SubLabel>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
-                {lastFeed != null && (
-                  <Chip
-                    label={`When last feed ended (${fmtAgoShort(lastFeed)})`}
-                    color={color}
-                    selected={startActive && te.startAnchor === 'lastfeed'}
-                    onPress={() => setStartedAt(now - lastFeed * 60000, 'lastfeed')}
-                  />
-                )}
-                {type === 'sleep' && lastWake != null && (
-                  <Chip
-                    label={`When they woke (${fmtAgoShort(lastWake)})`}
-                    color={color}
-                    selected={startActive && te.startAnchor === 'wake'}
-                    onPress={() => setStartedAt(now - lastWake * 60000, 'wake')}
-                  />
-                )}
-              </View>
-            </>
-          )}
+          <SubLabel>Started</SubLabel>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+            <Chip
+              label="Now"
+              color={color}
+              selected={startActive && te.startAnchor === 'now'}
+              onPress={() => setStartedAt(now, 'now')}
+            />
+            {lastFeed != null && (
+              <Chip
+                label={`When last feed ended (${fmtAgoShort(lastFeed)})`}
+                color={color}
+                selected={startActive && te.startAnchor === 'lastfeed'}
+                onPress={() => setStartedAt(now - lastFeed * 60000, 'lastfeed')}
+              />
+            )}
+            {type === 'sleep' && lastWake != null && (
+              <Chip
+                label={`When they woke (${fmtAgoShort(lastWake)})`}
+                color={color}
+                selected={startActive && te.startAnchor === 'wake'}
+                onPress={() => setStartedAt(now - lastWake * 60000, 'wake')}
+              />
+            )}
+          </View>
         </>
       ) : (
         <>

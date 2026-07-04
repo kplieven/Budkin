@@ -736,6 +736,17 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(s().te.startAbs).toBe(NOW - 40 * M);
   });
 
+  it('tapping "Now" while editing a running timer resets and persists its start (ongoing stays true)', () => {
+    useAppStore.setState({ timers: [feedingTimer('t6b')] }); // start NOW - 12m
+    s().openTimerEdit('t6b');
+    s().setStartedAt(NOW, 'now'); // user taps the "Now" chip
+    expect(s().te.startAnchor).toBe('now');
+    expect(s().te.ongoing).toBe(true); // setStartedAt must not disturb ongoing
+    s().saveTimerDetails();
+    expect(s().timers).toHaveLength(1); // still running, not stopped
+    expect(s().timers[0].start).toBe(NOW);
+  });
+
   it('leaves the start unchanged when it was not edited', () => {
     useAppStore.setState({ timers: [feedingTimer('t7')] }); // start NOW - 12m
     s().openTimerEdit('t7');
