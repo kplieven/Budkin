@@ -558,7 +558,7 @@ describe('time-entry: keep last two selected', () => {
 });
 
 describe('edit a running timer', () => {
-  it('openTimerEdit prefills from the timer', () => {
+  it('openTimerEdit prefills from the timer and shows the ongoing editing view', () => {
     useAppStore.setState({
       timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
     });
@@ -566,6 +566,9 @@ describe('edit a running timer', () => {
     expect(s().sheet?.type).toBe('sleep');
     expect(s().fromTimerId).toBe('t1');
     expect(s().te.startAbs).toBe(NOW - 40 * M);
+    // the timer is running, so TimeEntry must render its ongoing view (editable
+    // start + live "now" end), not dead end/lasted pills
+    expect(s().te.ongoing).toBe(true);
   });
 
   it('pressing the sheet\'s save button (save()) on a timer-edit keeps the timer running instead of stopping it', () => {
@@ -701,6 +704,57 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     const e = s().entries[0] as Extract<Entry, { type: 'pumping' }>;
     expect(e.amount).toBe(150);
     expect(e.method).toBe('left');
+  });
+
+  it('tummy: persists the milestone it claims to save (no false "Details saved" for a no-op)', () => {
+    useAppStore.setState({
+      timers: [{ id: 't5', activity: 'tummy', name: 'Tummy time', start: NOW - 5 * M, saveAs: 'tummy' }],
+    });
+    s().openTimerEdit('t5');
+    s().setTE({ milestone: 'lifted head' });
+    s().saveTimerDetails();
+    expect(s().timers).toHaveLength(1); // still running
+    expect(s().entries).toHaveLength(0);
+    // the toast asserts a save happened — so something must actually be persisted
+    expect(s().timers[0].milestone).toBe('lifted head');
+    expect(s().toast).toBe('Details saved');
+    s().openTimerEdit('t5'); // reopen reflects it
+    expect(s().te.milestone).toBe('lifted head');
+    s().stopTimer('t5');
+    const e = s().entries[0] as Extract<Entry, { type: 'tummy' }>;
+    expect(e.milestone).toBe('lifted head');
+  });
+
+  it('persists an edited start time onto the running timer', () => {
+    useAppStore.setState({ timers: [feedingTimer('t6')] }); // start NOW - 12m
+    s().openTimerEdit('t6');
+    s().setStartedAt(NOW - 40 * M); // user re-anchors the start earlier
+    s().saveTimerDetails();
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0].start).toBe(NOW - 40 * M);
+    s().openTimerEdit('t6'); // reopen reflects the new start
+    expect(s().te.startAbs).toBe(NOW - 40 * M);
+  });
+
+  it('leaves the start unchanged when it was not edited', () => {
+    useAppStore.setState({ timers: [feedingTimer('t7')] }); // start NOW - 12m
+    s().openTimerEdit('t7');
+    s().setTE({ amount: 30 });
+    s().saveTimerDetails();
+    expect(s().timers[0].start).toBe(NOW - 12 * M);
+  });
+
+  it('persists tags edited on a running timer and folds them into the stopped entry', () => {
+    useAppStore.setState({ timers: [feedingTimer('t8')] });
+    s().openTimerEdit('t8');
+    s().toggleTag('Cluster');
+    s().saveTimerDetails();
+    expect(s().timers[0].tags).toEqual(['Cluster']);
+    s().openTimerEdit('t8');
+    expect(s().te.tags).toEqual(['Cluster']);
+    s().stopTimer('t8');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('Cluster');
   });
 });
 

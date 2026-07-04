@@ -106,6 +106,8 @@ export interface Timer {
   startSide?: 'left' | 'right';
   amount?: number;
   nap?: boolean;
+  milestone?: string;
+  tags?: string[];
 }
 
 export type MeasurementKind = 'weight' | 'height' | 'head' | 'bmi';
