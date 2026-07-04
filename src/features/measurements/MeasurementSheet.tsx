@@ -123,7 +123,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             <Icon name="chevron-left" color={t.text} size={22} />
           </Pressable>
           <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
-            <Txt unselectable weight={700} size={15.5}>
+            <Txt weight={700} size={15.5}>
               {dateLabel}
             </Txt>
           </View>

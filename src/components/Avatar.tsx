@@ -52,7 +52,7 @@ export function Avatar({
         justifyContent: 'center',
       }}
     >
-      <Txt weight={800} size={fontSize} color={child?.color ?? t.text}>
+      <Txt unselectable weight={800} size={fontSize} color={child?.color ?? t.text}>
         {child ? child.first[0] : '?'}
       </Txt>
     </View>
