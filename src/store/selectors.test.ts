@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastFeedEndMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { lastDiaperMinAgo, lastFeedEndMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -43,6 +43,8 @@ describe('anchors', () => {
   const entries: Entry[] = [
     { id: 'f', childId: 'c1', type: 'feeding', start: NOW - 90 * M, end: NOW - 60 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
     { id: 's', childId: 'c1', type: 'sleep', start: NOW - 240 * M, end: NOW - 120 * M, nap: true, tags: [] },
+    { id: 'd0', childId: 'c1', type: 'diaper', time: NOW - 200 * M, wet: true, solid: false, color: null, tags: [] },
+    { id: 'd1', childId: 'c1', type: 'diaper', time: NOW - 45 * M, wet: true, solid: true, color: 'yellow', tags: [] },
   ];
   it('lastFeedEndMinAgo', () => {
     expect(lastFeedEndMinAgo(entries, NOW)).toBe(60);
@@ -50,6 +52,10 @@ describe('anchors', () => {
   });
   it('lastWakeMinAgo', () => {
     expect(lastWakeMinAgo(entries, NOW)).toBe(120);
+  });
+  it('lastDiaperMinAgo picks the most recent change', () => {
+    expect(lastDiaperMinAgo(entries, NOW)).toBe(45);
+    expect(lastDiaperMinAgo([], NOW)).toBeNull();
   });
 });
 
