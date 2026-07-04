@@ -59,7 +59,7 @@ export function AppTabBar({ state, navigation }: TabBarProps) {
               size={24}
               fill={active && route.name === 'index' ? hexA(t.primary, 0.22) : undefined}
             />
-            <Txt weight={700} size={11} color={color}>
+            <Txt unselectable weight={700} size={11} color={color}>
               {meta.label}
             </Txt>
           </Pressable>

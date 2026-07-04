@@ -55,7 +55,7 @@ export function ChildSwitcher() {
             >
               <Avatar child={c} size={42} radius={14} fontSize={17} />
               <View style={{ flex: 1 }}>
-                <Txt weight={700} size={16}>
+                <Txt unselectable weight={700} size={16}>
                   {c.first} {c.last}
                 </Txt>
                 <Txt weight={500} size={13} color={t.dim}>

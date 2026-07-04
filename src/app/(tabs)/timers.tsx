@@ -103,7 +103,7 @@ export default function Timers() {
                       isHovered(s) && { borderColor: t.line2 },
                     ]}
                   >
-                    <Txt weight={700} size={13}>
+                    <Txt unselectable weight={700} size={13}>
                       {lbl}
                     </Txt>
                   </Pressable>
@@ -126,7 +126,7 @@ export default function Timers() {
                     exactFor !== tm.id && isHovered(s) && { borderColor: t.line2 },
                   ]}
                 >
-                  <Txt weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
+                  <Txt unselectable weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
                     Exact…
                   </Txt>
                 </Pressable>
@@ -148,7 +148,7 @@ export default function Timers() {
                     isHovered(s) && { backgroundColor: t.elevated },
                   ]}
                 >
-                  <Txt weight={700} size={14.5} color={t.dim}>
+                  <Txt unselectable weight={700} size={14.5} color={t.dim}>
                     Discard
                   </Txt>
                 </Pressable>
@@ -161,7 +161,7 @@ export default function Timers() {
                     isHovered(s) && { backgroundColor: t.elevated },
                   ]}
                 >
-                  <Txt weight={800} size={14.5} color={color}>
+                  <Txt unselectable weight={800} size={14.5} color={color}>
                     Edit
                   </Txt>
                 </Pressable>
@@ -174,7 +174,7 @@ export default function Timers() {
                     isHovered(s) && { boxShadow: t.shadow },
                   ]}
                 >
-                  <Txt weight={800} size={14.5} color={t.onActivity} style={{ textAlign: 'center' }}>
+                  <Txt unselectable weight={800} size={14.5} color={t.onActivity} style={{ textAlign: 'center' }}>
                     Stop &amp; save
                   </Txt>
                 </Pressable>
@@ -202,7 +202,7 @@ export default function Timers() {
                         !sel && isHovered(s) && { borderColor: t.line2 },
                       ]}
                     >
-                      <Txt weight={700} size={12.5} color={sel ? t.onActivity : t.text}>
+                      <Txt unselectable weight={700} size={12.5} color={sel ? t.onActivity : t.text}>
                         {ACTIVITY_LABEL[o]}
                       </Txt>
                     </Pressable>
@@ -236,7 +236,7 @@ export default function Timers() {
         ]}
       >
         <Icon name="plus" color={t.primary} size={20} />
-        <Txt weight={700} size={15.5} color={t.primary}>
+        <Txt unselectable weight={700} size={15.5} color={t.primary}>
           New timer
         </Txt>
       </Pressable>

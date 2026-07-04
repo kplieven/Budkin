@@ -93,7 +93,7 @@ export default function Settings() {
             isHovered(s) && { backgroundColor: t.elevated },
           ]}
         >
-          <Txt weight={600} size={16} style={{ flex: 1 }}>
+          <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
             Night mode
           </Txt>
           <Toggle on={themeMode === 'dark'} />
@@ -105,7 +105,7 @@ export default function Settings() {
           accessibilityState={{ checked: simulateOffline }}
           style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
-          <Txt weight={600} size={16} style={{ flex: 1 }}>
+          <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
             Simulate offline
           </Txt>
           <Toggle on={simulateOffline} />
@@ -146,7 +146,7 @@ export default function Settings() {
           accessibilityRole="button"
           style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
-          <Txt weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
+          <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
             Reconnect / change server
           </Txt>
         </Pressable>

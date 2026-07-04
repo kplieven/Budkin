@@ -97,6 +97,7 @@ function ValuePill({
       ]}
     >
       <Txt
+        unselectable
         weight={800}
         size={big ? 17 : 12.5}
         tracking={big ? -0.3 : undefined}

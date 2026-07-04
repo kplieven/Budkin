@@ -123,7 +123,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             <Icon name="chevron-left" color={t.text} size={22} />
           </Pressable>
           <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
-            <Txt weight={700} size={15.5}>
+            <Txt unselectable weight={700} size={15.5}>
               {dateLabel}
             </Txt>
           </View>
@@ -161,7 +161,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
               isHovered(s) && { opacity: 0.75 },
             ]}
           >
-            <Txt weight={600} size={13} color={meta.color}>
+            <Txt unselectable weight={600} size={13} color={meta.color}>
               Jump to today
             </Txt>
           </Pressable>
@@ -189,7 +189,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
               isHovered(s) && { backgroundColor: t.elevated },
             ]}
           >
-            <Txt weight={800} size={16} color="#E2725B">
+            <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
             </Txt>
           </Pressable>
@@ -202,7 +202,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             isHovered(s) && { boxShadow: `0px 8px 22px ${hexA(meta.color, 0.5)}` },
           ]}
         >
-          <Txt weight={800} size={17.5} color={t.onActivity}>
+          <Txt unselectable weight={800} size={17.5} color={t.onActivity}>
             {editingId ? 'Save changes' : `Save ${meta.short.toLowerCase()}`}
           </Txt>
         </Pressable>

@@ -48,7 +48,7 @@ export function TimelineRail() {
           accessibilityRole="button"
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
         >
-          <Txt weight={700} size={13} color={t.primary}>
+          <Txt unselectable weight={700} size={13} color={t.primary}>
             All
           </Txt>
         </Pressable>

@@ -117,10 +117,10 @@ export default function Onboarding() {
               >
                 <Icon name="clock" color={t.dim} size={20} />
                 <View style={{ flex: 1 }}>
-                  <Txt weight={600} size={15} numberOfLines={1}>
+                  <Txt unselectable weight={600} size={15} numberOfLines={1}>
                     {host}
                   </Txt>
-                  <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                  <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
                     {'••••'}
                     {srv.token.slice(-4)}
                   </Txt>
@@ -226,7 +226,7 @@ export default function Onboarding() {
         {connecting ? (
           <ActivityIndicator color={t.onPrimary} />
         ) : (
-          <Txt weight={800} size={17} color={t.onPrimary}>
+          <Txt unselectable weight={800} size={17} color={t.onPrimary}>
             Connect
           </Txt>
         )}
@@ -244,8 +244,8 @@ export default function Onboarding() {
         accessibilityRole="button"
         style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
       >
-        <Txt weight={600} size={13.5} color={t.dim}>
-          Just exploring? <Txt weight={700} size={13.5} color={t.primary}>Try the demo →</Txt>
+        <Txt unselectable weight={600} size={13.5} color={t.dim}>
+          Just exploring? <Txt unselectable weight={700} size={13.5} color={t.primary}>Try the demo →</Txt>
         </Txt>
       </Pressable>
     </ScrollView>
