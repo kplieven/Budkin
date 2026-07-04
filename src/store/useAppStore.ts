@@ -72,6 +72,8 @@ interface AppState {
   simulateOffline: boolean;
   now: number;
   toast: string | null;
+  /** optional action button shown alongside the current toast (e.g. Undo) */
+  toastAction: ToastAction | null;
   showChildSwitcher: boolean;
   sheet: { type: ActivityType } | null;
   /** id of the entry being edited, or null when logging a new one */
@@ -119,6 +121,8 @@ interface AppActions {
   openTimerEdit: (timerId: string) => void;
   closeSheet: () => void;
   deleteEntry: (id: string) => void;
+  /** Restore the entry removed by the most recent deleteEntry (undo). */
+  undoDelete: () => void;
 
   openMeasurement: (kind: MeasurementKind) => void;
   openEditMeasurement: (id: string) => void;
@@ -152,7 +156,13 @@ interface AppActions {
    * WITHOUT stopping it or creating an entry, then close the sheet. */
   saveTimerDetails: () => void;
 
-  showToast: (msg: string) => void;
+  showToast: (msg: string, action?: ToastAction) => void;
+}
+
+/** A tappable action rendered inside a toast (e.g. "Undo" after a delete). */
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 export type AppStore = AppState & AppActions;
@@ -177,6 +187,10 @@ export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+// The most recently deleted entry, held so an "Undo" toast can restore it.
+// `didServerDelete` records whether the delete actually reached the server, so
+// undo only re-creates it server-side when a server record was really removed.
+let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | null = null;
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
@@ -197,6 +211,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   simulateOffline: false,
   now: Date.now(),
   toast: null,
+  toastAction: null,
   showChildSwitcher: false,
   sheet: null,
   editingId: null,
@@ -580,17 +595,37 @@ export const useAppStore = create<AppStore>((set, get) => ({
   closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
   deleteEntry: (id) => {
     const s = get();
-    const entry = s.entries.find((e) => e.id === id);
+    const index = s.entries.findIndex((e) => e.id === id);
+    if (index === -1) return;
+    const entry = s.entries[index];
+    const conn = s.connection;
+    const didServerDelete = entry.serverId != null && !!conn && !conn.demo && !s.offline;
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
       editingId: s.editingId === id ? null : s.editingId,
     });
-    get().showToast('Deleted');
-    const conn = s.connection;
-    if (entry && entry.serverId != null && conn && !conn.demo && !s.offline) {
-      void deleteEntryFromServer(conn, entry.type, entry.serverId).catch(() => {});
+    lastDeleted = { entry, index, didServerDelete };
+    if (didServerDelete) {
+      void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
     }
+    get().showToast('Deleted', { label: 'Undo', run: () => get().undoDelete() });
+  },
+  undoDelete: () => {
+    const d = lastDeleted;
+    if (!d) return;
+    lastDeleted = null;
+    set((s) => {
+      if (s.entries.some((e) => e.id === d.entry.id)) return {};
+      const next = s.entries.slice();
+      next.splice(Math.min(d.index, next.length), 0, d.entry);
+      return { entries: next };
+    });
+    // Only re-create server-side if the delete actually removed a server record;
+    // a local-only (offline/demo) delete leaves the server copy intact.
+    if (d.didServerDelete) get().commitWrite(d.entry);
+    set({ toast: null, toastAction: null });
+    if (toastTimer) clearTimeout(toastTimer);
   },
   openMeasurement: (kind) => set({ measurementSheet: { kind }, editingMeasurementId: null }),
   openEditMeasurement: (id) => {
@@ -940,10 +975,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       timers: s.timers.map((t) => (t.id === id ? { ...t, start: Math.min(Date.now(), ms) } : t)),
     })),
 
-  showToast: (msg) => {
-    set({ toast: msg });
+  showToast: (msg, action) => {
+    set({ toast: msg, toastAction: action ?? null });
     if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => set({ toast: null }), 2400);
+    // Actionable toasts (e.g. Undo) linger longer so there's time to react.
+    toastTimer = setTimeout(() => set({ toast: null, toastAction: null }), action ? 5000 : 2400);
   },
 }));
 

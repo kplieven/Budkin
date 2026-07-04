@@ -22,7 +22,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
   childName: 'Ada',
   birth: null,
-  lastFeedEnd: null,
+  lastFeedStart: null,
   nextSide: 'left',
   lastDiaper: null,
   lastDiaperSolid: false,
