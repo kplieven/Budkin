@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -28,8 +28,11 @@ export default function Home() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
 
-  // Pull-to-refresh: re-check the server and reload. This is the manual escape
-  // hatch when a stale `offline` needs clearing without restarting the app.
+  // Pull-to-refresh: re-check the server and reload. Native only — on web
+  // `RefreshControl` is an inert stub (no pull gesture in a browser), so the
+  // drag does nothing; the web build reconnects automatically via the AppState
+  // (visibilitychange) listener in _layout.tsx instead.
+  const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
@@ -83,13 +86,15 @@ export default function Home() {
       <ScrollView
         style={{ flex: 1 }}
         refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={t.dim}
-            colors={['#E2B554']}
-            progressViewOffset={insets.top + (offline ? 46 : 0)}
-          />
+          canPullToRefresh ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={t.dim}
+              colors={['#E2B554']}
+              progressViewOffset={insets.top + (offline ? 46 : 0)}
+            />
+          ) : undefined
         }
         contentContainerStyle={{
           paddingTop: insets.top + 8 + (offline ? 46 : 0),
