@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
@@ -97,7 +98,10 @@ export default function Timers() {
                     onPress={() => adjustTimerStart(tm.id, d)}
                     accessibilityRole="button"
                     accessibilityLabel={d < 0 ? `Move start ${-d} minutes earlier` : `Move start ${d} minutes later`}
-                    style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line }}
+                    style={(s) => [
+                      { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
+                      isHovered(s) && { borderColor: t.line2 },
+                    ]}
                   >
                     <Txt weight={700} size={13}>
                       {lbl}
@@ -109,14 +113,18 @@ export default function Timers() {
                   accessibilityRole="button"
                   accessibilityLabel="Set exact start time"
                   accessibilityState={{ selected: exactFor === tm.id }}
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 7,
-                    borderRadius: 11,
-                    backgroundColor: exactFor === tm.id ? hexA(color, 0.16) : t.chip,
-                    borderWidth: 1.5,
-                    borderColor: exactFor === tm.id ? color : t.line,
-                  }}
+                  style={(s) => [
+                    {
+                      paddingHorizontal: 12,
+                      paddingVertical: 7,
+                      borderRadius: 11,
+                      backgroundColor: exactFor === tm.id ? hexA(color, 0.16) : t.chip,
+                      borderWidth: 1.5,
+                      borderColor: exactFor === tm.id ? color : t.line,
+                      cursor: 'pointer',
+                    },
+                    exactFor !== tm.id && isHovered(s) && { borderColor: t.line2 },
+                  ]}
                 >
                   <Txt weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
                     Exact…
@@ -135,7 +143,10 @@ export default function Timers() {
                   onPress={() => discardTimer(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Discard ${tm.name} timer`}
-                  style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
+                  style={(s) => [
+                    { flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+                    isHovered(s) && { backgroundColor: t.elevated },
+                  ]}
                 >
                   <Txt weight={700} size={14.5} color={t.dim}>
                     Discard
@@ -145,7 +156,10 @@ export default function Timers() {
                   onPress={() => openTimerEdit(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Edit ${tm.name} timer`}
-                  style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
+                  style={(s) => [
+                    { flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+                    isHovered(s) && { backgroundColor: t.elevated },
+                  ]}
                 >
                   <Txt weight={800} size={14.5} color={color}>
                     Edit
@@ -155,7 +169,10 @@ export default function Timers() {
                   onPress={() => stopTimer(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Stop and save ${tm.name} timer`}
-                  style={{ flex: 1.7, height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}
+                  style={(s) => [
+                    { flex: 1.7, height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, cursor: 'pointer' },
+                    isHovered(s) && { boxShadow: t.shadow },
+                  ]}
                 >
                   <Txt weight={800} size={14.5} color={t.onActivity} style={{ textAlign: 'center' }}>
                     Stop &amp; save
@@ -172,14 +189,18 @@ export default function Timers() {
                       onPress={() => setTimerSaveAs(tm.id, o)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: sel }}
-                      style={{
-                        paddingHorizontal: 11,
-                        paddingVertical: 6,
-                        borderRadius: 10,
-                        backgroundColor: sel ? t.activity[o] : t.chip,
-                        borderWidth: 1.5,
-                        borderColor: sel ? t.activity[o] : t.line,
-                      }}
+                      style={(s) => [
+                        {
+                          paddingHorizontal: 11,
+                          paddingVertical: 6,
+                          borderRadius: 10,
+                          backgroundColor: sel ? t.activity[o] : t.chip,
+                          borderWidth: 1.5,
+                          borderColor: sel ? t.activity[o] : t.line,
+                          cursor: 'pointer',
+                        },
+                        !sel && isHovered(s) && { borderColor: t.line2 },
+                      ]}
                     >
                       <Txt weight={700} size={12.5} color={sel ? t.onActivity : t.text}>
                         {ACTIVITY_LABEL[o]}
@@ -196,19 +217,23 @@ export default function Timers() {
       <Pressable
         onPress={startQuickTimer}
         accessibilityRole="button"
-        style={{
-          marginTop: 16,
-          height: 54,
-          borderRadius: 16,
-          borderWidth: 1.5,
-          borderStyle: 'dashed',
-          borderColor: hexA(t.primary, 0.5),
-          backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-        }}
+        style={(s) => [
+          {
+            marginTop: 16,
+            height: 54,
+            borderRadius: 16,
+            borderWidth: 1.5,
+            borderStyle: 'dashed',
+            borderColor: hexA(t.primary, 0.5),
+            backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            cursor: 'pointer',
+          },
+          isHovered(s) && { borderColor: hexA(t.primary, 0.8) },
+        ]}
       >
         <Icon name="plus" color={t.primary} size={20} />
         <Txt weight={700} size={15.5} color={t.primary}>

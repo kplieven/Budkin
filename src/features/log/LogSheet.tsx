@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AmountScale } from '@/components/AmountScale';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Stepper } from '@/components/Stepper';
@@ -117,7 +118,10 @@ export function LogSheet() {
             <Pressable
               onPress={sleepWoke}
               accessibilityRole="button"
-              style={{ flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: hexA(color, 0.14), borderWidth: 1.5, borderColor: hexA(color, 0.4) }}
+              style={(s) => [
+                { flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: hexA(color, 0.14), borderWidth: 1.5, borderColor: hexA(color, 0.4), cursor: 'pointer' },
+                isHovered(s) && { borderColor: hexA(color, 0.7) },
+              ]}
             >
               <Txt weight={700} size={15}>
                 Woke up now
@@ -129,7 +133,10 @@ export function LogSheet() {
             <Pressable
               onPress={sleepStillSleeping}
               accessibilityRole="button"
-              style={{ flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line }}
+              style={(s) => [
+                { flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
+                isHovered(s) && { borderColor: t.line2 },
+              ]}
             >
               <Txt weight={700} size={15}>
                 Still sleeping
@@ -200,7 +207,10 @@ export function LogSheet() {
                 onPress={toggleWet}
                 accessibilityRole="button"
                 accessibilityState={{ selected: te.wet }}
-                style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.wet ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.wet ? color : t.line }}
+                style={(s) => [
+                  { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.wet ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.wet ? color : t.line, cursor: 'pointer' },
+                  !te.wet && isHovered(s) && { borderColor: t.line2 },
+                ]}
               >
                 <Icon name="drop" color={te.wet ? color : t.dim} size={22} />
                 <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
@@ -211,7 +221,10 @@ export function LogSheet() {
                 onPress={toggleSolid}
                 accessibilityRole="button"
                 accessibilityState={{ selected: te.solid }}
-                style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.solid ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.solid ? color : t.line }}
+                style={(s) => [
+                  { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.solid ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.solid ? color : t.line, cursor: 'pointer' },
+                  !te.solid && isHovered(s) && { borderColor: t.line2 },
+                ]}
               >
                 <Icon name="solid" color={te.solid ? color : t.dim} size={22} />
                 <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
@@ -305,7 +318,10 @@ export function LogSheet() {
           <Pressable
             onPress={() => deleteEntry(editingId)}
             accessibilityRole="button"
-            style={{ height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
+            style={(s) => [
+              { height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Txt weight={800} size={16} color="#E2725B">
               Delete
@@ -315,7 +331,10 @@ export function LogSheet() {
         <Pressable
           onPress={save}
           accessibilityRole="button"
-          style={{ flex: 1, height: 58, borderRadius: 18, backgroundColor: color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(color, 0.35)}` }}
+          style={(s) => [
+            { flex: 1, height: 58, borderRadius: 18, backgroundColor: color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(color, 0.35)}`, cursor: 'pointer' },
+            isHovered(s) && { boxShadow: `0px 8px 22px ${hexA(color, 0.5)}` },
+          ]}
         >
           <Txt weight={800} size={17.5} color={t.onActivity}>
             {saveLabel}

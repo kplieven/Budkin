@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -86,7 +87,11 @@ export default function Settings() {
           accessibilityRole="switch"
           accessibilityLabel="Night mode"
           accessibilityState={{ checked: themeMode === 'dark' }}
-          style={[row, { borderBottomWidth: 1, borderBottomColor: t.line }]}
+          style={(s) => [
+            row,
+            { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' },
+            isHovered(s) && { backgroundColor: t.elevated },
+          ]}
         >
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Night mode
@@ -98,7 +103,7 @@ export default function Settings() {
           accessibilityRole="switch"
           accessibilityLabel="Simulate offline"
           accessibilityState={{ checked: simulateOffline }}
-          style={row}
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Simulate offline
@@ -139,7 +144,7 @@ export default function Settings() {
             router.replace('/onboarding');
           }}
           accessibilityRole="button"
-          style={row}
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
           <Txt weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
             Reconnect / change server

@@ -3,6 +3,7 @@ import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
@@ -114,7 +115,10 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             onPress={() => stepDay(-1)}
             accessibilityRole="button"
             accessibilityLabel="Previous day"
-            style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center' }}
+            style={(s) => [
+              { width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Icon name="chevron-left" color={t.text} size={22} />
           </Pressable>
@@ -129,13 +133,34 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             accessibilityRole="button"
             accessibilityLabel="Next day"
             accessibilityState={{ disabled: isToday }}
-            style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', opacity: isToday ? 0.4 : 1 }}
+            style={(s) => [
+              {
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                backgroundColor: t.chip,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isToday ? 0.4 : 1,
+                cursor: isToday ? 'auto' : 'pointer',
+              },
+              !isToday && isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Icon name="chevron-right" color={t.text} size={22} />
           </Pressable>
         </View>
         {!isToday && (
-          <Pressable onPress={() => setDateMs(today)} accessibilityRole="button" style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+          <Pressable
+            onPress={() => setDateMs(today)}
+            accessibilityRole="button"
+            style={(s) => [
+              { alignSelf: 'flex-start', marginBottom: 16, cursor: 'pointer' },
+              isHovered(s) && { opacity: 0.75 },
+            ]}
+          >
             <Txt weight={600} size={13} color={meta.color}>
               Jump to today
             </Txt>
@@ -159,7 +184,10 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           <Pressable
             onPress={() => deleteMeasurement(editingId)}
             accessibilityRole="button"
-            style={{ height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
+            style={(s) => [
+              { height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Txt weight={800} size={16} color="#E2725B">
               Delete
@@ -169,7 +197,10 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         <Pressable
           onPress={onSave}
           accessibilityRole="button"
-          style={{ flex: 1, height: 58, borderRadius: 18, backgroundColor: meta.color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(meta.color, 0.35)}` }}
+          style={(s) => [
+            { flex: 1, height: 58, borderRadius: 18, backgroundColor: meta.color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(meta.color, 0.35)}`, cursor: 'pointer' },
+            isHovered(s) && { boxShadow: `0px 8px 22px ${hexA(meta.color, 0.5)}` },
+          ]}
         >
           <Txt weight={800} size={17.5} color={t.onActivity}>
             {editingId ? 'Save changes' : `Save ${meta.short.toLowerCase()}`}

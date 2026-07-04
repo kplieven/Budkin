@@ -13,6 +13,7 @@ import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
@@ -82,14 +83,18 @@ function ValuePill({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
-      style={{
-        paddingHorizontal: big ? 9 : 8,
-        paddingVertical: big ? 4 : 2,
-        borderRadius: 9,
-        backgroundColor: active ? color : t.chip,
-        borderWidth: 1.5,
-        borderColor: active ? color : t.line2,
-      }}
+      style={(s) => [
+        {
+          paddingHorizontal: big ? 9 : 8,
+          paddingVertical: big ? 4 : 2,
+          borderRadius: 9,
+          backgroundColor: active ? color : t.chip,
+          borderWidth: 1.5,
+          borderColor: active ? color : t.line2,
+          cursor: 'pointer',
+        },
+        !active && isHovered(s) && { borderColor: t.dim },
+      ]}
     >
       <Txt
         weight={800}

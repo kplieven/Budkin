@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { dayGroupLabel, fmtClock, fmtDur } from '@/lib/format';
@@ -68,6 +69,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
     backgroundColor: t.chip,
     borderWidth: 1.5,
     borderColor: t.line,
+    cursor: 'pointer' as const,
   };
 
   return (
@@ -105,7 +107,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
             onPress={() => step(d)}
             accessibilityRole="button"
             accessibilityLabel={d > 0 ? `Add ${d} minutes` : `Subtract ${-d} minutes`}
-            style={stepBtn}
+            style={(s) => [stepBtn, isHovered(s) && { backgroundColor: t.elevated }]}
           >
             <Txt weight={700} size={13} style={{ fontVariant: ['tabular-nums'] }}>
               {d > 0 ? `+${d}m` : `−${-d}m`}
@@ -120,7 +122,10 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
             onPress={() => stepDay(-1)}
             accessibilityRole="button"
             accessibilityLabel="Previous day"
-            style={{ width: 40, height: 38, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center' }}
+            style={(s) => [
+              { width: 40, height: 38, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Icon name="chevron-left" color={t.text} size={18} />
           </Pressable>
@@ -135,7 +140,21 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
             accessibilityRole="button"
             accessibilityLabel="Next day"
             accessibilityState={{ disabled: isToday }}
-            style={{ width: 40, height: 38, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', opacity: isToday ? 0.4 : 1 }}
+            style={(s) => [
+              {
+                width: 40,
+                height: 38,
+                borderRadius: 11,
+                backgroundColor: t.chip,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                alignItems: 'center',
+                justifyContent: 'center',
+                opacity: isToday ? 0.4 : 1,
+                cursor: isToday ? 'auto' : 'pointer',
+              },
+              !isToday && isHovered(s) && { backgroundColor: t.elevated },
+            ]}
           >
             <Icon name="chevron-right" color={t.text} size={18} />
           </Pressable>

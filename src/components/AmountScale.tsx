@@ -1,5 +1,6 @@
 import { Pressable, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 
@@ -21,16 +22,20 @@ export function AmountScale({ value, color, onSelect }: AmountScaleProps) {
             onPress={() => onSelect(n)}
             accessibilityRole="button"
             accessibilityState={{ selected: sel }}
-            style={{
-              flex: 1,
-              height: 42,
-              borderRadius: 10,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: sel ? color : t.chip,
-              borderWidth: 1.5,
-              borderColor: sel ? color : t.line,
-            }}
+            style={(s) => [
+              {
+                flex: 1,
+                height: 42,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: sel ? color : t.chip,
+                borderWidth: 1.5,
+                borderColor: sel ? color : t.line,
+                cursor: 'pointer',
+              },
+              !sel && isHovered(s) && { borderColor: t.line2 },
+            ]}
           >
             <Txt weight={700} size={13.5} color={sel ? t.onActivity : t.text}>
               {n}
