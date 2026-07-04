@@ -169,15 +169,15 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         >
           <PulsingDot color={t.activity[runningTimer.saveAs]} />
           <View style={{ flex: 1 }}>
-            <Txt weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
+            <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
               {ACTIVITY_LABEL[runningTimer.saveAs]} running
             </Txt>
-            <Txt weight={800} size={26} tracking={-0.5} color={t.activity[runningTimer.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
+            <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[runningTimer.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
               {fmtDur((now - runningTimer.start) / 60000)}
             </Txt>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Txt weight={600} size={13.5} color={t.dim}>
+            <Txt unselectable weight={600} size={13.5} color={t.dim}>
               View
             </Txt>
             <Icon name="chevron-right" color={t.dim} size={16} />
@@ -195,7 +195,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           accessibilityRole="button"
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
         >
-          <Txt weight={600} size={13.5} color={t.primary}>
+          <Txt unselectable weight={600} size={13.5} color={t.primary}>
             Timers
           </Txt>
         </Pressable>

@@ -123,10 +123,10 @@ export function LogSheet() {
                 isHovered(s) && { borderColor: hexA(color, 0.7) },
               ]}
             >
-              <Txt weight={700} size={15}>
+              <Txt unselectable weight={700} size={15}>
                 Woke up now
               </Txt>
-              <Txt weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
+              <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
                 ended this nap
               </Txt>
             </Pressable>
@@ -138,10 +138,10 @@ export function LogSheet() {
                 isHovered(s) && { borderColor: t.line2 },
               ]}
             >
-              <Txt weight={700} size={15}>
+              <Txt unselectable weight={700} size={15}>
                 Still sleeping
               </Txt>
-              <Txt weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
+              <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
                 start a live timer
               </Txt>
             </Pressable>
@@ -213,7 +213,7 @@ export function LogSheet() {
                 ]}
               >
                 <Icon name="drop" color={te.wet ? color : t.dim} size={22} />
-                <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
+                <Txt unselectable weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Wet
                 </Txt>
               </Pressable>
@@ -227,7 +227,7 @@ export function LogSheet() {
                 ]}
               >
                 <Icon name="solid" color={te.solid ? color : t.dim} size={22} />
-                <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
+                <Txt unselectable weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Solid
                 </Txt>
               </Pressable>
@@ -323,7 +323,7 @@ export function LogSheet() {
               isHovered(s) && { backgroundColor: t.elevated },
             ]}
           >
-            <Txt weight={800} size={16} color="#E2725B">
+            <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
             </Txt>
           </Pressable>
@@ -336,7 +336,7 @@ export function LogSheet() {
             isHovered(s) && { boxShadow: `0px 8px 22px ${hexA(color, 0.5)}` },
           ]}
         >
-          <Txt weight={800} size={17.5} color={t.onActivity}>
+          <Txt unselectable weight={800} size={17.5} color={t.onActivity}>
             {saveLabel}
           </Txt>
         </Pressable>

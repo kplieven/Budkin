@@ -9,10 +9,20 @@ interface TxtProps extends TextProps {
   color?: string;
   /** letterSpacing */
   tracking?: number;
+  /** Marks chrome (button/chip/tab/control labels) as non-selectable on web. */
+  unselectable?: boolean;
 }
 
 /** Text with the Figtree family resolved from `weight`. */
-export function Txt({ weight = 400, size = 15, color, tracking, style, ...rest }: TxtProps) {
+export function Txt({
+  weight = 400,
+  size = 15,
+  color,
+  tracking,
+  unselectable,
+  style,
+  ...rest
+}: TxtProps) {
   const t = useTheme();
   return (
     <Text
@@ -20,6 +30,7 @@ export function Txt({ weight = 400, size = 15, color, tracking, style, ...rest }
       style={[
         { fontFamily: fontFamily(weight), fontSize: size, color: color ?? t.text },
         tracking != null && { letterSpacing: tracking },
+        unselectable && { userSelect: 'none' as const },
         style,
       ]}
     />

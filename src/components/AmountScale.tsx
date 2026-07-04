@@ -37,7 +37,7 @@ export function AmountScale({ value, color, onSelect }: AmountScaleProps) {
               !sel && isHovered(s) && { borderColor: t.line2 },
             ]}
           >
-            <Txt weight={700} size={13.5} color={sel ? t.onActivity : t.text}>
+            <Txt unselectable weight={700} size={13.5} color={sel ? t.onActivity : t.text}>
               {n}
             </Txt>
           </Pressable>

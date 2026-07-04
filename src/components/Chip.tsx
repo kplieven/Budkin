@@ -58,7 +58,7 @@ export function Chip({
           isHovered(s) && { backgroundColor: hexA(t.primary, t.dark ? 0.16 : 0.12) },
         ]}
       >
-        <Txt weight={700} size={fontSize} color={t.primary}>
+        <Txt unselectable weight={700} size={fontSize} color={t.primary}>
           {label}
         </Txt>
       </Pressable>
@@ -98,7 +98,7 @@ export function Chip({
           }}
         />
       )}
-      <Txt weight={700} size={fontSize} color={selected ? t.onActivity : t.text}>
+      <Txt unselectable weight={700} size={fontSize} color={selected ? t.onActivity : t.text}>
         {label}
       </Txt>
     </Pressable>

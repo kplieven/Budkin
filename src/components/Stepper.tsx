@@ -41,7 +41,7 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
         accessibilityLabel={`Decrease ${unit}`}
         style={(s) => [btn, isHovered(s) && { backgroundColor: t.elevated }]}
       >
-        <Txt weight={700} size={26} color={t.text}>
+        <Txt unselectable weight={700} size={26} color={t.text}>
           −
         </Txt>
       </Pressable>
@@ -59,7 +59,7 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
         accessibilityLabel={`Increase ${unit}`}
         style={(s) => [btn, isHovered(s) && { backgroundColor: t.elevated }]}
       >
-        <Txt weight={700} size={26} color={t.text}>
+        <Txt unselectable weight={700} size={26} color={t.text}>
           +
         </Txt>
       </Pressable>
