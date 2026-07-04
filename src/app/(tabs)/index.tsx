@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { useCallback, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -25,6 +26,15 @@ export default function Home() {
   const queueCount = useAppStore((s) => s.queueCount);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
+  const refresh = useAppStore((s) => s.refresh);
+
+  // Pull-to-refresh: re-check the server and reload. This is the manual escape
+  // hatch when a stale `offline` needs clearing without restarting the app.
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh().finally(() => setRefreshing(false));
+  }, [refresh]);
 
   // Desktop: the sidebar (child card) and top bar (title, offline pill) own the
   // chrome, so the main region scrolls just the dashboard body.
@@ -72,6 +82,15 @@ export default function Home() {
 
       <ScrollView
         style={{ flex: 1 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={t.dim}
+            colors={['#E2B554']}
+            progressViewOffset={insets.top + (offline ? 46 : 0)}
+          />
+        }
         contentContainerStyle={{
           paddingTop: insets.top + 8 + (offline ? 46 : 0),
           paddingHorizontal: 18,

@@ -4,7 +4,7 @@ import { DarkTheme, DefaultTheme, Stack, ThemeProvider, useSegments } from 'expo
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
-import { View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -26,12 +26,24 @@ export default function RootLayout() {
   const tick = useAppStore((s) => s.tick);
   const hydrate = useAppStore((s) => s.hydrate);
   const hydrating = useAppStore((s) => s.hydrating);
+  const refresh = useAppStore((s) => s.refresh);
   const setNetworkOnline = useAppStore((s) => s.setNetworkOnline);
   const net = useNetworkState();
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
+
+  // Re-check the server whenever the app comes back to the foreground (or the web
+  // tab regains focus). `expo-network` only reports *device* connectivity and its
+  // effect fires only on a change, so without this a stale `offline` set while
+  // backgrounded would stick until a full restart.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
 
   useEffect(() => {
     initWidgetSync();

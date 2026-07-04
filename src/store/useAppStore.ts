@@ -100,6 +100,8 @@ interface AppActions {
   setNetworkOnline: (online: boolean) => void;
 
   hydrate: () => Promise<void>;
+  /** Re-check the server and reload data (on foreground / pull-to-refresh). */
+  refresh: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
   enterDemo: () => void;
   disconnect: () => void;
@@ -149,6 +151,9 @@ interface AppActions {
 export type AppStore = AppState & AppActions;
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
+// Guards against overlapping refreshes (e.g. a foreground event landing while a
+// pull-to-refresh is still in flight).
+let refreshInFlight = false;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -265,6 +270,46 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // network/server unreachable: enter the app in offline mode
         set({ connected: true, offline: true, hydrating: false, timers: savedTimers });
       }
+    }
+  },
+  refresh: async () => {
+    const s = get();
+    const conn = s.connection;
+    // Nothing to re-check for demo, no connection, or a manual offline override.
+    if (!conn || conn.demo || s.simulateOffline || refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+      const data = await loadFromServer(conn);
+      // Keep the user's current child if the server still has it; otherwise fall
+      // back to the server's first child (matches a cold `hydrate`). Running
+      // timers are local-only, so the on-device copy always wins over `data`'s [].
+      const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
+        ? s.selectedChildId
+        : data.selectedChildId;
+      set({
+        connected: true,
+        offline: false,
+        networkOnline: true,
+        ...data,
+        selectedChildId,
+        timers: get().timers,
+      });
+      void get().flushQueue();
+    } catch (e) {
+      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+        await clearConnection();
+        set({
+          connection: null,
+          connected: false,
+          connectError: 'Session expired — please reconnect.',
+        });
+      } else {
+        // server unreachable — stay/enter offline; queued writes hold until the
+        // next successful refresh.
+        set({ offline: true });
+      }
+    } finally {
+      refreshInFlight = false;
     }
   },
   connect: async (serverUrl, token) => {
