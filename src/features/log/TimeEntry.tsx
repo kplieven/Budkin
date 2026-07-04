@@ -48,11 +48,11 @@ const ENDED_OPTS: [number, string][] = [
 ];
 const AGO_OPTS: [number, string][] = [
   [0, 'Now'],
-  [5, '5m'],
-  [15, '15m'],
-  [30, '30m'],
-  [60, '1h'],
-  [120, '2h'],
+  [5, '5m ago'],
+  [15, '15m ago'],
+  [30, '30m ago'],
+  [60, '1h ago'],
+  [120, '2h ago'],
 ];
 
 type EditField = 'start' | 'end' | 'lasted' | 'when' | null;
