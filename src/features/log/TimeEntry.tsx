@@ -128,6 +128,7 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const setEndedAbs = useAppStore((s) => s.setEndedAbs);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const setLasted = useAppStore((s) => s.setLasted);
+  const setTimerLasted = useAppStore((s) => s.setTimerLasted);
   const setStartedAt = useAppStore((s) => s.setStartedAt);
 
   const [editing, setEditing] = useState<EditField>(null);
@@ -272,6 +273,27 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
                   />
                 ))}
               </View>
+            </>
+          )}
+
+          {timerEdit && (
+            <>
+              <SubLabel>Lasted</SubLabel>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
+                {lastedOpts.map((m) => (
+                  <Chip
+                    key={m}
+                    label={fmtDur(m)}
+                    color={color}
+                    selected={!te.ongoing && lastedActive && te.durationMin === m}
+                    onPress={() => setTimerLasted(m)}
+                  />
+                ))}
+                <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
+              </View>
+              <Txt weight={500} size={12} color={t.dim} style={{ marginBottom: 12 }}>
+                {te.ongoing ? 'Pick a length to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
+              </Txt>
             </>
           )}
 
