@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Baby Buddy",
+    "name": "Budkin",
     "slug": "babybuddy-mobile",
     "owner": "cheekybugga",
     "version": "1.0.0",
@@ -54,7 +54,7 @@
           "widgets": [
             {
               "name": "Status",
-              "label": "Baby Buddy",
+              "label": "Budkin",
               "minWidth": "200dp",
               "minHeight": "250dp",
               "targetCellWidth": 3,

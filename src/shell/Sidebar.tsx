@@ -63,7 +63,7 @@ export function Sidebar() {
           <Icon name="heart" color={t.onPrimary} size={22} />
         </View>
         <Txt weight={800} size={19} tracking={-0.4}>
-          Baby Buddy
+          Budkin
         </Txt>
       </View>
 

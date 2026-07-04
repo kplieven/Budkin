@@ -43,6 +43,6 @@ describe('screenTitleFor', () => {
   });
 
   it('falls back to the app name for unknown paths', () => {
-    expect(screenTitleFor('/something-else', 'Mara')).toBe('Baby Buddy');
+    expect(screenTitleFor('/something-else', 'Mara')).toBe('Budkin');
   });
 });
