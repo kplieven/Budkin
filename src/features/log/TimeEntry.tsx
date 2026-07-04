@@ -54,6 +54,8 @@ const AGO_OPTS: [number, string][] = [
   [60, '1h ago'],
   [120, '2h ago'],
 ];
+// Quick "started X ago" offsets (minutes), mirroring the Ended/When chips.
+const STARTED_OPTS = [5, 10, 15, 30, 45];
 
 type EditField = 'start' | 'end' | 'lasted' | 'when' | null;
 
@@ -279,6 +281,14 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
               selected={startActive && te.startAnchor === 'now'}
               onPress={() => setStartedAt(now, 'now')}
             />
+            {STARTED_OPTS.map((m) => (
+              <Chip
+                key={m}
+                label={`${m}m ago`}
+                color={color}
+                onPress={() => setStartedAt(now - m * 60000)}
+              />
+            ))}
             {lastFeed != null && (
               <Chip
                 label={`When last feed ended (${fmtAgoShort(lastFeed)})`}
