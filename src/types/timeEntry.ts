@@ -32,7 +32,7 @@ export interface TimeEntryState {
   /** absolute start (ms), pinned via an anchor / edit / going-ongoing */
   startAbs?: number;
   /** which "Started" anchor set the start (for highlighting) */
-  startAnchor?: 'lastfeed' | 'wake';
+  startAnchor?: 'lastfeed' | 'wake' | 'now';
   /** duration in minutes (the "lasted" quantity) */
   durationMin?: number;
 

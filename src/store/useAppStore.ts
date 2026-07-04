@@ -133,7 +133,7 @@ interface AppActions {
   setEndedAbs: (ms: number) => void;
   setOngoing: () => void;
   setLasted: (min: number) => void;
-  setStartedAt: (ms: number, anchor?: 'lastfeed' | 'wake') => void;
+  setStartedAt: (ms: number, anchor?: 'lastfeed' | 'wake' | 'now') => void;
   sleepWoke: () => void;
   sleepStillSleeping: () => void;
   save: () => void;
