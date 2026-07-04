@@ -142,7 +142,13 @@ export default function Home() {
               boxShadow: t.shadow,
             }}
           >
-            <ActivityIndicator color={t.dim} />
+            {webPull.refreshing ? (
+              <ActivityIndicator color={t.dim} />
+            ) : (
+              <Animated.View style={webPull.glyphStyle}>
+                <Icon name="chevron-down" color={t.dim} size={22} />
+              </Animated.View>
+            )}
           </View>
         </Animated.View>
       )}
