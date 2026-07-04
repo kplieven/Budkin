@@ -1,7 +1,13 @@
-import { type RefObject, useEffect, useRef, useState } from 'react';
+import { type RefObject, useEffect } from 'react';
 import { Platform, type ScrollView } from 'react-native';
+import { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
-import { PULL_TRIGGER_PX, pullOffset, shouldTrigger } from '@/features/dashboard/pullToRefresh';
+import {
+  PULL_REST_PX,
+  PULL_TRIGGER_PX,
+  pullOffset,
+  shouldTrigger,
+} from '@/features/dashboard/pullToRefresh';
 
 /**
  * True only in a touch-capable browser (phones/tablets) — never on a
@@ -14,40 +20,29 @@ const isTouchWeb =
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(pointer: coarse)').matches;
 
-export interface WebPullToRefresh {
-  /** Whether this session gets the custom web pull-to-refresh. */
-  enabled: boolean;
-  /** Current indicator offset in px (0 when idle). */
-  offset: number;
-  /** True while a triggered refresh is running. */
-  refreshing: boolean;
-}
-
 /**
  * Custom pull-to-refresh for touch-capable web, where React Native's
  * `RefreshControl` is an inert stub (it renders a bare View and drops
  * `onRefresh`). Attaches touch listeners to the ScrollView's DOM node: a
- * downward drag while scrolled to the top grows an indicator, and releasing past
- * the threshold runs `onRefresh`.
+ * downward drag while scrolled to the top tracks the finger 1:1 (with an
+ * Android-style rubber-band past the ceiling), and releasing past the threshold
+ * runs `onRefresh`. Release always eases back with `withTiming`.
  *
  * No-op on native (use the platform `RefreshControl`) and on mouse-driven web
- * (use the tappable offline banner / pill instead).
+ * (use the tappable offline banner / pill instead). The indicator is driven
+ * entirely by the `pull` shared value, so at rest (0) it is simply transparent —
+ * no mount/unmount bookkeeping.
  */
 export function useWebPullToRefresh(
   scrollRef: RefObject<ScrollView | null>,
   onRefresh: () => Promise<void> | void,
-): WebPullToRefresh {
-  const [offset, setOffset] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
+) {
+  const pull = useSharedValue(0);
 
-  // Refs so the attached DOM listeners always read fresh values.
-  const offsetRef = useRef(0);
-  const refreshingRef = useRef(false);
-
-  const setOff = (v: number) => {
-    offsetRef.current = v;
-    setOffset(v);
-  };
+  const style = useAnimatedStyle(() => ({
+    opacity: Math.min(1, pull.value / PULL_TRIGGER_PX),
+    transform: [{ translateY: pull.value }],
+  }));
 
   useEffect(() => {
     if (!isTouchWeb) return;
@@ -61,35 +56,39 @@ export function useWebPullToRefresh(
     node.style.overscrollBehaviorY = 'contain';
 
     let startY: number | null = null;
+    let busy = false; // a triggered refresh is in flight
+
+    const easeTo = (toValue: number, duration: number) => {
+      pull.value = withTiming(toValue, { duration, easing: Easing.out(Easing.cubic) });
+    };
 
     const onStart = (e: TouchEvent) => {
-      startY = node.scrollTop <= 0 && !refreshingRef.current ? e.touches[0].pageY : null;
+      startY = !busy && node.scrollTop <= 0 ? e.touches[0].pageY : null;
     };
     const onMove = (e: TouchEvent) => {
-      if (startY == null || refreshingRef.current) return;
+      if (startY == null || busy) return;
       const dy = e.touches[0].pageY - startY;
       if (dy > 0 && node.scrollTop <= 0) {
-        setOff(pullOffset(dy));
-        // Once we've clearly taken over the drag, suppress native rubber-banding.
-        if (offsetRef.current > 2 && e.cancelable) e.preventDefault();
-      } else if (offsetRef.current !== 0) {
-        setOff(0);
+        // Direct assignment tracks the finger 1:1 and cancels any easing in flight.
+        pull.value = pullOffset(dy);
+        if (pull.value > 2 && e.cancelable) e.preventDefault();
+      } else if (pull.value !== 0) {
+        pull.value = 0;
       }
     };
     const finish = () => {
       if (startY == null) return;
+      const reached = shouldTrigger(pull.value);
       startY = null;
-      if (shouldTrigger(offsetRef.current)) {
-        refreshingRef.current = true;
-        setRefreshing(true);
-        setOff(PULL_TRIGGER_PX); // hold the spinner at the trigger point while loading
+      if (reached) {
+        busy = true;
+        easeTo(PULL_REST_PX, 180); // settle to the resting spot while loading
         Promise.resolve(onRefresh()).finally(() => {
-          refreshingRef.current = false;
-          setRefreshing(false);
-          setOff(0);
+          busy = false;
+          easeTo(0, 320); // eased snap-back
         });
       } else {
-        setOff(0);
+        easeTo(0, 320); // eased snap-back
       }
     };
 
@@ -104,7 +103,7 @@ export function useWebPullToRefresh(
       node.removeEventListener('touchend', finish);
       node.removeEventListener('touchcancel', finish);
     };
-  }, [scrollRef, onRefresh]);
+  }, [scrollRef, onRefresh, pull]);
 
-  return { enabled: isTouchWeb, offset, refreshing };
+  return { enabled: isTouchWeb, style };
 }
