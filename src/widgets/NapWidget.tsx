@@ -1,0 +1,54 @@
+'use no memo';
+
+// Android home-screen widget: a single nap start/stop toggle. The whole surface
+// is one tap target (clickAction NAP_TOGGLE), handled headless in the widget
+// task handler — tapping never opens the app. `now` is passed in (not read in
+// render) to keep the render pure, mirroring StatusWidget.
+
+import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
+
+import { fmtDur } from '@/lib/format';
+import type { WidgetSnapshot } from '@/widgets/snapshot';
+import { activitySvg } from '@/widgets/widgetIcons';
+
+type Hex = `#${string}`;
+
+const BG: Hex = '#16110E';
+const TEXT: Hex = '#F3EBE1';
+const SLEEP: Hex = '#A99EDC';
+
+export function NapWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; now: number }) {
+  const sleepStart = snapshot?.sleepStart ?? null;
+  const napping = sleepStart != null;
+  const elapsed = napping ? fmtDur((now - sleepStart) / 60000) : '';
+
+  return (
+    <FlexWidget
+      clickAction="NAP_TOGGLE"
+      accessibilityLabel={napping ? 'Stop nap' : 'Start nap'}
+      style={{
+        height: 'match_parent',
+        width: 'match_parent',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: napping ? SLEEP : BG,
+        borderRadius: 24,
+        padding: 12,
+      }}
+    >
+      {napping ? (
+        <FlexWidget style={{ flexDirection: 'column', alignItems: 'center' }}>
+          <TextWidget text="● Napping" style={{ fontSize: 14, fontWeight: 'bold', color: BG }} />
+          <TextWidget text={elapsed} style={{ fontSize: 26, fontWeight: 'bold', color: BG, marginTop: 2 }} />
+          <TextWidget text="tap to stop" style={{ fontSize: 12, color: BG, marginTop: 2 }} />
+        </FlexWidget>
+      ) : (
+        <FlexWidget style={{ flexDirection: 'column', alignItems: 'center' }}>
+          <SvgWidget svg={activitySvg('sleep', SLEEP)} style={{ height: 34, width: 34 }} />
+          <TextWidget text="Start nap" style={{ fontSize: 16, fontWeight: 'bold', color: TEXT, marginTop: 6 }} />
+        </FlexWidget>
+      )}
+    </FlexWidget>
+  );
+}
