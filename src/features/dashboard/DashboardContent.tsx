@@ -241,10 +241,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
             <Icon name="timer" color={t.text} size={24} />
           </View>
-          <Txt weight={700} size={17} tracking={-0.2}>
+          <Txt unselectable weight={700} size={17} tracking={-0.2}>
             Start timer
           </Txt>
-          <Txt weight={500} size={12.5} color={t.dim}>
+          <Txt unselectable weight={500} size={12.5} color={t.dim}>
             Save as any activity
           </Txt>
         </Pressable>
@@ -292,10 +292,10 @@ function ActivityTile({
       <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
         <Icon name={icon} color={color} size={25} />
       </View>
-      <Txt weight={700} size={17} tracking={-0.2}>
+      <Txt unselectable weight={700} size={17} tracking={-0.2}>
         {label}
       </Txt>
-      <Txt weight={500} size={12.5} color={t.dim}>
+      <Txt unselectable weight={500} size={12.5} color={t.dim}>
         {hint}
       </Txt>
     </Pressable>
