@@ -62,6 +62,17 @@
               "description": "Baby status + quick log",
               "previewImage": "./assets/images/icon.png",
               "updatePeriodMillis": 1800000
+            },
+            {
+              "name": "Nap",
+              "label": "Nap timer",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 1,
+              "description": "Start / stop a nap",
+              "previewImage": "./assets/images/icon.png",
+              "updatePeriodMillis": 1800000
             }
           ]
         }
