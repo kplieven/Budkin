@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAppStore } from '@/store/useAppStore';
 import { teEnd, teStart } from '@/store/selectors';
+import { ApiError } from '@/api/client';
 import { loadConnection } from '@/data/storage';
 import { loadFromServer } from '@/data/repository';
 import { saveTimers } from '@/data/timers';
@@ -400,6 +401,79 @@ describe('connectivity', () => {
     expect(s().simulateOffline).toBe(true);
     s().toggleOffline();
     expect(s().offline).toBe(false);
+  });
+});
+
+describe('refresh / reconnect', () => {
+  it('clears a stuck offline flag when the server is reachable again', async () => {
+    useAppStore.setState({ offline: true, networkOnline: true });
+    await s().refresh();
+    expect(s().offline).toBe(false);
+    expect(s().networkOnline).toBe(true);
+  });
+
+  it('marks offline when the server is unreachable', async () => {
+    useAppStore.setState({ offline: false });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+    await s().refresh();
+    expect(s().offline).toBe(true);
+  });
+
+  it('preserves local running timers across a refresh (server has none)', async () => {
+    const timer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 5 * M, saveAs: 'sleep' };
+    useAppStore.setState({ timers: [timer], offline: true });
+    await s().refresh();
+    expect(s().timers).toEqual([timer]);
+  });
+
+  it('keeps the selected child when it still exists after refresh', async () => {
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [
+        { id: 'c0', first: 'A', last: '', birth: NOW, color: '#fff' },
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+      ],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c0',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    useAppStore.setState({ selectedChildId: 'c1' });
+    await s().refresh();
+    expect(s().selectedChildId).toBe('c1'); // not reset to the server's first child
+  });
+
+  it('flushes queued writes after reconnecting', async () => {
+    h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
+    useAppStore.setState({ offline: true, queueCount: 1 });
+    await s().refresh();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect(s().queueCount).toBe(0);
+  });
+
+  it('does not clear a manual simulate-offline override', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({ simulateOffline: true, offline: true });
+    await s().refresh();
+    expect(s().offline).toBe(true);
+    expect(loadFromServer).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op in demo mode', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' }, offline: false });
+    await s().refresh();
+    expect(loadFromServer).not.toHaveBeenCalled();
+    expect(s().offline).toBe(false);
+  });
+
+  it('clears the connection when the token has expired (401/403)', async () => {
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token'));
+    await s().refresh();
+    expect(s().connection).toBeNull();
+    expect(s().connected).toBe(false);
+    expect(s().connectError).toBeTruthy();
   });
 });
 
