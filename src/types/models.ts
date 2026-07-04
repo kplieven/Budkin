@@ -92,6 +92,20 @@ export interface Timer {
   start: number;
   /** the activity it will be saved as (user can change) */
   saveAs: ActivityType;
+
+  /**
+   * Metadata saved via editing the running timer (see `saveTimerDetails` in
+   * the store) while it keeps ticking. When present, `stopTimer` builds the
+   * entry from these instead of its generic per-activity defaults, and
+   * re-opening the editor (`openTimerEdit`) prefills from these. Field names
+   * mirror `TimeEntryState` / `Entry` — no new vocabulary.
+   */
+  feedType?: FeedType;
+  method?: FeedMethod;
+  /** for breastfeeding "both": which side it started on */
+  startSide?: 'left' | 'right';
+  amount?: number;
+  nap?: boolean;
 }
 
 export type MeasurementKind = 'weight' | 'height' | 'head' | 'bmi';

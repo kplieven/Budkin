@@ -61,6 +61,7 @@ export function LogSheet() {
   const sheet = useAppStore((s) => s.sheet);
   const te = useAppStore((s) => s.te);
   const editingId = useAppStore((s) => s.editingId);
+  const fromTimerId = useAppStore((s) => s.fromTimerId);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
   const setTE = useAppStore((s) => s.setTE);
   const toggleWet = useAppStore((s) => s.toggleWet);
@@ -82,9 +83,11 @@ export function LogSheet() {
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
   const saveLabel = editingId
     ? 'Save changes'
-    : te.ongoing && te.shape === 'interval'
-      ? 'Start live timer'
-      : `Save ${label.toLowerCase()}`;
+    : fromTimerId
+      ? 'Save details'
+      : te.ongoing && te.shape === 'interval'
+        ? 'Start live timer'
+        : `Save ${label.toLowerCase()}`;
 
   return (
     <BottomSheet onClose={closeSheet}>

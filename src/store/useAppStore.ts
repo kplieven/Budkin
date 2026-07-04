@@ -144,6 +144,9 @@ interface AppActions {
   setTimerStart: (id: string, ms: number) => void;
   discardTimer: (id: string) => void;
   setTimerSaveAs: (id: string, saveAs: ActivityType) => void;
+  /** Persist `te`'s metadata onto the running timer named by `fromTimerId`,
+   * WITHOUT stopping it or creating an entry, then close the sheet. */
+  saveTimerDetails: () => void;
 
   showToast: (msg: string) => void;
 }
@@ -513,17 +516,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
       durationMin: Math.max(1, Math.round((s.now - tm.start) / 60000)),
     };
     if (type === 'feeding') {
-      te.feedType = last.feedType || 'breast';
-      te.method = last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left';
-      te.startSide = nextStartSide(s.entries);
+      te.feedType = tm.feedType ?? (last.feedType || 'breast');
+      te.method =
+        tm.method ??
+        (last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left');
+      te.startSide = tm.startSide ?? nextStartSide(s.entries);
+      if (tm.amount != null) te.amount = tm.amount;
     }
     if (type === 'pumping') {
-      te.amount = 90;
-      te.method = 'both';
+      te.amount = tm.amount ?? 90;
+      te.method = tm.method ?? 'both';
     }
     if (type === 'sleep') {
       const hr = new Date().getHours();
-      te.nap = hr >= 7 && hr < 19;
+      te.nap = tm.nap ?? (hr >= 7 && hr < 19);
     }
     set({ sheet: { type }, te, editingId: null, fromTimerId: timerId });
   },
@@ -652,6 +658,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const s = get();
     const type = s.sheet?.type;
     if (!type) return;
+    // Editing a running timer (opened via openTimerEdit): keep it running and
+    // just persist the details onto the Timer instead of stopping it into an
+    // entry — see saveTimerDetails.
+    if (s.fromTimerId) {
+      get().saveTimerDetails();
+      return;
+    }
     const te = s.te;
     const now = s.now;
     const childId = s.selectedChildId;
@@ -750,9 +763,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const patch: Partial<AppState> = existing
       ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, editingId: null }
       : { entries: [entry, ...s.entries], sheet: null, fromTimerId: null };
-    if (!existing && s.fromTimerId) {
-      patch.timers = s.timers.filter((tm) => tm.id !== s.fromTimerId);
-    }
     if (type === 'feeding') {
       patch.lastFeed = { feedType: te.feedType ?? 'breast', method: te.method ?? 'left' };
     }
@@ -767,6 +777,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const queued = s.offline && !!s.connection && !s.connection.demo;
       get().showToast(queued ? 'Saved · queued offline' : 'Saved');
     }
+  },
+
+  saveTimerDetails: () => {
+    const s = get();
+    const timerId = s.fromTimerId;
+    if (!timerId) return;
+    const tm = s.timers.find((t) => t.id === timerId);
+    if (!tm) return;
+    const te = s.te;
+    // Extract only the metadata relevant to this timer's activity — mirrors
+    // what stopTimer hard-codes per activity today.
+    let patch: Partial<Timer> = {};
+    if (tm.saveAs === 'feeding') {
+      patch = { feedType: te.feedType, method: te.method, startSide: te.startSide, amount: te.amount };
+    } else if (tm.saveAs === 'pumping') {
+      patch = { method: te.method, amount: te.amount };
+    } else if (tm.saveAs === 'sleep') {
+      patch = { nap: te.nap };
+    }
+    set({
+      timers: s.timers.map((t) => (t.id === timerId ? { ...t, ...patch } : t)),
+      sheet: null,
+      fromTimerId: null,
+    });
+    get().showToast('Details saved');
   },
 
   startQuickTimer: () => {
@@ -790,14 +825,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const base = { id: 'e' + now, childId: s.selectedChildId, tags: [] as string[] };
     let entry: Entry;
     if (saveAs === 'feeding') {
-      entry = { ...base, type: 'feeding', start: tm.start, end: now, feedType: 'breast', method: 'left', amount: null };
+      const feedType = tm.feedType ?? 'breast';
+      const method = tm.method ?? 'left';
+      // mirror save()'s breastfeeding "both" → startSide-as-tag conversion
+      const tags = feedType === 'breast' && method === 'both' && tm.startSide ? [tm.startSide] : base.tags;
+      entry = { ...base, tags, type: 'feeding', start: tm.start, end: now, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
-      entry = { ...base, type: 'pumping', start: tm.start, end: now, amount: 90 };
+      entry = { ...base, type: 'pumping', start: tm.start, end: now, amount: tm.amount ?? 90, method: tm.method };
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: now };
     } else {
       const hr = new Date().getHours();
-      entry = { ...base, type: 'sleep', start: tm.start, end: now, nap: hr >= 7 && hr < 19 };
+      entry = { ...base, type: 'sleep', start: tm.start, end: now, nap: tm.nap ?? (hr >= 7 && hr < 19) };
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
