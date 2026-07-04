@@ -789,10 +789,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const tm = s.timers.find((t) => t.id === timerId);
     if (!tm) return;
     const te = s.te;
-    // Generic edits available on every timer type: the (possibly re-anchored)
-    // start time and tags. Then layer on the activity-specific metadata —
-    // mirrors what stopTimer builds per activity.
-    const patch: Partial<Timer> = { start: teStart(te, s.now) ?? tm.start, tags: te.tags };
+    // Generic edits available on every timer type: tags, plus the (possibly
+    // re-anchored) start time. Only trust the start when the sheet is still in
+    // the ongoing/start-adjust state: tapping Ended/Lasted flips ongoing:false
+    // and can make `start` a DERIVED value (end − duration ≈ now − 30m),
+    // unrelated to the real elapsed start — persisting that would silently
+    // corrupt the running timer. In that case keep tm.start (details still save).
+    const patch: Partial<Timer> = { tags: te.tags };
+    if (te.ongoing) patch.start = teStart(te, s.now) ?? tm.start;
     if (tm.saveAs === 'feeding') {
       patch.feedType = te.feedType;
       patch.method = te.method;
