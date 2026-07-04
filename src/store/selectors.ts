@@ -82,6 +82,14 @@ export function lastFeedEndMinAgo(entries: Entry[], now: number): number | null 
   return f ? Math.round((now - (f.end as number)) / M) : null;
 }
 
+/** Minutes since the most recent completed feeding *started*, or null. */
+export function lastFeedStartMinAgo(entries: Entry[], now: number): number | null {
+  const f = entries
+    .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
+    .sort((a, b) => b.start - a.start)[0];
+  return f ? Math.round((now - f.start) / M) : null;
+}
+
 /** Minutes since the most recent completed sleep ended (woke), or null. */
 export function lastWakeMinAgo(entries: Entry[], now: number): number | null {
   const s = entries

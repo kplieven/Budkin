@@ -89,7 +89,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
       </FlexWidget>
 
       <FlexWidget style={{ flex: 1, flexDirection: 'column', width: 'match_parent', justifyContent: 'space-around', marginTop: 6, marginBottom: 6 }}>
-        <StatRow label="Fed" value={agoLabel(s?.lastFeedEnd, now)} color={FEED} />
+        <StatRow label="Fed" value={agoLabel(s?.lastFeedStart, now)} color={FEED} />
         <StatRow label={napping ? 'Napping' : 'Sleep'} value={sleepValue} color={SLEEP} />
         <StatRow label="Diaper" value={agoLabel(s?.lastDiaper, now)} color={DIAPER} />
         <TextWidget text={today} style={{ fontSize: 12, color: DIM }} />
