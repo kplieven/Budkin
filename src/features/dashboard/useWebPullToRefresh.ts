@@ -1,4 +1,4 @@
-import { type RefObject, useEffect } from 'react';
+import { type RefObject, useEffect, useState } from 'react';
 import { Platform, type ScrollView } from 'react-native';
 import { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
@@ -32,16 +32,28 @@ const isTouchWeb =
  * (use the tappable offline banner / pill instead). The indicator is driven
  * entirely by the `pull` shared value, so at rest (0) it is simply transparent —
  * no mount/unmount bookkeeping.
+ *
+ * While dragging, the caller shows a determinate glyph rotated by `glyphStyle`
+ * (progress, not motion); only once released into a refresh does `refreshing`
+ * flip true and the caller swap in a spinner. Spinning always means "working".
  */
 export function useWebPullToRefresh(
   scrollRef: RefObject<ScrollView | null>,
   onRefresh: () => Promise<void> | void,
 ) {
   const pull = useSharedValue(0);
+  const [refreshing, setRefreshing] = useState(false);
 
+  // Puck position/fade: opacity ramps in with the pull, and it rides down with it.
   const style = useAnimatedStyle(() => ({
     opacity: Math.min(1, pull.value / PULL_TRIGGER_PX),
     transform: [{ translateY: pull.value }],
+  }));
+
+  // Determinate drag glyph: a chevron that rotates from down (0) to up (180°) as
+  // the pull approaches the trigger — reflects where it's dragged, does not spin.
+  const glyphStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${Math.min(1, pull.value / PULL_TRIGGER_PX) * 180}deg` }],
   }));
 
   useEffect(() => {
@@ -82,13 +94,15 @@ export function useWebPullToRefresh(
       startY = null;
       if (reached) {
         busy = true;
+        setRefreshing(true); // released past the threshold → now spinning/working
         easeTo(PULL_REST_PX, 180); // settle to the resting spot while loading
         Promise.resolve(onRefresh()).finally(() => {
           busy = false;
+          setRefreshing(false);
           easeTo(0, 320); // eased snap-back
         });
       } else {
-        easeTo(0, 320); // eased snap-back
+        easeTo(0, 320); // eased snap-back (did not reach the threshold)
       }
     };
 
@@ -105,5 +119,5 @@ export function useWebPullToRefresh(
     };
   }, [scrollRef, onRefresh, pull]);
 
-  return { enabled: isTouchWeb, style };
+  return { enabled: isTouchWeb, style, glyphStyle, refreshing };
 }
