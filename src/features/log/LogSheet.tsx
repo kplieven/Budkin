@@ -156,7 +156,7 @@ export function LogSheet() {
             </View>
             {showStartSide && (
               <>
-                <FieldLabel hint="↔ auto-alternating">Started on</FieldLabel>
+                <FieldLabel hint="auto-alternating">Started on</FieldLabel>
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
                   {(['left', 'right'] as const).map((side) => (
                     <Chip
@@ -198,7 +198,7 @@ export function LogSheet() {
                 onPress={toggleWet}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.wet ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.wet ? color : t.line }}
               >
-                <Txt size={22}>💧</Txt>
+                <Icon name="drop" color={te.wet ? color : t.dim} size={22} />
                 <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Wet
                 </Txt>
@@ -207,7 +207,7 @@ export function LogSheet() {
                 onPress={toggleSolid}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.solid ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.solid ? color : t.line }}
               >
-                <Txt size={22}>💩</Txt>
+                <Icon name="solid" color={te.solid ? color : t.dim} size={22} />
                 <Txt weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Solid
                 </Txt>
