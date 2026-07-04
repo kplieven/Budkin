@@ -14,7 +14,8 @@ import type { Child, Entry, Timer } from '@/types/models';
 export interface WidgetSnapshot {
   childName: string;
   birth: number | null;
-  lastFeedEnd: number | null;
+  /** start of the most recent completed feeding — the widget shows "x ago" from feed start */
+  lastFeedStart: number | null;
   nextSide: 'left' | 'right';
   lastDiaper: number | null;
   lastDiaperSolid: boolean;
@@ -59,7 +60,7 @@ export function buildWidgetSnapshot(s: {
   const child = s.children.find((c) => c.id === s.selectedChildId);
   const lastFeeding = s.entries
     .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
-    .sort((a, b) => (b.end as number) - (a.end as number))[0];
+    .sort((a, b) => b.start - a.start)[0];
   const todayStr = new Date().toDateString();
   const sleepTodayMin = s.entries
     .filter((e): e is Extract<Entry, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
@@ -77,7 +78,7 @@ export function buildWidgetSnapshot(s: {
   return {
     childName: child ? child.first : '',
     birth: child?.birth ?? null,
-    lastFeedEnd: lastFeeding?.end ?? null,
+    lastFeedStart: lastFeeding?.start ?? null,
     nextSide: nextStartSide(s.entries),
     lastDiaper: diaper?.time ?? null,
     lastDiaperSolid: diaper?.solid ?? false,
