@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useAppStore } from '@/store/useAppStore';
+import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
 import { teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection } from '@/data/storage';
@@ -288,6 +288,119 @@ describe('timer persistence across restarts', () => {
     s().disconnect();
     expect(saveTimers).toHaveBeenLastCalledWith([]);
     expect(h.timers).toEqual([]);
+  });
+});
+
+describe('mergeQueuedEntries', () => {
+  const mk = (id: string, serverId?: number): Entry => ({
+    id,
+    serverId,
+    childId: 'c1',
+    type: 'diaper',
+    time: NOW,
+    wet: true,
+    solid: false,
+    color: null,
+    tags: [],
+  });
+
+  it('prepends queued entries that are not yet on the server', () => {
+    const merged = mergeQueuedEntries([mk('s1', 1)], [mk('q1')]);
+    expect(merged.map((e) => e.id)).toEqual(['q1', 's1']);
+  });
+
+  it('drops a queued entry whose id already exists among the server entries', () => {
+    const merged = mergeQueuedEntries([mk('dup', 1)], [mk('dup')]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].serverId).toBe(1);
+  });
+
+  it('drops a queued entry whose serverId matches a server entry (safety net)', () => {
+    const merged = mergeQueuedEntries([mk('s1', 42)], [{ ...mk('q1'), serverId: 42 }]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].id).toBe('s1');
+  });
+
+  it('returns just the server entries when nothing is queued', () => {
+    expect(mergeQueuedEntries([mk('s1', 1)], [])).toEqual([mk('s1', 1)]);
+  });
+});
+
+describe('queued entries survive killing the app', () => {
+  const queuedEntry = (id: string): Entry => ({
+    id,
+    childId: 'c1',
+    type: 'diaper',
+    time: NOW,
+    wet: true,
+    solid: false,
+    color: null,
+    tags: [],
+  });
+  const mira = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
+  it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
+    h.q = [queuedEntry('e1')];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [
+        { id: 'srv-1', serverId: 5, childId: 'c1', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
+      ],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().entries.map((e) => e.id)).toEqual(['e1', 'srv-1']);
+    expect(s().queueCount).toBe(1); // still counted as queued (flush hasn't run yet)
+  });
+
+  it('restores a queued entry into `entries` when the server is unreachable at launch', async () => {
+    h.q = [queuedEntry('e2')];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+    await s().hydrate();
+    expect(s().offline).toBe(true);
+    expect(s().entries).toEqual([queuedEntry('e2')]);
+    expect(s().queueCount).toBe(1);
+  });
+
+  it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
+    h.q = [queuedEntry('e3')];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].id).toBe('e3');
+
+    // hydrate's fire-and-forget flushQueue() pushes it and clears the persisted
+    // queue, but does NOT touch `entries` (matches existing flushQueue behavior).
+    await flush();
+    expect(h.q).toHaveLength(0);
+    expect(s().entries).toHaveLength(1);
+
+    // the next refresh sees the entry server-side (in server shape/id) — the
+    // full `...data` replace in refresh() swaps the local copy for it.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [{ id: 'diaper-9', serverId: 9, childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].id).toBe('diaper-9');
   });
 });
 
