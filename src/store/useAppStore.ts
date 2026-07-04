@@ -25,6 +25,7 @@ import {
 import { ApiError } from '@/api/client';
 import { makeSeed } from '@/data/seed';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
+import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
   loadServers,
@@ -323,13 +324,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
+      // Running timers are local-only (the server has none) and can be mutated
+      // out-of-band by the home-screen widget while the app is warm. Re-read the
+      // on-device copy — the source of truth — rather than trusting the possibly
+      // stale in-memory list, so a widget-started nap isn't lost and a
+      // widget-stopped nap isn't double-committed. Mirrors cold `hydrate`.
+      const localTimers = await loadTimers();
       set({
         connected: true,
         offline: false,
         networkOnline: true,
         ...data,
         selectedChildId,
-        timers: get().timers,
+        timers: localTimers,
       });
       void get().flushQueue();
     } catch (e) {
@@ -910,8 +917,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: now, milestone: tm.milestone };
     } else {
-      const hr = new Date().getHours();
-      entry = { ...base, type: 'sleep', start: tm.start, end: now, nap: tm.nap ?? (hr >= 7 && hr < 19) };
+      entry = buildSleepEntry(tm, now, s.selectedChildId);
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);

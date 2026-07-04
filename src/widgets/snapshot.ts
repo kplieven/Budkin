@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { lastDiaper, nextStartSide } from '@/store/selectors';
+import type { Connection } from '@/data/repository';
 import type { Child, Entry, Timer } from '@/types/models';
 
 export interface WidgetSnapshot {
@@ -23,6 +24,10 @@ export interface WidgetSnapshot {
   sleepTodayMin: number;
   feedsToday: number;
   diapersToday: number;
+  /** id of the selected child — stamps entries created from the widget */
+  selectedChildId: string;
+  /** true when a real (non-demo) connection exists, so a widget-saved nap can be queued */
+  canQueueNap: boolean;
 }
 
 const KEY = 'babybuddy.widget.v1';
@@ -49,6 +54,7 @@ export function buildWidgetSnapshot(s: {
   selectedChildId: string;
   entries: Entry[];
   timers: Timer[];
+  connection: Connection | null;
 }): WidgetSnapshot {
   const child = s.children.find((c) => c.id === s.selectedChildId);
   const lastFeeding = s.entries
@@ -79,5 +85,7 @@ export function buildWidgetSnapshot(s: {
     sleepTodayMin: Math.round(sleepTodayMin),
     feedsToday,
     diapersToday,
+    selectedChildId: s.selectedChildId,
+    canQueueNap: !!s.connection && !s.connection.demo,
   };
 }
