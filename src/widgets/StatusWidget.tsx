@@ -82,7 +82,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
     >
       <FlexWidget style={{ flexDirection: 'row', width: 'match_parent', justifyContent: 'space-between', alignItems: 'center' }}>
         <FlexWidget style={{ flexDirection: 'column' }}>
-          <TextWidget text={s?.childName || 'Baby Buddy'} style={{ fontSize: 18, fontWeight: 'bold', color: TEXT }} />
+          <TextWidget text={s?.childName || 'Budkin'} style={{ fontSize: 18, fontWeight: 'bold', color: TEXT }} />
           {age ? <TextWidget text={age} style={{ fontSize: 12, color: DIM }} /> : <FlexWidget style={{ height: 0 }} />}
         </FlexWidget>
         <TextWidget text={`start ${nextSide}`} style={{ fontSize: 14, fontWeight: 'bold', color: FEED }} />
