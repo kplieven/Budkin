@@ -63,7 +63,7 @@ export default function Home() {
   // chrome, so the main region scrolls just the dashboard body.
   if (desktop) {
     return (
-      <View style={{ flex: 1, flexDirection: 'row' }}>
+      <View style={{ flex: 1, flexDirection: 'row', backgroundColor: t.bg }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
           <DashboardContent layout="desktop" />
         </ScrollView>
