@@ -744,6 +744,23 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(s().timers[0].start).toBe(NOW - 12 * M);
   });
 
+  it('tapping Lasted before Save details does NOT corrupt the running timer start', () => {
+    useAppStore.setState({ timers: [feedingTimer('t9')] }); // start NOW - 12m
+    s().openTimerEdit('t9');
+    s().setTE({ amount: 60, method: 'both', startSide: 'right' });
+    // setLasted reorders so `start` becomes derived (end − duration ≈ now − 30m)
+    // and flips ongoing:false — the trap the guard defends against.
+    s().setLasted(30);
+    expect(s().te.ongoing).toBe(false); // sanity: we're in the dangerous state
+    s().saveTimerDetails();
+    expect(s().timers).toHaveLength(1); // still running
+    expect(s().timers[0].start).toBe(NOW - 12 * M); // NOT rewritten to now − 30m
+    // details still persist even though the start is (correctly) left alone
+    expect(s().timers[0].amount).toBe(60);
+    expect(s().timers[0].startSide).toBe('right');
+    expect(s().timers[0].method).toBe('both');
+  });
+
   it('persists tags edited on a running timer and folds them into the stopped entry', () => {
     useAppStore.setState({ timers: [feedingTimer('t8')] });
     s().openTimerEdit('t8');

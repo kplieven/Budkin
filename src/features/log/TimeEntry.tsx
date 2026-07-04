@@ -107,6 +107,11 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
+  // Editing a running timer (opened via openTimerEdit): a running timer has no
+  // end/duration, so the Ended/Lasted controls don't apply — only Start + the
+  // detail fields do. Ending stays on the Timers tab (Stop). Gating strictly on
+  // fromTimerId leaves normal new-entry sheets (incl. "Still ongoing") untouched.
+  const timerEdit = useAppStore((s) => s.fromTimerId != null);
   const setTE = useAppStore((s) => s.setTE);
   const setEnded = useAppStore((s) => s.setEnded);
   const setEndedAbs = useAppStore((s) => s.setEndedAbs);
@@ -228,32 +233,36 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
 
       {isInterval ? (
         <>
-          <SubLabel>Ended</SubLabel>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {ENDED_OPTS.map(([m, label]) => (
-              <Chip
-                key={m}
-                label={label}
-                color={color}
-                selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === m}
-                onPress={() => setEnded(m)}
-              />
-            ))}
-            <Chip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={setOngoing} />
-          </View>
+          {!timerEdit && (
+            <>
+              <SubLabel>Ended</SubLabel>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {ENDED_OPTS.map(([m, label]) => (
+                  <Chip
+                    key={m}
+                    label={label}
+                    color={color}
+                    selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === m}
+                    onPress={() => setEnded(m)}
+                  />
+                ))}
+                <Chip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={setOngoing} />
+              </View>
 
-          <SubLabel>Lasted</SubLabel>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {lastedOpts.map((m) => (
-              <Chip
-                key={m}
-                label={fmtDur(m)}
-                color={color}
-                selected={!te.ongoing && lastedActive && te.durationMin === m}
-                onPress={() => setLasted(m)}
-              />
-            ))}
-          </View>
+              <SubLabel>Lasted</SubLabel>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {lastedOpts.map((m) => (
+                  <Chip
+                    key={m}
+                    label={fmtDur(m)}
+                    color={color}
+                    selected={!te.ongoing && lastedActive && te.durationMin === m}
+                    onPress={() => setLasted(m)}
+                  />
+                ))}
+              </View>
+            </>
+          )}
 
           {hasAnchors && (
             <>
