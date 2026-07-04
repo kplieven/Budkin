@@ -506,14 +506,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!tm) return;
     const type = tm.saveAs;
     const last = s.lastFeed;
+    // The timer IS running, so show TimeEntry's ongoing editing view (start
+    // editable, live "now" end) rather than dead end/lasted pills. save()
+    // short-circuits to saveTimerDetails on fromTimerId BEFORE its
+    // ongoing-creation branch, so ongoing:true here never spawns a new timer.
     const te: TimeEntryState = {
       shape: 'interval',
-      tags: [],
+      tags: tm.tags ?? [],
       startAbs: tm.start,
-      endAgoMin: 0,
-      ongoing: false,
+      ongoing: true,
       order: ['end', 'start', 'lasted'],
-      durationMin: Math.max(1, Math.round((s.now - tm.start) / 60000)),
     };
     if (type === 'feeding') {
       te.feedType = tm.feedType ?? (last.feedType || 'breast');
@@ -531,6 +533,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const hr = new Date().getHours();
       te.nap = tm.nap ?? (hr >= 7 && hr < 19);
     }
+    if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
     set({ sheet: { type }, te, editingId: null, fromTimerId: timerId });
   },
   closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
@@ -786,15 +789,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const tm = s.timers.find((t) => t.id === timerId);
     if (!tm) return;
     const te = s.te;
-    // Extract only the metadata relevant to this timer's activity — mirrors
-    // what stopTimer hard-codes per activity today.
-    let patch: Partial<Timer> = {};
+    // Generic edits available on every timer type: the (possibly re-anchored)
+    // start time and tags. Then layer on the activity-specific metadata —
+    // mirrors what stopTimer builds per activity.
+    const patch: Partial<Timer> = { start: teStart(te, s.now) ?? tm.start, tags: te.tags };
     if (tm.saveAs === 'feeding') {
-      patch = { feedType: te.feedType, method: te.method, startSide: te.startSide, amount: te.amount };
+      patch.feedType = te.feedType;
+      patch.method = te.method;
+      patch.startSide = te.startSide;
+      patch.amount = te.amount;
     } else if (tm.saveAs === 'pumping') {
-      patch = { method: te.method, amount: te.amount };
+      patch.method = te.method;
+      patch.amount = te.amount;
     } else if (tm.saveAs === 'sleep') {
-      patch = { nap: te.nap };
+      patch.nap = te.nap;
+    } else if (tm.saveAs === 'tummy') {
+      patch.milestone = te.milestone;
     }
     set({
       timers: s.timers.map((t) => (t.id === timerId ? { ...t, ...patch } : t)),
@@ -822,18 +832,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!tm) return;
     const saveAs = tm.saveAs;
     const now = Date.now();
-    const base = { id: 'e' + now, childId: s.selectedChildId, tags: [] as string[] };
+    const savedTags = tm.tags ?? [];
+    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags };
     let entry: Entry;
     if (saveAs === 'feeding') {
       const feedType = tm.feedType ?? 'breast';
       const method = tm.method ?? 'left';
       // mirror save()'s breastfeeding "both" → startSide-as-tag conversion
-      const tags = feedType === 'breast' && method === 'both' && tm.startSide ? [tm.startSide] : base.tags;
+      const tags =
+        feedType === 'breast' && method === 'both' && tm.startSide && !savedTags.includes(tm.startSide)
+          ? [...savedTags, tm.startSide]
+          : savedTags;
       entry = { ...base, tags, type: 'feeding', start: tm.start, end: now, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
       entry = { ...base, type: 'pumping', start: tm.start, end: now, amount: tm.amount ?? 90, method: tm.method };
     } else if (saveAs === 'tummy') {
-      entry = { ...base, type: 'tummy', start: tm.start, end: now };
+      entry = { ...base, type: 'tummy', start: tm.start, end: now, milestone: tm.milestone };
     } else {
       const hr = new Date().getHours();
       entry = { ...base, type: 'sleep', start: tm.start, end: now, nap: tm.nap ?? (hr >= 7 && hr < 19) };
