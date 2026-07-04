@@ -578,6 +578,24 @@ describe('refresh / reconnect', () => {
   });
 });
 
+describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
+  const sleepTimer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+
+  it('picks up a widget-started timer the in-memory list does not have', async () => {
+    useAppStore.setState({ timers: [] });   // app thinks no timers running
+    h.timers = [sleepTimer];                // widget wrote storage while app was warm
+    await useAppStore.getState().refresh();
+    expect(useAppStore.getState().timers).toEqual([sleepTimer]);
+  });
+
+  it('drops a timer the widget has stopped (absent from storage)', async () => {
+    useAppStore.setState({ timers: [sleepTimer] });  // app still holds the running timer
+    h.timers = [];                                   // widget stopped it → storage empty
+    await useAppStore.getState().refresh();
+    expect(useAppStore.getState().timers).toEqual([]);
+  });
+});
+
 describe('feeding extras', () => {
   it('breastfeed "both" records the start side as a tag + 1-10 intake in amount', () => {
     s().openSheet('feeding');

@@ -324,13 +324,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
+      // Running timers are local-only (the server has none) and can be mutated
+      // out-of-band by the home-screen widget while the app is warm. Re-read the
+      // on-device copy — the source of truth — rather than trusting the possibly
+      // stale in-memory list, so a widget-started nap isn't lost and a
+      // widget-stopped nap isn't double-committed. Mirrors cold `hydrate`.
+      const localTimers = await loadTimers();
       set({
         connected: true,
         offline: false,
         networkOnline: true,
         ...data,
         selectedChildId,
-        timers: get().timers,
+        timers: localTimers,
       });
       void get().flushQueue();
     } catch (e) {
