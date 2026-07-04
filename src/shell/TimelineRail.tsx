@@ -1,6 +1,7 @@
 import { router } from 'expo-router';
 import { Pressable, ScrollView, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { ActivityRow } from '@/features/activity/ActivityRow';
 import { groupByDay } from '@/features/activity/groupByDay';
@@ -42,7 +43,11 @@ export function TimelineRail() {
         <Txt weight={800} size={16} tracking={-0.3}>
           Recent activity
         </Txt>
-        <Pressable onPress={() => router.navigate('/history')} accessibilityRole="button">
+        <Pressable
+          onPress={() => router.navigate('/history')}
+          accessibilityRole="button"
+          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
+        >
           <Txt weight={700} size={13} color={t.primary}>
             All
           </Txt>

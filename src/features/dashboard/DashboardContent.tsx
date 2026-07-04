@@ -150,18 +150,22 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         <Pressable
           onPress={() => router.navigate('/timers')}
           accessibilityRole="button"
-          style={{
-            backgroundColor: t.surface,
-            borderWidth: 1.5,
-            borderColor: t.line,
-            borderRadius: 20,
-            paddingVertical: 15,
-            paddingHorizontal: 17,
-            marginTop: 4,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 11,
-          }}
+          style={(s) => [
+            {
+              backgroundColor: t.surface,
+              borderWidth: 1.5,
+              borderColor: t.line,
+              borderRadius: 20,
+              paddingVertical: 15,
+              paddingHorizontal: 17,
+              marginTop: 4,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 11,
+              cursor: 'pointer',
+            },
+            isHovered(s) && { borderColor: t.line2 },
+          ]}
         >
           <PulsingDot color={t.activity[runningTimer.saveAs]} />
           <View style={{ flex: 1 }}>
@@ -186,7 +190,11 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         <Txt weight={700} size={13} color={t.faint} tracking={0.8} style={{ textTransform: 'uppercase' }}>
           Log activity
         </Txt>
-        <Pressable onPress={() => router.navigate('/timers')} accessibilityRole="button">
+        <Pressable
+          onPress={() => router.navigate('/timers')}
+          accessibilityRole="button"
+          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
+        >
           <Txt weight={600} size={13.5} color={t.primary}>
             Timers
           </Txt>

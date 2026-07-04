@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { fontFamily } from '@/theme/fonts';
@@ -96,19 +97,23 @@ export default function Onboarding() {
                 disabled={connecting}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: connecting }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  minHeight: 60,
-                  borderRadius: 15,
-                  backgroundColor: t.surface,
-                  borderWidth: 1.5,
-                  borderColor: t.line2,
-                  paddingHorizontal: 14,
-                  paddingVertical: 10,
-                  marginBottom: 10,
-                }}
+                style={(s) => [
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 12,
+                    minHeight: 60,
+                    borderRadius: 15,
+                    backgroundColor: t.surface,
+                    borderWidth: 1.5,
+                    borderColor: t.line2,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    marginBottom: 10,
+                    cursor: connecting ? 'auto' : 'pointer',
+                  },
+                  !connecting && isHovered(s) && { borderColor: t.line },
+                ]}
               >
                 <Icon name="clock" color={t.dim} size={20} />
                 <View style={{ flex: 1 }}>
@@ -128,7 +133,7 @@ export default function Onboarding() {
                     hitSlop={10}
                     accessibilityRole="button"
                     accessibilityLabel={`Remove ${host}`}
-                    style={{ padding: 6 }}
+                    style={(s) => [{ padding: 6, borderRadius: 8, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.chip }]}
                   >
                     <Icon name="close" color={t.faint} size={18} />
                   </Pressable>
@@ -203,7 +208,7 @@ export default function Onboarding() {
         accessibilityRole="button"
         accessibilityLabel="Connect"
         accessibilityState={{ disabled: connecting }}
-        style={[
+        style={(s) => [
           {
             marginTop: 24,
             height: 56,
@@ -212,8 +217,10 @@ export default function Onboarding() {
             alignItems: 'center',
             justifyContent: 'center',
             opacity: connecting ? 0.85 : 1,
+            cursor: connecting ? 'auto' : 'pointer',
           },
           shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
+          !connecting && isHovered(s) && { opacity: 0.9 },
         ]}
       >
         {connecting ? (
@@ -232,7 +239,11 @@ export default function Onboarding() {
         </Txt>
       </Txt>
 
-      <Pressable onPress={enterDemo} accessibilityRole="button" style={{ marginTop: 18, alignItems: 'center' }}>
+      <Pressable
+        onPress={enterDemo}
+        accessibilityRole="button"
+        style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
+      >
         <Txt weight={600} size={13.5} color={t.dim}>
           Just exploring? <Txt weight={700} size={13.5} color={t.primary}>Try the demo →</Txt>
         </Txt>

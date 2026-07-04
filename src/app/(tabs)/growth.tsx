@@ -165,6 +165,7 @@ export default function Growth() {
           onPress={openSwitcher}
           accessibilityRole="button"
           accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
         >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>

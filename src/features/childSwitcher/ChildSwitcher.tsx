@@ -3,6 +3,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { BottomSheet } from '@/components/BottomSheet';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ageStr } from '@/lib/format';
@@ -36,17 +37,21 @@ export function ChildSwitcher() {
               onPress={() => selectChild(c.id)}
               accessibilityRole="button"
               accessibilityState={{ selected }}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 13,
-                paddingVertical: 12,
-                paddingHorizontal: 14,
-                borderRadius: 18,
-                backgroundColor: selected ? hexA(t.primary, t.dark ? 0.13 : 0.1) : t.chip,
-                borderWidth: 1.5,
-                borderColor: selected ? hexA(t.primary, 0.4) : t.line,
-              }}
+              style={(s) => [
+                {
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 13,
+                  paddingVertical: 12,
+                  paddingHorizontal: 14,
+                  borderRadius: 18,
+                  backgroundColor: selected ? hexA(t.primary, t.dark ? 0.13 : 0.1) : t.chip,
+                  borderWidth: 1.5,
+                  borderColor: selected ? hexA(t.primary, 0.4) : t.line,
+                  cursor: 'pointer',
+                },
+                !selected && isHovered(s) && { borderColor: t.line2 },
+              ]}
             >
               <Avatar child={c} size={42} radius={14} fontSize={17} />
               <View style={{ flex: 1 }}>

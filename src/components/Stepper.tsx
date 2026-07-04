@@ -1,5 +1,6 @@
 import { Pressable, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 
@@ -19,6 +20,7 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
     backgroundColor: t.chip,
     alignItems: 'center' as const,
     justifyContent: 'center' as const,
+    cursor: 'pointer' as const,
   };
   return (
     <View
@@ -33,7 +35,12 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
         padding: 8,
       }}
     >
-      <Pressable onPress={onMinus} accessibilityRole="button" accessibilityLabel={`Decrease ${unit}`} style={btn}>
+      <Pressable
+        onPress={onMinus}
+        accessibilityRole="button"
+        accessibilityLabel={`Decrease ${unit}`}
+        style={(s) => [btn, isHovered(s) && { backgroundColor: t.elevated }]}
+      >
         <Txt weight={700} size={26} color={t.text}>
           −
         </Txt>
@@ -46,7 +53,12 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
           {unit}
         </Txt>
       </View>
-      <Pressable onPress={onPlus} accessibilityRole="button" accessibilityLabel={`Increase ${unit}`} style={btn}>
+      <Pressable
+        onPress={onPlus}
+        accessibilityRole="button"
+        accessibilityLabel={`Increase ${unit}`}
+        style={(s) => [btn, isHovered(s) && { backgroundColor: t.elevated }]}
+      >
         <Txt weight={700} size={26} color={t.text}>
           +
         </Txt>

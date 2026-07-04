@@ -2,6 +2,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { ActivityRow } from '@/features/activity/ActivityRow';
@@ -69,6 +70,7 @@ export default function History() {
           onPress={openSwitcher}
           accessibilityRole="button"
           accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
         >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>

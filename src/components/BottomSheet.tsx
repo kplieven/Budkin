@@ -127,7 +127,7 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
       ]}
     >
       {/* On desktop the scrim is decorative (Escape/close handle dismissal for AT); keep it out of the focus order. */}
-      <Pressable style={{ flex: 1 }} onPress={onClose} accessible={dialog ? false : undefined} />
+      <Pressable style={{ flex: 1, cursor: 'auto' }} onPress={onClose} accessible={dialog ? false : undefined} />
     </Animated.View>
   );
 

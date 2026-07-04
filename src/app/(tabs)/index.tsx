@@ -179,10 +179,15 @@ export default function Home() {
             onPress={openSwitcher}
             accessibilityRole="button"
             accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+            style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
           >
             <Avatar child={child} size={50} radius={16} fontSize={21} />
           </Pressable>
-          <Pressable onPress={openSwitcher} accessibilityRole="button" style={{ flex: 1 }}>
+          <Pressable
+            onPress={openSwitcher}
+            accessibilityRole="button"
+            style={(s) => [{ flex: 1, cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
               <Txt weight={700} size={21} tracking={-0.3} numberOfLines={1} style={{ flexShrink: 1 }}>
                 {child ? `${child.first} ${child.last}` : 'No child'}

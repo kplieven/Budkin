@@ -1,6 +1,7 @@
 import { Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
@@ -47,7 +48,10 @@ export function AppTabBar({ state, navigation }: TabBarProps) {
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             accessibilityLabel={meta.label}
-            style={{ flex: 1, alignItems: 'center', gap: 3, paddingTop: 8, paddingBottom: 4 }}
+            style={(s) => [
+              { flex: 1, alignItems: 'center', gap: 3, paddingTop: 8, paddingBottom: 4, cursor: 'pointer' },
+              !active && isHovered(s) && { opacity: 0.75 },
+            ]}
           >
             <Icon
               name={meta.icon}

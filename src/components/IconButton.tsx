@@ -1,5 +1,6 @@
 import { Pressable, type ViewStyle } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { useTheme } from '@/theme/useTheme';
 
@@ -22,7 +23,7 @@ export function IconButton({ name, accessibilityLabel, onPress, color, size = 22
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       hitSlop={6}
-      style={[
+      style={(s) => [
         {
           width: 40,
           height: 40,
@@ -32,8 +33,10 @@ export function IconButton({ name, accessibilityLabel, onPress, color, size = 22
           borderColor: t.line,
           alignItems: 'center',
           justifyContent: 'center',
+          cursor: 'pointer',
         },
         style,
+        isHovered(s) && { backgroundColor: t.elevated },
       ]}
     >
       <Icon name={name} color={color ?? t.dim} size={size} />

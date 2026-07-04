@@ -1,5 +1,6 @@
 import { Pressable, View } from 'react-native';
 
+import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
@@ -40,18 +41,22 @@ export function Chip({
         onPress={onPress}
         accessibilityRole="button"
         accessibilityState={{ selected }}
-        style={{
-          paddingHorizontal: padH,
-          paddingVertical: padV,
-          borderRadius: radius,
-          backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.07),
-          borderWidth: 1.5,
-          borderColor: hexA(t.primary, 0.5),
-          borderStyle: 'dashed',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 7,
-        }}
+        style={(s) => [
+          {
+            paddingHorizontal: padH,
+            paddingVertical: padV,
+            borderRadius: radius,
+            backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.07),
+            borderWidth: 1.5,
+            borderColor: hexA(t.primary, 0.5),
+            borderStyle: 'dashed' as const,
+            flexDirection: 'row' as const,
+            alignItems: 'center' as const,
+            gap: 7,
+            cursor: 'pointer' as const,
+          },
+          isHovered(s) && { backgroundColor: hexA(t.primary, t.dark ? 0.16 : 0.12) },
+        ]}
       >
         <Txt weight={700} size={fontSize} color={t.primary}>
           {label}
@@ -65,17 +70,21 @@ export function Chip({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
-      style={{
-        paddingHorizontal: padH,
-        paddingVertical: padV,
-        borderRadius: radius,
-        backgroundColor: selected ? color : t.chip,
-        borderWidth: 1.5,
-        borderColor: selected ? color : t.line,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 7,
-      }}
+      style={(s) => [
+        {
+          paddingHorizontal: padH,
+          paddingVertical: padV,
+          borderRadius: radius,
+          backgroundColor: selected ? color : t.chip,
+          borderWidth: 1.5,
+          borderColor: selected ? color : t.line,
+          flexDirection: 'row' as const,
+          alignItems: 'center' as const,
+          gap: 7,
+          cursor: 'pointer' as const,
+        },
+        !selected && isHovered(s) && { borderColor: t.line2 },
+      ]}
     >
       {swatch && (
         <View
