@@ -96,3 +96,9 @@ export function lastDiaper(entries: Entry[]) {
     .filter((e): e is Extract<Entry, { type: 'diaper' }> => e.type === 'diaper')
     .sort((a, b) => b.time - a.time)[0];
 }
+
+/** Minutes since the most recent diaper change, or null. */
+export function lastDiaperMinAgo(entries: Entry[], now: number): number | null {
+  const d = lastDiaper(entries);
+  return d ? Math.round((now - d.time) / M) : null;
+}

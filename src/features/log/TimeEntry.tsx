@@ -21,6 +21,7 @@ import { dayGroupLabel, fmtAgoShort, fmtClock, fmtDur, relDayLabel } from '@/lib
 import {
   derivedField,
   isActive,
+  lastDiaperMinAgo,
   lastFeedEndMinAgo,
   lastWakeMinAgo,
   teDurationMin,
@@ -142,6 +143,7 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
 
   const lastFeed = lastFeedEndMinAgo(entries, now);
   const lastWake = lastWakeMinAgo(entries, now);
+  const lastDiaper = lastDiaperMinAgo(entries, now);
   const lastedOpts = type === 'sleep' ? [20, 45, 90, 120] : [10, 20, 30, 45];
 
   const endActive = isActive(te.order, 'end');
@@ -295,6 +297,14 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
                 color={color}
                 selected={startActive && te.startAnchor === 'lastfeed'}
                 onPress={() => setStartedAt(now - lastFeed * 60000, 'lastfeed')}
+              />
+            )}
+            {lastDiaper != null && (
+              <Chip
+                label={`When last diaper changed (${fmtAgoShort(lastDiaper)})`}
+                color={color}
+                selected={startActive && te.startAnchor === 'diaper'}
+                onPress={() => setStartedAt(now - lastDiaper * 60000, 'diaper')}
               />
             )}
             {type === 'sleep' && lastWake != null && (
