@@ -175,10 +175,14 @@ export default function Home() {
       >
         {/* child header (phone only — the desktop sidebar carries the child card) */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 4, paddingTop: 6, paddingBottom: 18 }}>
-          <Pressable onPress={openSwitcher}>
+          <Pressable
+            onPress={openSwitcher}
+            accessibilityRole="button"
+            accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+          >
             <Avatar child={child} size={50} radius={16} fontSize={21} />
           </Pressable>
-          <Pressable onPress={openSwitcher} style={{ flex: 1 }}>
+          <Pressable onPress={openSwitcher} accessibilityRole="button" style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
               <Txt weight={700} size={21} tracking={-0.3} numberOfLines={1} style={{ flexShrink: 1 }}>
                 {child ? `${child.first} ${child.last}` : 'No child'}
@@ -189,7 +193,7 @@ export default function Home() {
               {child ? ageStr(child.birth, now) : ''}
             </Txt>
           </Pressable>
-          <IconButton name="settings" onPress={() => router.push('/settings')} />
+          <IconButton name="settings" onPress={() => router.push('/settings')} accessibilityLabel="Open settings" />
         </View>
 
         <DashboardContent layout="phone" />

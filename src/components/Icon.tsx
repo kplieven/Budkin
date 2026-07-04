@@ -49,7 +49,17 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
   const detail = t.dark ? 'rgba(0,0,0,0.25)' : 'rgba(255,255,255,0.6)';
   const detail2 = t.dark ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.55)';
 
-  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none' as const };
+  const common = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none' as const,
+    // Every icon here is either decorative next to labeled text or sits inside a
+    // control whose accessible name comes from the wrapping Pressable/IconButton —
+    // hide it from AT so labeled controls read once instead of twice.
+    importantForAccessibility: 'no-hide-descendants' as const,
+    'aria-hidden': true as const,
+  };
 
   switch (name) {
     case 'feeding':

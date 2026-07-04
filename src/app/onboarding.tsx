@@ -94,6 +94,8 @@ export default function Onboarding() {
                 key={srv.serverUrl}
                 onPress={() => tryServer(srv)}
                 disabled={connecting}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: connecting }}
                 style={{
                   flexDirection: 'row',
                   alignItems: 'center',
@@ -124,6 +126,8 @@ export default function Onboarding() {
                   <Pressable
                     onPress={() => forgetServer(srv.serverUrl)}
                     hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${host}`}
                     style={{ padding: 6 }}
                   >
                     <Icon name="close" color={t.faint} size={18} />
@@ -196,6 +200,9 @@ export default function Onboarding() {
       <Pressable
         onPress={() => { setPendingUrl(null); connect(url, token); }}
         disabled={connecting}
+        accessibilityRole="button"
+        accessibilityLabel="Connect"
+        accessibilityState={{ disabled: connecting }}
         style={[
           {
             marginTop: 24,
@@ -225,7 +232,7 @@ export default function Onboarding() {
         </Txt>
       </Txt>
 
-      <Pressable onPress={enterDemo} style={{ marginTop: 18, alignItems: 'center' }}>
+      <Pressable onPress={enterDemo} accessibilityRole="button" style={{ marginTop: 18, alignItems: 'center' }}>
         <Txt weight={600} size={13.5} color={t.dim}>
           Just exploring? <Txt weight={700} size={13.5} color={t.primary}>Try the demo →</Txt>
         </Txt>

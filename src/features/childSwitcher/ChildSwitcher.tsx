@@ -34,6 +34,8 @@ export function ChildSwitcher() {
             <Pressable
               key={c.id}
               onPress={() => selectChild(c.id)}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
               style={{
                 flexDirection: 'row',
                 alignItems: 'center',

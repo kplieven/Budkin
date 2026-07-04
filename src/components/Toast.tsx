@@ -14,6 +14,9 @@ export function Toast() {
   return (
     <Animated.View
       pointerEvents="none"
+      accessibilityLiveRegion="polite"
+      role="alert"
+      aria-live="polite"
       entering={FadeInDown.duration(200)}
       exiting={FadeOutUp.duration(200)}
       style={{

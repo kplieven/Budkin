@@ -100,7 +100,13 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
 
       <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
         {STEPS.map((d) => (
-          <Pressable key={d} onPress={() => step(d)} style={stepBtn}>
+          <Pressable
+            key={d}
+            onPress={() => step(d)}
+            accessibilityRole="button"
+            accessibilityLabel={d > 0 ? `Add ${d} minutes` : `Subtract ${-d} minutes`}
+            style={stepBtn}
+          >
             <Txt weight={700} size={13} style={{ fontVariant: ['tabular-nums'] }}>
               {d > 0 ? `+${d}m` : `−${-d}m`}
             </Txt>
@@ -112,6 +118,8 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Pressable
             onPress={() => stepDay(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="Previous day"
             style={{ width: 40, height: 38, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center' }}
           >
             <Icon name="chevron-left" color={t.text} size={18} />
@@ -124,6 +132,9 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
           <Pressable
             onPress={() => stepDay(1)}
             disabled={isToday}
+            accessibilityRole="button"
+            accessibilityLabel="Next day"
+            accessibilityState={{ disabled: isToday }}
             style={{ width: 40, height: 38, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', opacity: isToday ? 0.4 : 1 }}
           >
             <Icon name="chevron-right" color={t.text} size={18} />

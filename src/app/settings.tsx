@@ -81,13 +81,25 @@ export default function Settings() {
         Appearance
       </Txt>
       <View style={group}>
-        <Pressable onPress={toggleTheme} style={[row, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
+        <Pressable
+          onPress={toggleTheme}
+          accessibilityRole="switch"
+          accessibilityLabel="Night mode"
+          accessibilityState={{ checked: themeMode === 'dark' }}
+          style={[row, { borderBottomWidth: 1, borderBottomColor: t.line }]}
+        >
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Night mode
           </Txt>
           <Toggle on={themeMode === 'dark'} />
         </Pressable>
-        <Pressable onPress={toggleOffline} style={row}>
+        <Pressable
+          onPress={toggleOffline}
+          accessibilityRole="switch"
+          accessibilityLabel="Simulate offline"
+          accessibilityState={{ checked: simulateOffline }}
+          style={row}
+        >
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Simulate offline
           </Txt>
@@ -126,6 +138,7 @@ export default function Settings() {
             disconnect();
             router.replace('/onboarding');
           }}
+          accessibilityRole="button"
           style={row}
         >
           <Txt weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
@@ -144,7 +157,7 @@ export default function Settings() {
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} />
+        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
         <Txt weight={800} size={27} tracking={-0.6}>
           Settings
         </Txt>
