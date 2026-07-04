@@ -153,6 +153,31 @@ interface AppActions {
 
 export type AppStore = AppState & AppActions;
 
+/**
+ * Merge not-yet-flushed queued entries (from the offline write queue) into a
+ * set of server entries for display, so an entry created offline stays
+ * visible across an app kill instead of only being reflected in `queueCount`.
+ * Queued entries are prepended (they're the newest — `save()` also prepends).
+ *
+ * De-dup is a defensive safety net for the case where a queued entry has
+ * already reached the server (e.g. a flush that pushed successfully but
+ * crashed before persisting the shrunk queue): a queued entry is dropped if
+ * its `id` or (if present) `serverId` already appears among the server
+ * entries. In the common case — a flush completes normally after hydrate —
+ * de-duplication instead falls out of `refresh()`'s full replacement of
+ * `entries` with fresh server data, which naturally drops the local copy.
+ */
+export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[]): Entry[] {
+  const serverIds = new Set(serverEntries.map((e) => e.id));
+  const serverServerIds = new Set(
+    serverEntries.filter((e) => e.serverId != null).map((e) => e.serverId),
+  );
+  const notYetOnServer = queuedEntries.filter(
+    (q) => !serverIds.has(q.id) && (q.serverId == null || !serverServerIds.has(q.serverId)),
+  );
+  return [...notYetOnServer, ...serverEntries];
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
@@ -258,7 +283,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const data = await loadFromServer(conn);
       // `data.timers` is always [] (the server has none); the on-device copy wins.
-      set({ connected: true, hydrating: false, ...data, timers: savedTimers });
+      // Queued (not-yet-flushed) entries aren't in `data.entries` yet, so merge
+      // them in to keep them visible — flushQueue below pushes them, and the
+      // NEXT refresh()/hydrate() will replace `entries` with server data that
+      // includes them, naturally dropping the local copy.
+      set({
+        connected: true,
+        hydrating: false,
+        ...data,
+        entries: mergeQueuedEntries(data.entries, q),
+        timers: savedTimers,
+      });
       void get().flushQueue();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
@@ -270,8 +305,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connectError: 'Session expired — please reconnect.',
         });
       } else {
-        // network/server unreachable: enter the app in offline mode
-        set({ connected: true, offline: true, hydrating: false, timers: savedTimers });
+        // network/server unreachable: enter the app in offline mode. There's
+        // no server data to merge with, so the queued entries are all we have
+        // — best-effort restore so they aren't dropped from view.
+        set({ connected: true, offline: true, hydrating: false, entries: q, timers: savedTimers });
       }
     }
   },
