@@ -65,7 +65,11 @@ export default function History() {
         <Txt weight={800} size={27} tracking={-0.6}>
           History
         </Txt>
-        <Pressable onPress={openSwitcher}>
+        <Pressable
+          onPress={openSwitcher}
+          accessibilityRole="button"
+          accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+        >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>
       </View>

@@ -33,7 +33,7 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
         padding: 8,
       }}
     >
-      <Pressable onPress={onMinus} style={btn}>
+      <Pressable onPress={onMinus} accessibilityRole="button" accessibilityLabel={`Decrease ${unit}`} style={btn}>
         <Txt weight={700} size={26} color={t.text}>
           −
         </Txt>
@@ -46,7 +46,7 @@ export function Stepper({ value, unit = 'ml', onMinus, onPlus }: StepperProps) {
           {unit}
         </Txt>
       </View>
-      <Pressable onPress={onPlus} style={btn}>
+      <Pressable onPress={onPlus} accessibilityRole="button" accessibilityLabel={`Increase ${unit}`} style={btn}>
         <Txt weight={700} size={26} color={t.text}>
           +
         </Txt>

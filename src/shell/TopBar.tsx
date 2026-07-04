@@ -83,6 +83,7 @@ export function TopBar() {
 
         <Pressable
           onPress={toggleTheme}
+          accessibilityRole="button"
           accessibilityLabel="Toggle theme"
           style={(s) => [
             {

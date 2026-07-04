@@ -79,7 +79,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             </Txt>
           ) : null}
         </View>
-        <IconButton name="close" onPress={close} size={20} />
+        <IconButton name="close" onPress={close} size={20} accessibilityLabel="Close" />
       </View>
 
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
@@ -112,6 +112,8 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: isToday ? 16 : 8 }}>
           <Pressable
             onPress={() => stepDay(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="Previous day"
             style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center' }}
           >
             <Icon name="chevron-left" color={t.text} size={22} />
@@ -124,13 +126,16 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           <Pressable
             onPress={() => stepDay(1)}
             disabled={isToday}
+            accessibilityRole="button"
+            accessibilityLabel="Next day"
+            accessibilityState={{ disabled: isToday }}
             style={{ width: 48, height: 48, borderRadius: 14, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, alignItems: 'center', justifyContent: 'center', opacity: isToday ? 0.4 : 1 }}
           >
             <Icon name="chevron-right" color={t.text} size={22} />
           </Pressable>
         </View>
         {!isToday && (
-          <Pressable onPress={() => setDateMs(today)} style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
+          <Pressable onPress={() => setDateMs(today)} accessibilityRole="button" style={{ alignSelf: 'flex-start', marginBottom: 16 }}>
             <Txt weight={600} size={13} color={meta.color}>
               Jump to today
             </Txt>
@@ -153,6 +158,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         {editingId && (
           <Pressable
             onPress={() => deleteMeasurement(editingId)}
+            accessibilityRole="button"
             style={{ height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
           >
             <Txt weight={800} size={16} color="#E2725B">
@@ -162,6 +168,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         )}
         <Pressable
           onPress={onSave}
+          accessibilityRole="button"
           style={{ flex: 1, height: 58, borderRadius: 18, backgroundColor: meta.color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(meta.color, 0.35)}` }}
         >
           <Txt weight={800} size={17.5} color={t.onActivity}>

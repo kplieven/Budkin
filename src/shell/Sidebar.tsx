@@ -75,6 +75,9 @@ export function Sidebar() {
             <Pressable
               key={item.label}
               onPress={() => router.navigate(item.href)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={item.label}
               style={(s) => [
                 {
                   flexDirection: 'row',
@@ -106,6 +109,8 @@ export function Sidebar() {
       {/* child card */}
       <Pressable
         onPress={openSwitcher}
+        accessibilityRole="button"
+        accessibilityLabel={child ? `${child.first} ${child.last}, switch child` : 'Switch child'}
         style={(s) => [
           {
             flexDirection: 'row',

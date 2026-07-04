@@ -80,6 +80,8 @@ function ValuePill({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={{
         paddingHorizontal: big ? 9 : 8,
         paddingVertical: big ? 4 : 2,

@@ -44,6 +44,9 @@ export function AppTabBar({ state, navigation }: TabBarProps) {
           <Pressable
             key={route.key}
             onPress={() => navigation.navigate(route.name)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+            accessibilityLabel={meta.label}
             style={{ flex: 1, alignItems: 'center', gap: 3, paddingTop: 8, paddingBottom: 4 }}
           >
             <Icon

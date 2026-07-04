@@ -42,7 +42,7 @@ export function TimelineRail() {
         <Txt weight={800} size={16} tracking={-0.3}>
           Recent activity
         </Txt>
-        <Pressable onPress={() => router.navigate('/history')}>
+        <Pressable onPress={() => router.navigate('/history')} accessibilityRole="button">
           <Txt weight={700} size={13} color={t.primary}>
             All
           </Txt>

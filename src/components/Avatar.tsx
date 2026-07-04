@@ -17,11 +17,14 @@ export function Avatar({
   size,
   radius,
   fontSize,
+  accessibilityLabel,
 }: {
   child?: AvatarChild;
   size: number;
   radius: number;
   fontSize: number;
+  /** Optional accessible name (the child's name) — omit when a wrapping control already supplies one. */
+  accessibilityLabel?: string;
 }) {
   const t = useTheme();
   if (child?.picture) {
@@ -31,11 +34,15 @@ export function Avatar({
         style={{ width: size, height: size, borderRadius: radius }}
         contentFit="cover"
         transition={150}
+        accessible={accessibilityLabel != null}
+        accessibilityLabel={accessibilityLabel}
       />
     );
   }
   return (
     <View
+      accessible={accessibilityLabel != null}
+      accessibilityLabel={accessibilityLabel}
       style={{
         width: size,
         height: size,

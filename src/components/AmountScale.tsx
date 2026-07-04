@@ -19,6 +19,8 @@ export function AmountScale({ value, color, onSelect }: AmountScaleProps) {
           <Pressable
             key={n}
             onPress={() => onSelect(n)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: sel }}
             style={{
               flex: 1,
               height: 42,

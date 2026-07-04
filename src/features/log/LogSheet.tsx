@@ -106,7 +106,7 @@ export function LogSheet() {
             </Txt>
           ) : null}
         </View>
-        <IconButton name="close" onPress={closeSheet} size={20} />
+        <IconButton name="close" onPress={closeSheet} size={20} accessibilityLabel="Close" />
       </View>
 
       {/* scrollable body */}
@@ -116,6 +116,7 @@ export function LogSheet() {
           <View style={{ flexDirection: 'row', gap: 9, marginBottom: 8 }}>
             <Pressable
               onPress={sleepWoke}
+              accessibilityRole="button"
               style={{ flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: hexA(color, 0.14), borderWidth: 1.5, borderColor: hexA(color, 0.4) }}
             >
               <Txt weight={700} size={15}>
@@ -127,6 +128,7 @@ export function LogSheet() {
             </Pressable>
             <Pressable
               onPress={sleepStillSleeping}
+              accessibilityRole="button"
               style={{ flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line }}
             >
               <Txt weight={700} size={15}>
@@ -196,6 +198,8 @@ export function LogSheet() {
             <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
               <Pressable
                 onPress={toggleWet}
+                accessibilityRole="button"
+                accessibilityState={{ selected: te.wet }}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.wet ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.wet ? color : t.line }}
               >
                 <Icon name="drop" color={te.wet ? color : t.dim} size={22} />
@@ -205,6 +209,8 @@ export function LogSheet() {
               </Pressable>
               <Pressable
                 onPress={toggleSolid}
+                accessibilityRole="button"
+                accessibilityState={{ selected: te.solid }}
                 style={{ flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: te.solid ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: te.solid ? color : t.line }}
               >
                 <Icon name="solid" color={te.solid ? color : t.dim} size={22} />
@@ -298,6 +304,7 @@ export function LogSheet() {
         {editingId && (
           <Pressable
             onPress={() => deleteEntry(editingId)}
+            accessibilityRole="button"
             style={{ height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
           >
             <Txt weight={800} size={16} color="#E2725B">
@@ -307,6 +314,7 @@ export function LogSheet() {
         )}
         <Pressable
           onPress={save}
+          accessibilityRole="button"
           style={{ flex: 1, height: 58, borderRadius: 18, backgroundColor: color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(color, 0.35)}` }}
         >
           <Txt weight={800} size={17.5} color={t.onActivity}>

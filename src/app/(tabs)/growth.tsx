@@ -37,6 +37,7 @@ export default function Growth() {
             <Pressable
               key={kind}
               onPress={() => openMeasurement(kind)}
+              accessibilityRole="button"
               style={(s) => [
                 {
                   width: '47.8%',
@@ -108,6 +109,7 @@ export default function Growth() {
               <Pressable
                 key={m.id}
                 onPress={() => openEditMeasurement(m.id)}
+                accessibilityRole="button"
                 style={(s) => [
                   {
                     flexDirection: 'row',
@@ -159,7 +161,11 @@ export default function Growth() {
         <Txt weight={800} size={27} tracking={-0.6}>
           Growth
         </Txt>
-        <Pressable onPress={openSwitcher}>
+        <Pressable
+          onPress={openSwitcher}
+          accessibilityRole="button"
+          accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+        >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>
       </View>

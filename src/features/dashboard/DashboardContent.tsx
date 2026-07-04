@@ -149,6 +149,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       {runningTimer && (
         <Pressable
           onPress={() => router.navigate('/timers')}
+          accessibilityRole="button"
           style={{
             backgroundColor: t.surface,
             borderWidth: 1.5,
@@ -185,7 +186,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         <Txt weight={700} size={13} color={t.faint} tracking={0.8} style={{ textTransform: 'uppercase' }}>
           Log activity
         </Txt>
-        <Pressable onPress={() => router.navigate('/timers')}>
+        <Pressable onPress={() => router.navigate('/timers')} accessibilityRole="button">
           <Txt weight={600} size={13.5} color={t.primary}>
             Timers
           </Txt>
@@ -211,6 +212,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             startQuickTimer();
             router.navigate('/timers');
           }}
+          accessibilityRole="button"
           style={(s) => [
             {
               backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
@@ -262,6 +264,7 @@ function ActivityTile({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       style={(s) => [
         {
           backgroundColor: t.surface,

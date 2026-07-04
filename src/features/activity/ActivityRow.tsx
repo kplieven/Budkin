@@ -56,6 +56,7 @@ export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
       style={(s) => [
         {
           flexDirection: 'row',

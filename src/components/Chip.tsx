@@ -38,6 +38,8 @@ export function Chip({
     return (
       <Pressable
         onPress={onPress}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
         style={{
           paddingHorizontal: padH,
           paddingVertical: padV,
@@ -61,6 +63,8 @@ export function Chip({
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
       style={{
         paddingHorizontal: padH,
         paddingVertical: padV,

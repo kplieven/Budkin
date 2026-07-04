@@ -95,6 +95,8 @@ export default function Timers() {
                   <Pressable
                     key={lbl}
                     onPress={() => adjustTimerStart(tm.id, d)}
+                    accessibilityRole="button"
+                    accessibilityLabel={d < 0 ? `Move start ${-d} minutes earlier` : `Move start ${d} minutes later`}
                     style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line }}
                   >
                     <Txt weight={700} size={13}>
@@ -104,6 +106,9 @@ export default function Timers() {
                 ))}
                 <Pressable
                   onPress={() => setExactFor(exactFor === tm.id ? null : tm.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Set exact start time"
+                  accessibilityState={{ selected: exactFor === tm.id }}
                   style={{
                     paddingHorizontal: 12,
                     paddingVertical: 7,
@@ -128,6 +133,8 @@ export default function Timers() {
               <View style={{ flexDirection: 'row', gap: 9, marginTop: 14 }}>
                 <Pressable
                   onPress={() => discardTimer(tm.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Discard ${tm.name} timer`}
                   style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
                 >
                   <Txt weight={700} size={14.5} color={t.dim}>
@@ -136,6 +143,8 @@ export default function Timers() {
                 </Pressable>
                 <Pressable
                   onPress={() => openTimerEdit(tm.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${tm.name} timer`}
                   style={{ flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}
                 >
                   <Txt weight={800} size={14.5} color={color}>
@@ -144,6 +153,8 @@ export default function Timers() {
                 </Pressable>
                 <Pressable
                   onPress={() => stopTimer(tm.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Stop and save ${tm.name} timer`}
                   style={{ flex: 1.7, height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }}
                 >
                   <Txt weight={800} size={14.5} color={t.onActivity} style={{ textAlign: 'center' }}>
@@ -159,6 +170,8 @@ export default function Timers() {
                     <Pressable
                       key={o}
                       onPress={() => setTimerSaveAs(tm.id, o)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: sel }}
                       style={{
                         paddingHorizontal: 11,
                         paddingVertical: 6,
@@ -182,6 +195,7 @@ export default function Timers() {
 
       <Pressable
         onPress={startQuickTimer}
+        accessibilityRole="button"
         style={{
           marginTop: 16,
           height: 54,
