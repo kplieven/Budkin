@@ -4,6 +4,7 @@ import { Platform, Pressable, RefreshControl, ScrollView, View, useWindowDimensi
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
+import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
@@ -27,6 +28,13 @@ export default function Home() {
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
+  const showToast = useAppStore((s) => s.showToast);
+
+  // Tap the offline banner to retry the connection now (works on web + native).
+  const retry = useCallback(() => {
+    showToast('Checking connection…');
+    void refresh();
+  }, [refresh, showToast]);
 
   // Pull-to-refresh: re-check the server and reload. Native only — on web
   // `RefreshControl` is an inert stub (no pull gesture in a browser), so the
@@ -55,24 +63,32 @@ export default function Home() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {offline && (
-        <View
-          style={{
-            position: 'absolute',
-            top: insets.top - 2,
-            left: 12,
-            right: 12,
-            zIndex: 30,
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: 9,
-            backgroundColor: t.dark ? '#3A2E18' : '#FBEFD4',
-            borderWidth: 1,
-            borderColor: hexA('#E2B554', 0.5),
-            borderRadius: 13,
-            paddingVertical: 9,
-            paddingHorizontal: 13,
-            boxShadow: t.shadow,
-          }}
+        <Pressable
+          onPress={retry}
+          accessibilityRole="button"
+          accessibilityLabel="Retry connection"
+          style={(pstate) => [
+            {
+              position: 'absolute',
+              top: insets.top - 2,
+              left: 12,
+              right: 12,
+              zIndex: 30,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 9,
+              backgroundColor: t.dark ? '#3A2E18' : '#FBEFD4',
+              borderWidth: 1,
+              borderColor: hexA('#E2B554', 0.5),
+              borderRadius: 13,
+              paddingVertical: 9,
+              paddingHorizontal: 13,
+              boxShadow: t.shadow,
+              cursor: 'pointer',
+            },
+            isHovered(pstate) && { borderColor: hexA('#E2B554', 0.9) },
+            pstate.pressed && { opacity: 0.85 },
+          ]}
         >
           <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
           <Txt weight={600} size={12.5} style={{ flex: 1 }}>
@@ -80,7 +96,10 @@ export default function Home() {
               ? `Offline — ${queueCount} ${queueCount === 1 ? 'entry' : 'entries'} queued, will sync when reconnected`
               : 'Offline — changes will sync when reconnected'}
           </Txt>
-        </View>
+          <Txt weight={700} size={12.5} color="#E2B554">
+            Retry
+          </Txt>
+        </Pressable>
       )}
 
       <ScrollView

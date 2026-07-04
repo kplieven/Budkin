@@ -16,6 +16,8 @@ export function TopBar() {
   const offline = useAppStore((s) => s.offline);
   const queueCount = useAppStore((s) => s.queueCount);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
+  const refresh = useAppStore((s) => s.refresh);
+  const showToast = useAppStore((s) => s.showToast);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
 
   const greeting = greetingFor(new Date(now).getHours());
@@ -44,24 +46,35 @@ export function TopBar() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         {offline && (
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              paddingVertical: 8,
-              paddingHorizontal: 13,
-              borderRadius: 12,
-              backgroundColor: t.dark ? '#3A2E18' : '#FBEFD4',
-              borderWidth: 1,
-              borderColor: 'rgba(226,181,84,0.5)',
+          <Pressable
+            onPress={() => {
+              showToast('Checking connection…');
+              void refresh();
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Retry connection"
+            style={(pstate) => [
+              {
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                paddingVertical: 8,
+                paddingHorizontal: 13,
+                borderRadius: 12,
+                backgroundColor: t.dark ? '#3A2E18' : '#FBEFD4',
+                borderWidth: 1,
+                borderColor: 'rgba(226,181,84,0.5)',
+                cursor: 'pointer',
+              },
+              isHovered(pstate) && { borderColor: 'rgba(226,181,84,0.9)' },
+              pstate.pressed && { opacity: 0.85 },
+            ]}
           >
             <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
             <Txt weight={600} size={12.5} color={t.text}>
               {queueCount > 0 ? `Offline · ${queueCount} queued` : 'Offline'}
             </Txt>
-          </View>
+          </Pressable>
         )}
 
         <Txt weight={700} size={14.5} color={t.dim} style={{ fontVariant: ['tabular-nums'] }}>
