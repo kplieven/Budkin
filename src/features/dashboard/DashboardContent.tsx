@@ -8,7 +8,7 @@ import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { lastDiaper, lastFeedEndMinAgo, nextStartSide } from '@/store/selectors';
+import { lastDiaper, lastFeedStartMinAgo, nextStartSide } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -52,10 +52,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       : { width: '47.8%', flexGrow: 1 };
 
   // ---- derived status ----
-  const lastFeedAgo = lastFeedEndMinAgo(entries, now);
+  const lastFeedAgo = lastFeedStartMinAgo(entries, now);
   const lastFeeding = entries
     .filter((e): e is Extract<typeof e, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
-    .sort((a, b) => (b.end as number) - (a.end as number))[0];
+    .sort((a, b) => b.start - a.start)[0];
   const fedSide = lastFeeding ? METHOD_LABEL[lastFeeding.method] : null;
 
   const runningSleep = timers.find((tm) => tm.activity === 'sleep');

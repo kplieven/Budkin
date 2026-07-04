@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastDiaperMinAgo, lastFeedEndMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -49,6 +49,10 @@ describe('anchors', () => {
   it('lastFeedEndMinAgo', () => {
     expect(lastFeedEndMinAgo(entries, NOW)).toBe(60);
     expect(lastFeedEndMinAgo([], NOW)).toBeNull();
+  });
+  it('lastFeedStartMinAgo counts from the feeding start, not end', () => {
+    expect(lastFeedStartMinAgo(entries, NOW)).toBe(90);
+    expect(lastFeedStartMinAgo([], NOW)).toBeNull();
   });
   it('lastWakeMinAgo', () => {
     expect(lastWakeMinAgo(entries, NOW)).toBe(120);
