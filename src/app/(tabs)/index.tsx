@@ -1,6 +1,14 @@
 import { router } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { Platform, Pressable, RefreshControl, ScrollView, View, useWindowDimensions } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -9,6 +17,8 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
+import { PULL_TRIGGER_PX } from '@/features/dashboard/pullToRefresh';
+import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { hexA } from '@/lib/color';
 import { ageStr } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
@@ -36,16 +46,18 @@ export default function Home() {
     void refresh();
   }, [refresh, showToast]);
 
-  // Pull-to-refresh: re-check the server and reload. Native only — on web
-  // `RefreshControl` is an inert stub (no pull gesture in a browser), so the
-  // drag does nothing; the web build reconnects automatically via the AppState
-  // (visibilitychange) listener in _layout.tsx instead.
+  // Pull-to-refresh. Native uses the platform RefreshControl. On web that
+  // control is an inert stub, so touch-capable web (phones/tablets) gets a
+  // custom gesture instead; mouse-driven laptops get neither (they use the
+  // tappable offline banner and auto-refresh on tab refocus).
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     refresh().finally(() => setRefreshing(false));
   }, [refresh]);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const webPull = useWebPullToRefresh(scrollRef, refresh);
 
   // Desktop: the sidebar (child card) and top bar (title, offline pill) own the
   // chrome, so the main region scrolls just the dashboard body.
@@ -102,7 +114,26 @@ export default function Home() {
         </Pressable>
       )}
 
+      {webPull.enabled && (webPull.offset > 0 || webPull.refreshing) && (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: insets.top + (offline ? 46 : 0),
+            left: 0,
+            right: 0,
+            alignItems: 'center',
+            zIndex: 25,
+            opacity: webPull.refreshing ? 1 : Math.min(1, webPull.offset / PULL_TRIGGER_PX),
+            transform: [{ translateY: webPull.offset }],
+          }}
+        >
+          <ActivityIndicator color={t.dim} />
+        </View>
+      )}
+
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         refreshControl={
           canPullToRefresh ? (
