@@ -9,6 +9,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -17,7 +18,6 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
-import { PULL_TRIGGER_PX } from '@/features/dashboard/pullToRefresh';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { hexA } from '@/lib/color';
 import { ageStr } from '@/lib/format';
@@ -114,22 +114,37 @@ export default function Home() {
         </Pressable>
       )}
 
-      {webPull.enabled && (webPull.offset > 0 || webPull.refreshing) && (
-        <View
+      {webPull.enabled && (
+        <Animated.View
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            top: insets.top + (offline ? 46 : 0),
-            left: 0,
-            right: 0,
-            alignItems: 'center',
-            zIndex: 25,
-            opacity: webPull.refreshing ? 1 : Math.min(1, webPull.offset / PULL_TRIGGER_PX),
-            transform: [{ translateY: webPull.offset }],
-          }}
+          style={[
+            {
+              position: 'absolute',
+              top: insets.top + (offline ? 46 : 0) - 6,
+              left: 0,
+              right: 0,
+              alignItems: 'center',
+              zIndex: 25,
+            },
+            webPull.style,
+          ]}
         >
-          <ActivityIndicator color={t.dim} />
-        </View>
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 99,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.line,
+              boxShadow: t.shadow,
+            }}
+          >
+            <ActivityIndicator color={t.dim} />
+          </View>
+        </Animated.View>
       )}
 
       <ScrollView

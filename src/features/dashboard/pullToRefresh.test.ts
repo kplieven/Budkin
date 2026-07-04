@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PULL_MAX_PX,
+  PULL_OVERSCROLL_PX,
   PULL_TRIGGER_PX,
   pullOffset,
   shouldTrigger,
@@ -13,12 +14,26 @@ describe('pullOffset', () => {
     expect(pullOffset(-40)).toBe(0);
   });
 
-  it('applies resistance to the finger travel', () => {
-    expect(pullOffset(100)).toBe(50); // 100 * 0.5
+  it('applies resistance in the linear region', () => {
+    expect(pullOffset(100)).toBe(50); // 100 * 0.5, below the soft ceiling
   });
 
-  it('clamps at the maximum', () => {
-    expect(pullOffset(10_000)).toBe(PULL_MAX_PX);
+  it('reaches the soft ceiling exactly at its resisted travel', () => {
+    expect(pullOffset(PULL_MAX_PX / 0.5)).toBeCloseTo(PULL_MAX_PX);
+  });
+
+  it('rubber-bands past the ceiling toward the asymptote', () => {
+    const asymptote = PULL_MAX_PX + PULL_OVERSCROLL_PX;
+    const pulled = pullOffset(1000); // a big but physically realistic drag
+    expect(pulled).toBeGreaterThan(PULL_MAX_PX);
+    expect(pulled).toBeLessThan(asymptote);
+    // even an extreme drag is bounded by the asymptote
+    expect(pullOffset(1_000_000)).toBeLessThanOrEqual(asymptote);
+  });
+
+  it('is monotonically increasing through the overscroll region', () => {
+    expect(pullOffset(400)).toBeGreaterThan(pullOffset(300));
+    expect(pullOffset(300)).toBeGreaterThan(pullOffset(260));
   });
 });
 
@@ -32,7 +47,7 @@ describe('shouldTrigger', () => {
     expect(shouldTrigger(PULL_MAX_PX)).toBe(true);
   });
 
-  it('the trigger point is reachable before the indicator maxes out', () => {
+  it('the trigger point is reachable before the soft ceiling', () => {
     expect(PULL_TRIGGER_PX).toBeLessThanOrEqual(PULL_MAX_PX);
   });
 });
