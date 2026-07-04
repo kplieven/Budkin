@@ -25,6 +25,7 @@ import {
 import { ApiError } from '@/api/client';
 import { makeSeed } from '@/data/seed';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
+import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
   loadServers,
@@ -910,8 +911,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: now, milestone: tm.milestone };
     } else {
-      const hr = new Date().getHours();
-      entry = { ...base, type: 'sleep', start: tm.start, end: now, nap: tm.nap ?? (hr >= 7 && hr < 19) };
+      entry = buildSleepEntry(tm, now, s.selectedChildId);
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
