@@ -558,7 +558,7 @@ describe('time-entry: keep last two selected', () => {
 });
 
 describe('edit a running timer', () => {
-  it('openTimerEdit prefills from the timer; save creates an entry and consumes the timer', () => {
+  it('openTimerEdit prefills from the timer', () => {
     useAppStore.setState({
       timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
     });
@@ -566,12 +566,21 @@ describe('edit a running timer', () => {
     expect(s().sheet?.type).toBe('sleep');
     expect(s().fromTimerId).toBe('t1');
     expect(s().te.startAbs).toBe(NOW - 40 * M);
+  });
+
+  it('pressing the sheet\'s save button (save()) on a timer-edit keeps the timer running instead of stopping it', () => {
+    // Regression guard for the original bug: editing a running timer used to
+    // route through save()'s normal "consume into an entry" path because
+    // openTimerEdit sets ongoing:false. save() must now detect fromTimerId
+    // and delegate to saveTimerDetails instead.
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
     s().save();
-    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
-    expect(e.type).toBe('sleep');
-    expect(e.start).toBe(NOW - 40 * M);
-    expect(e.end).toBe(NOW);
-    expect(s().timers).toHaveLength(0);
+    expect(s().timers).toHaveLength(1); // still running, not consumed
+    expect(s().entries).toHaveLength(0); // no entry created
+    expect(s().sheet).toBeNull();
     expect(s().fromTimerId).toBeNull();
   });
 
@@ -584,6 +593,114 @@ describe('edit a running timer', () => {
     expect(s().sheet).toBeNull();
     expect(s().timers).toHaveLength(1);
     expect(s().fromTimerId).toBeNull();
+  });
+});
+
+describe('saveTimerDetails: persisting edits to a running timer', () => {
+  const feedingTimer = (id: string): Timer => ({
+    id,
+    activity: 'feeding',
+    name: 'Feeding',
+    start: NOW - 12 * M,
+    saveAs: 'feeding',
+  });
+
+  it('writes amount + side onto the Timer and keeps it running (not converted to an entry)', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 45 });
+    s().saveTimerDetails();
+    expect(s().timers).toHaveLength(1);
+    expect(s().entries).toHaveLength(0);
+    const tm = s().timers[0];
+    expect(tm.amount).toBe(45);
+    expect(tm.startSide).toBe('right');
+    expect(tm.method).toBe('both');
+    expect(s().sheet).toBeNull();
+    expect(s().fromTimerId).toBeNull();
+  });
+
+  it('persists via the store subscribe (AsyncStorage-backed)', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    vi.mocked(saveTimers).mockClear();
+    s().openTimerEdit('t1');
+    s().setTE({ amount: 45 });
+    s().saveTimerDetails();
+    expect(saveTimers).toHaveBeenCalled();
+  });
+
+  it('reopening the editor shows the previously saved details', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 45 });
+    s().saveTimerDetails();
+    s().openTimerEdit('t1');
+    expect(s().te.amount).toBe(45);
+    expect(s().te.startSide).toBe('right');
+    expect(s().te.method).toBe('both');
+    expect(s().te.feedType).toBe('breast');
+  });
+
+  it('stopTimer uses the saved amount/side instead of hard-coded defaults', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ feedType: 'formula', method: 'bottle', amount: 120 });
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.feedType).toBe('formula');
+    expect(e.method).toBe('bottle');
+    expect(e.amount).toBe(120);
+  });
+
+  it('stopTimer folds a saved breastfeeding "both" startSide into the tags, like a normal save', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'left' });
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('left');
+  });
+
+  it('a timer with no saved metadata still stops with the existing default behavior (regression guard)', () => {
+    useAppStore.setState({ timers: [feedingTimer('t2')] });
+    s().stopTimer('t2');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.feedType).toBe('breast');
+    expect(e.method).toBe('left');
+    expect(e.amount).toBeNull();
+    expect(e.tags).toEqual([]);
+  });
+
+  it('sleep: saved nap flag survives reopen and stopTimer (regression guard for the no-metadata default too)', () => {
+    useAppStore.setState({
+      timers: [{ id: 't3', activity: 'sleep', name: 'Sleep', start: NOW - 5 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t3');
+    s().setTE({ nap: false });
+    s().saveTimerDetails();
+    s().openTimerEdit('t3');
+    expect(s().te.nap).toBe(false);
+    s().stopTimer('t3');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false);
+  });
+
+  it('pumping: saved amount/method survive reopen and stopTimer', () => {
+    useAppStore.setState({
+      timers: [{ id: 't4', activity: 'pumping', name: 'Pumping', start: NOW - 5 * M, saveAs: 'pumping' }],
+    });
+    s().openTimerEdit('t4');
+    s().setTE({ amount: 150, method: 'left' });
+    s().saveTimerDetails();
+    s().openTimerEdit('t4');
+    expect(s().te.amount).toBe(150);
+    expect(s().te.method).toBe('left');
+    s().stopTimer('t4');
+    const e = s().entries[0] as Extract<Entry, { type: 'pumping' }>;
+    expect(e.amount).toBe(150);
+    expect(e.method).toBe('left');
   });
 });
 
