@@ -133,6 +133,9 @@ interface AppActions {
   setEndedAbs: (ms: number) => void;
   setOngoing: () => void;
   setLasted: (min: number) => void;
+  /** Timer-edit "lasted X": pin the duration off the fixed start (end becomes
+   * the derived point) and mark the entry finished, so save() stops the timer. */
+  setTimerLasted: (min: number) => void;
   setStartedAt: (ms: number, anchor?: 'lastfeed' | 'wake' | 'diaper' | 'now') => void;
   sleepWoke: () => void;
   sleepStillSleeping: () => void;
@@ -683,6 +686,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return { te: next };
     }),
+  // Naming a length for a running timer: unlike setLasted (which pins the end at
+  // "now" and lets the start slide back), keep the START fixed and make the END
+  // the derived point (start + X). ongoing:false marks the entry finished so
+  // save() stops the timer into a completed entry rather than keeping it live.
+  setTimerLasted: (min) =>
+    set((s) => ({
+      te: {
+        ...s.te,
+        ongoing: false,
+        durationMin: min,
+        endAbs: undefined,
+        endAgoMin: undefined,
+        order: ['lasted', 'start', 'end'],
+      },
+    })),
   setStartedAt: (ms, anchor) =>
     set((s) => ({ te: { ...s.te, startAbs: ms, startAnchor: anchor, order: reorder(s.te.order, 'start') } })),
   sleepWoke: () => get().setEnded(0),
@@ -692,10 +710,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const s = get();
     const type = s.sheet?.type;
     if (!type) return;
-    // Editing a running timer (opened via openTimerEdit): keep it running and
-    // just persist the details onto the Timer instead of stopping it into an
-    // entry — see saveTimerDetails.
-    if (s.fromTimerId) {
+    // Editing a running timer (opened via openTimerEdit): while it is still
+    // ongoing, keep it running and just persist the details onto the Timer
+    // (saveTimerDetails). Once the user names a length ("lasted X" →
+    // setTimerLasted flips ongoing:false), fall through and stop it into a
+    // completed entry, dropping the source timer below.
+    if (s.fromTimerId && s.te.ongoing) {
       get().saveTimerDetails();
       return;
     }
@@ -796,7 +816,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const patch: Partial<AppState> = existing
       ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, editingId: null }
-      : { entries: [entry, ...s.entries], sheet: null, fromTimerId: null };
+      : {
+          entries: [entry, ...s.entries],
+          sheet: null,
+          fromTimerId: null,
+          // stopping a running timer via "lasted X" drops the source timer
+          ...(s.fromTimerId ? { timers: s.timers.filter((tm) => tm.id !== s.fromTimerId) } : {}),
+        };
     if (type === 'feeding') {
       patch.lastFeed = { feedType: te.feedType ?? 'breast', method: te.method ?? 'left' };
     }

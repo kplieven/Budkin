@@ -856,21 +856,43 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(s().timers[0].start).toBe(NOW - 12 * M);
   });
 
-  it('tapping Lasted before Save details does NOT corrupt the running timer start', () => {
+  it('setTimerLasted keeps the fixed start and derives the end (start + X)', () => {
     useAppStore.setState({ timers: [feedingTimer('t9')] }); // start NOW - 12m
     s().openTimerEdit('t9');
+    s().setTimerLasted(45); // "oh, it lasted about 45 min"
+    expect(s().te.ongoing).toBe(false); // marked finished
+    expect(s().te.startAbs).toBe(NOW - 12 * M); // start NOT rewritten
+    expect(s().te.durationMin).toBe(45);
+    expect(s().te.order?.[2]).toBe('end'); // end is the derived point
+  });
+
+  it('Save with a chosen length stops the timer into a fixed-start entry', () => {
+    useAppStore.setState({ timers: [feedingTimer('t9b')] }); // start NOW - 12m
+    s().openTimerEdit('t9b');
     s().setTE({ amount: 60, method: 'both', startSide: 'right' });
-    // setLasted reorders so `start` becomes derived (end − duration ≈ now − 30m)
-    // and flips ongoing:false — the trap the guard defends against.
-    s().setLasted(30);
-    expect(s().te.ongoing).toBe(false); // sanity: we're in the dangerous state
-    s().saveTimerDetails();
-    expect(s().timers).toHaveLength(1); // still running
-    expect(s().timers[0].start).toBe(NOW - 12 * M); // NOT rewritten to now − 30m
-    // details still persist even though the start is (correctly) left alone
-    expect(s().timers[0].amount).toBe(60);
-    expect(s().timers[0].startSide).toBe('right');
-    expect(s().timers[0].method).toBe('both');
+    s().setTimerLasted(45);
+    s().save();
+    expect(s().timers).toHaveLength(0); // timer stopped
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.type).toBe('feeding');
+    expect(e.start).toBe(NOW - 12 * M); // fixed start preserved
+    expect(e.end).toBe(NOW - 12 * M + 45 * M); // end = start + 45m
+    expect(e.amount).toBe(60);
+    expect(e.method).toBe('both');
+    expect(e.tags).toContain('right'); // "both" folds the starting side into a tag
+    expect(s().sheet).toBeNull();
+  });
+
+  it('"Still running" after a length keeps the timer live on save', () => {
+    useAppStore.setState({ timers: [feedingTimer('t9c')] }); // start NOW - 12m
+    s().openTimerEdit('t9c');
+    s().setTimerLasted(30); // considered stopping...
+    s().setOngoing(); // ...then tapped "Still running" to keep it going
+    expect(s().te.ongoing).toBe(true);
+    s().save();
+    expect(s().timers).toHaveLength(1); // still running, not stopped
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers[0].start).toBe(NOW - 12 * M);
   });
 
   it('persists tags edited on a running timer and folds them into the stopped entry', () => {

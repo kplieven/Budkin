@@ -85,7 +85,9 @@ export function LogSheet() {
   const saveLabel = editingId
     ? 'Save changes'
     : fromTimerId
-      ? 'Save details'
+      ? te.ongoing
+        ? 'Save details'
+        : 'Stop & save'
       : te.ongoing && te.shape === 'interval'
         ? 'Start live timer'
         : `Save ${label.toLowerCase()}`;
