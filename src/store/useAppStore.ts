@@ -155,27 +155,21 @@ export type AppStore = AppState & AppActions;
 
 /**
  * Merge not-yet-flushed queued entries (from the offline write queue) into a
- * set of server entries for display, so an entry created offline stays
- * visible across an app kill instead of only being reflected in `queueCount`.
- * Queued entries are prepended (they're the newest — `save()` also prepends).
+ * set of freshly-loaded server entries for display, so an entry created
+ * offline stays visible across an app kill instead of only being reflected in
+ * `queueCount`. Queued entries are prepended: they're the newest, matching how
+ * `save()` prepends new entries.
  *
- * De-dup is a defensive safety net for the case where a queued entry has
- * already reached the server (e.g. a flush that pushed successfully but
- * crashed before persisting the shrunk queue): a queued entry is dropped if
- * its `id` or (if present) `serverId` already appears among the server
- * entries. In the common case — a flush completes normally after hydrate —
- * de-duplication instead falls out of `refresh()`'s full replacement of
- * `entries` with fresh server data, which naturally drops the local copy.
+ * No de-duplication happens here, and none is needed: server data loaded from
+ * the API never contains a not-yet-flushed queued entry (a queued entry only
+ * reaches the server via `flushQueue`, and that copy comes back with a server
+ * shape/id on a *later* load). The post-flush no-duplication guarantee comes
+ * entirely from `refresh()`/`hydrate()` replacing `entries` wholesale with the
+ * next `...data` load once the server has the entry — which drops the local
+ * copy. This helper's only job is the initial "keep it visible" prepend.
  */
 export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[]): Entry[] {
-  const serverIds = new Set(serverEntries.map((e) => e.id));
-  const serverServerIds = new Set(
-    serverEntries.filter((e) => e.serverId != null).map((e) => e.serverId),
-  );
-  const notYetOnServer = queuedEntries.filter(
-    (q) => !serverIds.has(q.id) && (q.serverId == null || !serverServerIds.has(q.serverId)),
-  );
-  return [...notYetOnServer, ...serverEntries];
+  return [...queuedEntries, ...serverEntries];
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;

@@ -304,21 +304,9 @@ describe('mergeQueuedEntries', () => {
     tags: [],
   });
 
-  it('prepends queued entries that are not yet on the server', () => {
+  it('prepends queued entries (newest first) onto the server entries', () => {
     const merged = mergeQueuedEntries([mk('s1', 1)], [mk('q1')]);
     expect(merged.map((e) => e.id)).toEqual(['q1', 's1']);
-  });
-
-  it('drops a queued entry whose id already exists among the server entries', () => {
-    const merged = mergeQueuedEntries([mk('dup', 1)], [mk('dup')]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].serverId).toBe(1);
-  });
-
-  it('drops a queued entry whose serverId matches a server entry (safety net)', () => {
-    const merged = mergeQueuedEntries([mk('s1', 42)], [{ ...mk('q1'), serverId: 42 }]);
-    expect(merged).toHaveLength(1);
-    expect(merged[0].id).toBe('s1');
   });
 
   it('returns just the server entries when nothing is queued', () => {
