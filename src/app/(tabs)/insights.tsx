@@ -5,8 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
-import { buildSleepHeatmap, buildTrend } from '@/features/insights/compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend } from '@/features/insights/compute';
 import { NORMS } from '@/features/insights/norms';
+import { DiaperBars } from '@/features/insights/DiaperBars';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
 import { TrendCard } from '@/features/insights/TrendCard';
 import { hexA } from '@/lib/color';
@@ -36,6 +37,7 @@ export default function Insights() {
   const wake = useMemo(() => buildTrend(entries, 'wakeWindow', now, rangeDays), [entries, now, rangeDays]);
   const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', now, rangeDays), [entries, now, rangeDays]);
   const interval = useMemo(() => buildTrend(entries, 'feedInterval', now, rangeDays), [entries, now, rangeDays]);
+  const diapers = useMemo(() => buildDiaperSeries(entries, now, rangeDays), [entries, now, rangeDays]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
 
   useEffect(() => {
@@ -91,6 +93,25 @@ export default function Insights() {
       <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
         norm={NORMS.feedInterval} birth={birth} points={interval}
         yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} width={width} />
+      <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 12, textTransform: 'uppercase' }}>
+        Diapers
+      </Txt>
+      <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <Txt weight={700} size={15}>Wet vs dirty / day</Txt>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightWet }} />
+              <Txt weight={600} size={11} color={t.dim}>Wet</Txt>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightDirty }} />
+              <Txt weight={600} size={11} color={t.dim}>Dirty</Txt>
+            </View>
+          </View>
+        </View>
+        <DiaperBars data={diapers} width={width - 32} />
+      </View>
     </View>
   );
 
