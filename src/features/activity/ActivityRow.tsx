@@ -6,7 +6,7 @@ import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtClock, fmtDur } from '@/lib/format';
-import { entryTimestamp, type Entry } from '@/types/models';
+import { type Entry } from '@/types/models';
 import { useTheme } from '@/theme/useTheme';
 
 const FEED_TYPE_LABEL: Record<string, string> = {
@@ -51,7 +51,8 @@ function detailFor(e: Entry): string {
  *  the History screen and the desktop timeline rail. */
 export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number; onPress: () => void }) {
   const t = useTheme();
-  const ts = entryTimestamp(entry);
+  // Duration activities show their START time; diaper is a point event (time).
+  const ts = entry.type === 'diaper' ? entry.time : entry.start;
   const color = t.activity[entry.type];
   return (
     <Pressable
