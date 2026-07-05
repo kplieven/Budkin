@@ -27,6 +27,9 @@ export function SwipeableRow({ onDelete, children }: { onDelete: () => void; chi
         {
           width: 92,
           marginLeft: 8,
+          // Inset by the card's 1.5px border (ActivityRow) so the red button
+          // matches the card body height instead of peeking above/below on swipe.
+          marginVertical: 1.5,
           borderRadius: 18,
           backgroundColor: DELETE_COLOR,
           alignItems: 'center',
