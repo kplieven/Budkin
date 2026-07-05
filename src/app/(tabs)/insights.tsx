@@ -5,8 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
-import { buildSleepHeatmap } from '@/features/insights/compute';
+import { buildSleepHeatmap, buildTrend } from '@/features/insights/compute';
+import { NORMS } from '@/features/insights/norms';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
+import { TrendCard } from '@/features/insights/TrendCard';
 import { hexA } from '@/lib/color';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -25,12 +27,29 @@ export default function Insights() {
   const [width, setWidth] = useState(0);
   const heatRows = useMemo(() => buildSleepHeatmap(entries, now, 28), [entries, now]);
 
+  const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
+  const [rangeDays, setRangeDays] = useState(30);
+  const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
+
+  const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', now, rangeDays), [entries, now, rangeDays]);
+  const longest = useMemo(() => buildTrend(entries, 'longestStretch', now, rangeDays), [entries, now, rangeDays]);
+  const wake = useMemo(() => buildTrend(entries, 'wakeWindow', now, rangeDays), [entries, now, rangeDays]);
+  const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
+
   useEffect(() => {
     loadInsights();
   }, [loadInsights]);
 
   const body = (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+      <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 6 }}>
+        {RANGES.map(([lbl, d]) => (
+          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
+            <Txt weight={rangeDays === d ? 700 : 600} size={13} color={rangeDays === d ? t.text : t.dim}>{lbl}</Txt>
+          </Pressable>
+        ))}
+      </View>
+      <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginBottom: 14 }}>Applies to trend charts</Txt>
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginBottom: 10, textTransform: 'uppercase' }}>
         Sleep
       </Txt>
@@ -51,6 +70,16 @@ export default function Insights() {
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks · midnight-centred</Txt>
         <SleepHeatmap rows={heatRows} width={width - 30} />
       </View>
+
+      <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
+        caption="Typical for age" norm={NORMS.totalSleep} birth={birth} points={totalSleep}
+        yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} />
+      <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
+        caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
+        yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width} />
+      <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
+        caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
+        yTicks={[30, 60, 90, 120, 150]} fmtY={(v) => `${v}`} width={width} />
     </View>
   );
 
