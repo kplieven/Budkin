@@ -2,3 +2,4 @@
 // module) registers the home-screen widget's headless task handler.
 import 'expo-router/entry';
 import './src/widgets/register';
+import './src/notifications/register';
