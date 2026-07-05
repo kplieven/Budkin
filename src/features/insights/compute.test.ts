@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
 import type { Entry } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
@@ -126,5 +126,29 @@ describe('buildTrend', () => {
         'wakeWindow', now, 30,
       ),
     ).toHaveLength(0);
+  });
+});
+
+const diaper = (time: number, wet: boolean, solid: boolean): Entry => ({
+  id: `d-${time}`, childId: 'c1', type: 'diaper', time, wet, solid, color: null, tags: [],
+});
+
+describe('buildDiaperSeries', () => {
+  const now = at(2026, 6, 5, 15);
+  const day = at(2026, 6, 5, 9);
+
+  it('counts a both-wet-and-dirty change once in each series, never summed', () => {
+    const s = buildDiaperSeries([diaper(day, true, true)], now, 14);
+    expect(s[0].wet).toBe(1);
+    expect(s[0].dirty).toBe(1);
+  });
+
+  it('tallies wet-only and dirty-only independently within a day', () => {
+    const s = buildDiaperSeries(
+      [diaper(day, true, false), diaper(day + 3600000, true, false), diaper(day + 7200000, false, true)],
+      now, 14,
+    );
+    expect(s[0].wet).toBe(2);
+    expect(s[0].dirty).toBe(1);
   });
 });
