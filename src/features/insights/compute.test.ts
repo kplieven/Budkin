@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildSleepHeatmap, noonWindowStart } from './compute';
+import { buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
 import type { Entry } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
@@ -59,4 +59,47 @@ describe('buildSleepHeatmap', () => {
 it('noonWindowStart bins a pre-noon time into the previous noon', () => {
   const w = noonWindowStart(at(2026, 6, 5, 3)); // 3am 5 Jul → noon 4 Jul
   expect(new Date(w).getDate()).toBe(4);
+});
+
+const feeding = (start: number): Entry => ({
+  id: `f-${start}`, childId: 'c1', type: 'feeding', start, end: start + 900000,
+  feedType: 'breast', method: 'left', amount: null, tags: [],
+});
+
+describe('buildTrend', () => {
+  const now = at(2026, 6, 5, 15);
+
+  it('totalSleep sums a night\'s sleep into one noon-to-noon point (hours)', () => {
+    const pts = buildTrend(
+      [sleep(at(2026, 6, 4, 20), at(2026, 6, 4, 23), false), sleep(at(2026, 6, 5, 1), at(2026, 6, 5, 6), false)],
+      'totalSleep', now, 30,
+    );
+    expect(pts).toHaveLength(1);
+    expect(pts[0].value).toBeCloseTo(8, 1); // 3h + 5h in the same night window
+  });
+
+  it('longestStretch reports the single longest sleep of the night (hours)', () => {
+    const pts = buildTrend(
+      [sleep(at(2026, 6, 4, 20), at(2026, 6, 4, 22), false), sleep(at(2026, 6, 5, 0), at(2026, 6, 5, 6), false)],
+      'longestStretch', now, 30,
+    );
+    expect(pts[0].value).toBeCloseTo(6, 1);
+  });
+
+  it('feedsPerDay counts feedings within a calendar day', () => {
+    const day = at(2026, 6, 5, 8);
+    const pts = buildTrend([feeding(day), feeding(day + 3600000), feeding(day + 7200000)], 'feedsPerDay', now, 30);
+    expect(pts[0].value).toBe(3);
+  });
+
+  it('feedInterval averages gaps between consecutive feeds (hours)', () => {
+    const day = at(2026, 6, 5, 8);
+    const pts = buildTrend([feeding(day), feeding(day + 2 * 3600000), feeding(day + 4 * 3600000)], 'feedInterval', now, 30);
+    expect(pts[0].value).toBeCloseTo(2, 2);
+  });
+
+  it('omits entries older than the range', () => {
+    const pts = buildTrend([feeding(at(2026, 5, 1, 8))], 'feedsPerDay', now, 14);
+    expect(pts).toHaveLength(0);
+  });
 });
