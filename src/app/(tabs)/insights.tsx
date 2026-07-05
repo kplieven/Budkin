@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
+import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { buildDiaperSeries, buildSleepHeatmap, buildTrend } from '@/features/insights/compute';
 import { NORMS } from '@/features/insights/norms';
@@ -15,6 +16,37 @@ import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+
+function KeepLogging({ what }: { what: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 20, marginTop: 12 }}>
+      <Txt weight={600} size={13.5} color={t.dim} style={{ lineHeight: 20 }}>
+        Keep logging — your {what} chart appears after a few days.
+      </Txt>
+    </View>
+  );
+}
+
+function CenteredState({ title, subtitle, action }: {
+  title: string; subtitle: string; action?: { label: string; onPress: () => void };
+}) {
+  const t = useTheme();
+  return (
+    <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
+      <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
+        <Icon name="insights" color={t.faint} size={34} />
+      </View>
+      <Txt weight={700} size={16}>{title}</Txt>
+      <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>{subtitle}</Txt>
+      {action ? (
+        <Pressable onPress={action.onPress} accessibilityRole="button" style={{ marginTop: 4, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22 }}>
+          <Txt weight={700} size={14} color={t.onPrimary}>{action.label}</Txt>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
 
 export default function Insights() {
   const t = useTheme();
@@ -39,6 +71,15 @@ export default function Insights() {
   const interval = useMemo(() => buildTrend(entries, 'feedInterval', now, rangeDays), [entries, now, rangeDays]);
   const diapers = useMemo(() => buildDiaperSeries(entries, now, rangeDays), [entries, now, rangeDays]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
+
+  const loaded = useAppStore((s) => s.insightsLoaded);
+  const error = useAppStore((s) => s.insightsError);
+  const daysWithSleep = heatRows.filter((r) => r.segments.length > 0).length;
+  const enoughForChart = (pts: unknown[]) => pts.length >= 3;
+  // delta for longest stretch: last minus first in range, when there's a span
+  const stretchDelta = longest.length >= 2 ? longest[longest.length - 1].value - longest[0].value : 0;
+  const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
+    enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
   useEffect(() => {
     loadInsights();
@@ -72,68 +113,97 @@ export default function Insights() {
           </View>
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks · midnight-centred</Txt>
-        <SleepHeatmap rows={heatRows} width={width - 30} />
+        {daysWithSleep >= 7 ? (
+          <SleepHeatmap rows={heatRows} width={width - 30} />
+        ) : (
+          <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
+            Keep logging sleep — the rhythm heatmap appears after about a week.
+          </Txt>
+        )}
       </View>
 
-      <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
-        caption="Typical for age" norm={NORMS.totalSleep} birth={birth} points={totalSleep}
-        yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} />
-      <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
-        caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
-        yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width} />
-      <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
-        caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
-        yTicks={[30, 60, 90, 120, 150]} fmtY={(v) => `${v}`} width={width} />
+      {gated(totalSleep, 'total sleep', (
+        <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
+          caption="Typical for age" norm={NORMS.totalSleep} birth={birth} points={totalSleep}
+          yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} />
+      ))}
+      {gated(longest, 'longest stretch', (
+        <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
+          caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
+          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width}
+          delta={stretchDelta >= 0.5 ? `+${stretchDelta.toFixed(1)}h` : undefined} good />
+      ))}
+      {gated(wake, 'wake window', (
+        <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
+          caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
+          yTicks={[30, 60, 90, 120, 150]} fmtY={(v) => `${v}`} width={width} />
+      ))}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 2, textTransform: 'uppercase' }}>
         Feeding
       </Txt>
-      <TrendCard label="Feeds / day" color={t.activity.feeding} unit="" value={Math.round(lastVal(feeds)).toString()}
-        caption="Typical for age" norm={NORMS.feedsPerDay} birth={birth} points={feeds}
-        yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} />
-      <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
-        norm={NORMS.feedInterval} birth={birth} points={interval}
-        yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} width={width} />
+      {gated(feeds, 'feeds per day', (
+        <TrendCard label="Feeds / day" color={t.activity.feeding} unit="" value={Math.round(lastVal(feeds)).toString()}
+          caption="Typical for age" norm={NORMS.feedsPerDay} birth={birth} points={feeds}
+          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} />
+      ))}
+      {gated(interval, 'feed interval', (
+        <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
+          norm={NORMS.feedInterval} birth={birth} points={interval}
+          yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} width={width} />
+      ))}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 12, textTransform: 'uppercase' }}>
         Diapers
       </Txt>
-      <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-          <Txt weight={700} size={15}>Wet vs dirty / day</Txt>
-          <View style={{ flexDirection: 'row', gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightWet }} />
-              <Txt weight={600} size={11} color={t.dim}>Wet</Txt>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightDirty }} />
-              <Txt weight={600} size={11} color={t.dim}>Dirty</Txt>
+      {diapers.length >= 3 ? (
+        <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Txt weight={700} size={15}>Wet vs dirty / day</Txt>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightWet }} />
+                <Txt weight={600} size={11} color={t.dim}>Wet</Txt>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: t.insightDirty }} />
+                <Txt weight={600} size={11} color={t.dim}>Dirty</Txt>
+              </View>
             </View>
           </View>
+          <DiaperBars data={diapers} width={width - 32} />
         </View>
-        <DiaperBars data={diapers} width={width - 32} />
-      </View>
+      ) : (
+        <KeepLogging what="diaper" />
+      )}
     </View>
   );
 
-  if (desktop) return <DesktopPage maxWidth={640}>{body}</DesktopPage>;
-
-  return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
-        <Txt weight={800} size={27} tracking={-0.6}>Insights</Txt>
-        <Pressable
-          onPress={openSwitcher}
-          accessibilityRole="button"
-          accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
-          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
-        >
-          <Avatar child={child} size={38} radius={12} fontSize={16} />
-        </Pressable>
-      </View>
-      {body}
-    </ScrollView>
+  // Phone shows the inline header; desktop uses the shell's own top bar (as in growth.tsx).
+  const head = (
+    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
+      <Txt weight={800} size={27} tracking={-0.6}>Insights</Txt>
+      <Pressable onPress={openSwitcher} accessibilityRole="button" accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'} style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}>
+        <Avatar child={child} size={38} radius={12} fontSize={16} />
+      </Pressable>
+    </View>
   );
+  const frame = (inner: ReactNode) =>
+    desktop ? (
+      <DesktopPage maxWidth={640}>{inner}</DesktopPage>
+    ) : (
+      <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}>
+        {head}
+        {inner}
+      </ScrollView>
+    );
+
+  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
+  if (error)
+    return frame(
+      <CenteredState
+        title="Couldn't load insights"
+        subtitle="Check your connection and try again."
+        action={{ label: 'Try again', onPress: () => { useAppStore.setState({ insightsLoading: false }); loadInsights(); } }}
+      />,
+    );
+  return frame(body);
 }
