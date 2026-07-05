@@ -1008,17 +1008,20 @@ describe('saved servers', () => {
 });
 
 describe('insights slice', () => {
-  it('loadInsights in demo mode fills insightsEntries from local entries', async () => {
+  it('loadInsights in demo mode fills insightsEntries from local entries scoped to the child', async () => {
     useAppStore.setState({
       connection: { demo: true, serverUrl: '', token: '' } as any,
       selectedChildId: 'c1',
-      entries: [{ id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any],
+      entries: [
+        { id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
+        { id: 's2', type: 'sleep', childId: 'c2', start: 3, end: 4, nap: false, tags: [] } as any,
+      ],
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     await useAppStore.getState().loadInsights();
     const s = useAppStore.getState();
     expect(s.insightsLoaded).toBe(true);
-    expect(s.insightsEntries.length).toBeGreaterThan(0);
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['s1']); // c2's entry excluded
   });
 
   it('selectChild resets the insights cache', () => {
