@@ -130,6 +130,7 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const setLasted = useAppStore((s) => s.setLasted);
   const setTimerLasted = useAppStore((s) => s.setTimerLasted);
   const setStartedAt = useAppStore((s) => s.setStartedAt);
+  const setStartedAgo = useAppStore((s) => s.setStartedAgo);
 
   const [editing, setEditing] = useState<EditField>(null);
 
@@ -310,7 +311,8 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
                 key={m}
                 label={`${m}m ago`}
                 color={color}
-                onPress={() => setStartedAt(now - m * 60000)}
+                selected={startActive && te.startAbs == null && te.startAgoMin === m}
+                onPress={() => setStartedAgo(m)}
               />
             ))}
             {lastFeed != null && (
