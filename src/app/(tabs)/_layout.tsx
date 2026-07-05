@@ -30,6 +30,7 @@ export default function TabsLayout() {
       <Tabs.Screen name="timers" options={{ title: 'Timers' }} />
       <Tabs.Screen name="history" options={{ title: 'History' }} />
       <Tabs.Screen name="growth" options={{ title: 'Growth' }} />
+      <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
     </Tabs>
   );
 }

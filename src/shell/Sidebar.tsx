@@ -24,6 +24,7 @@ const NAV: NavItem[] = [
   { label: 'Timers', icon: 'timer', href: '/timers', match: (p) => p.startsWith('/timers') },
   { label: 'History', icon: 'list', href: '/history', match: (p) => p.startsWith('/history') },
   { label: 'Growth', icon: 'chart', href: '/growth', match: (p) => p.startsWith('/growth') },
+  { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
   { label: 'Settings', icon: 'settings', href: '/settings', match: (p) => p.startsWith('/settings') },
 ];
 
