@@ -4,15 +4,16 @@
  */
 
 import { BabybuddyClient } from '@/api/client';
-import type {
-  ActivityType,
-  Child,
-  Entry,
-  FeedMethod,
-  FeedType,
-  Measurement,
-  MeasurementKind,
-  Timer,
+import {
+  entryTimestamp,
+  type ActivityType,
+  type Child,
+  type Entry,
+  type FeedMethod,
+  type FeedType,
+  type Measurement,
+  type MeasurementKind,
+  type Timer,
 } from '@/types/models';
 
 export interface Connection {
@@ -69,6 +70,40 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
   }
 
   return { children, entries, timers: [], selectedChildId, lastFeed, measurements };
+}
+
+/**
+ * Fetch the charted history (sleep + feedings + diapers) back to `sinceMs`
+ * using LimitOffset pagination. Demo mode returns [] — the store supplies demo
+ * history from the local seed. Per-type failures degrade to [].
+ */
+export async function loadInsightsHistory(
+  conn: Connection,
+  childId: string,
+  sinceMs: number,
+): Promise<Entry[]> {
+  if (conn.demo || !childId) return [];
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  const LIMIT = 100;
+  const MAX_PAGES = 20; // hard backstop: ≤2000 entries/type
+
+  const pageAll = async (fetch: (limit: number, offset: number) => Promise<Entry[]>): Promise<Entry[]> => {
+    const acc: Entry[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const batch = await fetch(LIMIT, page * LIMIT).catch(() => [] as Entry[]);
+      acc.push(...batch);
+      if (batch.length < LIMIT) break;
+      if (entryTimestamp(batch[batch.length - 1]) < sinceMs) break;
+    }
+    return acc.filter((e) => entryTimestamp(e) >= sinceMs);
+  };
+
+  const [s, f, d] = await Promise.all([
+    pageAll((l, o) => client.listSleep(childId, l, o)),
+    pageAll((l, o) => client.listFeedings(childId, l, o)),
+    pageAll((l, o) => client.listChanges(childId, l, o)),
+  ]);
+  return [...s, ...f, ...d];
 }
 
 /** Push a created measurement; returns its new server id (or undefined). */

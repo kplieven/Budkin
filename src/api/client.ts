@@ -175,9 +175,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listFeedings(childId: string, limit = 50): Promise<FeedingEntry[]> {
+  async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/feedings/?child=${childId}&ordering=-start&limit=${limit}`,
+      `/feedings/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((f) => ({
       id: `feeding-${f.id}`,
@@ -193,9 +193,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listSleep(childId: string, limit = 50): Promise<SleepEntry[]> {
+  async listSleep(childId: string, limit = 50, offset = 0): Promise<SleepEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/sleep/?child=${childId}&ordering=-start&limit=${limit}`,
+      `/sleep/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((s) => ({
       id: `sleep-${s.id}`,
@@ -209,9 +209,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listChanges(childId: string, limit = 50): Promise<DiaperEntry[]> {
+  async listChanges(childId: string, limit = 50, offset = 0): Promise<DiaperEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/changes/?child=${childId}&ordering=-time&limit=${limit}`,
+      `/changes/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((c) => ({
       id: `diaper-${c.id}`,
