@@ -500,8 +500,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!conn || !childId) return;
     set({ insightsLoading: true, insightsError: false });
     try {
-      // Demo: the store's `entries` already hold the full local seed history.
-      const entries = conn.demo ? s.entries : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      // Demo: the store's `entries` hold the local seed history for ALL
+      // children — scope to the selected child, matching the per-child fetch.
+      const entries = conn.demo
+        ? s.entries.filter((e) => e.childId === childId)
+        : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
