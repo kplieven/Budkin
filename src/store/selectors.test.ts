@@ -37,6 +37,13 @@ describe('teEnd / teStart / teDurationMin', () => {
     expect(teStart(te, NOW)).toBe(NOW - 30 * M);
     expect(teDurationMin(te, NOW)).toBe(30);
   });
+  it('start set via startAgoMin resolves live and slides with now (mirrors endAgoMin)', () => {
+    const te: TimeEntryState = { shape: 'interval', order: ['start', 'end', 'lasted'], startAgoMin: 10, endAgoMin: 0, tags: [] };
+    expect(teStart(te, NOW)).toBe(NOW - 10 * M);
+    expect(teDurationMin(te, NOW)).toBe(10);
+    // still 10 minutes before "now" at a later now (sliding, not frozen)
+    expect(teStart(te, NOW + 5 * M)).toBe(NOW + 5 * M - 10 * M);
+  });
 });
 
 describe('anchors', () => {

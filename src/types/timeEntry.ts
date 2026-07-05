@@ -33,6 +33,9 @@ export interface TimeEntryState {
   startAbs?: number;
   /** which "Started" anchor set the start (for highlighting) */
   startAnchor?: 'lastfeed' | 'wake' | 'diaper' | 'now';
+  /** start as "minutes ago" when set via a "Xm ago" chip (mirrors endAgoMin);
+   *  resolved live so it stays that many minutes before now */
+  startAgoMin?: number;
   /** duration in minutes (the "lasted" quantity) */
   durationMin?: number;
 

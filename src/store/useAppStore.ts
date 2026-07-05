@@ -142,6 +142,7 @@ interface AppActions {
    * the derived point) and mark the entry finished, so save() stops the timer. */
   setTimerLasted: (min: number) => void;
   setStartedAt: (ms: number, anchor?: 'lastfeed' | 'wake' | 'diaper' | 'now') => void;
+  setStartedAgo: (min: number) => void;
   sleepWoke: () => void;
   sleepStillSleeping: () => void;
   save: () => void;
@@ -744,7 +745,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     })),
   setStartedAt: (ms, anchor) =>
-    set((s) => ({ te: { ...s.te, startAbs: ms, startAnchor: anchor, order: reorder(s.te.order, 'start') } })),
+    set((s) => ({ te: { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined, order: reorder(s.te.order, 'start') } })),
+  setStartedAgo: (min) =>
+    set((s) => ({ te: { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined, order: reorder(s.te.order, 'start') } })),
   sleepWoke: () => get().setEnded(0),
   sleepStillSleeping: () => get().setOngoing(),
 
