@@ -17,6 +17,7 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
+import { initTimerNotificationSync } from '@/notifications/sync';
 import { initWidgetSync } from '@/widgets/sync';
 
 SplashScreen.preventAutoHideAsync();
@@ -47,6 +48,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     initWidgetSync();
+    initTimerNotificationSync();
   }, []);
 
   useEffect(() => {

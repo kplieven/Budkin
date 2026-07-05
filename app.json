@@ -76,6 +76,12 @@
             }
           ]
         }
+      ],
+      [
+        "expo-notifications",
+        {
+          "defaultChannel": "timers"
+        }
       ]
     ],
     "experiments": {
