@@ -274,6 +274,31 @@ describe('buildTrend', () => {
     const pts = buildTrend([feeding(at(2026, 5, 1, 8))], 'feedsPerDay', now, 14);
     expect(pts).toHaveLength(0);
   });
+
+  it('wakeWindow averages awake gaps between sleeps in a night window (minutes)', () => {
+    const pts = buildTrend(
+      [
+        sleep(at(2026, 6, 4, 20), at(2026, 6, 4, 22), false),
+        sleep(at(2026, 6, 4, 23), at(2026, 6, 5, 1), false),
+        sleep(at(2026, 6, 5, 2, 30), at(2026, 6, 5, 6), false),
+      ],
+      'wakeWindow', now, 30,
+    );
+    expect(pts).toHaveLength(1);
+    expect(pts[0].value).toBeCloseTo(75, 1); // gaps of 60m and 90m → avg 75m
+  });
+
+  it('wakeWindow ignores gaps ≥6h and omits windows with no valid gap', () => {
+    // single sleep → no gaps → window omitted
+    expect(buildTrend([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false)], 'wakeWindow', now, 30)).toHaveLength(0);
+    // two sleeps 8h apart → gap filtered as an outlier → window omitted
+    expect(
+      buildTrend(
+        [sleep(at(2026, 6, 3, 13), at(2026, 6, 3, 14), true), sleep(at(2026, 6, 3, 22), at(2026, 6, 4, 6), false)],
+        'wakeWindow', now, 30,
+      ),
+    ).toHaveLength(0);
+  });
 });
 ```
 
