@@ -1,10 +1,24 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 
+import { TIMER_CHANNEL_ID } from '@/notifications/content';
+
+// Without a handler, notifications posted while the app is in the FOREGROUND are
+// suppressed (not shown in the tray). This makes them appear; sound is left to the
+// channel (LOW = silent), so shouldPlaySound stays false.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowBanner: true,
+    shouldShowList: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
 // A LOW-importance channel: this is a persistent status, not an alert — no sound,
-// vibration, or heads-up. `defaultChannel: "timers"` (config plugin) routes our
-// immediate notifications here.
-void Notifications.setNotificationChannelAsync('timers', {
+// vibration, or heads-up. Notifications are bound to it by the channel-aware
+// trigger in postNotification.android.ts.
+void Notifications.setNotificationChannelAsync(TIMER_CHANNEL_ID, {
   name: 'Running timers',
   importance: Notifications.AndroidImportance.LOW,
 });

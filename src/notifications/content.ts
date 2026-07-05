@@ -9,6 +9,11 @@
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import type { Timer } from '@/types/models';
 
+/** Android channel id, shared by the channel *creation* (register.android) and the
+ *  channel-aware *trigger* (postNotification.android) so a typo can't silently
+ *  route notifications to a noisy fallback channel. */
+export const TIMER_CHANNEL_ID = 'timers';
+
 export interface TimerNotification {
   /** stable id = timer.id, so posts update in place and dismissals are exact */
   identifier: string;
