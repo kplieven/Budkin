@@ -17,6 +17,7 @@ import {
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   loadFromServer,
+  loadInsightsHistory,
   pushEntryToServer,
   pushMeasurementToServer,
   updateEntryOnServer,
@@ -90,6 +91,11 @@ interface AppState {
   timers: Timer[];
   measurements: Measurement[];
   lastFeed: { feedType: FeedType; method: FeedMethod };
+  insightsEntries: Entry[];
+  insightsLoaded: boolean;
+  insightsLoading: boolean;
+  insightsError: boolean;
+  loadInsights: () => Promise<void>;
 
   // working time-entry
   te: TimeEntryState;
@@ -226,6 +232,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   timers: [],
   measurements: [],
   lastFeed: { feedType: 'breast', method: 'left' },
+  insightsEntries: [],
+  insightsLoaded: false,
+  insightsLoading: false,
+  insightsError: false,
 
   te: { shape: 'interval', tags: [] },
 
@@ -476,9 +486,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- child switcher ----
-  selectChild: (id) => set({ selectedChildId: id, showChildSwitcher: false }),
+  selectChild: (id) =>
+    set({ selectedChildId: id, showChildSwitcher: false, insightsLoaded: false, insightsEntries: [] }),
   openSwitcher: () => set({ showChildSwitcher: true }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
+
+  // ---- insights (lazy deep-history load) ----
+  loadInsights: async () => {
+    const s = get();
+    if (s.insightsLoaded || s.insightsLoading) return;
+    const conn = s.connection;
+    const childId = s.selectedChildId;
+    if (!conn || !childId) return;
+    set({ insightsLoading: true, insightsError: false });
+    try {
+      // Demo: the store's `entries` already hold the full local seed history.
+      const entries = conn.demo ? s.entries : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
+    } catch {
+      set({ insightsLoading: false, insightsError: true });
+    }
+  },
 
   // ---- log sheet ----
   openSheet: (type) => {
