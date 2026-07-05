@@ -737,17 +737,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { useAppStore } from './useAppStore';
 
 describe('insights slice', () => {
-  it('loadInsights in demo mode fills insightsEntries from local entries', async () => {
+  it('loadInsights in demo mode fills insightsEntries from local entries scoped to the child', async () => {
     useAppStore.setState({
       connection: { demo: true, serverUrl: '', token: '' } as any,
       selectedChildId: 'c1',
-      entries: [{ id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any],
+      entries: [
+        { id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
+        { id: 's2', type: 'sleep', childId: 'c2', start: 3, end: 4, nap: false, tags: [] } as any,
+      ],
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     await useAppStore.getState().loadInsights();
     const s = useAppStore.getState();
     expect(s.insightsLoaded).toBe(true);
-    expect(s.insightsEntries.length).toBeGreaterThan(0);
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['s1']); // c2's entry excluded
   });
 
   it('selectChild resets the insights cache', () => {
@@ -813,8 +816,11 @@ Add alongside the other actions (e.g. after `selectChild`). Import `loadInsights
     if (!conn || !childId) return;
     set({ insightsLoading: true, insightsError: false });
     try {
-      // Demo: the store's `entries` already hold the full local seed history.
-      const entries = conn.demo ? s.entries : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      // Demo: the store's `entries` hold the local seed history for ALL
+      // children — scope to the selected child, matching the per-child fetch.
+      const entries = conn.demo
+        ? s.entries.filter((e) => e.childId === childId)
+        : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
