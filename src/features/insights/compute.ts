@@ -64,6 +64,22 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28): Hea
   return out;
 }
 
+export interface DiaperDay { t: number; wet: number; dirty: number }
+
+export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: number): DiaperDay[] {
+  const cutoff = now - rangeDays * DAY;
+  const byDay = new Map<number, { wet: number; dirty: number }>();
+  for (const e of entries) {
+    if (e.type !== 'diaper' || e.time < cutoff) continue;
+    const d = dayStart(e.time);
+    const cur = byDay.get(d) ?? { wet: 0, dirty: 0 };
+    if (e.wet) cur.wet += 1;   // wet and dirty are independent signals —
+    if (e.solid) cur.dirty += 1; // a both-diaper increments each, never their sum
+    byDay.set(d, cur);
+  }
+  return [...byDay.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ t, wet: v.wet, dirty: v.dirty }));
+}
+
 const HOUR = 3600000;
 
 export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, rangeDays: number): TrendPoint[] {
