@@ -3,7 +3,7 @@
  * inline SVGs. Activity icons are soft-filled; UI icons are stroked.
  */
 
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
 import { useTheme } from '@/theme/useTheme';
 
@@ -103,12 +103,11 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'solid':
+      // Abstract "stack" — reads as a solid mass without the literal poop shape.
       return (
         <Svg {...common}>
-          <Path
-            d="M4.5 18.5c0-3 1.6-5.2 3.9-6.1C8.2 9 10 6.6 12 6.6s3.8 2.4 3.6 5.8c2.3.9 3.9 3.1 3.9 6.1 0 .3-.2.5-.5.5h-14c-.3 0-.5-.2-.5-.5z"
-            fill={color}
-          />
+          <Rect x={5} y={13.5} width={14} height={5} rx={2.5} fill={color} />
+          <Rect x={7.5} y={7.5} width={9} height={5} rx={2.5} fill={color} />
         </Svg>
       );
     case 'tummy':
