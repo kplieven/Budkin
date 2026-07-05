@@ -32,3 +32,21 @@ export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pu
 
 /** Activities a timer can be saved as. */
 export const TIMER_SAVE_OPTIONS: ActivityType[] = ['feeding', 'sleep', 'pumping', 'tummy'];
+
+export interface DurationShortcutCopy {
+  /** the "log it as just-ended" button */
+  doneTitle: string;
+  doneSub: string;
+  /** the "start a live timer" button */
+  liveTitle: string;
+  liveSub: string;
+}
+
+/** Copy for the two shortcut buttons shown at the top of every interval
+ *  activity's log sheet. Point activities (diaper) have none. */
+export const DURATION_SHORTCUTS: Partial<Record<ActivityType, DurationShortcutCopy>> = {
+  feeding: { doneTitle: 'Just finished', doneSub: 'ended this feed', liveTitle: 'Still feeding', liveSub: 'start a live timer' },
+  sleep: { doneTitle: 'Woke up now', doneSub: 'ended this nap', liveTitle: 'Still sleeping', liveSub: 'start a live timer' },
+  pumping: { doneTitle: 'Just finished', doneSub: 'ended this session', liveTitle: 'Still pumping', liveSub: 'start a live timer' },
+  tummy: { doneTitle: 'Just finished', doneSub: 'ended tummy time', liveTitle: 'Still going', liveSub: 'start a live timer' },
+};
