@@ -97,4 +97,24 @@ describe('toggleNapFromWidget', () => {
     await toggleNapFromWidget(5000);
     expect(dismissTimerNotification).toHaveBeenCalledWith('t1');
   });
+
+  it('debounce: a second toggle within the window is ignored (no stop, no 0-min entry)', async () => {
+    await writeWidgetSnapshot(snap());
+    await toggleNapFromWidget(1000); // start
+    expect(await loadTimers()).toHaveLength(1);
+
+    const dup = await toggleNapFromWidget(1200); // duplicate delivery 200ms later
+    expect(dup?.sleepStart).toBe(1000); // still napping — the stop was swallowed
+    expect(await loadTimers()).toHaveLength(1); // timer untouched
+    expect(await loadQueue()).toHaveLength(0); // no phantom 0-minute nap logged
+  });
+
+  it('debounce: a stop is accepted once the window has passed', async () => {
+    await writeWidgetSnapshot(snap());
+    await toggleNapFromWidget(1000); // start
+    const stopped = await toggleNapFromWidget(1000 + 1500); // exactly at the window edge
+    expect(stopped?.sleepStart).toBeNull();
+    expect(await loadTimers()).toHaveLength(0);
+    expect(await loadQueue()).toHaveLength(1); // the real nap is still logged
+  });
 });

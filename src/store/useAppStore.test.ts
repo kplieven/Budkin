@@ -625,6 +625,15 @@ describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
     await useAppStore.getState().refresh();
     expect(useAppStore.getState().timers).toEqual([]);
   });
+
+  it('reconciles timers from storage even when the server is unreachable', async () => {
+    useAppStore.setState({ timers: [sleepTimer] }); // persist mock writes this to storage too
+    h.timers = [];                                  // widget stopped it out-of-band
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+    await useAppStore.getState().refresh();
+    expect(useAppStore.getState().offline).toBe(true);
+    expect(useAppStore.getState().timers).toEqual([]); // still cleared despite being offline
+  });
 });
 
 describe('feeding extras', () => {

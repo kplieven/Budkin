@@ -332,20 +332,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Nothing to re-check for demo, no connection, or a manual offline override.
     if (!conn || conn.demo || s.simulateOffline || refreshInFlight) return;
     refreshInFlight = true;
+    // Running timers are local-only (the server has none) and can be mutated
+    // out-of-band by the home-screen widget while the app is warm. Re-read the
+    // on-device copy — the source of truth — rather than trusting the possibly
+    // stale in-memory list, so a widget-started nap isn't lost and a
+    // widget-stopped nap isn't left "running" in the app. Done up front so it
+    // reconciles even when the server is unreachable (offline), not just on a
+    // successful fetch — otherwise a widget-stopped nap keeps showing in-app
+    // until connectivity returns. Mirrors cold `hydrate`.
+    const localTimers = await loadTimers();
     try {
       const data = await loadFromServer(conn);
       // Keep the user's current child if the server still has it; otherwise fall
-      // back to the server's first child (matches a cold `hydrate`). Running
-      // timers are local-only, so the on-device copy always wins over `data`'s [].
+      // back to the server's first child (matches a cold `hydrate`).
       const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
-      // Running timers are local-only (the server has none) and can be mutated
-      // out-of-band by the home-screen widget while the app is warm. Re-read the
-      // on-device copy — the source of truth — rather than trusting the possibly
-      // stale in-memory list, so a widget-started nap isn't lost and a
-      // widget-stopped nap isn't double-committed. Mirrors cold `hydrate`.
-      const localTimers = await loadTimers();
       set({
         connected: true,
         offline: false,
@@ -365,8 +367,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         });
       } else {
         // server unreachable — stay/enter offline; queued writes hold until the
-        // next successful refresh.
-        set({ offline: true });
+        // next successful refresh. Still reconcile local timers so a widget
+        // start/stop is reflected even while offline.
+        set({ offline: true, timers: localTimers });
       }
     } finally {
       refreshInFlight = false;
