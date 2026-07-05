@@ -1006,3 +1006,25 @@ describe('saved servers', () => {
     expect(h.servers).toEqual([]); // persistServers never called
   });
 });
+
+describe('insights slice', () => {
+  it('loadInsights in demo mode fills insightsEntries from local entries', async () => {
+    useAppStore.setState({
+      connection: { demo: true, serverUrl: '', token: '' } as any,
+      selectedChildId: 'c1',
+      entries: [{ id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any],
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    await useAppStore.getState().loadInsights();
+    const s = useAppStore.getState();
+    expect(s.insightsLoaded).toBe(true);
+    expect(s.insightsEntries.length).toBeGreaterThan(0);
+  });
+
+  it('selectChild resets the insights cache', () => {
+    useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any] });
+    useAppStore.getState().selectChild('c2');
+    expect(useAppStore.getState().insightsLoaded).toBe(false);
+    expect(useAppStore.getState().insightsEntries).toEqual([]);
+  });
+});
