@@ -45,4 +45,8 @@ describe('screenTitleFor', () => {
   it('falls back to the app name for unknown paths', () => {
     expect(screenTitleFor('/something-else', 'Mara')).toBe('Budkin');
   });
+
+  it('titles the insights route', () => {
+    expect(screenTitleFor('/insights')).toBe('Insights');
+  });
 });

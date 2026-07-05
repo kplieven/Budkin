@@ -18,6 +18,7 @@ const TABS: Record<string, { label: string; icon: IconName }> = {
   timers: { label: 'Timers', icon: 'timer' },
   history: { label: 'History', icon: 'list' },
   growth: { label: 'Growth', icon: 'chart' },
+  insights: { label: 'Insights', icon: 'insights' },
 };
 
 export function AppTabBar({ state, navigation }: TabBarProps) {

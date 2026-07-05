@@ -29,6 +29,7 @@ export type IconName =
   | 'chevron-right'
   | 'chevron-left'
   | 'chart'
+  | 'insights'
   | 'moon'
   | 'sun';
 
@@ -211,6 +212,15 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         <Svg {...common}>
           <Path d="M5 4v15h15" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
           <Path d="M8 14l3-3 2.5 2.5L19 8" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'insights':
+      // a rising three-bar chart, distinct from `chart`
+      return (
+        <Svg {...common}>
+          <Rect x={4} y={12} width={3.4} height={8} rx={1.4} fill={color} />
+          <Rect x={10.3} y={7} width={3.4} height={13} rx={1.4} fill={color} />
+          <Rect x={16.6} y={9.5} width={3.4} height={10.5} rx={1.4} fill={color} />
         </Svg>
       );
     case 'moon':
