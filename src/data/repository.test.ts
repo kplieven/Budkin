@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+
 import { entryTimestamp } from '@/types/models';
+
+import { loadInsightsHistory } from './repository';
 
 const DAY = 86400000;
 
@@ -11,8 +14,6 @@ vi.mock('@/api/client', () => ({
   BabybuddyClient: vi.fn().mockImplementation(() => ({ listSleep, listFeedings, listChanges })),
   normalizeServerUrl: (s: string) => s,
 }));
-
-import { loadInsightsHistory } from './repository';
 
 const sleepEntry = (start: number) => ({ id: `s-${start}`, type: 'sleep', childId: 'c1', start, end: start + 3600000, nap: false, tags: [] });
 
