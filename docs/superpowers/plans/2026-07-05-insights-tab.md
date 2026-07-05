@@ -1588,7 +1588,8 @@ Refactor the screen's return into a shared `frame` so all three states share the
       </ScrollView>
     );
 
-  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
+  // Order matters: a failed load leaves insightsLoaded=false, so the error
+  // check must come FIRST or the error/retry state is unreachable.
   if (error)
     return frame(
       <CenteredState
@@ -1597,6 +1598,7 @@ Refactor the screen's return into a shared `frame` so all three states share the
         action={{ label: 'Try again', onPress: () => { useAppStore.setState({ insightsLoading: false }); loadInsights(); } }}
       />,
     );
+  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
   return frame(body);
 ```
 (Delete the earlier `if (desktop) return <DesktopPage…>` / phone `return <ScrollView…>` block from Task 7 — `frame` now owns rendering. The `body` variable and its `onLayout` width measurement stay.)
