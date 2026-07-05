@@ -589,7 +589,7 @@ git commit -m "feat(insights): cited age-tracking normative bands"
 
 **Interfaces:**
 - Consumes: `BabybuddyClient`, `Connection`, `entryTimestamp` from `@/lib/activities`.
-- Produces: `loadInsightsHistory(conn, childId, sinceMs): Promise<Entry[]>` — sleep+feedings+changes back to `sinceMs`, paginated; demo returns `[]` (store supplies demo data from seed); per-type failure degrades to `[]`.
+- Produces: `loadInsightsHistory(conn, childId, sinceMs): Promise<Entry[]>` — sleep+feedings+changes back to `sinceMs`, paginated; demo returns `[]` (store supplies demo data from seed); a first-page failure degrades that type to `[]`, a later-page failure keeps the already-fetched newest pages (oldest end truncated only).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -669,7 +669,9 @@ import { entryTimestamp } from '@/lib/activities';
 /**
  * Fetch the charted history (sleep + feedings + diapers) back to `sinceMs`
  * using LimitOffset pagination. Demo mode returns [] — the store supplies demo
- * history from the local seed. Per-type failures degrade to [].
+ * history from the local seed. A failed first page degrades that type to [];
+ * a failed later page keeps the newest pages already fetched (the range is
+ * truncated at the oldest end only).
  */
 export async function loadInsightsHistory(
   conn: Connection,

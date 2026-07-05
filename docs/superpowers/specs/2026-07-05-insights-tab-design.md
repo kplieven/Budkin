@@ -272,7 +272,9 @@ data from §5/§6. Theme-aware via `useTheme`.
   boundaries given a birth date; floor/none kinds behave; unknown ages clamp to
   the nearest bucket.
 - **`src/data/repository`** — `loadInsightsHistory` pages until the cutoff and
-  trims; demo mode returns local entries; per-type fetch failure degrades to `[]`
+  trims; demo mode returns local entries; a first-page failure degrades that
+  type to `[]`, and a later-page failure keeps the pages already fetched
+  (newest-first, so only the oldest end of the range is truncated)
   (matching `loadFromServer`'s `.catch(() => [])`).
 - **`src/shell/labels.test.ts`** — `/insights` title.
 - Chart components are visual; covered by manual verification, not snapshot pixel
@@ -321,7 +323,10 @@ switch child           -> insightsLoaded=false -> reload on next focus
 - **No connection / demo:** demo entries drive a fully-populated example tab.
 - **Load failure:** `loadInsights` sets an error flag; the tab shows a friendly
   retry state (reuse the Growth empty-state visual language), no crash. Per-type
-  fetch failures degrade to `[]`.
+  fetch failures degrade per type: a first-page failure yields `[]` for that
+  type; a later-page failure keeps the already-fetched newest pages, so that
+  type's charts render a correct but shorter recent history (user decision:
+  partial recent data beats dropping the type).
 - **Low data per metric:** each metric needs a minimum (e.g. **≥7 days** with
   sleep data for the heatmap to render, **≥3 points** for a trend line). Below
   that, the card shows a "Keep logging — your <metric> curve appears after a few
