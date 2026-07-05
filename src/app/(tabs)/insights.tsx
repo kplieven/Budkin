@@ -34,6 +34,8 @@ export default function Insights() {
   const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', now, rangeDays), [entries, now, rangeDays]);
   const longest = useMemo(() => buildTrend(entries, 'longestStretch', now, rangeDays), [entries, now, rangeDays]);
   const wake = useMemo(() => buildTrend(entries, 'wakeWindow', now, rangeDays), [entries, now, rangeDays]);
+  const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', now, rangeDays), [entries, now, rangeDays]);
+  const interval = useMemo(() => buildTrend(entries, 'feedInterval', now, rangeDays), [entries, now, rangeDays]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
 
   useEffect(() => {
@@ -80,6 +82,15 @@ export default function Insights() {
       <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
         caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
         yTicks={[30, 60, 90, 120, 150]} fmtY={(v) => `${v}`} width={width} />
+      <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 2, textTransform: 'uppercase' }}>
+        Feeding
+      </Txt>
+      <TrendCard label="Feeds / day" color={t.activity.feeding} unit="" value={Math.round(lastVal(feeds)).toString()}
+        caption="Typical for age" norm={NORMS.feedsPerDay} birth={birth} points={feeds}
+        yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} />
+      <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
+        norm={NORMS.feedInterval} birth={birth} points={interval}
+        yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} width={width} />
     </View>
   );
 
