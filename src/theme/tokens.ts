@@ -29,6 +29,8 @@ export interface Palette {
   onActivity: string;
   /** CSS box-shadow string (React Native >= 0.81 supports the boxShadow style). */
   shadow: string;
+  insightWet: string;
+  insightDirty: string;
 }
 
 export interface Theme extends Palette {
@@ -51,6 +53,8 @@ const NIGHT: Palette = {
   onPrimary: '#2A170B',
   onActivity: '#1A120B',
   shadow: '0px 12px 40px rgba(0,0,0,0.5)',
+  insightWet: '#5FB0DE',
+  insightDirty: '#C08A5A',
 };
 
 const DAYLIGHT: Palette = {
@@ -68,6 +72,8 @@ const DAYLIGHT: Palette = {
   onPrimary: '#FFFFFF',
   onActivity: '#FFFFFF',
   shadow: '0px 12px 36px rgba(120,86,52,0.16)',
+  insightWet: '#54A6D6',
+  insightDirty: '#B27C4E',
 };
 
 const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
