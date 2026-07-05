@@ -30,7 +30,7 @@ function endPinned(te: TimeEntryState, now: number): number {
   return te.endAbs ?? now - (te.endAgoMin ?? 0) * M;
 }
 function startPinned(te: TimeEntryState, now: number): number {
-  return te.startAbs ?? now;
+  return te.startAbs ?? now - (te.startAgoMin ?? 0) * M;
 }
 
 /** Resulting end timestamp (ms); for ongoing entries this is `now` (live). */

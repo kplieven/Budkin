@@ -10,7 +10,7 @@ import { IconButton } from '@/components/IconButton';
 import { Stepper } from '@/components/Stepper';
 import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
-import { ACTIVITY_LABEL } from '@/lib/activities';
+import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
@@ -69,8 +69,8 @@ export function LogSheet() {
   const toggleSolid = useAppStore((s) => s.toggleSolid);
   const toggleTag = useAppStore((s) => s.toggleTag);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
-  const sleepWoke = useAppStore((s) => s.sleepWoke);
-  const sleepStillSleeping = useAppStore((s) => s.sleepStillSleeping);
+  const setEnded = useAppStore((s) => s.setEnded);
+  const setOngoing = useAppStore((s) => s.setOngoing);
   const save = useAppStore((s) => s.save);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
@@ -79,6 +79,7 @@ export function LogSheet() {
   const type = sheet.type;
   const color = t.activity[type];
   const label = ACTIVITY_LABEL[type];
+  const shortcut = DURATION_SHORTCUTS[type];
   const showVolume = type === 'feeding' && (te.feedType !== 'breast' || te.method === 'bottle');
   const showIntake = type === 'feeding' && te.feedType === 'breast' && te.method !== 'bottle';
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
@@ -114,37 +115,59 @@ export function LogSheet() {
 
       {/* scrollable body */}
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
-        {/* sleep shortcuts */}
-        {type === 'sleep' && (
+        {/* duration shortcuts (every interval activity): "log as just-ended" vs
+            "start a live timer". Highlight tracks te.ongoing so the selected one
+            is always the tinted one. */}
+        {shortcut && (
           <View style={{ flexDirection: 'row', gap: 9, marginBottom: 8 }}>
             <Pressable
-              onPress={sleepWoke}
+              onPress={() => setEnded(0)}
               accessibilityRole="button"
+              accessibilityState={{ selected: !te.ongoing }}
               style={(s) => [
-                { flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: hexA(color, 0.14), borderWidth: 1.5, borderColor: hexA(color, 0.4), cursor: 'pointer' },
-                isHovered(s) && { borderColor: hexA(color, 0.7) },
+                {
+                  flex: 1,
+                  paddingVertical: 13,
+                  paddingHorizontal: 14,
+                  borderRadius: 16,
+                  borderWidth: 1.5,
+                  backgroundColor: !te.ongoing ? hexA(color, 0.14) : t.chip,
+                  borderColor: !te.ongoing ? hexA(color, 0.4) : t.line,
+                  cursor: 'pointer',
+                },
+                isHovered(s) && { borderColor: !te.ongoing ? hexA(color, 0.7) : t.line2 },
               ]}
             >
               <Txt unselectable weight={700} size={15}>
-                Woke up now
+                {shortcut.doneTitle}
               </Txt>
               <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
-                ended this nap
+                {shortcut.doneSub}
               </Txt>
             </Pressable>
             <Pressable
-              onPress={sleepStillSleeping}
+              onPress={() => setOngoing()}
               accessibilityRole="button"
+              accessibilityState={{ selected: !!te.ongoing }}
               style={(s) => [
-                { flex: 1, paddingVertical: 13, paddingHorizontal: 14, borderRadius: 16, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
-                isHovered(s) && { borderColor: t.line2 },
+                {
+                  flex: 1,
+                  paddingVertical: 13,
+                  paddingHorizontal: 14,
+                  borderRadius: 16,
+                  borderWidth: 1.5,
+                  backgroundColor: te.ongoing ? hexA(color, 0.14) : t.chip,
+                  borderColor: te.ongoing ? hexA(color, 0.4) : t.line,
+                  cursor: 'pointer',
+                },
+                isHovered(s) && { borderColor: te.ongoing ? hexA(color, 0.7) : t.line2 },
               ]}
             >
               <Txt unselectable weight={700} size={15}>
-                Still sleeping
+                {shortcut.liveTitle}
               </Txt>
               <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
-                start a live timer
+                {shortcut.liveSub}
               </Txt>
             </Pressable>
           </View>
