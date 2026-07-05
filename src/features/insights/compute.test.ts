@@ -10,8 +10,9 @@ const sleep = (start: number, end: number, nap: boolean): Entry => ({
 describe('buildSleepHeatmap', () => {
   const now = at(2026, 6, 5, 15); // 5 Jul 2026, 3pm
 
-  it('places a night sleep as one contiguous segment in today\'s row', () => {
-    const rows = buildSleepHeatmap([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false)], now);
+  it('places last night’s sleep in the current window when checked in the morning', () => {
+    const morning = at(2026, 6, 5, 10); // before noon → the night’s window is still the current one
+    const rows = buildSleepHeatmap([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false)], morning);
     const today = rows[rows.length - 1];
     expect(today.offsetFromToday).toBe(0);
     expect(today.segments).toHaveLength(1);
@@ -19,6 +20,14 @@ describe('buildSleepHeatmap', () => {
     expect(today.segments[0].x0).toBeCloseTo(8 / 24, 3);
     expect(today.segments[0].x1).toBeCloseTo(18 / 24, 3);
     expect(today.segments[0].nap).toBe(false);
+  });
+
+  it('after noon, last night moves up a row and Today is the fresh (empty) window', () => {
+    const rows = buildSleepHeatmap([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false)], now); // 3pm
+    expect(rows[rows.length - 1].offsetFromToday).toBe(0);
+    expect(rows[rows.length - 1].segments).toHaveLength(0);
+    expect(rows[rows.length - 2].offsetFromToday).toBe(1);
+    expect(rows[rows.length - 2].segments).toHaveLength(1);
   });
 
   it('marks a daytime nap with nap=true at the right x', () => {
@@ -35,9 +44,15 @@ describe('buildSleepHeatmap', () => {
     expect(withSegs).toHaveLength(2);
   });
 
-  it('returns only rows up to the oldest data day (no phantom padding)', () => {
-    const rows = buildSleepHeatmap([sleep(at(2026, 6, 3, 20), at(2026, 6, 4, 6), false)], now);
-    expect(rows.length).toBeLessThanOrEqual(2); // data only ~1–2 days back
+  it('spans oldest data → today inclusive, with no rows older than the data', () => {
+    const rows = buildSleepHeatmap([sleep(at(2026, 6, 3, 20), at(2026, 6, 4, 6), false)], now); // 3pm Jul 5
+    expect(rows).toHaveLength(3); // offsets 2,1,0 — nothing older than the data
+    expect(rows[0].segments).toHaveLength(1);
+    expect(rows[2].segments).toHaveLength(0); // today-so-far, still empty
+  });
+
+  it('returns [] when no sleep falls inside the window', () => {
+    expect(buildSleepHeatmap([], now)).toEqual([]);
   });
 });
 
