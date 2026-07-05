@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { loadQueue } from '@/data/queue';
 import { loadTimers, saveTimers } from '@/data/timers';
+import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
 import { toggleNapFromWidget } from '@/widgets/napToggle';
 import { writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
 
@@ -17,6 +18,11 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
       mem.store.delete(k);
     }),
   },
+}));
+
+vi.mock('@/notifications/postNotification', () => ({
+  postTimerNotification: vi.fn(async () => {}),
+  dismissTimerNotification: vi.fn(async () => {}),
 }));
 
 const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
@@ -37,6 +43,7 @@ const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
 
 beforeEach(() => {
   mem.store.clear();
+  vi.clearAllMocks();
 });
 
 describe('toggleNapFromWidget', () => {
@@ -72,5 +79,22 @@ describe('toggleNapFromWidget', () => {
     expect(next?.sleepStart).toBeNull();
     expect(await loadTimers()).toHaveLength(0);
     expect(await loadQueue()).toHaveLength(0);
+  });
+
+  it('start: posts a sticky notification for the new nap', async () => {
+    await writeWidgetSnapshot(snap({ childName: 'Ada' }));
+    await toggleNapFromWidget(1000);
+    expect(postTimerNotification).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(postTimerNotification).mock.calls[0][0]).toMatchObject({
+      title: 'Ada · Sleep',
+      data: { url: '/timers', timerId: 't1000' },
+    });
+  });
+
+  it('stop: dismisses the nap notification by timer id', async () => {
+    await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await toggleNapFromWidget(5000);
+    expect(dismissTimerNotification).toHaveBeenCalledWith('t1');
   });
 });

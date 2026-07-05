@@ -9,6 +9,8 @@
 import { enqueueEntry } from '@/data/queue';
 import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import { loadTimers, saveTimers } from '@/data/timers';
+import { buildTimerNotification } from '@/notifications/content';
+import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
 import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
 
 export async function toggleNapFromWidget(now: number): Promise<WidgetSnapshot | null> {
@@ -24,14 +26,17 @@ export async function toggleNapFromWidget(now: number): Promise<WidgetSnapshot |
       await enqueueEntry(buildSleepEntry(running, now, snap.selectedChildId));
     }
     await saveTimers(timers.filter((t) => t !== running));
+    await dismissTimerNotification(running.id);
     const next: WidgetSnapshot = { ...snap, sleepStart: null };
     await writeWidgetSnapshot(next);
     return next;
   }
 
   // Start: append a running sleep timer in place.
-  await saveTimers([...timers, startSleepTimer(now)]);
+  const timer = startSleepTimer(now);
+  await saveTimers([...timers, timer]);
   const next: WidgetSnapshot = { ...snap, sleepStart: now };
   await writeWidgetSnapshot(next);
+  await postTimerNotification(buildTimerNotification(timer, snap.childName));
   return next;
 }
