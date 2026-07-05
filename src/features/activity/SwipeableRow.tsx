@@ -48,7 +48,9 @@ export function SwipeableRow({ onDelete, children }: { onDelete: () => void; chi
       rightThreshold={40}
       overshootRight={false}
       renderRightActions={renderRightActions}
-      containerStyle={{ borderRadius: 18 }}
+      // overflow:visible so the whole card (including its own left border) slides
+      // left as one piece, instead of sliding behind the container's fixed clip.
+      containerStyle={{ borderRadius: 18, overflow: 'visible' }}
     >
       {children}
     </ReanimatedSwipeable>
