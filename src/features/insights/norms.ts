@@ -9,18 +9,22 @@ export interface Norm {
   unit: string;
   buckets: NormBucket[];
   source: string;
+  /** When present, the source is shown as a tappable link to the guidance. */
+  sourceUrl?: string;
   disclaimer: string;
 }
 
-const DISCLAIMER = 'General guidance, not medical advice. Ranges vary widely — ask your pediatrician.';
+const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so ask your pediatrician.';
 
 // Sources documented inline. Bands are population ranges, deliberately wide.
 export const NORMS: Record<TrendMetric | 'wet' | 'dirty', Norm> = {
   // National Sleep Foundation / AASM total sleep incl. naps.
-  totalSleep: { kind: 'band', unit: 'h', source: 'National Sleep Foundation / AASM', disclaimer: DISCLAIMER,
+  totalSleep: { kind: 'band', unit: 'h', source: 'National Sleep Foundation',
+    sourceUrl: 'https://www.thensf.org/how-many-hours-of-sleep-do-you-really-need/', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 90, lo: 14, hi: 17 }, { maxAgeDays: 365, lo: 12, hi: 16 }, { maxAgeDays: 730, lo: 11, hi: 14 }] },
   // AAP general feeding frequency guidance.
-  feedsPerDay: { kind: 'band', unit: '/day', source: 'AAP general feeding guidance', disclaimer: DISCLAIMER,
+  feedsPerDay: { kind: 'band', unit: '/day', source: 'AAP (HealthyChildren.org)',
+    sourceUrl: 'https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/default.aspx', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 30, lo: 8, hi: 12 }, { maxAgeDays: 90, lo: 7, hi: 9 }, { maxAgeDays: 180, lo: 5, hi: 7 }, { maxAgeDays: 365, lo: 4, hi: 6 }] },
   // AAP hydration: ~6+ wet/day after the first week. Floor line, no upper bound.
   wet: { kind: 'floor', unit: '/day', source: 'AAP hydration guidance', disclaimer: DISCLAIMER,
