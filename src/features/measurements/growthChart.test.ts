@@ -43,10 +43,24 @@ describe('yTicksFor', () => {
     expect(ticks.every((v) => Number.isFinite(v))).toBe(true);
   });
 
-  it('formats ticks with fmtY, trimming trailing zeros', () => {
+  it('formats ticks from a coarse (integer-step) axis with no decimals', () => {
     const { fmtY } = yTicksFor([{ t: 1, value: 3 }, { t: 2, value: 8 }]);
     expect(fmtY(3)).toBe('3');
-    expect(fmtY(15.5)).toBe('15.5');
+    expect(fmtY(8)).toBe('8');
+  });
+
+  it('formats ticks from a tight axis with distinct labels (regression: close readings)', () => {
+    const { ticks, fmtY } = yTicksFor([{ t: 1, value: 5.2 }, { t: 2, value: 5.23 }]);
+    expect(new Set(ticks.map(fmtY)).size).toBe(ticks.length);
+    expect(fmtY(5.2)).not.toBe(fmtY(5.21));
+  });
+
+  it('returns finite, strictly ascending ticks bracketing a single point', () => {
+    const { ticks } = yTicksFor([{ t: 1, value: 7 }]);
+    expect(ticks[0]).toBeLessThan(7);
+    expect(ticks[ticks.length - 1]).toBeGreaterThan(7);
+    expect(ticks.every((v) => Number.isFinite(v))).toBe(true);
+    for (let i = 1; i < ticks.length; i++) expect(ticks[i]).toBeGreaterThan(ticks[i - 1]);
   });
 });
 
