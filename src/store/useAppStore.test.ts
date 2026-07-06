@@ -1025,9 +1025,10 @@ describe('insights slice', () => {
   });
 
   it('selectChild resets the insights cache', () => {
-    useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any] });
+    useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any], insightsError: true });
     useAppStore.getState().selectChild('c2');
     expect(useAppStore.getState().insightsLoaded).toBe(false);
     expect(useAppStore.getState().insightsEntries).toEqual([]);
+    expect(useAppStore.getState().insightsError).toBe(false);
   });
 });

@@ -53,6 +53,7 @@ export default function Insights() {
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const loadInsights = useAppStore((s) => s.loadInsights);
   const now = useAppStore((s) => s.now);
@@ -81,9 +82,10 @@ export default function Insights() {
   const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
     enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
+  // Re-run on child switch — selectChild resets the cache, this refills it.
   useEffect(() => {
     loadInsights();
-  }, [loadInsights]);
+  }, [loadInsights, selectedChildId]);
 
   const body = (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>

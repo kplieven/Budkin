@@ -487,7 +487,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // ---- child switcher ----
   selectChild: (id) =>
-    set({ selectedChildId: id, showChildSwitcher: false, insightsLoaded: false, insightsEntries: [] }),
+    set({
+      selectedChildId: id,
+      showChildSwitcher: false,
+      insightsLoaded: false,
+      insightsEntries: [],
+      insightsError: false,
+    }),
   openSwitcher: () => set({ showChildSwitcher: true }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
 
