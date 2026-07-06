@@ -57,20 +57,24 @@ export default function Insights() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const loadInsights = useAppStore((s) => s.loadInsights);
   const now = useAppStore((s) => s.now);
+  // Insights is retrospective: hour-quantized `now` keeps memos stable between
+  // ticks. Hours align with the noon boundary, so the heatmap's Today-window
+  // anchor still rolls over exactly at 12:00.
+  const nowH = Math.floor(now / 3600000) * 3600000;
   const entries = useAppStore((s) => s.insightsEntries);
   const [width, setWidth] = useState(0);
-  const heatRows = useMemo(() => buildSleepHeatmap(entries, now, 28), [entries, now]);
+  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28), [entries, nowH]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
   const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
 
-  const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', now, rangeDays), [entries, now, rangeDays]);
-  const longest = useMemo(() => buildTrend(entries, 'longestStretch', now, rangeDays), [entries, now, rangeDays]);
-  const wake = useMemo(() => buildTrend(entries, 'wakeWindow', now, rangeDays), [entries, now, rangeDays]);
-  const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', now, rangeDays), [entries, now, rangeDays]);
-  const interval = useMemo(() => buildTrend(entries, 'feedInterval', now, rangeDays), [entries, now, rangeDays]);
-  const diapers = useMemo(() => buildDiaperSeries(entries, now, rangeDays), [entries, now, rangeDays]);
+  const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', nowH, rangeDays), [entries, nowH, rangeDays]);
+  const longest = useMemo(() => buildTrend(entries, 'longestStretch', nowH, rangeDays), [entries, nowH, rangeDays]);
+  const wake = useMemo(() => buildTrend(entries, 'wakeWindow', nowH, rangeDays), [entries, nowH, rangeDays]);
+  const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', nowH, rangeDays), [entries, nowH, rangeDays]);
+  const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays), [entries, nowH, rangeDays]);
+  const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays), [entries, nowH, rangeDays]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
 
   const loaded = useAppStore((s) => s.insightsLoaded);
@@ -138,7 +142,7 @@ export default function Insights() {
       {gated(wake, 'wake window', (
         <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
           caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
-          yTicks={[30, 60, 90, 120, 150]} fmtY={(v) => `${v}`} width={width} />
+          yTicks={[0, 60, 120, 180, 240]} fmtY={(v) => `${v}`} width={width} />
       ))}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 2, textTransform: 'uppercase' }}>
         Feeding
