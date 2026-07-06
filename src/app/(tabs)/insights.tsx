@@ -196,7 +196,8 @@ export default function Insights() {
       </ScrollView>
     );
 
-  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
+  // Order matters: a failed load leaves insightsLoaded=false, so the error
+  // check must come FIRST or the error/retry state is unreachable.
   if (error)
     return frame(
       <CenteredState
@@ -205,5 +206,6 @@ export default function Insights() {
         action={{ label: 'Try again', onPress: () => { useAppStore.setState({ insightsLoading: false }); loadInsights(); } }}
       />,
     );
+  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
   return frame(body);
 }
