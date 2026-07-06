@@ -95,7 +95,7 @@ export default function Insights() {
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 6 }}>
         {RANGES.map(([lbl, d]) => (
-          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
+          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" accessibilityState={{ selected: rangeDays === d }} style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
             <Txt weight={rangeDays === d ? 700 : 600} size={13} color={rangeDays === d ? t.text : t.dim}>{lbl}</Txt>
           </Pressable>
         ))}

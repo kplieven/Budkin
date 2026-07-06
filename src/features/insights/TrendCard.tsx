@@ -47,13 +47,19 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
       <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={width - 32} />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
-        <Pressable onPress={() => setInfo(false)} style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.35)', justifyContent: 'center', padding: 32 }}>
+        <View style={{ flex: 1, justifyContent: 'center', padding: 32 }}>
+          {/* Scrim is a sibling of the content, not its parent — tapping the
+              sheet must not bubble into this Pressable and dismiss it. */}
+          <Pressable
+            onPress={() => setInfo(false)}
+            style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' }}
+          />
           <View style={{ backgroundColor: t.surface, borderRadius: 18, padding: 20, gap: 8 }}>
             <Txt weight={700} size={15}>{label}</Txt>
             <Txt weight={500} size={13} color={t.dim}>Source: {norm.source || '—'}</Txt>
             <Txt weight={500} size={12.5} color={t.faint} style={{ lineHeight: 18 }}>{norm.disclaimer}</Txt>
           </View>
-        </Pressable>
+        </View>
       </Modal>
     </View>
   );
