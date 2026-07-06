@@ -22,7 +22,7 @@ function KeepLogging({ what }: { what: string }) {
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 20, marginTop: 12 }}>
       <Txt weight={600} size={13.5} color={t.dim} style={{ lineHeight: 20 }}>
-        Keep logging — your {what} chart appears after a few days.
+        Your {what} chart will appear after a few days of logging.
       </Txt>
     </View>
   );
@@ -119,12 +119,12 @@ export default function Insights() {
             </View>
           </View>
         </View>
-        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks · midnight-centred</Txt>
+        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks, midnight in the middle</Txt>
         {daysWithSleep >= 7 ? (
           <SleepHeatmap rows={heatRows} width={width - 30} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
-            Keep logging sleep — the rhythm heatmap appears after about a week.
+            Log about a week of sleep to see the rhythm heatmap here.
           </Txt>
         )}
       </View>
@@ -213,6 +213,6 @@ export default function Insights() {
         action={{ label: 'Try again', onPress: () => { useAppStore.setState({ insightsLoading: false }); loadInsights(); } }}
       />,
     );
-  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="Gathering the last few weeks of sleep, feeds and diapers." />);
+  if (!loaded) return frame(<CenteredState title="Loading insights…" subtitle="This can take a moment the first time." />);
   return frame(body);
 }

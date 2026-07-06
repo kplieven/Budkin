@@ -1,3 +1,4 @@
+import { openBrowserAsync } from 'expo-web-browser';
 import { useState } from 'react';
 import { Modal, Pressable, View } from 'react-native';
 
@@ -56,7 +57,25 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
           />
           <View style={{ backgroundColor: t.surface, borderRadius: 18, padding: 20, gap: 8 }}>
             <Txt weight={700} size={15}>{label}</Txt>
-            <Txt weight={500} size={13} color={t.dim}>Source: {norm.source || '—'}</Txt>
+            {norm.source ? (
+              <Txt weight={500} size={13} color={t.dim}>
+                Source:{' '}
+                {norm.sourceUrl ? (
+                  <Txt
+                    weight={600}
+                    size={13}
+                    color={color}
+                    style={{ textDecorationLine: 'underline' }}
+                    accessibilityRole="link"
+                    onPress={() => openBrowserAsync(norm.sourceUrl!)}
+                  >
+                    {norm.source}
+                  </Txt>
+                ) : (
+                  norm.source
+                )}
+              </Txt>
+            ) : null}
             <Txt weight={500} size={12.5} color={t.faint} style={{ lineHeight: 18 }}>{norm.disclaimer}</Txt>
           </View>
         </View>
