@@ -20,11 +20,6 @@ function niceNum(range: number, round: boolean): number {
   return nice * 10 ** exp;
 }
 
-const fmtY = (v: number): string => {
-  const r = Math.round(v * 10) / 10;
-  return Number.isInteger(r) ? String(r) : r.toFixed(1);
-};
-
 /** Ascending "nice" y-axis ticks spanning the data, with headroom. */
 export function yTicksFor(points: TrendPoint[]): { ticks: number[]; fmtY: (v: number) => string } {
   const vals = points.map((p) => p.value);
@@ -42,6 +37,8 @@ export function yTicksFor(points: TrendPoint[]): { ticks: number[]; fmtY: (v: nu
   for (let v = niceLo; v <= niceHi + step * 0.5; v += step) {
     ticks.push(Math.round(v * 1000) / 1000);
   }
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)));
+  const fmtY = (v: number): string => v.toFixed(decimals);
   return { ticks, fmtY };
 }
 
