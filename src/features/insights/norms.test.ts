@@ -24,4 +24,19 @@ describe('bandForRange', () => {
     const band = bandForRange(NORMS.totalSleep, birth, [{ t: birth + 5000 * DAY }])!;
     expect(band.lo[0]).toBe(11);
   });
+
+  it('a floor norm (wet) has no upper bound: hi falls back to lo', () => {
+    const young = birth + 2 * DAY;   // <=5d bucket → lo 4
+    const older = birth + 30 * DAY;  // later bucket → lo 6
+    const band = bandForRange(NORMS.wet, birth, [{ t: young }, { t: older }])!;
+    expect(band.lo[0]).toBe(4);
+    expect(band.hi[0]).toBe(band.lo[0]);
+    expect(band.lo[1]).toBe(6);
+    expect(band.hi[1]).toBe(band.lo[1]);
+  });
+
+  it('a ruleOfThumb norm (wakeWindow) yields a real band with hi above lo', () => {
+    const band = bandForRange(NORMS.wakeWindow, birth, [{ t: birth + 30 * DAY }])!;
+    expect(band.hi[0]).toBeGreaterThan(band.lo[0]);
+  });
 });

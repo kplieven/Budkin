@@ -4,7 +4,7 @@ import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
 import { teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection } from '@/data/storage';
-import { loadFromServer } from '@/data/repository';
+import { loadFromServer, loadInsightsHistory } from '@/data/repository';
 import { saveTimers } from '@/data/timers';
 import type { Entry, Timer } from '@/types/models';
 
@@ -95,6 +95,7 @@ vi.mock('@/data/repository', () => ({
   deleteMeasurementFromServer: vi.fn(async (_c: unknown, kind: unknown, id: unknown) => {
     h.measDeleted.push({ kind, id });
   }),
+  loadInsightsHistory: vi.fn(async () => []),
 }));
 
 const NOW = 1_700_000_000_000;
@@ -1029,6 +1030,49 @@ describe('insights slice', () => {
     useAppStore.getState().selectChild('c2');
     expect(useAppStore.getState().insightsLoaded).toBe(false);
     expect(useAppStore.getState().insightsEntries).toEqual([]);
+    expect(useAppStore.getState().insightsError).toBe(false);
+  });
+
+  it('loadInsights in non-demo mode fetches deep history from the server', async () => {
+    useAppStore.setState({
+      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
+      { id: 'r1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
+    ]);
+    await useAppStore.getState().loadInsights();
+    expect(loadInsightsHistory).toHaveBeenCalledWith(
+      { demo: false, serverUrl: 'x', token: 'y' },
+      'c1',
+      expect.any(Number),
+    );
+    const s = useAppStore.getState();
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['r1']);
+    expect(s.insightsLoaded).toBe(true);
+  });
+
+  it('loadInsights surfaces an error and recovers on retry', async () => {
+    useAppStore.setState({
+      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    vi.mocked(loadInsightsHistory).mockRejectedValueOnce(new Error('network'));
+    await useAppStore.getState().loadInsights();
+    expect(useAppStore.getState().insightsError).toBe(true);
+    expect(useAppStore.getState().insightsLoading).toBe(false);
+    expect(useAppStore.getState().insightsLoaded).toBe(false);
+
+    // Retry: the CenteredState error view resets insightsLoading before
+    // calling loadInsights again — mirror that here.
+    vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
+      { id: 'r2', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
+    ]);
+    useAppStore.setState({ insightsLoading: false });
+    await useAppStore.getState().loadInsights();
+    expect(useAppStore.getState().insightsLoaded).toBe(true);
     expect(useAppStore.getState().insightsError).toBe(false);
   });
 });
