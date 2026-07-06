@@ -5,9 +5,10 @@ import { useTheme } from '@/theme/useTheme';
 import type { TrendPoint } from './compute';
 import type { Band } from './norms';
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'start', xEndLabel = 'Today' }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
+  xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
 }) {
   const t = useTheme();
   if (width <= 0) return null;
@@ -16,7 +17,14 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   const height = top + plotH + axisH;
   const yMin = Math.min(...yTicks), yMax = Math.max(...yTicks);
   const yv = (v: number) => top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
-  const xv = (i: number) => gx + (points.length <= 1 ? 0.5 : i / (points.length - 1)) * gw;
+  const tMin = points.length ? points[0].t : 0;
+  const tMax = points.length ? points[points.length - 1].t : 1;
+  const xFrac = (i: number) => {
+    if (points.length <= 1) return 0.5;
+    if (xMode === 'time' && tMax > tMin) return (points[i].t - tMin) / (tMax - tMin);
+    return i / (points.length - 1);
+  };
+  const xv = (i: number) => gx + xFrac(i) * gw;
 
   const area = (hi: number[], lo: number[]) => {
     let d = '';
@@ -44,8 +52,8 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {yTicks.map((v, i) => (
         <SvgText key={`y${i}`} x={gx - 6} y={yv(v) + 3.5} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="end">{fmtY(v)}</SvgText>
       ))}
-      <SvgText x={gx} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="start">start</SvgText>
-      <SvgText x={gx + gw} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="end">Today</SvgText>
+      <SvgText x={gx} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="start">{xStartLabel}</SvgText>
+      <SvgText x={gx + gw} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="end">{xEndLabel}</SvgText>
       <Path d={line} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
       {points.length ? (
         <Circle cx={xv(points.length - 1)} cy={yv(points[points.length - 1].value)} r={3.6} fill={color} stroke={t.surface} strokeWidth={1.8} />
