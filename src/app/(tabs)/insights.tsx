@@ -56,11 +56,12 @@ export default function Insights() {
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const loadInsights = useAppStore((s) => s.loadInsights);
-  const now = useAppStore((s) => s.now);
   // Insights is retrospective: hour-quantized `now` keeps memos stable between
-  // ticks. Hours align with the noon boundary, so the heatmap's Today-window
-  // anchor still rolls over exactly at 12:00.
-  const nowH = Math.floor(now / 3600000) * 3600000;
+  // ticks, and quantizing inside the selector means the per-second store tick
+  // doesn't re-render this screen at all. The heatmap's Today-window anchor
+  // rolls over within the hour of the noon boundary (exact in whole-hour
+  // timezones).
+  const nowH = useAppStore((s) => Math.floor(s.now / 3600000) * 3600000);
   const entries = useAppStore((s) => s.insightsEntries);
   const [width, setWidth] = useState(0);
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28), [entries, nowH]);

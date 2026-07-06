@@ -1053,6 +1053,36 @@ describe('insights slice', () => {
     expect(s.insightsLoaded).toBe(true);
   });
 
+  it('discards an in-flight fetch when the child switches mid-load and reloads for the new child', async () => {
+    vi.mocked(loadInsightsHistory).mockClear();
+    useAppStore.setState({
+      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    // First call: a manually-controlled deferred so we can switch children
+    // while the 90-day fetch is still in flight.
+    let resolveC1!: (v: Entry[]) => void;
+    vi.mocked(loadInsightsHistory).mockImplementationOnce(
+      () => new Promise<Entry[]>((r) => { resolveC1 = r; }),
+    );
+    const inFlight = useAppStore.getState().loadInsights(); // c1 fetch starts
+    useAppStore.getState().selectChild('c2'); // switch lands mid-flight
+    resolveC1([{ id: 'a1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any]);
+    await inFlight;
+    await flush(); // let the re-triggered c2 load settle (default mock resolves [])
+
+    const st = useAppStore.getState();
+    // c1's stale entries must NOT be stored under c2...
+    expect(st.insightsEntries.map((e) => e.id)).not.toContain('a1');
+    // ...and a fresh load for c2 must have been kicked off.
+    expect(loadInsightsHistory).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(loadInsightsHistory).mock.calls[1][1]).toBe('c2');
+    expect(st.insightsEntries).toEqual([]); // c2's (empty) result
+    expect(st.insightsLoaded).toBe(true);
+    expect(st.insightsLoading).toBe(false);
+  });
+
   it('loadInsights surfaces an error and recovers on retry', async () => {
     useAppStore.setState({
       connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
