@@ -511,6 +511,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const entries = conn.demo
         ? s.entries.filter((e) => e.childId === childId)
         : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      if (get().selectedChildId !== childId) {
+        // A child switch landed while this fetch was in flight — discard the
+        // stale result and load for the now-selected child instead.
+        set({ insightsLoading: false });
+        get().loadInsights();
+        return;
+      }
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
