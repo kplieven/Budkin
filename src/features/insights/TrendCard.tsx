@@ -5,6 +5,7 @@ import { Modal, Pressable, View } from 'react-native';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
+import { xTicksFor } from '@/features/measurements/growthChart';
 import type { TrendPoint } from './compute';
 import { bandForRange, type Norm } from './norms';
 import { TrendChart } from './TrendChart';
@@ -21,6 +22,10 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
   const [info, setInfo] = useState(false);
   const band = bandForRange(norm, birth, points);
   const ruleOfThumb = norm.kind === 'ruleOfThumb';
+  const chartW = width - 32;
+  // Calendar-nice date ticks across the range (same helper the growth chart
+  // uses); it adapts the label from day -> month -> year as the span grows.
+  const { ticks: xTicks, fmtX } = xTicksFor(points, Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)));
 
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 16, marginTop: 12 }}>
@@ -41,16 +46,14 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8, marginBottom: 6 }}>
         <Txt weight={800} size={24} tracking={-0.4}>{value}</Txt>
         {unit ? <Txt weight={600} size={13} color={t.dim}>{unit}</Txt> : null}
+        {todaySoFar ? <Txt weight={500} size={12.5} color={t.faint}>today so far</Txt> : null}
         {delta ? (
           <View style={{ backgroundColor: good ? hexA('#3E9E6E', 0.14) : t.chip, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 }}>
             <Txt weight={700} size={11.5} color={good ? '#3E9E6E' : t.faint}>{delta}</Txt>
           </View>
         ) : null}
       </View>
-      {todaySoFar ? (
-        <Txt weight={500} size={11.5} color={t.faint} style={{ marginTop: -2, marginBottom: 8 }}>today so far</Txt>
-      ) : null}
-      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={width - 32} dots="all" hover unit={unit} fmtHoverDate={fmtDate} />
+      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
