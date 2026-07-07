@@ -7,7 +7,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { ActivityRow } from '@/features/activity/ActivityRow';
+import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { SwipeableRow } from '@/features/activity/SwipeableRow';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -57,30 +57,37 @@ export default function History() {
       </View>
     ) : (
       groups.map((g) => (
-        <View key={g.label} style={{ marginBottom: 18 }}>
-          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 9, textTransform: 'uppercase' }}>
+        <View key={g.label} style={{ marginBottom: 14 }}>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 6, textTransform: 'uppercase' }}>
             {g.label}
           </Txt>
-          {/* Desktop: two-up grid (web handoff). Phone: single column with
-              swipe-to-delete (mouse-driven desktop keeps plain rows). */}
-          <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 11 } : { gap: 8 }}>
-            {g.items.map((e) =>
-              desktop ? (
-                <View key={e.id} style={{ flexBasis: '48%', flexGrow: 1, minWidth: 280 }}>
-                  <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
-                </View>
+          {/* A continuous timeline spine per day. Phone rows swipe to delete;
+              the mouse-driven desktop keeps plain rows (tap to edit). */}
+          <View>
+            {g.items.map((e, i) => {
+              const row = (
+                <TimelineEntry
+                  entry={e}
+                  now={now}
+                  onPress={() => openEdit(e.id)}
+                  isFirst={i === 0}
+                  isLast={i === g.items.length - 1}
+                />
+              );
+              return desktop ? (
+                <View key={e.id}>{row}</View>
               ) : (
                 <SwipeableRow key={e.id} onDelete={() => deleteEntry(e.id)}>
-                  <ActivityRow entry={e} now={now} onPress={() => openEdit(e.id)} />
+                  {row}
                 </SwipeableRow>
-              ),
-            )}
+              );
+            })}
           </View>
         </View>
       ))
     );
 
-  if (desktop) return <DesktopPage maxWidth={760}>{body}</DesktopPage>;
+  if (desktop) return <DesktopPage maxWidth={600}>{body}</DesktopPage>;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
