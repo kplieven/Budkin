@@ -23,14 +23,14 @@ const timer = (over: Partial<Timer> = {}): Timer => ({
 });
 
 describe('formatClock', () => {
-  it('formats afternoon as 12-hour with PM', () => {
-    expect(formatClock(at(14, 45))).toBe('2:45 PM');
+  it('formats afternoon in 24-hour', () => {
+    expect(formatClock(at(14, 45))).toBe('14:45');
   });
-  it('formats midnight hour as 12 AM and pads minutes', () => {
-    expect(formatClock(at(0, 5))).toBe('12:05 AM');
+  it('formats midnight hour as 00 and pads minutes', () => {
+    expect(formatClock(at(0, 5))).toBe('00:05');
   });
-  it('formats noon as 12 PM', () => {
-    expect(formatClock(at(12, 0))).toBe('12:00 PM');
+  it('formats noon as 12:00', () => {
+    expect(formatClock(at(12, 0))).toBe('12:00');
   });
 });
 
@@ -39,7 +39,7 @@ describe('buildTimerNotification', () => {
     expect(buildTimerNotification(timer(), 'Ellie')).toEqual({
       identifier: 't1',
       title: 'Ellie · Feeding',
-      body: 'Started 2:45 PM',
+      body: 'Started 14:45',
       data: { url: '/timers', timerId: 't1' },
     });
   });
@@ -55,7 +55,7 @@ describe('diffTimerNotifications', () => {
   const a: TimerNotification = {
     identifier: 't1',
     title: 'Ellie · Feeding',
-    body: 'Started 2:45 PM',
+    body: 'Started 14:45',
     data: { url: '/timers', timerId: 't1' },
   };
 
@@ -69,7 +69,7 @@ describe('diffTimerNotifications', () => {
     expect(diffTimerNotifications([a], [])).toEqual({ toPost: [], toDismiss: ['t1'] });
   });
   it('re-posts when the content changed for the same id', () => {
-    const a2 = { ...a, body: 'Started 3:10 PM' };
+    const a2 = { ...a, body: 'Started 15:10' };
     expect(diffTimerNotifications([a], [a2])).toEqual({ toPost: [a2], toDismiss: [] });
   });
 });
