@@ -60,9 +60,11 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
           start at its foot. Point events show their single time at the head. */}
       <View style={{ width: TIME_W, paddingRight: 8 }}>
         {isPoint ? (
-          <Txt weight={600} size={13.5} style={{ fontVariant: ['tabular-nums'], textAlign: 'right', marginTop: NODE_TOP - 7 }}>
-            {fmtClock(start)}
-          </Txt>
+          <View style={{ position: 'absolute', right: 8, top: NODE_TOP, height: DOT, justifyContent: 'center' }}>
+            <Txt weight={600} size={13.5} style={{ fontVariant: ['tabular-nums'], textAlign: 'right' }}>
+              {fmtClock(start)}
+            </Txt>
+          </View>
         ) : (
           <>
             {endTs != null ? (
