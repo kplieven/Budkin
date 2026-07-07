@@ -112,9 +112,10 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'tummy':
+      // 4-point sparkle (milestone metaphor): tummy time is where milestones get logged.
       return (
         <Svg {...common}>
-          <Path d="M12 3l1.9 5.2 5.6.3-4.4 3.5 1.5 5.4L12 19.6 7.9 20.1l1.5-5.4L5 14l5.6-.3z" fill={color} />
+          <Path d="M12 2 Q14.4 9.6 22 12 Q14.4 14.4 12 22 Q9.6 14.4 2 12 Q9.6 9.6 12 2 Z" fill={color} />
         </Svg>
       );
     case 'timer':
