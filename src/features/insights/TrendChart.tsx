@@ -99,13 +99,16 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
 
   // Dots are 2–3px, too small to hover, so overlay enlarged hit-targets and
   // float a value+date tooltip, clamped to stay inside the chart's width.
-  const HIT = 22, TIP_W = 128;
+  const HIT = 22, TIP_W = 128, TIP_GAP = 12;
   const ai = hoverIdx;
   const ap = ai != null ? points[ai] : null;
   const apx = ai != null ? xv(ai) : 0;
   const apy = ap ? yv(ap.value) : 0;
   const tipLeft = Math.max(0, Math.min(apx - TIP_W / 2, Math.max(0, width - TIP_W)));
-  const tipTop = apy - 44 >= 0 ? apy - 44 : apy + 12;
+  // Prefer BELOW the dot (it never overlaps there); flip above only for
+  // low points, anchored by its bottom edge so it clears the dot regardless
+  // of the tooltip's own height.
+  const tipV = apy <= height / 2 ? { top: apy + TIP_GAP } : { bottom: height - apy + TIP_GAP };
   return (
     <View style={{ width, height, position: 'relative' }}>
       {chart}
@@ -120,7 +123,7 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {ap ? (
         <View
           pointerEvents="none"
-          style={{ position: 'absolute', left: tipLeft, top: tipTop, width: TIP_W, alignItems: 'center', backgroundColor: t.elevated, borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 10, boxShadow: t.shadow }}
+          style={{ position: 'absolute', left: tipLeft, ...tipV, width: TIP_W, alignItems: 'center', backgroundColor: t.elevated, borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 10, boxShadow: t.shadow }}
         >
           <Txt weight={700} size={13}>{numLabel(ap.value)}{unit ? ` ${unit}` : ''}</Txt>
           {fmtHoverDate ? <Txt weight={500} size={11.5} color={t.faint} style={{ marginTop: 1 }}>{fmtHoverDate(ap.t)}</Txt> : null}
