@@ -6,7 +6,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend } from '@/features/insights/compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, DAY } from '@/features/insights/compute';
 import { NORMS } from '@/features/insights/norms';
 import { DiaperBars } from '@/features/insights/DiaperBars';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
@@ -77,6 +77,9 @@ export default function Insights() {
   const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays), [entries, nowH, rangeDays]);
   const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays), [entries, nowH, rangeDays]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
+  // The big number is the current (partial) window's value — only call it
+  // "today so far" when that last point really is today's window.
+  const isToday = (pts: { t: number }[]) => pts.length > 0 && nowH - pts[pts.length - 1].t < DAY;
 
   const loaded = useAppStore((s) => s.insightsLoaded);
   const error = useAppStore((s) => s.insightsError);
@@ -132,12 +135,12 @@ export default function Insights() {
       {gated(totalSleep, 'total sleep', (
         <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
           caption="Typical for age" norm={NORMS.totalSleep} birth={birth} points={totalSleep}
-          yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} />
+          yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} todaySoFar={isToday(totalSleep)} />
       ))}
       {gated(longest, 'longest stretch', (
         <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
           caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
-          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width}
+          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width} todaySoFar={isToday(longest)}
           delta={stretchDelta >= 0.5 ? `+${stretchDelta.toFixed(1)}h` : undefined} good />
       ))}
       {gated(wake, 'wake window', (
@@ -151,7 +154,7 @@ export default function Insights() {
       {gated(feeds, 'feeds per day', (
         <TrendCard label="Feeds / day" color={t.activity.feeding} unit="" value={Math.round(lastVal(feeds)).toString()}
           caption="Typical for age" norm={NORMS.feedsPerDay} birth={birth} points={feeds}
-          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} />
+          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} todaySoFar={isToday(feeds)} />
       ))}
       {gated(interval, 'feed interval', (
         <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
