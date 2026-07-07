@@ -6,7 +6,7 @@ import { useTheme } from '@/theme/useTheme';
 import type { TrendPoint } from './compute';
 import type { Band } from './norms';
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Started', xEndLabel = 'Today', xTicks, fmtX, dots = 'last' }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last' }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;

@@ -22,13 +22,10 @@ export interface TimerNotification {
   data: { url: string; timerId: string };
 }
 
-/** "2:45 PM" — local 12-hour clock, timezone-agnostic in tests via local Date input. */
+/** "14:45" — local 24-hour clock (nl-BE), timezone-agnostic in tests via local Date input. */
 export function formatClock(ms: number): string {
   const d = new Date(ms);
-  const ampm = d.getHours() >= 12 ? 'PM' : 'AM';
-  let h = d.getHours() % 12;
-  if (h === 0) h = 12;
-  return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`;
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 export function buildTimerNotification(timer: Timer, childName: string): TimerNotification {

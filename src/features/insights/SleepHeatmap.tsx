@@ -7,7 +7,7 @@ import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import { DAY, noonWindowStart, type HeatRow } from './compute';
 
-const HOUR_TICKS: [string, number][] = [['12 PM', 0], ['6 PM', 6], ['12 AM', 12], ['6 AM', 18], ['12 PM', 24]];
+const HOUR_TICKS: [string, number][] = [['12:00', 0], ['18:00', 6], ['00:00', 12], ['06:00', 18], ['12:00', 24]];
 const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
 
 export function SleepHeatmap({ rows, width, now }: { rows: HeatRow[]; width: number; now: number }) {
@@ -55,7 +55,7 @@ export function SleepHeatmap({ rows, width, now }: { rows: HeatRow[]; width: num
           );
         })}
         {HOUR_TICKS.map(([lbl, h], i) => (
-          <SvgText key={`l${i}`} x={xAt(h)} y={top + gh + 15} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="middle">
+          <SvgText key={`l${i}`} x={xAt(h)} y={top + gh + 15} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor={h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}>
             {lbl}
           </SvgText>
         ))}
