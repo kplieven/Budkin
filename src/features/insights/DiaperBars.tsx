@@ -12,7 +12,7 @@ export function DiaperBars({ data, width }: { data: DiaperDay[]; width: number }
   const bx = left, bw = Math.max(0, width - left - right);
   const height = top + plotH + axisH;
   const maxV = Math.max(3, ...days.map((d) => Math.max(d.wet, d.dirty)));
-  const floor = 6; // AAP wet-diaper reference
+  const floor = 6; // NHS: 6+ wet nappies/day (from ~day 5)
   const slot = bw / days.length, barW = Math.min(9, slot * 0.32);
   const yv = (v: number) => top + plotH - (v / maxV) * plotH;
 
