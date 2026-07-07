@@ -13,7 +13,7 @@ import type { Band } from './norms';
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
 const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate, calendarBands = false }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate, calendarBands = false, dashGaps = false }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
@@ -22,6 +22,8 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   hover?: boolean; unit?: string; fmtHoverDate?: (t: number) => string;
   /** Time mode: shade weekends (short spans) or alternating months (long spans) behind the plot. */
   calendarBands?: boolean;
+  /** Time mode: solid line for consecutive days, dashed across missed-day gaps. */
+  dashGaps?: boolean;
 }) {
   const t = useTheme();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -50,6 +52,24 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
     return d + 'Z';
   };
   const line = points.map((p, i) => `${i ? 'L' : 'M'} ${xv(i).toFixed(1)} ${yv(p.value).toFixed(1)}`).join(' ');
+
+  // Daily insights data: draw contiguous days with a solid line and bridge gaps
+  // (missed days) with a dashed segment, so a sparse log doesn't look like a
+  // smooth run of consecutive days.
+  const daily = dashGaps && xMode === 'time' && points.length >= 2;
+  let solidD = '', dashD = '';
+  if (daily) {
+    for (let i = 0; i < points.length; i++) {
+      const px = xv(i).toFixed(1), py = yv(points[i].value).toFixed(1);
+      if (i === 0) { solidD = `M ${px} ${py}`; continue; }
+      if (points[i].t - points[i - 1].t > DAY_MS * 1.5) {
+        dashD += `M ${xv(i - 1).toFixed(1)} ${yv(points[i - 1].value).toFixed(1)} L ${px} ${py} `;
+        solidD += ` M ${px} ${py}`;
+      } else {
+        solidD += ` L ${px} ${py}`;
+      }
+    }
+  }
 
   // Calendar backdrop (insights only). Short spans shade each weekend column;
   // longer spans (3 months) shade alternating months instead — weekend stripes
@@ -98,7 +118,14 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {yTicks.map((v, i) => (
         <Line key={i} x1={gx} y1={yv(v)} x2={gx + gw} y2={yv(v)} stroke={t.line} strokeWidth={1} opacity={0.6} />
       ))}
-      <Path d={line} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+      {daily ? (
+        <>
+          <Path d={solidD} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+          {dashD ? <Path d={dashD} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeDasharray="4 4" opacity={0.5} /> : null}
+        </>
+      ) : (
+        <Path d={line} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+      )}
       {dots === 'all' ? (
         points.map((p, i) => (
           <Circle key={`d${i}`} cx={xv(i)} cy={yv(p.value)} r={dotR} fill={color} stroke={t.surface} strokeWidth={1.4} />
