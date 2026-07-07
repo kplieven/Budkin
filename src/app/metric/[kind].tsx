@@ -47,15 +47,28 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
 
   const body = (
     <>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: change ? 4 : 16 }}>
-        {latest ? (
-          <>
-            <Txt weight={800} size={34} tracking={-0.6}>{latest.value}</Txt>
-            {meta.unit ? <Txt weight={600} size={16} color={t.dim}>{meta.unit}</Txt> : null}
-          </>
-        ) : (
-          <Txt weight={700} size={20} color={t.dim}>No data yet</Txt>
-        )}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: change ? 4 : 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexShrink: 1 }}>
+          {latest ? (
+            <>
+              <Txt weight={800} size={34} tracking={-0.6}>{latest.value}</Txt>
+              {meta.unit ? <Txt weight={600} size={16} color={t.dim}>{meta.unit}</Txt> : null}
+            </>
+          ) : (
+            <Txt weight={700} size={20} color={t.dim}>No data yet</Txt>
+          )}
+        </View>
+        <Pressable
+          onPress={() => openMeasurement(kind)}
+          accessibilityRole="button"
+          accessibilityLabel={`Add ${meta.label.toLowerCase()}`}
+          style={(s) => [
+            { flexDirection: 'row', alignItems: 'center', height: 38, paddingHorizontal: 15, borderRadius: 13, backgroundColor: meta.color, boxShadow: `0px 5px 14px ${hexA(meta.color, 0.32)}`, cursor: 'pointer' },
+            isHovered(s) && { boxShadow: `0px 5px 16px ${hexA(meta.color, 0.5)}` },
+          ]}
+        >
+          <Txt unselectable weight={800} size={14.5} color={t.onActivity}>+ Add</Txt>
+        </Pressable>
       </View>
       {change ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16 }}>
@@ -114,17 +127,6 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
           ))}
         </View>
       )}
-
-      <Pressable
-        onPress={() => openMeasurement(kind)}
-        accessibilityRole="button"
-        style={(s) => [
-          { height: 56, borderRadius: 18, backgroundColor: meta.color, alignItems: 'center', justifyContent: 'center', boxShadow: `0px 8px 22px ${hexA(meta.color, 0.35)}`, cursor: 'pointer' },
-          isHovered(s) && { boxShadow: `0px 8px 22px ${hexA(meta.color, 0.5)}` },
-        ]}
-      >
-        <Txt unselectable weight={800} size={16.5} color={t.onActivity}>+ Add {meta.short.toLowerCase()}</Txt>
-      </Pressable>
     </>
   );
 
