@@ -1,18 +1,28 @@
+import { useState } from 'react';
+import { Platform, Pressable, View } from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
+import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import type { TrendPoint } from './compute';
 import type { Band } from './norms';
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last' }: {
+/** Value as stored, trailing zeros trimmed: 5.20 -> "5.2", 5.00 -> "5". */
+const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
+
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
   xTicks?: number[]; fmtX?: (t: number) => string; dots?: 'all' | 'last';
+  /** Web-only: hovering a data point reveals a value+date tooltip. */
+  hover?: boolean; unit?: string; fmtHoverDate?: (t: number) => string;
 }) {
   const t = useTheme();
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const canHover = !!hover && Platform.OS === 'web';
   if (width <= 0) return null;
   const gutter = 30, right = 6, top = 8, plotH = 96, axisH = 18;
   const gx = gutter, gw = Math.max(0, width - gutter - right);
@@ -38,7 +48,7 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   };
   const line = points.map((p, i) => `${i ? 'L' : 'M'} ${xv(i).toFixed(1)} ${yv(p.value).toFixed(1)}`).join(' ');
 
-  return (
+  const chart = (
     <Svg width={width} height={height}>
       {band ? (
         <Path
@@ -61,6 +71,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       ) : points.length ? (
         <Circle cx={xv(points.length - 1)} cy={yv(points[points.length - 1].value)} r={3.6} fill={color} stroke={t.surface} strokeWidth={1.8} />
       ) : null}
+      {canHover && hoverIdx != null && points[hoverIdx] ? (
+        <Circle cx={xv(hoverIdx)} cy={yv(points[hoverIdx].value)} r={dotR + 2.6} fill={color} stroke={t.surface} strokeWidth={2} />
+      ) : null}
       {/* Axis labels paint LAST so the trend line never covers the text. */}
       {yTicks.map((v, i) => (
         <SvgText key={`y${i}`} x={gx - 6} y={yv(v) + 3.5} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">{fmtY(v)}</SvgText>
@@ -80,5 +93,39 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
         </>
       )}
     </Svg>
+  );
+
+  if (!canHover) return chart;
+
+  // Dots are 2–3px, too small to hover, so overlay enlarged hit-targets and
+  // float a value+date tooltip, clamped to stay inside the chart's width.
+  const HIT = 22, TIP_W = 128;
+  const ai = hoverIdx;
+  const ap = ai != null ? points[ai] : null;
+  const apx = ai != null ? xv(ai) : 0;
+  const apy = ap ? yv(ap.value) : 0;
+  const tipLeft = Math.max(0, Math.min(apx - TIP_W / 2, Math.max(0, width - TIP_W)));
+  const tipTop = apy - 44 >= 0 ? apy - 44 : apy + 12;
+  return (
+    <View style={{ width, height, position: 'relative' }}>
+      {chart}
+      {points.map((p, i) => (
+        <Pressable
+          key={`hit${i}`}
+          onHoverIn={() => setHoverIdx(i)}
+          onHoverOut={() => setHoverIdx((c) => (c === i ? null : c))}
+          style={{ position: 'absolute', left: xv(i) - HIT / 2, top: yv(p.value) - HIT / 2, width: HIT, height: HIT }}
+        />
+      ))}
+      {ap ? (
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: tipLeft, top: tipTop, width: TIP_W, alignItems: 'center', backgroundColor: t.elevated, borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 10, boxShadow: t.shadow }}
+        >
+          <Txt weight={700} size={13}>{numLabel(ap.value)}{unit ? ` ${unit}` : ''}</Txt>
+          {fmtHoverDate ? <Txt weight={500} size={11.5} color={t.faint} style={{ marginTop: 1 }}>{fmtHoverDate(ap.t)}</Txt> : null}
+        </View>
+      ) : null}
+    </View>
   );
 }
