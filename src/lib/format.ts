@@ -62,13 +62,13 @@ export function relDayLabel(ms: number, now: number): string {
   return 'Yesterday';
 }
 
-/** Day-group label for the timeline: "Today" / "Yesterday" / locale date. */
+/** Day-group label for the timeline: "Today" / "Yesterday" / DD/MM/YYYY (nl-BE). */
 export function dayGroupLabel(ms: number, now: number): string {
   const d = new Date(ms);
   const nowD = new Date(now);
   if (d.toDateString() === nowD.toDateString()) return 'Today';
   if (now - ms < 2 * 86400000) return 'Yesterday';
-  return d.toLocaleDateString();
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 
 /** Elapsed clock for live timers: "M:SS" or "H:MM:SS". */
