@@ -3,7 +3,7 @@ import { Pressable, ScrollView, View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
-import { ActivityRow } from '@/features/activity/ActivityRow';
+import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -65,9 +65,9 @@ export function TimelineRail() {
               <Txt weight={700} size={11.5} color={t.faint} tracking={0.6} style={{ marginHorizontal: 2, marginBottom: 8, textTransform: 'uppercase' }}>
                 {g.label}
               </Txt>
-              <View style={{ gap: 8 }}>
-                {g.items.map((e) => (
-                  <ActivityRow key={e.id} entry={e} now={now} onPress={() => openEdit(e.id)} />
+              <View>
+                {g.items.map((e, i) => (
+                  <TimelineEntry key={e.id} entry={e} now={now} onPress={() => openEdit(e.id)} isFirst={i === 0} isLast={i === g.items.length - 1} />
                 ))}
               </View>
             </View>
