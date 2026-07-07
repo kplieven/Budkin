@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
-import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
@@ -11,14 +11,17 @@ import type { Band } from './norms';
 
 /** Value as stored, trailing zeros trimmed: 5.20 -> "5.2", 5.00 -> "5". */
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
+const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate, calendarBands = false }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
   xTicks?: number[]; fmtX?: (t: number) => string; dots?: 'all' | 'last';
   /** Web-only: hovering a data point reveals a value+date tooltip. */
   hover?: boolean; unit?: string; fmtHoverDate?: (t: number) => string;
+  /** Time mode: shade weekends (short spans) or alternating months (long spans) behind the plot. */
+  calendarBands?: boolean;
 }) {
   const t = useTheme();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -48,8 +51,40 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   };
   const line = points.map((p, i) => `${i ? 'L' : 'M'} ${xv(i).toFixed(1)} ${yv(p.value).toFixed(1)}`).join(' ');
 
+  // Calendar backdrop (insights only). Short spans shade each weekend column;
+  // longer spans (3 months) shade alternating months instead — weekend stripes
+  // would collapse into an unreadable zebra there.
+  const calBands: { x0: number; x1: number }[] = [];
+  if (calendarBands && xMode === 'time' && points.length >= 2 && tMax > tMin) {
+    const clampX = (x: number) => Math.max(gx, Math.min(x, gx + gw));
+    if ((tMax - tMin) / DAY_MS <= 45) {
+      const d0 = new Date(tMin); d0.setHours(0, 0, 0, 0);
+      for (let ts = d0.getTime(); ts <= tMax; ts += DAY_MS) {
+        const wd = new Date(ts).getDay();
+        if (wd === 0 || wd === 6) {
+          const x0 = clampX(xAtT(ts)), x1 = clampX(xAtT(ts + DAY_MS));
+          if (x1 - x0 > 0.5) calBands.push({ x0, x1 });
+        }
+      }
+    } else {
+      const start = new Date(tMin); start.setDate(1); start.setHours(0, 0, 0, 0);
+      for (let k = 0; ; k++) {
+        const mStart = new Date(start.getFullYear(), start.getMonth() + k, 1);
+        if (mStart.getTime() > tMax) break;
+        if (mStart.getMonth() % 2 === 0) {
+          const mEnd = new Date(start.getFullYear(), start.getMonth() + k + 1, 1).getTime();
+          const x0 = clampX(xAtT(Math.max(mStart.getTime(), tMin))), x1 = clampX(xAtT(Math.min(mEnd, tMax)));
+          if (x1 - x0 > 0.5) calBands.push({ x0, x1 });
+        }
+      }
+    }
+  }
+
   const chart = (
     <Svg width={width} height={height}>
+      {calBands.map((b, i) => (
+        <Rect key={`cb${i}`} x={b.x0} y={top} width={b.x1 - b.x0} height={plotH} fill={hexA(t.faint, 0.09)} />
+      ))}
       {band ? (
         <Path
           d={area(band.hi, band.lo)}
