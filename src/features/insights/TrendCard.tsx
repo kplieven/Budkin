@@ -9,9 +9,11 @@ import type { TrendPoint } from './compute';
 import { bandForRange, type Norm } from './norms';
 import { TrendChart } from './TrendChart';
 
-export function TrendCard({ label, color, unit, value, delta, good, caption, norm, birth, points, yTicks, fmtY, width }: {
+const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+export function TrendCard({ label, color, unit, value, delta, good, caption, norm, birth, points, yTicks, fmtY, width, todaySoFar = false }: {
   label: string; color: string; unit: string; value: string;
-  delta?: string; good?: boolean; caption?: string;
+  delta?: string; good?: boolean; caption?: string; todaySoFar?: boolean;
   norm: Norm; birth: number; points: TrendPoint[];
   yTicks: number[]; fmtY: (v: number) => string; width: number;
 }) {
@@ -45,17 +47,20 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
           </View>
         ) : null}
       </View>
-      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={width - 32} />
+      {todaySoFar ? (
+        <Txt weight={500} size={11.5} color={t.faint} style={{ marginTop: -2, marginBottom: 8 }}>today so far</Txt>
+      ) : null}
+      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={width - 32} dots="all" hover unit={unit} fmtHoverDate={fmtDate} />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
-        <View style={{ flex: 1, justifyContent: 'center', padding: 32 }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
           {/* Scrim is a sibling of the content, not its parent — tapping the
               sheet must not bubble into this Pressable and dismiss it. */}
           <Pressable
             onPress={() => setInfo(false)}
             style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' }}
           />
-          <View style={{ backgroundColor: t.surface, borderRadius: 18, padding: 20, gap: 8 }}>
+          <View style={{ backgroundColor: t.surface, borderRadius: 18, padding: 20, gap: 8, width: '100%', maxWidth: 380 }}>
             <Txt weight={700} size={15}>{label}</Txt>
             {norm.source ? (
               <Txt weight={500} size={13} color={t.dim}>
