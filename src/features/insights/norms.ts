@@ -14,7 +14,7 @@ export interface Norm {
   disclaimer: string;
 }
 
-const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so speak to your doctor or health visitor.';
+const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so speak to your doctor or paediatrician.';
 
 // Sources documented inline. Bands are population ranges, deliberately wide.
 export const NORMS: Record<TrendMetric | 'wet' | 'dirty', Norm> = {
