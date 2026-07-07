@@ -18,8 +18,9 @@ const CAP_W = 8;     // duration-capsule width
 
 // Duration -> capsule height, proportional but CAPPED: a marker saturates at
 // CAP_MIN so a long night sleep reads as "long" without ballooning the row (and
-// leaving a wall of whitespace). Short events keep a legible minimum.
-const MIN_BAR = 22, MAX_BAR = 68, CAP_MIN = 210;
+// leaving a wall of whitespace). The minimum keeps a short event's capsule tall
+// enough to separate its start and end clock labels.
+const MIN_BAR = 28, MAX_BAR = 72, CAP_MIN = 210;
 function barHeight(min: number): number {
   const clamped = Math.max(0, Math.min(min, CAP_MIN));
   return MIN_BAR + (clamped / CAP_MIN) * (MAX_BAR - MIN_BAR);
@@ -28,9 +29,10 @@ function barHeight(min: number): number {
 /**
  * One event on the History timeline: a continuous spine on the left with a
  * marker (a dot for point events like diapers, a duration capsule for intervals
- * like sleep/feeds), the start time — and, for longer intervals, the end time
- * aligned to the capsule's foot so the gap reads as the event's real span.
- * `isFirst`/`isLast` trim the spine so it doesn't overhang a day group.
+ * like sleep/feeds). The list runs newest-first, so an interval's newer edge
+ * (its end) sits at the capsule head and its start at the foot — the gap between
+ * the two clock labels reads as the event's real span. `isFirst`/`isLast` trim
+ * the spine so it doesn't overhang a day group.
  */
 export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
   entry: Entry; now: number; onPress: () => void; isFirst: boolean; isLast: boolean;
@@ -45,9 +47,6 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
   const durMin = isPoint ? 0 : ((endTs ?? now) - start) / 60000;
   const bh = isPoint ? DOT : barHeight(durMin);
   const nodeBottom = NODE_TOP + bh;
-  // Only label the end once the capsule is tall enough to keep the two clock
-  // labels from crowding each other.
-  const showEnd = !isPoint && endTs != null && bh >= 40;
   const minHeight = Math.max(58, nodeBottom + 16);
 
   return (
@@ -57,16 +56,25 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
       accessibilityLabel={`Edit ${ACTIVITY_LABEL[entry.type]}`}
       style={(s) => [{ flexDirection: 'row', minHeight, cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
     >
-      {/* clock column: start at the capsule head, end at its foot */}
+      {/* clock column: newest-first, so the end sits at the capsule head and the
+          start at its foot. Point events show their single time at the head. */}
       <View style={{ width: TIME_W, paddingRight: 8 }}>
-        <Txt weight={600} size={13.5} style={{ fontVariant: ['tabular-nums'], textAlign: 'right', marginTop: NODE_TOP - 7 }}>
-          {fmtClock(start)}
-        </Txt>
-        {showEnd && endTs != null ? (
-          <Txt weight={500} size={12} color={t.faint} style={{ position: 'absolute', right: 8, top: nodeBottom - 7, fontVariant: ['tabular-nums'], textAlign: 'right' }}>
-            {fmtClock(endTs)}
+        {isPoint ? (
+          <Txt weight={600} size={13.5} style={{ fontVariant: ['tabular-nums'], textAlign: 'right', marginTop: NODE_TOP - 7 }}>
+            {fmtClock(start)}
           </Txt>
-        ) : null}
+        ) : (
+          <>
+            {endTs != null ? (
+              <Txt weight={500} size={12} color={t.faint} style={{ fontVariant: ['tabular-nums'], textAlign: 'right', marginTop: NODE_TOP - 7 }}>
+                {fmtClock(endTs)}
+              </Txt>
+            ) : null}
+            <Txt weight={600} size={13.5} style={{ position: 'absolute', right: 8, top: nodeBottom - 7, fontVariant: ['tabular-nums'], textAlign: 'right' }}>
+              {fmtClock(start)}
+            </Txt>
+          </>
+        )}
       </View>
 
       {/* spine + marker */}
