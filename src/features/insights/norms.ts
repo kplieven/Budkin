@@ -14,22 +14,27 @@ export interface Norm {
   disclaimer: string;
 }
 
-const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so ask your pediatrician.';
+const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so speak to your doctor or health visitor.';
 
 // Sources documented inline. Bands are population ranges, deliberately wide.
 export const NORMS: Record<TrendMetric | 'wet' | 'dirty', Norm> = {
-  // National Sleep Foundation / AASM total sleep incl. naps.
-  totalSleep: { kind: 'band', unit: 'h', source: 'National Sleep Foundation',
-    sourceUrl: 'https://www.thensf.org/how-many-hours-of-sleep-do-you-really-need/', disclaimer: DISCLAIMER,
+  // WHO 2019 guideline on sleep for children under 5 (total sleep incl. naps);
+  // a global independent body stating the same age-banded ranges the US bodies use.
+  totalSleep: { kind: 'band', unit: 'h', source: 'World Health Organization',
+    sourceUrl: 'https://www.who.int/publications/i/item/9789241550536', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 90, lo: 14, hi: 17 }, { maxAgeDays: 365, lo: 12, hi: 16 }, { maxAgeDays: 730, lo: 11, hi: 14 }] },
-  // AAP general feeding frequency guidance.
-  feedsPerDay: { kind: 'band', unit: '/day', source: 'AAP (HealthyChildren.org)',
-    sourceUrl: 'https://www.healthychildren.org/English/ages-stages/baby/feeding-nutrition/Pages/default.aspx', disclaimer: DISCLAIMER,
+  // NHS: newborns feed "at least 8 to 12 times every 24 hours"; feeds become
+  // fewer and longer with age (later buckets taper that guidance).
+  feedsPerDay: { kind: 'band', unit: '/day', source: 'NHS',
+    sourceUrl: 'https://www.nhs.uk/baby/breastfeeding-and-bottle-feeding/breastfeeding/the-first-few-days/', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 30, lo: 8, hi: 12 }, { maxAgeDays: 90, lo: 7, hi: 9 }, { maxAgeDays: 180, lo: 5, hi: 7 }, { maxAgeDays: 365, lo: 4, hi: 6 }] },
-  // AAP hydration: ~6+ wet/day after the first week. Floor line, no upper bound.
-  wet: { kind: 'floor', unit: '/day', source: 'AAP hydration guidance', disclaimer: DISCLAIMER,
+  // NHS: "6 or more wet nappies a day" from ~day 5 onward; the first days ramp
+  // up (lower floor for <=5 days). Floor line, no upper bound.
+  wet: { kind: 'floor', unit: '/day', source: 'NHS',
+    sourceUrl: 'https://www.nhs.uk/baby/breastfeeding-and-bottle-feeding/breastfeeding-problems/enough-milk/', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 5, lo: 4 }, { maxAgeDays: 3650, lo: 6 }] },
-  // Sleep-consultant rules of thumb — NOT medical consensus.
+  // Sleep-consultant rules of thumb — independent guidance, NOT medical
+  // consensus (no European or WHO body defines named "wake windows").
   wakeWindow: { kind: 'ruleOfThumb', unit: 'min', source: 'Common sleep-consultant guidance', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 30, lo: 45, hi: 60 }, { maxAgeDays: 90, lo: 60, hi: 90 }, { maxAgeDays: 180, lo: 90, hi: 120 }, { maxAgeDays: 365, lo: 120, hi: 180 }] },
   longestStretch: { kind: 'ruleOfThumb', unit: 'h', source: 'Common sleep-consultant guidance', disclaimer: DISCLAIMER,
