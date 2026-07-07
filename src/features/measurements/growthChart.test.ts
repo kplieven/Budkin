@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { changeSince, seriesFor, yTicksFor } from './growthChart';
+import { changeSince, seriesFor, xTicksFor, yTicksFor } from './growthChart';
 import type { Measurement } from '@/types/models';
 
 const DAY = 86400000;
@@ -61,6 +61,57 @@ describe('yTicksFor', () => {
     expect(ticks[ticks.length - 1]).toBeGreaterThan(7);
     expect(ticks.every((v) => Number.isFinite(v))).toBe(true);
     for (let i = 1; i < ticks.length; i++) expect(ticks[i]).toBeGreaterThan(ticks[i - 1]);
+  });
+});
+
+describe('xTicksFor', () => {
+  it('returns an empty ticks array for no points', () => {
+    const { ticks } = xTicksFor([], 5);
+    expect(ticks).toEqual([]);
+  });
+
+  it('returns a single tick at that point for one point', () => {
+    const t = base + 10 * DAY;
+    const { ticks } = xTicksFor([{ t, value: 1 }], 5);
+    expect(ticks).toEqual([t]);
+  });
+
+  it('produces strictly ascending ticks all within the domain for a multi-month span', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 150 * DAY, value: 2 }];
+    const { ticks } = xTicksFor(points, 6);
+    for (let i = 1; i < ticks.length; i++) expect(ticks[i]).toBeGreaterThan(ticks[i - 1]);
+    for (const tick of ticks) {
+      expect(tick).toBeGreaterThanOrEqual(base);
+      expect(tick).toBeLessThanOrEqual(base + 150 * DAY);
+    }
+  });
+
+  it('respects the tick budget for a large span', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 900 * DAY, value: 2 }];
+    const { ticks } = xTicksFor(points, 5);
+    expect(ticks.length).toBeLessThanOrEqual(5);
+  });
+
+  it('yields more ticks with a larger budget for the same span', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 150 * DAY, value: 2 }];
+    const sparse = xTicksFor(points, 2).ticks;
+    const dense = xTicksFor(points, 8).ticks;
+    expect(dense.length).toBeGreaterThanOrEqual(sparse.length);
+    expect(dense.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('formats a short span with a month + digit-day', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 10 * DAY, value: 2 }];
+    const { fmtX } = xTicksFor(points, 5);
+    const label = fmtX(base);
+    expect(label).toMatch(/\d/);
+    expect(label).toMatch(/[A-Za-z]/);
+  });
+
+  it('formats a long span (multi-year) as a 4-digit year', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 1100 * DAY, value: 2 }];
+    const { fmtX } = xTicksFor(points, 5);
+    expect(fmtX(base)).toMatch(/^\d{4}$/);
   });
 });
 

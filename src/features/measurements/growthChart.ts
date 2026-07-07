@@ -42,6 +42,56 @@ export function yTicksFor(points: TrendPoint[]): { ticks: number[]; fmtY: (v: nu
   return { ticks, fmtY };
 }
 
+const DAY_MS = 86400000;
+const fmtMonthDay = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const fmtMonth = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short' });
+const fmtYear = (t: number) => String(new Date(t).getFullYear());
+
+type XStep = { unit: 'day' | 'month'; n: number };
+const X_STEPS: XStep[] = [
+  { unit: 'day', n: 1 }, { unit: 'day', n: 2 }, { unit: 'day', n: 7 }, { unit: 'day', n: 14 },
+  { unit: 'month', n: 1 }, { unit: 'month', n: 2 }, { unit: 'month', n: 3 }, { unit: 'month', n: 6 },
+  { unit: 'month', n: 12 }, { unit: 'month', n: 24 }, { unit: 'month', n: 60 },
+];
+
+function genXTicks(tMin: number, tMax: number, step: XStep): number[] {
+  const out: number[] = [];
+  if (step.unit === 'day') {
+    const d0 = new Date(tMin); d0.setHours(0, 0, 0, 0);
+    const stepMs = step.n * DAY_MS;
+    for (let ts = d0.getTime(); ts <= tMax; ts += stepMs) if (ts >= tMin) out.push(ts);
+  } else {
+    const d0 = new Date(tMin); d0.setDate(1); d0.setHours(0, 0, 0, 0);
+    for (let k = 0; ; k++) {
+      const d = new Date(d0.getFullYear(), d0.getMonth() + k * step.n, 1);
+      const ts = d.getTime();
+      if (ts > tMax) break;
+      if (ts >= tMin) out.push(ts);
+    }
+  }
+  return out;
+}
+
+/** Ascending, calendar-nice x-axis ticks within the data's time domain, bounded by a pixel budget. */
+export function xTicksFor(points: TrendPoint[], maxTicks: number): { ticks: number[]; fmtX: (t: number) => string } {
+  const budget = Math.max(2, Math.floor(maxTicks));
+  if (points.length === 0) return { ticks: [], fmtX: fmtMonthDay };
+  const tMin = points[0].t;
+  const tMax = points[points.length - 1].t;
+  if (points.length < 2 || tMax <= tMin) return { ticks: [tMin], fmtX: fmtMonthDay };
+
+  const spanDays = (tMax - tMin) / DAY_MS;
+  const fmtX = spanDays <= 62 ? fmtMonthDay : spanDays <= 730 ? fmtMonth : fmtYear;
+
+  let ticks: number[] = [];
+  for (const step of X_STEPS) {
+    const t = genXTicks(tMin, tMax, step);
+    if (t.length <= budget) { ticks = t; break; }
+  }
+  if (ticks.length < 2) ticks = [tMin, tMax];
+  return { ticks, fmtX };
+}
+
 /** Change from the previous measurement to the latest, and the previous date. */
 export function changeSince(points: TrendPoint[]): { delta: number; sinceT: number } | null {
   if (points.length < 2) return null;

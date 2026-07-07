@@ -7,7 +7,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
-import { changeSince, seriesFor, yTicksFor } from '@/features/measurements/growthChart';
+import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
@@ -43,6 +43,9 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const latest = points.length ? points[points.length - 1] : null;
   const change = changeSince(points);
   const { ticks, fmtY } = yTicksFor(points);
+  const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
+  const maxXTicks = Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)); // ~56px per label; 36 = svg gutter+right
+  const { ticks: xTicks, fmtX } = xTicksFor(points, maxXTicks);
   const history = measurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
 
   const body = (
@@ -93,6 +96,9 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             xMode="time"
             xStartLabel={shortDate(points[0].t)}
             xEndLabel={shortDate(points[points.length - 1].t)}
+            xTicks={xTicks}
+            fmtX={fmtX}
+            dots="all"
           />
         ) : (
           <Txt weight={500} size={13.5} color={t.faint} style={{ paddingVertical: 20, textAlign: 'center' }}>
