@@ -53,7 +53,7 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
           </View>
         ) : null}
       </View>
-      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} calendarBands />
+      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} calendarBands dashGaps />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
