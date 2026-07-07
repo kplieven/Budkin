@@ -19,6 +19,7 @@ import type { MeasurementKind } from '@/types/models';
 
 const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const rowDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+const tipDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const GOOD = '#3E9E6E';
 
 export default function MetricDetailRoute() {
@@ -99,6 +100,9 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             xTicks={xTicks}
             fmtX={fmtX}
             dots="all"
+            hover
+            unit={meta.unit}
+            fmtHoverDate={tipDate}
           />
         ) : (
           <Txt weight={500} size={13.5} color={t.faint} style={{ paddingVertical: 20, textAlign: 'center' }}>
