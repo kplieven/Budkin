@@ -1,5 +1,6 @@
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { hexA } from '@/lib/color';
+import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import type { DiaperDay } from './compute';
 
@@ -33,8 +34,8 @@ export function DiaperBars({ data, width }: { data: DiaperDay[]; width: number }
         );
       })}
       <Line x1={bx} y1={top + plotH} x2={bx + bw} y2={top + plotH} stroke={t.line} strokeWidth={1} />
-      <SvgText x={bx} y={top + plotH + 14} fontSize={10} fontWeight="600" fill={t.faint} textAnchor="start">2 weeks ago</SvgText>
-      <SvgText x={bx + bw} y={top + plotH + 14} fontSize={10} fontWeight="600" fill={t.faint} textAnchor="end">Today</SvgText>
+      <SvgText x={bx} y={top + plotH + 14} fontSize={10} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="start">2 weeks ago</SvgText>
+      <SvgText x={bx + bw} y={top + plotH + 14} fontSize={10} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">Today</SvgText>
     </Svg>
   );
 }

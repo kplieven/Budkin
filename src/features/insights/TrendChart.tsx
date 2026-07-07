@@ -1,11 +1,12 @@
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { hexA } from '@/lib/color';
+import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import type { TrendPoint } from './compute';
 import type { Band } from './norms';
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last' }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Started', xEndLabel = 'Today', xTicks, fmtX, dots = 'last' }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
@@ -52,23 +53,6 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {yTicks.map((v, i) => (
         <Line key={i} x1={gx} y1={yv(v)} x2={gx + gw} y2={yv(v)} stroke={t.line} strokeWidth={1} opacity={0.6} />
       ))}
-      {yTicks.map((v, i) => (
-        <SvgText key={`y${i}`} x={gx - 6} y={yv(v) + 3.5} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="end">{fmtY(v)}</SvgText>
-      ))}
-      {xTicks?.length && fmtX ? (
-        xTicks.map((tk, i) => {
-          const x = xAtT(tk);
-          const textAnchor = x <= gx + 10 ? 'start' : x >= gx + gw - 10 ? 'end' : 'middle';
-          return (
-            <SvgText key={`x${i}`} x={x} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor={textAnchor}>{fmtX(tk)}</SvgText>
-          );
-        })
-      ) : (
-        <>
-          <SvgText x={gx} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="start">{xStartLabel}</SvgText>
-          <SvgText x={gx + gw} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fill={t.faint} textAnchor="end">{xEndLabel}</SvgText>
-        </>
-      )}
       <Path d={line} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
       {dots === 'all' ? (
         points.map((p, i) => (
@@ -77,6 +61,24 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       ) : points.length ? (
         <Circle cx={xv(points.length - 1)} cy={yv(points[points.length - 1].value)} r={3.6} fill={color} stroke={t.surface} strokeWidth={1.8} />
       ) : null}
+      {/* Axis labels paint LAST so the trend line never covers the text. */}
+      {yTicks.map((v, i) => (
+        <SvgText key={`y${i}`} x={gx - 6} y={yv(v) + 3.5} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">{fmtY(v)}</SvgText>
+      ))}
+      {xTicks?.length && fmtX ? (
+        xTicks.map((tk, i) => {
+          const x = xAtT(tk);
+          const textAnchor = x <= gx + 10 ? 'start' : x >= gx + gw - 10 ? 'end' : 'middle';
+          return (
+            <SvgText key={`x${i}`} x={x} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor={textAnchor}>{fmtX(tk)}</SvgText>
+          );
+        })
+      ) : (
+        <>
+          <SvgText x={gx} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="start">{xStartLabel}</SvgText>
+          <SvgText x={gx + gw} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">{xEndLabel}</SvgText>
+        </>
+      )}
     </Svg>
   );
 }

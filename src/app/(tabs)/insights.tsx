@@ -121,7 +121,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks, midnight in the middle</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.
