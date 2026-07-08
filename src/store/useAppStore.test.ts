@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
-import { teEnd, teStart } from '@/store/selectors';
+import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection } from '@/data/storage';
 import { loadFromServer, loadInsightsHistory } from '@/data/repository';
@@ -798,6 +798,28 @@ describe('time-entry: keep last two selected', () => {
     expect(s().te.endAbs).toBeUndefined();
     expect(teEnd(s().te, NOW)).toBe(NOW - 15 * M);
   });
+
+  it('with lasted+end active, nudging start moves only start and re-derives lasted', () => {
+    s().openSheet('feeding');
+    s().setLasted(20); // active {lasted, end@now}, start derived (= now-20)
+    s().setStartedAt(NOW - 50 * M); // nudge start earlier — must overrule lasted
+    expect(teStart(s().te, NOW)).toBe(NOW - 50 * M); // start moved
+    expect(teEnd(s().te, NOW)).toBe(NOW); // end stayed put (frozen)
+    expect(teDurationMin(s().te, NOW)).toBe(50); // duration recomputed as end − start
+    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected → derived
+    expect(isActive(s().te.order, 'lasted')).toBe(false);
+  });
+
+  it('with lasted+start active, nudging end moves only end and re-derives lasted', () => {
+    s().openSheet('feeding');
+    s().setStartedAt(NOW - 60 * M); // pin start (freezes end, lasted → derived)
+    s().setLasted(30); // active {lasted, start}, end derived (= now-30)
+    s().setEndedAbs(NOW - 5 * M); // nudge end later — must overrule lasted
+    expect(teEnd(s().te, NOW)).toBe(NOW - 5 * M); // end moved
+    expect(teStart(s().te, NOW)).toBe(NOW - 60 * M); // start stayed put (frozen)
+    expect(teDurationMin(s().te, NOW)).toBe(55); // duration recomputed
+    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected → derived
+  });
 });
 
 describe('edit a running timer', () => {
@@ -1006,6 +1028,17 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(s().te.startAbs).toBe(NOW - 12 * M); // start NOT rewritten
     expect(s().te.durationMin).toBe(45);
     expect(s().te.order?.[2]).toBe('end'); // end is the derived point
+  });
+
+  it('nudging the end after setTimerLasted moves only the end; the real start stays fixed', () => {
+    useAppStore.setState({ timers: [feedingTimer('t9c')] }); // real start NOW - 12m
+    s().openTimerEdit('t9c');
+    s().setTimerLasted(45); // active {lasted, start}, end derived (= start + 45)
+    s().setEndedAbs(NOW - 2 * M); // fine-tune the end — must overrule the lasted estimate
+    expect(teStart(s().te, NOW)).toBe(NOW - 12 * M); // real elapsed start untouched
+    expect(teEnd(s().te, NOW)).toBe(NOW - 2 * M); // only the end moved
+    expect(teDurationMin(s().te, NOW)).toBe(10); // duration re-derives (end − start)
+    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected
   });
 
   it('Save with a chosen length stops the timer into a fixed-start entry', () => {
