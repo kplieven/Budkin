@@ -121,7 +121,7 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {daily ? (
         <>
           <Path d={solidD} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
-          {dashD ? <Path d={dashD} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeDasharray="4 4" opacity={0.5} /> : null}
+          {dashD ? <Path d={dashD} fill="none" stroke={t.dim} strokeWidth={2} strokeLinecap="round" strokeDasharray="4 4" opacity={0.7} /> : null}
         </>
       ) : (
         <Path d={line} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
