@@ -34,6 +34,12 @@ describe('timers persistence', () => {
     expect(await loadTimers()).toEqual(timers);
   });
 
+  it('round-trips a staged end time', async () => {
+    const timers: Timer[] = [{ ...t('a'), stagedEnd: 500 }];
+    await saveTimers(timers);
+    expect(await loadTimers()).toEqual(timers);
+  });
+
   it('clears saved timers', async () => {
     await saveTimers([t('a')]);
     await clearTimers();

@@ -681,6 +681,89 @@ describe('setTimerStart', () => {
   });
 });
 
+describe('staged end time (Ended earlier?)', () => {
+  const runningTimer = (id: string, startAgoMin: number): Timer => ({
+    id,
+    activity: 'sleep',
+    name: 'Sleep',
+    start: NOW - startAgoMin * M,
+    saveAs: 'sleep',
+  });
+
+  it('setTimerEnd stages an end, clamped into [start, now]', () => {
+    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
+    s().setTimerEnd('t1', NOW - 10 * M);
+    expect(s().timers[0].stagedEnd).toBe(NOW - 10 * M);
+    // before the start → clamped up to start
+    s().setTimerEnd('t1', NOW - 40 * M);
+    expect(s().timers[0].stagedEnd).toBe(NOW - 30 * M);
+    // in the future → clamped to <= now
+    s().setTimerEnd('t1', Date.now() + 60 * M);
+    expect(s().timers[0].stagedEnd!).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('adjustTimerEnd nudges the staged end earlier and cannot go before start', () => {
+    useAppStore.setState({ timers: [runningTimer('t1', 3)] }); // start NOW - 3m
+    s().setTimerEnd('t1', NOW - 2 * M); // stage at NOW - 2m
+    s().adjustTimerEnd('t1', -10); // would be NOW - 12m, before start
+    expect(s().timers[0].stagedEnd).toBe(NOW - 3 * M); // clamped to start
+  });
+
+  it('adjustTimerEnd with no prior staged end nudges back from now', () => {
+    useAppStore.setState({ timers: [runningTimer('t1', 60)] });
+    const before = Date.now();
+    s().adjustTimerEnd('t1', -5);
+    const after = Date.now();
+    const staged = s().timers[0].stagedEnd!;
+    expect(staged).toBeGreaterThanOrEqual(before - 5 * M);
+    expect(staged).toBeLessThanOrEqual(after - 5 * M);
+  });
+
+  it('clearTimerEnd removes the staged end', () => {
+    useAppStore.setState({ timers: [{ ...runningTimer('t1', 30), stagedEnd: NOW - 5 * M }] });
+    s().clearTimerEnd('t1');
+    expect(s().timers[0].stagedEnd).toBeUndefined();
+  });
+
+  it('stopTimer logs a sleep entry with the staged end instead of now', () => {
+    useAppStore.setState({ timers: [{ ...runningTimer('t1', 30), stagedEnd: NOW - 5 * M }] });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.start).toBe(NOW - 30 * M);
+    expect(e.end).toBe(NOW - 5 * M);
+  });
+
+  it('stopTimer honors the staged end for a non-sleep timer too', () => {
+    useAppStore.setState({
+      timers: [{ id: 't2', activity: 'feeding', name: 'Feeding', start: NOW - 30 * M, saveAs: 'feeding', stagedEnd: NOW - 8 * M }],
+    });
+    s().stopTimer('t2');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.start).toBe(NOW - 30 * M);
+    expect(e.end).toBe(NOW - 8 * M);
+  });
+
+  it('stopTimer without a staged end still ends at now (regression)', () => {
+    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
+    const before = Date.now();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.end).toBeGreaterThanOrEqual(before);
+    expect(e.end).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('defensively clamps a staged end that predates the (later-moved) start', () => {
+    // start was nudged forward past a previously-staged end
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 5 * M, saveAs: 'sleep', stagedEnd: NOW - 20 * M }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.end).toBeGreaterThanOrEqual(e.start); // no negative-duration entry
+    expect(e.end).toBe(NOW - 5 * M); // clamped up to start
+  });
+});
+
 describe('time-entry: keep last two selected', () => {
   it('pinning Start derives Lasted (start+end both set)', () => {
     s().openSheet('feeding'); // active {end, lasted}, derived start
