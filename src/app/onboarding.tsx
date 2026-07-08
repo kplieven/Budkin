@@ -1,3 +1,4 @@
+import { openBrowserAsync } from 'expo-web-browser';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
@@ -234,7 +235,14 @@ export default function Onboarding() {
 
       <Txt weight={500} size={13.5} color={t.faint} style={{ textAlign: 'center', marginTop: 14 }}>
         Don&apos;t have a server?{' '}
-        <Txt weight={600} size={13.5} color={t.primary}>
+        <Txt
+          weight={600}
+          size={13.5}
+          color={t.primary}
+          accessibilityRole="link"
+          onPress={() => openBrowserAsync('https://docs.baby-buddy.net/setup/deployment/')}
+          style={{ textDecorationLine: 'underline' }}
+        >
           Learn how to host one
         </Txt>
       </Txt>
