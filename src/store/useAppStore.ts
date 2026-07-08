@@ -157,6 +157,13 @@ interface AppActions {
   stopTimer: (id: string) => void;
   adjustTimerStart: (id: string, deltaMin: number) => void;
   setTimerStart: (id: string, ms: number) => void;
+  /** Nudge the staged past end time by `deltaMin` (relative to the current
+   * staged end, or now if none), clamped into `[start, now]`. */
+  adjustTimerEnd: (id: string, deltaMin: number) => void;
+  /** Stage an exact past end time (epoch ms), clamped into `[start, now]`. */
+  setTimerEnd: (id: string, ms: number) => void;
+  /** Clear the staged end so the timer logs at "now" again. */
+  clearTimerEnd: (id: string) => void;
   discardTimer: (id: string) => void;
   setTimerSaveAs: (id: string, saveAs: ActivityType) => void;
   /** Persist `te`'s metadata onto the running timer named by `fromTimerId`,
@@ -985,6 +992,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!tm) return;
     const saveAs = tm.saveAs;
     const now = Date.now();
+    // Honor a user-staged past end ("Ended 5m ago"); otherwise end at now.
+    // Re-clamp into [start, now] defensively in case the start was moved
+    // forward past the staged end after it was set (or persistence changed it).
+    const endMs = tm.stagedEnd != null ? Math.min(now, Math.max(tm.start, tm.stagedEnd)) : now;
     const savedTags = tm.tags ?? [];
     const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags };
     let entry: Entry;
@@ -996,13 +1007,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         feedType === 'breast' && method === 'both' && tm.startSide && !savedTags.includes(tm.startSide)
           ? [...savedTags, tm.startSide]
           : savedTags;
-      entry = { ...base, tags, type: 'feeding', start: tm.start, end: now, feedType, method, amount: tm.amount ?? null };
+      entry = { ...base, tags, type: 'feeding', start: tm.start, end: endMs, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
-      entry = { ...base, type: 'pumping', start: tm.start, end: now, amount: tm.amount ?? 90, method: tm.method };
+      entry = { ...base, type: 'pumping', start: tm.start, end: endMs, amount: tm.amount ?? 90, method: tm.method };
     } else if (saveAs === 'tummy') {
-      entry = { ...base, type: 'tummy', start: tm.start, end: now, milestone: tm.milestone };
+      entry = { ...base, type: 'tummy', start: tm.start, end: endMs, milestone: tm.milestone };
     } else {
-      entry = buildSleepEntry(tm, now, s.selectedChildId);
+      // Pass the staged end as buildSleepEntry's existing 2nd arg — it doubles as
+      // the entry `end` and the nap-heuristic clock; deriving nap from the real
+      // logged end is at least as correct, and this keeps the widget builders /
+      // parity tests untouched (no signature change).
+      entry = buildSleepEntry(tm, endMs, s.selectedChildId);
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
@@ -1023,6 +1038,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setTimerStart: (id, ms) =>
     set((s) => ({
       timers: s.timers.map((t) => (t.id === id ? { ...t, start: Math.min(Date.now(), ms) } : t)),
+    })),
+  adjustTimerEnd: (id, deltaMin) =>
+    set((s) => ({
+      timers: s.timers.map((t) => {
+        if (t.id !== id) return t;
+        const now = Date.now();
+        const from = t.stagedEnd ?? now;
+        return { ...t, stagedEnd: Math.min(now, Math.max(t.start, from + deltaMin * 60000)) };
+      }),
+    })),
+  setTimerEnd: (id, ms) =>
+    set((s) => ({
+      timers: s.timers.map((t) =>
+        t.id === id ? { ...t, stagedEnd: Math.min(Date.now(), Math.max(t.start, ms)) } : t,
+      ),
+    })),
+  clearTimerEnd: (id) =>
+    set((s) => ({
+      timers: s.timers.map((t) => (t.id === id ? { ...t, stagedEnd: undefined } : t)),
     })),
 
   showToast: (msg, action) => {
