@@ -15,6 +15,7 @@ const TIME_W = 46;   // width of the clock column
 const NODE_TOP = 15; // vertical offset of the node/capsule from the entry top
 const DOT = 12;      // point-event marker diameter
 const CAP_W = 8;     // duration-capsule width
+const CONTENT_H = 30; // content row height (== icon chip), used to center it on the marker
 
 // Duration -> capsule height, proportional but CAPPED: a marker saturates at
 // CAP_MIN so a long night sleep reads as "long" without ballooning the row (and
@@ -48,6 +49,7 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
   const bh = isPoint ? DOT : barHeight(durMin);
   const nodeBottom = NODE_TOP + bh;
   const minHeight = Math.max(58, nodeBottom + 16);
+  const detail = detailFor(entry);
 
   return (
     <Pressable
@@ -94,19 +96,25 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
         )}
       </View>
 
-      {/* content */}
-      <View style={{ flex: 1, paddingLeft: 4, paddingTop: NODE_TOP - 8, paddingBottom: 14 }}>
+      {/* content: icon + label │ detail on ONE line, vertically centered on the
+          marker (its center is NODE_TOP + bh/2 for both dot and capsule). */}
+      <View style={{ flex: 1, paddingLeft: 4, paddingTop: NODE_TOP + bh / 2 - CONTENT_H / 2, paddingBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={{ width: 30, height: 30, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: CONTENT_H, height: CONTENT_H, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={entry.type as IconName} color={color} size={17} />
           </View>
-          <Txt weight={700} size={15} tracking={-0.2}>
+          <Txt weight={700} size={16} tracking={-0.2}>
             {ACTIVITY_LABEL[entry.type]}
           </Txt>
+          {detail ? (
+            <>
+              <View style={{ width: 1, height: 18, backgroundColor: t.line }} />
+              <Txt weight={500} size={14} color={t.dim} numberOfLines={1} style={{ flexShrink: 1 }}>
+                {detail}
+              </Txt>
+            </>
+          ) : null}
         </View>
-        <Txt weight={500} size={13} color={t.dim} numberOfLines={1} style={{ marginTop: 4 }}>
-          {detailFor(entry)}
-        </Txt>
       </View>
     </Pressable>
   );
