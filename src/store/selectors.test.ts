@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -43,6 +43,28 @@ describe('teEnd / teStart / teDurationMin', () => {
     expect(teDurationMin(te, NOW)).toBe(10);
     // still 10 minutes before "now" at a later now (sliding, not frozen)
     expect(teStart(te, NOW + 5 * M)).toBe(NOW + 5 * M - 10 * M);
+  });
+});
+
+describe('overruleLasted', () => {
+  it('returns null when lasted is already derived (both endpoints pinned)', () => {
+    const te: TimeEntryState = { shape: 'interval', order: ['end', 'start', 'lasted'], endAbs: NOW - 10 * M, startAbs: NOW - 40 * M, tags: [] };
+    expect(overruleLasted(te, NOW, 'start')).toBeNull();
+    expect(overruleLasted(te, NOW, 'end')).toBeNull();
+  });
+  it('returns null while ongoing (end must stay live, not freeze)', () => {
+    const te: TimeEntryState = { shape: 'interval', ongoing: true, order: ['end', 'lasted', 'start'], endAgoMin: 0, durationMin: 20, tags: [] };
+    expect(overruleLasted(te, NOW, 'start')).toBeNull();
+  });
+  it('nudging start freezes the resolved end and demotes lasted to derived', () => {
+    // lasted + end active: end = now, duration 20, start derived (= now-20)
+    const te: TimeEntryState = { shape: 'interval', order: ['lasted', 'end', 'start'], endAgoMin: 0, durationMin: 20, tags: [] };
+    expect(overruleLasted(te, NOW, 'start')).toEqual({ frozen: NOW, order: ['start', 'end', 'lasted'] });
+  });
+  it('nudging end freezes the resolved start and demotes lasted to derived', () => {
+    // lasted + start active: start = now-40, duration 20, end derived (= now-20)
+    const te: TimeEntryState = { shape: 'interval', order: ['lasted', 'start', 'end'], startAbs: NOW - 40 * M, durationMin: 20, tags: [] };
+    expect(overruleLasted(te, NOW, 'end')).toEqual({ frozen: NOW - 40 * M, order: ['end', 'start', 'lasted'] });
   });
 });
 

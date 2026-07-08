@@ -26,6 +26,27 @@ export function reorder(order: TimeField[] | undefined, f: TimeField): TimeField
   return [f, ...base.filter((x) => x !== f)];
 }
 
+/**
+ * A nudge to an endpoint OVERRULES an active "lasted" duration: only the nudged
+ * endpoint should move, so the OTHER endpoint is frozen at its current resolved
+ * ms and `lasted` is demoted to the derived quantity (`end − start`). Freezing
+ * the resolved value matters so a `now`-relative opposite endpoint stops
+ * drifting once the nudge pins it.
+ *
+ * Returns `{ frozen, order }` when the override applies, or `null` when it does
+ * not — i.e. while `ongoing` (the end must stay live) or when `lasted` is
+ * already derived (both endpoints pinned, so a normal reorder suffices).
+ */
+export function overruleLasted(
+  te: TimeEntryState,
+  now: number,
+  nudged: 'start' | 'end',
+): { frozen: number; order: TimeField[] } | null {
+  if (te.ongoing || !isActive(te.order, 'lasted')) return null;
+  if (nudged === 'start') return { frozen: teEnd(te, now), order: ['start', 'end', 'lasted'] };
+  return { frozen: teStart(te, now) ?? now, order: ['end', 'start', 'lasted'] };
+}
+
 function endPinned(te: TimeEntryState, now: number): number {
   return te.endAbs ?? now - (te.endAgoMin ?? 0) * M;
 }

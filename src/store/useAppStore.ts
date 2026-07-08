@@ -36,7 +36,7 @@ import {
   type SavedServer,
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
-import { nextStartSide, reorder, teEnd, teStart } from '@/store/selectors';
+import { nextStartSide, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -761,13 +761,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   // ----- interval time-entry (keep the last two of start/end/lasted) -----
   setEnded: (agoMin) =>
-    set((s) => ({
-      te: { ...s.te, endAgoMin: agoMin, endAbs: undefined, ongoing: false, order: reorder(s.te.order, 'end') },
-    })),
+    set((s) => {
+      const ov = overruleLasted(s.te, s.now, 'end');
+      const next = { ...s.te, endAgoMin: agoMin, endAbs: undefined, ongoing: false };
+      if (ov) {
+        next.startAbs = ov.frozen; // freeze the un-nudged start so lasted no longer drives it
+        next.startAgoMin = undefined;
+        next.order = ov.order;
+      } else {
+        next.order = reorder(s.te.order, 'end');
+      }
+      return { te: next };
+    }),
   setEndedAbs: (ms) =>
-    set((s) => ({
-      te: { ...s.te, endAbs: ms, endAgoMin: undefined, ongoing: false, order: reorder(s.te.order, 'end') },
-    })),
+    set((s) => {
+      const ov = overruleLasted(s.te, s.now, 'end');
+      const next = { ...s.te, endAbs: ms, endAgoMin: undefined, ongoing: false };
+      if (ov) {
+        next.startAbs = ov.frozen; // freeze the un-nudged start so lasted no longer drives it
+        next.startAgoMin = undefined;
+        next.order = ov.order;
+      } else {
+        next.order = reorder(s.te.order, 'end');
+      }
+      return { te: next };
+    }),
   setOngoing: () =>
     set((s) => {
       const startMs = teStart(s.te, s.now) ?? s.now;
@@ -799,9 +817,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
       },
     })),
   setStartedAt: (ms, anchor) =>
-    set((s) => ({ te: { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined, order: reorder(s.te.order, 'start') } })),
+    set((s) => {
+      const ov = overruleLasted(s.te, s.now, 'start');
+      const next = { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined };
+      if (ov) {
+        next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
+        next.endAgoMin = undefined;
+        next.order = ov.order;
+      } else {
+        next.order = reorder(s.te.order, 'start');
+      }
+      return { te: next };
+    }),
   setStartedAgo: (min) =>
-    set((s) => ({ te: { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined, order: reorder(s.te.order, 'start') } })),
+    set((s) => {
+      const ov = overruleLasted(s.te, s.now, 'start');
+      const next = { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined };
+      if (ov) {
+        next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
+        next.endAgoMin = undefined;
+        next.order = ov.order;
+      } else {
+        next.order = reorder(s.te.order, 'start');
+      }
+      return { te: next };
+    }),
   sleepWoke: () => get().setEnded(0),
   sleepStillSleeping: () => get().setOngoing(),
 

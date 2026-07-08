@@ -225,7 +225,7 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
           value={start as number}
           now={now}
           color={color}
-          onChange={(ms) => setStartedAt(!te.ongoing && endActive && derived === 'lasted' ? Math.min(ms, end) : ms)}
+          onChange={(ms) => setStartedAt(te.ongoing ? ms : Math.min(ms, end))}
         />
       )}
       {activeEditor === 'end' && (
@@ -234,7 +234,7 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
           value={end}
           now={now}
           color={color}
-          onChange={(ms) => setEndedAbs(startActive && derived === 'lasted' ? Math.max(ms, start as number) : ms)}
+          onChange={(ms) => setEndedAbs(Math.max(ms, start as number))}
         />
       )}
       {activeEditor === 'lasted' && (
