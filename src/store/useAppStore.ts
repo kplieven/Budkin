@@ -942,6 +942,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Only re-create server-side if the delete actually removed a server record;
     // a local-only (offline/demo) delete leaves the server copy intact.
     if (d.didServerDelete) get().commitWrite(d.entry);
+    // Cancel any queued offline pending-delete op for this entry so it doesn't
+    // replay on reconnect and delete the just-restored record out from under the
+    // user. Harmless no-op if no such op was recorded (online delete, or a
+    // local-only unsynced entry).
+    if (d.entry.serverId != null) {
+      void loadPendingOps().then((ops) =>
+        savePendingOps(ops.filter((o) => !(o.op === 'delete' && o.entity === 'entry' && o.serverId === d.entry.serverId))),
+      );
+    }
     set({ toast: null, toastAction: null });
     if (toastTimer) clearTimeout(toastTimer);
   },
