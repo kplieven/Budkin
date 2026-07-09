@@ -9,6 +9,7 @@ export const ACTIVITY_LABEL: Record<ActivityType, string> = {
   diaper: 'Diaper',
   pumping: 'Pumping',
   tummy: 'Tummy time',
+  bath: 'Bath',
 };
 
 export const ACTIVITY_SHAPE: Record<ActivityType, TimeEntryShape> = {
@@ -17,6 +18,7 @@ export const ACTIVITY_SHAPE: Record<ActivityType, TimeEntryShape> = {
   diaper: 'point',
   pumping: 'interval',
   tummy: 'interval',
+  bath: 'point',
 };
 
 /** Default typical duration (minutes) pre-selected when opening an interval sheet. */
@@ -26,9 +28,10 @@ export const DEFAULT_DURATION_MIN: Record<ActivityType, number> = {
   pumping: 15,
   tummy: 18,
   diaper: 0,
+  bath: 0,
 };
 
-export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy'];
+export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath'];
 
 /** Activities a timer can be saved as. */
 export const TIMER_SAVE_OPTIONS: ActivityType[] = ['feeding', 'sleep', 'pumping', 'tummy'];

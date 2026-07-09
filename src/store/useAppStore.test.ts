@@ -169,6 +169,48 @@ describe('openSheet defaults', () => {
   });
 });
 
+describe('bath tracking', () => {
+  it('openSheet: point shape, wash defaults to the due kind', () => {
+    s().openSheet('bath');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.wash).toBe('small'); // no bath history => small is due
+  });
+  it('openSheet defaults to big when three recent washes are small', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
+        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+      ],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('big');
+  });
+  it('setWash selects the wash size', () => {
+    s().openSheet('bath');
+    s().setWash('big');
+    expect(s().te.wash).toBe('big');
+    s().setWash('small');
+    expect(s().te.wash).toBe('small');
+  });
+  it('save builds a point bath entry and pushes it (to the notes endpoint)', async () => {
+    s().openSheet('bath');
+    s().setWash('big');
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'bath' }>;
+    expect(e.type).toBe('bath');
+    expect(e.time).toBe(NOW);
+    expect(e.wash).toBe('big');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'bath' }>).type).toBe('bath');
+  });
+});
+
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
     s().openSheet('feeding');

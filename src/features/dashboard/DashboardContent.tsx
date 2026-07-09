@@ -8,7 +8,7 @@ import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { lastDiaper, lastFeedStartMinAgo, nextStartSide } from '@/store/selectors';
+import { lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -28,6 +28,7 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   diaper: 'diaper',
   pumping: 'pumping',
   tummy: 'tummy',
+  bath: 'bath',
 };
 
 /**
@@ -79,12 +80,14 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
   const startSideLabel = nextStartSide(entries) === 'left' ? 'Left' : 'Right';
+  const washHint = nextWashKind(entries) === 'big' ? 'Big wash due today' : 'Small wash due';
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,
     diaper: diaperHint,
     pumping: 'Tap to log',
     tummy: 'Tap to log',
+    bath: washHint,
   };
 
   const status = [

@@ -37,7 +37,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
-import { nextStartSide, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
+import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -140,6 +140,8 @@ interface AppActions {
   adjustAmount: (delta: number) => void;
   toggleWet: () => void;
   toggleSolid: () => void;
+  /** bath: pick the wash size (small/big) */
+  setWash: (wash: 'small' | 'big') => void;
   toggleTag: (tag: string) => void;
   setEnded: (agoMin: number) => void;
   setEndedAbs: (ms: number) => void;
@@ -559,6 +561,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const hr = new Date().getHours();
       te.nap = hr >= 7 && hr < 19;
     }
+    if (type === 'bath') {
+      // Pre-select the wash that's due from the small/big rhythm.
+      te.wash = nextWashKind(get().entries);
+    }
     set({ sheet: { type }, te, editingId: null, fromTimerId: null });
   },
   openEdit: (entryId) => {
@@ -566,8 +572,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const entry = s.entries.find((e) => e.id === entryId);
     if (!entry) return;
     const now = s.now;
+    const isPoint = entry.type === 'diaper' || entry.type === 'bath';
     const te: TimeEntryState = {
-      shape: entry.type === 'diaper' ? 'point' : 'interval',
+      shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
     };
     if (entry.type === 'diaper') {
@@ -577,6 +584,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.solid = entry.solid;
       te.color = entry.color ?? 'yellow';
       te.amount = entry.amount ?? undefined;
+    } else if (entry.type === 'bath') {
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.wash = entry.wash;
     } else {
       if (entry.end != null) {
         te.endAbs = entry.end;
@@ -750,6 +761,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({ te: { ...s.te, amount: Math.max(0, (s.te.amount ?? 0) + delta) } })),
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
+  setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),
   toggleTag: (tag) =>
     set((s) => {
       const has = s.te.tags.includes(tag);
@@ -912,6 +924,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         start: teStart(te, now) as number,
         end: te.ongoing ? null : teEnd(te, now),
         milestone: te.milestone,
+        tags,
+      };
+    } else if (type === 'bath') {
+      // bath (point) — stored server-side as a tagged note (see the API client)
+      entry = {
+        id,
+        childId,
+        type: 'bath',
+        time: teEnd(te, now),
+        wash: te.wash ?? 'small',
         tags,
       };
     } else {

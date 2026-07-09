@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -74,13 +74,25 @@ export interface TummyEntry extends EntryBase {
   milestone?: string;
 }
 
-export type Entry = FeedingEntry | SleepEntry | DiaperEntry | PumpingEntry | TummyEntry;
+/**
+ * A bath (small/big wash). Baby Buddy has no bath resource, so these are stored
+ * server-side as tagged Notes (see the API client). Point event — a single time,
+ * no duration. `wash` distinguishes the daily "small wash" from the periodic
+ * "big wash".
+ */
+export interface BathEntry extends EntryBase {
+  type: 'bath';
+  time: number;
+  wash: 'small' | 'big';
+}
+
+export type Entry = FeedingEntry | SleepEntry | DiaperEntry | PumpingEntry | TummyEntry | BathEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
-export const POINT_ACTIVITIES: ActivityType[] = ['diaper'];
+export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' ? e.time : (e.end ?? e.start);
+  return e.type === 'diaper' || e.type === 'bath' ? e.time : (e.end ?? e.start);
 }
 
 export interface Timer {

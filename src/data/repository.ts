@@ -43,14 +43,15 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
 
   let entries: Entry[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt] = await Promise.all([
+    const [f, s, d, p, tt, b] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
       client.listPumping(selectedChildId).catch(() => []),
       client.listTummy(selectedChildId).catch(() => []),
+      client.listNotes(selectedChildId).catch(() => []),
     ]);
-    entries = [...f, ...s, ...d, ...p, ...tt];
+    entries = [...f, ...s, ...d, ...p, ...tt, ...b];
   }
 
   const lastFeeding = entries

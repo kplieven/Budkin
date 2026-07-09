@@ -119,6 +119,19 @@ export function lastWakeMinAgo(entries: Entry[], now: number): number | null {
   return s ? Math.round((now - (s.end as number)) / M) : null;
 }
 
+/**
+ * The wash due next, from the user's rhythm: a "small wash" most days, a "big
+ * wash" every few days. Rule: if the three most recent washes are all small,
+ * a big wash is due; otherwise small. Fewer than three washes (or none) → small.
+ */
+export function nextWashKind(entries: Entry[]): 'small' | 'big' {
+  const recent = entries
+    .filter((e): e is Extract<Entry, { type: 'bath' }> => e.type === 'bath')
+    .sort((a, b) => b.time - a.time)
+    .slice(0, 3);
+  return recent.length === 3 && recent.every((b) => b.wash === 'small') ? 'big' : 'small';
+}
+
 /** Most recent diaper change, or null. */
 export function lastDiaper(entries: Entry[]) {
   return entries

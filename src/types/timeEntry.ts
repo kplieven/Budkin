@@ -54,6 +54,8 @@ export interface TimeEntryState {
   color?: DiaperColor;
   nap?: boolean;
   milestone?: string;
+  /** bath (point): which wash was given */
+  wash?: 'small' | 'big';
 
   tags: string[];
 }
