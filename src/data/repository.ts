@@ -13,6 +13,7 @@ import {
   type FeedType,
   type Measurement,
   type MeasurementKind,
+  type PhotoChange,
   type Profile,
   type Timer,
 } from '@/types/models';
@@ -146,17 +147,27 @@ export async function deleteMeasurementFromServer(
   await client.deleteMeasurement(kind, serverId);
 }
 
-/** Push a newly created child; returns its new server id (or undefined). */
-export async function pushChildToServer(conn: Connection, child: Child): Promise<number | undefined> {
+/** Push a newly created child (with an optional photo); returns the new server
+ *  id and stored picture URL. */
+export async function pushChildToServer(
+  conn: Connection,
+  child: Child,
+  change: PhotoChange = { kind: 'none' },
+): Promise<{ id?: number; picture?: string | null } | undefined> {
   if (conn.demo) return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  return client.createChild(child);
+  return client.createChild(child, change.kind === 'set' ? change.photo : undefined);
 }
 
-export async function updateChildOnServer(conn: Connection, child: Child): Promise<void> {
-  if (conn.demo) return;
+/** Update a child (name/birth and photo change); returns the stored picture URL. */
+export async function updateChildOnServer(
+  conn: Connection,
+  child: Child,
+  change: PhotoChange = { kind: 'none' },
+): Promise<string | null | undefined> {
+  if (conn.demo) return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.updateChild(child);
+  return client.updateChild(child, change);
 }
 
 /** Push a created entry to the server; returns its new server id (or undefined). */
