@@ -208,3 +208,12 @@ export async function deleteEntryFromServer(
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteEntry(type, serverId);
 }
+
+/** True if the server already has at least one child (i.e. it is NOT a fresh,
+ *  empty instance). Used by the adopt flow to decide the empty vs guarded path. */
+export async function serverHasData(conn: Connection): Promise<boolean> {
+  if (conn.mode !== 'server') return false;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  const children = await client.listChildren();
+  return children.length > 0;
+}

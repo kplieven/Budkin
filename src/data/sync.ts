@@ -109,3 +109,21 @@ export async function uploadUnsynced(
 
   return { children, entries, measurements };
 }
+
+/** Find a server child that matches a local child by first name (case-insensitive,
+ *  trimmed) AND birth date (same calendar day). Returns the matched server child's
+ *  serverId, or null when there's no match. Used by the "upload anyway" override so a
+ *  local child is attached to an existing server child instead of duplicated. */
+export function matchServerChild(local: Child, serverChildren: Child[]): number | null {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const sameDay = (a: number, b: number) => {
+    const da = new Date(a), db = new Date(b);
+    return da.getFullYear() === db.getFullYear()
+      && da.getMonth() === db.getMonth()
+      && da.getDate() === db.getDate();
+  };
+  const match = serverChildren.find(
+    (c) => norm(c.first) === norm(local.first) && sameDay(c.birth, local.birth),
+  );
+  return match?.serverId ?? null;
+}

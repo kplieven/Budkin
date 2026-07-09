@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { uploadUnsynced } from '@/data/sync';
+import { matchServerChild, uploadUnsynced } from '@/data/sync';
 import type { UploadDeps, UploadState } from '@/data/sync';
 import type { Child, DiaperEntry, Entry, Measurement } from '@/types/models';
 
@@ -241,5 +241,45 @@ describe('uploadUnsynced', () => {
     await uploadUnsynced(state, makeDeps());
 
     expect(state).toEqual(snapshot);
+  });
+});
+
+describe('matchServerChild', () => {
+  const localMidnight = new Date(2020, 5, 15, 0, 0, 0).getTime();
+  const sameDayMidday = new Date(2020, 5, 15, 13, 30, 0).getTime();
+  const differentDay = new Date(2020, 5, 16, 0, 0, 0).getTime();
+
+  it('returns the serverId when first name (case/space-insensitive) and birth day match', () => {
+    const local = child({ first: '  ada  ', birth: localMidnight });
+    const serverChildren = [child({ id: 's1', serverId: 7, first: 'Ada', birth: localMidnight })];
+
+    expect(matchServerChild(local, serverChildren)).toBe(7);
+  });
+
+  it('returns null when the name differs', () => {
+    const local = child({ first: 'Ada', birth: localMidnight });
+    const serverChildren = [child({ id: 's1', serverId: 7, first: 'Grace', birth: localMidnight })];
+
+    expect(matchServerChild(local, serverChildren)).toBeNull();
+  });
+
+  it('returns null when the birth day differs, even with the same name', () => {
+    const local = child({ first: 'Ada', birth: localMidnight });
+    const serverChildren = [child({ id: 's1', serverId: 7, first: 'Ada', birth: differentDay })];
+
+    expect(matchServerChild(local, serverChildren)).toBeNull();
+  });
+
+  it('matches when births fall on the same calendar day but differ in time-of-day', () => {
+    const local = child({ first: 'Ada', birth: sameDayMidday });
+    const serverChildren = [child({ id: 's1', serverId: 7, first: 'Ada', birth: localMidnight })];
+
+    expect(matchServerChild(local, serverChildren)).toBe(7);
+  });
+
+  it('returns null when there are no server children', () => {
+    const local = child({ first: 'Ada', birth: localMidnight });
+
+    expect(matchServerChild(local, [])).toBeNull();
   });
 });
