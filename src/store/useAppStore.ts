@@ -1403,7 +1403,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         wet: te.wet ?? false,
         solid: te.solid ?? false,
         color: te.solid ? (te.color ?? null) : null,
-        amount: te.amount && te.amount > 0 ? te.amount : null,
+        amount: te.solid && te.amount && te.amount > 0 ? te.amount : null,
         tags,
       };
     }

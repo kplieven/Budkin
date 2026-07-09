@@ -1412,12 +1412,20 @@ describe('feeding extras', () => {
 });
 
 describe('diaper amount', () => {
-  it('saves an optional amount', () => {
+  it('saves a solid diaper amount (Medium = 2)', () => {
     s().openSheet('diaper');
-    s().setTE({ amount: 3 });
+    s().setTE({ solid: true, amount: 2 });
     s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'diaper' }>;
-    expect(e.amount).toBe(3);
+    expect(e.amount).toBe(2);
+  });
+
+  it('drops the amount when the diaper is not solid (wet only)', () => {
+    s().openSheet('diaper');
+    s().setTE({ wet: true, solid: false, amount: 2 });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'diaper' }>;
+    expect(e.amount).toBeNull();
   });
 });
 
