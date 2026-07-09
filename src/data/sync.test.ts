@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { uploadUnsynced } from '@/data/sync';
 import type { UploadDeps, UploadState } from '@/data/sync';
-import type { Child, DiaperEntry, Measurement } from '@/types/models';
+import type { Child, DiaperEntry, Entry, Measurement } from '@/types/models';
 
 const child = (overrides: Partial<Child> = {}): Child => ({
   id: 'c1',
@@ -149,6 +149,57 @@ describe('uploadUnsynced', () => {
 
     expect(result.children.find((c) => c.id === 'c1')?.serverId).toBeUndefined();
     expect(result.children.find((c) => c.id === 'c2')?.serverId).toBe(11);
+  });
+
+  it('does not push an entry or measurement that already has a serverId', async () => {
+    const pushEntry = vi.fn(async () => 999);
+    const pushMeasurement = vi.fn(async () => 888);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: 5 })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1', serverId: 99 })],
+      measurements: [measurement({ id: 'm1', childId: 'c1', serverId: 99 })],
+    };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushEntry, pushMeasurement }));
+
+    expect(pushEntry).not.toHaveBeenCalled();
+    expect(pushMeasurement).not.toHaveBeenCalled();
+    expect(result.entries[0].serverId).toBe(99);
+    expect(result.measurements[0].serverId).toBe(99);
+  });
+
+  it('leaves an entry unsynced when pushEntry returns undefined, and does not abort the rest', async () => {
+    const otherPushEntry = vi.fn(async (_e: Entry) => 21);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: 1 })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' }), diaperEntry({ id: 'e2', childId: 'c1' })],
+      measurements: [measurement({ id: 'm1', childId: 'c1' })],
+    };
+    const pushEntry = vi.fn(async (e: Entry) => (e.id === 'e1' ? undefined : otherPushEntry(e)));
+
+    const result = await uploadUnsynced(state, makeDeps({ pushEntry }));
+
+    expect(result.entries.find((e) => e.id === 'e1')?.serverId).toBeUndefined();
+    expect(result.entries.find((e) => e.id === 'e2')?.serverId).toBe(21);
+    expect(result.measurements[0].serverId).toBe(300);
+  });
+
+  it('leaves an entry unsynced when pushEntry throws, and does not abort the rest', async () => {
+    const otherPushEntry = vi.fn(async (_e: Entry) => 22);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: 1 })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' }), diaperEntry({ id: 'e2', childId: 'c1' })],
+      measurements: [],
+    };
+    const pushEntry = vi.fn(async (e: Entry) => {
+      if (e.id === 'e1') throw new Error('network down');
+      return otherPushEntry(e);
+    });
+
+    const result = await uploadUnsynced(state, makeDeps({ pushEntry }));
+
+    expect(result.entries.find((e) => e.id === 'e1')?.serverId).toBeUndefined();
+    expect(result.entries.find((e) => e.id === 'e2')?.serverId).toBe(22);
   });
 
   it('pushes an entry under an already-synced parent using its existing server id', async () => {
