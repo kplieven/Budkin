@@ -165,7 +165,8 @@ function Inner() {
               </Txt>
             </View>
             <Txt weight={500} size={13.5} color={t.dim} style={{ lineHeight: 20 }}>
-              Uploading may create duplicates. Use the server&apos;s data as-is, or upload this device&apos;s data too.
+              Uploading may create duplicates. Use only the server&apos;s data — this device&apos;s data stays on it but
+              isn&apos;t uploaded, and you&apos;ll see the server&apos;s data — or upload this device&apos;s data too.
             </Txt>
           </View>
         )}
@@ -224,7 +225,7 @@ function Inner() {
               onPress={useServerData}
               disabled={busy}
               accessibilityRole="button"
-              accessibilityLabel="Use the server's data"
+              accessibilityLabel="Use only the server's data"
               accessibilityState={{ disabled: busy }}
               style={(s) => [
                 {
@@ -242,7 +243,7 @@ function Inner() {
               ]}
             >
               <Txt unselectable weight={800} size={15} color={t.text}>
-                Use the server&apos;s data
+                Use only the server&apos;s data
               </Txt>
             </Pressable>
             <Pressable

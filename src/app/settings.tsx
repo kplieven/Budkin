@@ -197,7 +197,7 @@ export default function Settings() {
           <Pressable
             onPress={openAdopt}
             accessibilityRole="button"
-            style={(s) => [row, { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+            style={(s) => [row, { borderBottomWidth: connection?.mode === 'local' ? 0 : 1, borderBottomColor: t.line, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
           >
             <View style={{ flex: 1 }}>
               <Txt unselectable weight={600} size={16} color={t.primary}>
@@ -210,18 +210,20 @@ export default function Settings() {
             </View>
           </Pressable>
         )}
-        <Pressable
-          onPress={() => {
-            disconnect();
-            router.replace('/onboarding');
-          }}
-          accessibilityRole="button"
-          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
-        >
-          <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
-            Reconnect / change server
-          </Txt>
-        </Pressable>
+        {connection?.mode !== 'local' && (
+          <Pressable
+            onPress={() => {
+              disconnect();
+              router.replace('/onboarding');
+            }}
+            accessibilityRole="button"
+            style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+          >
+            <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
+              Reconnect / change server
+            </Txt>
+          </Pressable>
+        )}
       </View>
     </>
   );
