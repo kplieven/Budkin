@@ -153,7 +153,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           </View>
         </View>
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 8 }}>
-          Can't be in the future — out-of-range values are clamped when you save.
+          Can&apos;t be in the future — out-of-range values are clamped when you save.
         </Txt>
       </ScrollView>
 
