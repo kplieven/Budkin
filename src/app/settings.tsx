@@ -81,7 +81,7 @@ export default function Settings() {
 
   const host =
     connection?.mode === 'local'
-      ? 'Demo mode'
+      ? 'Local mode'
       : connection?.mode === 'server'
         ? connection.serverUrl.replace(/^https?:\/\//, '') || '—'
         : '—';
