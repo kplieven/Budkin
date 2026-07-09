@@ -8,8 +8,10 @@ import {
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
+  serverHasData,
   updateChildOnServer,
 } from '@/data/repository';
+import { matchServerChild, uploadUnsynced } from '@/data/sync';
 import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
 import {
@@ -154,6 +156,23 @@ vi.mock('@/data/repository', () => ({
     if (h.profileFails) throw new Error('500');
     return h.profile;
   }),
+  serverHasData: vi.fn(async () => false),
+}));
+
+// `@/data/sync`'s real uploader/matcher (Unit J's primitives, from an earlier
+// unit on this branch). Default `uploadUnsynced` is a pure passthrough (no
+// stamping) so it's a no-op for every OTHER test in this file that
+// incidentally triggers `flushUnsynced` via connect/hydrate/refresh/etc (the
+// default seeded child has no serverId, so `flushUnsynced`'s `hasUnsynced`
+// check is true almost everywhere) — only the `adopt`/`flushUnsynced`
+// describe blocks below override this to actually stamp serverIds.
+vi.mock('@/data/sync', () => ({
+  uploadUnsynced: vi.fn(async (state: { children: unknown[]; entries: unknown[]; measurements: unknown[] }) => ({
+    children: state.children,
+    entries: state.entries,
+    measurements: state.measurements,
+  })),
+  matchServerChild: vi.fn(() => null),
 }));
 
 // The offline op-log (Unit D). Tests assert against `h.pendingOps` directly
@@ -2015,5 +2034,199 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(s().profileLoaded).toBe(false);
     expect(s().profile).toBeNull();
     expect(s().profileError).toBe(false);
+  });
+});
+
+describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () => {
+  beforeEach(() => {
+    useAppStore.setState({ connection: { mode: 'local' }, connected: true });
+    vi.mocked(serverHasData).mockClear();
+    vi.mocked(uploadUnsynced).mockClear();
+    vi.mocked(matchServerChild).mockClear();
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(saveConnection).mockClear();
+    vi.mocked(serverHasData).mockResolvedValue(false);
+    vi.mocked(matchServerChild).mockReturnValue(null);
+    // Full-success stamping default for this block: any serverId==null record
+    // gets stamped, mirroring uploadUnsynced's real "everything pushed"
+    // outcome. Individual tests override with mockImplementationOnce for the
+    // partial-upload / server-switch scenarios.
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null ? { ...c, serverId: 501 } : c)),
+      entries: state.entries.map((e) => (e.serverId == null ? { ...e, serverId: 601 } : e)),
+      measurements: state.measurements.map((m) => (m.serverId == null ? { ...m, serverId: 701 } : m)),
+    }));
+  });
+
+  it('against an empty server: uploads the local data and switches to server mode', async () => {
+    const localChild: Child = { id: 'localA', first: 'Ann', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(serverHasData).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children).toEqual([localChild]); // the not-yet-synced local child was uploaded
+    expect(s().connection).toEqual({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    expect(s().connected).toBe(true);
+    expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+  });
+
+  it('against a non-empty server without override: guards instead of uploading, stays local', async () => {
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'guard' });
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().connected).toBe(true);
+  });
+
+  it('non-empty WITH uploadAnyway: dedups against a matching server child, then uploads', async () => {
+    const localChild: Child = { id: 'localB', first: 'Ben', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+    const serverChild: Child = { id: '900', serverId: 900, first: 'Ben', last: '', birth: NOW, color: '#eee' };
+    vi.mocked(loadFromServer)
+      .mockResolvedValueOnce({ // the dedup fetch
+        children: [serverChild], entries: [], timers: [], selectedChildId: '900',
+        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+      })
+      .mockResolvedValueOnce({ // the post-success reload
+        children: [serverChild], entries: [], timers: [], selectedChildId: '900',
+        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+      });
+    vi.mocked(matchServerChild).mockReturnValueOnce(900);
+
+    const result = await s().adopt('https://new.lan', 'tok', { uploadAnyway: true });
+
+    expect(matchServerChild).toHaveBeenCalledWith(localChild, [serverChild]);
+    // Attached to the existing server child (not duplicated) BEFORE uploading
+    // — uploadUnsynced then sees serverId already set and skips it.
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children.find((c) => c.id === 'localB')?.serverId).toBe(900);
+    expect(result).toEqual({ status: 'done' });
+  });
+
+  it('when uploadUnsynced leaves a record serverId==null: returns partial, stays local', async () => {
+    const localChild: Child = { id: 'localC', first: 'Cara', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children, // unchanged: the push never completed
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'partial' });
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().children.find((c) => c.id === 'localC')?.serverId).toBeUndefined();
+  });
+
+  it('when serverHasData throws: returns error, stays local', async () => {
+    vi.mocked(serverHasData).mockRejectedValueOnce(new Error('bad token'));
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'error', message: 'bad token' });
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('server-switch reset: adopting a DIFFERENT server clears serverIds stamped by an abandoned adoption', async () => {
+    const childA: Child = { id: 'localD', first: 'Dee', last: '', birth: NOW, color: '#fff' };
+    const childB: Child = { id: 'localE', first: 'Eve', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [childA, childB] });
+    // Server A: only childA's push succeeds -> the overall result is
+    // `partial`, so `adoptTarget` stays pointed at server A (an "abandoned"
+    // adoption in local mode).
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => (c.id === 'localD' ? { ...c, serverId: 111 } : c)),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    const first = await s().adopt('https://server-a.lan', 'tok');
+    expect(first).toEqual({ status: 'partial' });
+    expect(s().children.find((c) => c.id === 'localD')?.serverId).toBe(111);
+
+    // Adopting a DIFFERENT server must clear the stale serverId from A BEFORE
+    // uploading, or childA would be wrongly skipped as "already synced" (to
+    // the wrong server).
+    await s().adopt('https://server-b.lan', 'tok');
+    const secondUpload = vi.mocked(uploadUnsynced).mock.calls[1][0];
+    expect(secondUpload.children.every((c) => c.serverId == null)).toBe(true);
+  });
+});
+
+describe('flushUnsynced (reconnect flush of offline-created children/measurements)', () => {
+  beforeEach(() => {
+    vi.mocked(uploadUnsynced).mockClear();
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null ? { ...c, serverId: 501 } : c)),
+      entries: state.entries,
+      measurements: state.measurements.map((m) => (m.serverId == null ? { ...m, serverId: 701 } : m)),
+    }));
+  });
+
+  it('stamps a serverId==null child while online in server mode', async () => {
+    const localChild: Child = { id: 'localF', first: 'Finn', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).toHaveBeenCalled();
+    // entries: [] passed through untouched — this path never touches entries
+    // (they still flow through queue.ts's flushQueue).
+    expect(vi.mocked(uploadUnsynced).mock.calls[0][0].entries).toEqual([]);
+    expect(s().children.find((c) => c.id === 'localF')?.serverId).toBe(501);
+  });
+
+  it('stamps a serverId==null measurement', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [{ id: 'localG', childId: 'c1', kind: 'weight', value: 5, date: NOW }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(s().measurements.find((m) => m.id === 'localG')?.serverId).toBe(701);
+  });
+
+  it('is a no-op while offline', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'localH', first: 'H', last: '', birth: NOW, color: '#fff' }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op in local mode', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [{ id: 'localI', first: 'I', last: '', birth: NOW, color: '#fff' }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when nothing is unsynced', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
   });
 });

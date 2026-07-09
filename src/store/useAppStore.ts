@@ -22,10 +22,12 @@ import {
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
+  serverHasData,
   updateChildOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
 } from '@/data/repository';
+import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
 import { ApiError, childColor } from '@/api/client';
 import {
   clearEntities,
@@ -128,6 +130,16 @@ interface AppState {
   te: TimeEntryState;
 }
 
+/** Outcome of `adopt` — pushing a local-mode user's data up to a Baby Buddy
+ *  server. `partial` means the upload was interrupted (network drop mid-way);
+ *  the app stays in local mode with whatever serverIds got stamped, so a
+ *  retry (calling `adopt` again against the same server) resumes cleanly. */
+export type AdoptResult =
+  | { status: 'guard' } // server already has data; awaiting the user's choice
+  | { status: 'done' } // uploaded (or the server was empty) + now in server mode
+  | { status: 'partial' } // upload interrupted; STILL local mode; retry-able
+  | { status: 'error'; message: string };
+
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
@@ -139,12 +151,22 @@ interface AppActions {
   /** Re-check the server and reload data (on foreground / pull-to-refresh). */
   refresh: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
+  /** Push a local-mode user's data up to a Baby Buddy server and switch to
+   *  server mode. `opts.uploadAnyway` overrides the non-empty-server guard,
+   *  attaching to matching existing server children (see `matchServerChild`)
+   *  instead of duplicating them. Safe to call again after a `partial` result
+   *  — the upload is resumable (already-stamped records are skipped). */
+  adopt: (serverUrl: string, token: string, opts?: { uploadAnyway?: boolean }) => Promise<AdoptResult>;
   enterLocal: () => Promise<void>;
   disconnect: () => void;
   forgetServer: (serverUrl: string) => void;
   flushQueue: () => Promise<void>;
   /** Replay durable offline update/delete ops (Unit D's `pendingOps` log) on reconnect. */
   flushPendingOps: () => Promise<void>;
+  /** Push offline-created children/measurements (serverId == null) up on
+   *  reconnect. Entries are deliberately excluded — they still flow through
+   *  the queue.ts path (flushQueue); mixing the two would double-push. */
+  flushUnsynced: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
 
   selectChild: (id: string) => void;
@@ -254,6 +276,17 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   return [...unsynced, ...serverList];
 }
 
+/** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
+ *  `adopt` and `flushUnsynced` — the only two callers that push local-only
+ *  (serverId == null) records up to the server. */
+function buildUploadDeps(conn: Connection): UploadDeps {
+  return {
+    pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
+    pushEntry: (e) => pushEntryToServer(conn, e),
+    pushMeasurement: (m) => pushMeasurementToServer(conn, m),
+  };
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -262,6 +295,10 @@ let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | nul
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
+// The server URL of the most recent (possibly still in-progress/partial)
+// `adopt` call. If a later `adopt` targets a DIFFERENT server, any serverIds
+// stamped by the abandoned attempt must be cleared first — see `adopt` below.
+let adoptTarget: string | null = null;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -322,6 +359,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!offline) {
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     }
   },
   toggleOffline: () => {
@@ -331,6 +369,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!offline) {
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     }
   },
   setNetworkOnline: (online) => {
@@ -339,6 +378,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!offline) {
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     }
   },
 
@@ -410,6 +450,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -473,6 +514,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -521,12 +563,88 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void persistServers(savedServers);
       void get().flushQueue();
       void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       set({
         connecting: false,
         connectError: e instanceof Error ? e.message : "Couldn't connect to server.",
       });
     }
+  },
+  adopt: async (serverUrl, token, opts) => {
+    const conn: Connection = { mode: 'server', serverUrl, token };
+    // Server-switch reset: a prior abandoned adoption (a `partial` result)
+    // stamped serverIds against a DIFFERENT server. Those ids must not cause
+    // this adoption to wrongly skip records that were never pushed to
+    // `serverUrl` — clear them before doing anything else.
+    if (adoptTarget != null && adoptTarget !== serverUrl) {
+      set((st) => ({
+        children: st.children.map((c) => ({ ...c, serverId: undefined })),
+        entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
+        measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
+      }));
+    }
+    adoptTarget = serverUrl;
+
+    // Probe first — this also validates the token.
+    let hasData: boolean;
+    try {
+      hasData = await serverHasData(conn);
+    } catch (e) {
+      return { status: 'error', message: e instanceof Error ? e.message : "Couldn't reach the server." };
+    }
+    if (hasData && !opts?.uploadAnyway) {
+      // Non-empty server, no override: don't upload — the UI offers "upload
+      // anyway" or "use server data" from here.
+      return { status: 'guard' };
+    }
+
+    const s = get();
+    let state = { children: s.children, entries: s.entries, measurements: s.measurements };
+    if (hasData && opts?.uploadAnyway) {
+      // Dedup: attach each not-yet-synced local child to a matching existing
+      // server child (by name + birth date) instead of duplicating it.
+      const data = await loadFromServer(conn);
+      const serverChildren = data.children;
+      state = {
+        ...state,
+        children: state.children.map((c) => {
+          if (c.serverId != null) return c;
+          const matched = matchServerChild(c, serverChildren);
+          return matched != null ? { ...c, serverId: matched } : c;
+        }),
+      };
+    }
+
+    const result = await uploadUnsynced(state, buildUploadDeps(conn));
+    // Persist stamped serverIds immediately so a partial upload is resumable
+    // on retry, even before we know whether it fully succeeded.
+    set({ children: result.children, entries: result.entries, measurements: result.measurements });
+
+    const stillUnsynced =
+      result.children.some((c) => c.serverId == null) ||
+      result.entries.some((e) => e.serverId == null) ||
+      result.measurements.some((m) => m.serverId == null);
+    if (stillUnsynced) {
+      // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
+      // retry against the SAME server doesn't wrongly reset the ids we just stamped.
+      return { status: 'partial' };
+    }
+
+    // Full success: switch to server mode, mirroring connect()'s structure.
+    set({ connection: conn, connected: true });
+    void saveConnection(conn);
+    const data = await loadFromServer(conn);
+    set({
+      ...data,
+      // a newly-adopted server's profile hasn't been fetched yet
+      profile: null,
+      profileLoaded: false,
+      profileError: false,
+      profileLoading: false,
+    });
+    adoptTarget = null;
+    return { status: 'done' };
   },
   enterLocal: async () => {
     const conn: Connection = { mode: 'local' };
@@ -613,6 +731,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     }
     await savePendingOps(remaining);
+  },
+  flushUnsynced: async () => {
+    const s = get();
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
+    // Only children & measurements here — entries still flow through
+    // queue.ts (flushQueue), and mixing would double-push. (Full entry
+    // unification is a later change.) Note: an offline entry created for an
+    // offline-created child while CONNECTED is a niche case not handled here
+    // either — it stays on the queue path.
+    const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
+    if (!hasUnsynced) return;
+    const result = await uploadUnsynced(
+      { children: s.children, entries: [], measurements: s.measurements },
+      buildUploadDeps(conn),
+    );
+    set({ children: result.children, measurements: result.measurements });
   },
   commitWrite: (entry) => {
     const s = get();
