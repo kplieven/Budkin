@@ -98,6 +98,8 @@ interface AppState {
   childSheet: boolean;
   /** id of the child being edited, or null when creating a new one */
   editingChildId: string | null;
+  /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
+  adoptSheet: boolean;
   sheet: { type: ActivityType } | null;
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
@@ -177,6 +179,9 @@ interface AppActions {
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
   saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
+
+  openAdopt: () => void;
+  closeAdopt: () => void;
 
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
@@ -320,6 +325,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   showChildSwitcher: false,
   childSheet: false,
   editingChildId: null,
+  adoptSheet: false,
   sheet: null,
   editingId: null,
   fromTimerId: null,
@@ -631,9 +637,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return { status: 'partial' };
     }
 
-    // Full success: switch to server mode, mirroring connect()'s structure.
-    set({ connection: conn, connected: true });
+    // Full success: switch to server mode, mirroring connect()'s structure —
+    // including upserting the server into the "previously connected" retry
+    // list, so an adopted server shows up there too (not just a fresh connect()).
+    const savedServers = upsertServer(get().savedServers, {
+      serverUrl,
+      token,
+      lastUsedAt: Date.now(),
+    });
+    set({ connection: conn, connected: true, savedServers });
     void saveConnection(conn);
+    void persistServers(savedServers);
     const data = await loadFromServer(conn);
     set({
       ...data,
@@ -783,6 +797,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openAddChild: () => set({ childSheet: true, editingChildId: null }),
   openEditChild: (id) => set({ childSheet: true, editingChildId: id }),
   closeChildSheet: () => set({ childSheet: false, editingChildId: null }),
+
+  openAdopt: () => set({ adoptSheet: true }),
+  closeAdopt: () => set({ adoptSheet: false }),
+
   saveChild: (fields) => {
     const s = get();
     const change: PhotoChange = fields.photo ?? { kind: 'none' };

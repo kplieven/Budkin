@@ -242,6 +242,7 @@ beforeEach(() => {
     showChildSwitcher: false,
     childSheet: false,
     editingChildId: null,
+    adoptSheet: false,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
     profile: null,
@@ -1097,6 +1098,21 @@ describe('children', () => {
     s().closeChildSheet();
     expect(s().childSheet).toBe(false);
     expect(s().editingChildId).toBeNull();
+  });
+});
+
+describe('adopt sheet open/close (mirrors openAddChild/closeChildSheet)', () => {
+  it('openAdopt opens the sheet', () => {
+    expect(s().adoptSheet).toBe(false);
+    s().openAdopt();
+    expect(s().adoptSheet).toBe(true);
+  });
+
+  it('closeAdopt closes the sheet', () => {
+    s().openAdopt();
+    expect(s().adoptSheet).toBe(true);
+    s().closeAdopt();
+    expect(s().adoptSheet).toBe(false);
   });
 });
 
@@ -2072,6 +2088,29 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(s().connected).toBe(true);
     expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+  });
+
+  it('on success, upserts the adopted server into savedServers (so it appears in the reconnect list)', async () => {
+    useAppStore.setState({ savedServers: [] });
+    h.servers = [];
+
+    const result = await s().adopt('https://adopted.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(s().savedServers.map((x) => x.serverUrl)).toContain('https://adopted.lan');
+    expect(h.servers).toHaveLength(1); // persisted, mirroring connect()
+  });
+
+  it('does NOT upsert savedServers on a guard/partial/error outcome (only on done)', async () => {
+    useAppStore.setState({ savedServers: [] });
+    h.servers = [];
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+
+    const result = await s().adopt('https://guarded.lan', 'tok');
+
+    expect(result).toEqual({ status: 'guard' });
+    expect(s().savedServers).toEqual([]);
+    expect(h.servers).toEqual([]);
   });
 
   it('against a non-empty server without override: guards instead of uploading, stays local', async () => {
