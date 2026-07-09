@@ -4,7 +4,12 @@ import { mergeQueuedEntries, mergeUnsynced, useAppStore } from '@/store/useAppSt
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection, saveConnection } from '@/data/storage';
-import { loadFromServer, loadInsightsHistory, loadProfileFromServer } from '@/data/repository';
+import {
+  loadFromServer,
+  loadInsightsHistory,
+  loadProfileFromServer,
+  updateChildOnServer,
+} from '@/data/repository';
 import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
 import {
@@ -30,6 +35,7 @@ const h = vi.hoisted(() => ({
   childUpdated: [] as unknown[],
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
+  pendingOps: [] as unknown[],
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
@@ -150,6 +156,23 @@ vi.mock('@/data/repository', () => ({
   }),
 }));
 
+// The offline op-log (Unit D). Tests assert against `h.pendingOps` directly
+// (mirroring how `h.pushed`/`h.updated`/etc. track the repository mocks above)
+// rather than asserting on the mock functions themselves.
+vi.mock('@/data/pendingOps', () => ({
+  addPendingOp: vi.fn(async (op: unknown) => {
+    h.pendingOps.push(op);
+    return h.pendingOps;
+  }),
+  loadPendingOps: vi.fn(async () => h.pendingOps),
+  savePendingOps: vi.fn(async (ops: unknown[]) => {
+    h.pendingOps = ops;
+  }),
+  clearPendingOps: vi.fn(async () => {
+    h.pendingOps = [];
+  }),
+}));
+
 const NOW = 1_700_000_000_000;
 const M = 60000;
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -168,6 +191,7 @@ beforeEach(() => {
   h.childUpdated = [];
   h.childPushChange = [];
   h.childUpdateChange = [];
+  h.pendingOps = [];
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
@@ -346,6 +370,85 @@ describe('flushQueue', () => {
     await s().flushQueue();
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
+  });
+});
+
+describe('flushPendingOps', () => {
+  const child: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' };
+  const measurement: Measurement = { id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 6, date: NOW };
+  const entry: Entry = {
+    id: 'feeding-1',
+    serverId: 1,
+    childId: 'c1',
+    type: 'feeding',
+    start: NOW - 30 * M,
+    end: NOW - 10 * M,
+    feedType: 'breast',
+    method: 'left',
+    amount: null,
+    tags: [],
+  };
+
+  it('replays an update/child op to updateChildOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'child', payload: child }];
+    await s().flushPendingOps();
+    expect(h.childUpdated).toEqual([child]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays an update/measurement op to updateMeasurementOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'measurement', payload: measurement }];
+    await s().flushPendingOps();
+    expect(h.measUpdated).toEqual([measurement]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays an update/entry op to updateEntryOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'entry', payload: entry }];
+    await s().flushPendingOps();
+    expect(h.updated).toEqual([entry]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays a delete/measurement op to deleteMeasurementFromServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toEqual([{ kind: 'weight', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays a delete/entry op to deleteEntryFromServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.deleted).toEqual([{ type: 'feeding', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('retains an op that fails to replay, leaving successful ones cleared', async () => {
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+    h.pendingOps = [
+      { op: 'update', entity: 'child', payload: child },
+      { op: 'update', entity: 'measurement', payload: measurement },
+    ];
+    await s().flushPendingOps();
+    expect(h.measUpdated).toEqual([measurement]); // the other op still replayed
+    expect(h.pendingOps).toEqual([{ op: 'update', entity: 'child', payload: child }]); // failed op retained
+  });
+
+  it('is a no-op while offline', async () => {
+    useAppStore.setState({ offline: true });
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(1);
+  });
+
+  it('is a no-op in demo mode', async () => {
+    useAppStore.setState({ connection: { mode: 'local' } });
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(1);
   });
 });
 
@@ -686,6 +789,39 @@ describe('edit / delete entry', () => {
     expect(h.deleted).toHaveLength(1);
   });
 
+  it('offline edit of a synced entry records an update pending op instead of pushing', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().openEdit('feeding-1');
+    s().setTE({ method: 'right' });
+    s().save();
+    await flush();
+    expect(h.updated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'entry' });
+    expect((h.pendingOps[0] as { payload: Entry }).payload.id).toBe('feeding-1');
+  });
+
+  it('online edit of a synced entry does NOT record a pending op', async () => {
+    seedFeeding();
+    s().openEdit('feeding-1');
+    s().setTE({ method: 'right' });
+    s().save();
+    await flush();
+    expect(h.updated).toHaveLength(1);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('offline delete of a synced entry records a delete pending op and still removes locally', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0); // still removed locally
+    await flush();
+    expect(h.deleted).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }]);
+  });
+
   it('deleteEntry shows an Undo toast and undoDelete restores + re-creates the entry', async () => {
     seedFeeding();
     s().deleteEntry('feeding-1');
@@ -744,6 +880,32 @@ describe('measurements', () => {
     await flush();
     expect(h.measDeleted).toHaveLength(1);
   });
+
+  it('offline edit of a synced measurement records an update pending op instead of pushing', async () => {
+    useAppStore.setState({
+      offline: true,
+      measurements: [{ id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().openEditMeasurement('weight-1');
+    s().saveMeasurement(6.0, NOW);
+    await flush();
+    expect(h.measUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'measurement' });
+    expect((h.pendingOps[0] as { payload: Measurement }).payload.id).toBe('weight-1');
+  });
+
+  it('offline delete of a synced measurement records a delete pending op and still removes locally', async () => {
+    useAppStore.setState({
+      offline: true,
+      measurements: [{ id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().deleteMeasurement('weight-1');
+    expect(s().measurements).toHaveLength(0); // still removed locally
+    await flush();
+    expect(h.measDeleted).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }]);
+  });
 });
 
 describe('children', () => {
@@ -795,6 +957,44 @@ describe('children', () => {
     await flush();
     expect(h.childUpdated).toHaveLength(1);
     expect(h.childPushed).toHaveLength(0);
+  });
+
+  it('offline edit of a synced child records an update pending op instead of pushing', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+
+    expect(s().children[0].last).toBe('Updated'); // still applied locally
+    await flush();
+    expect(h.childUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'child' });
+    expect((h.pendingOps[0] as { payload: Child }).payload.id).toBe('c1');
+  });
+
+  it('online edit of a synced child does NOT record a pending op', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+    await flush();
+    expect(h.childUpdated).toHaveLength(1);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('offline edit of a NOT-yet-synced child (no serverId) records no pending op (its create is still pending)', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'localOnly', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('localOnly');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+    await flush();
+    expect(h.pendingOps).toHaveLength(0);
   });
 
   it('saveChild create with a photo sets picture optimistically, then swaps in the server URL', async () => {
@@ -1040,6 +1240,25 @@ describe('refresh / reconnect', () => {
     await s().loadProfile();
     expect(loadProfileFromServer).toHaveBeenCalled();
     expect(s().profileLoaded).toBe(true);
+  });
+
+  it('keeps selectedChildId pointing at an offline-created child still visible after refresh (regression)', async () => {
+    // Bug: refresh() used to check the server's child list only, so an
+    // offline-created child (kept visible via mergeUnsynced) that's currently
+    // selected would get silently deselected back to the server's first child.
+    const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
+    useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().selectedChildId).toBe('localZ'); // not reset to the server's first child
+    expect(s().children.map((c) => c.id)).toContain('localZ');
   });
 
   it('keeps an in-memory serverId==null child (created offline) across a refresh whose server data omits it', async () => {

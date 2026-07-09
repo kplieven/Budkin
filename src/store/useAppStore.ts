@@ -36,6 +36,7 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
+import { addPendingOp, loadPendingOps, savePendingOps, type PendingOp } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -142,6 +143,8 @@ interface AppActions {
   disconnect: () => void;
   forgetServer: (serverUrl: string) => void;
   flushQueue: () => Promise<void>;
+  /** Replay durable offline update/delete ops (Unit D's `pendingOps` log) on reconnect. */
+  flushPendingOps: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
 
   selectChild: (id: string) => void;
@@ -316,18 +319,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+    }
   },
   toggleOffline: () => {
     const sim = !get().simulateOffline;
     const offline = sim || !get().networkOnline;
     set({ simulateOffline: sim, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+    }
   },
   setNetworkOnline: (online) => {
     const offline = get().simulateOffline || !online;
     set({ networkOnline: online, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+    }
   },
 
   // ---- connection ----
@@ -397,6 +409,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         timers: savedTimers,
       });
       void get().flushQueue();
+      void get().flushPendingOps();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -435,27 +448,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const localTimers = await loadTimers();
     try {
       const data = await loadFromServer(conn);
-      // Keep the user's current child if the server still has it; otherwise fall
-      // back to the server's first child (matches a cold `hydrate`).
-      const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
-        ? s.selectedChildId
-        : data.selectedChildId;
       // Children/measurements created offline (serverId == null) have no flush
       // yet (Phase 3): merge the in-memory unsynced ones back in so a wholesale
       // reload doesn't drop them from view. Entries are deliberately excluded
       // from this merge (see `mergeUnsynced`'s doc comment) — `...data` below
       // is entries' only source, unchanged.
+      const mergedChildren = mergeUnsynced(data.children, s.children);
+      // Keep the user's current child if it's still visible — checked against
+      // the MERGED list (not just the server's), so an offline-created child
+      // kept visible by mergeUnsynced above doesn't get silently deselected;
+      // otherwise fall back to the server's first child (matches cold `hydrate`).
+      const selectedChildId = mergedChildren.some((c) => c.id === s.selectedChildId)
+        ? s.selectedChildId
+        : data.selectedChildId;
       set({
         connected: true,
         offline: false,
         networkOnline: true,
         ...data,
-        children: mergeUnsynced(data.children, s.children),
+        children: mergedChildren,
         measurements: mergeUnsynced(data.measurements, s.measurements),
         selectedChildId,
         timers: localTimers,
       });
       void get().flushQueue();
+      void get().flushPendingOps();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -503,6 +520,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void saveConnection(conn);
       void persistServers(savedServers);
       void get().flushQueue();
+      void get().flushPendingOps();
     } catch (e) {
       set({
         connecting: false,
@@ -576,6 +594,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
     }
   },
+  flushPendingOps: async () => {
+    const s = get();
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
+    const ops = await loadPendingOps();
+    if (ops.length === 0) return;
+    const remaining: PendingOp[] = [];
+    for (const op of ops) {
+      try {
+        if (op.op === 'update' && op.entity === 'child') await updateChildOnServer(conn, op.payload);
+        else if (op.op === 'update' && op.entity === 'measurement') await updateMeasurementOnServer(conn, op.payload);
+        else if (op.op === 'update' && op.entity === 'entry') await updateEntryOnServer(conn, op.payload);
+        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
+      } catch {
+        remaining.push(op);
+      }
+    }
+    await savePendingOps(remaining);
+  },
   commitWrite: (entry) => {
     const s = get();
     const conn = s.connection;
@@ -641,6 +679,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
             }));
           })
           .catch(() => {});
+      } else if (conn && conn.mode === 'server' && s.offline && child.serverId != null) {
+        // Already on the server, editing while offline: record the update so
+        // it replays on reconnect instead of being silently overwritten by the
+        // next refresh(). A not-yet-synced local (serverId == null) needs no
+        // op — its create is still pending.
+        void addPendingOp({ op: 'update', entity: 'child', payload: child });
       }
       return;
     }
@@ -878,6 +922,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     lastDeleted = { entry, index, didServerDelete };
     if (didServerDelete) {
       void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
+    } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
+      // Already on the server, deleted while offline: record the delete so it
+      // replays on reconnect instead of the record resurrecting on the next refresh().
+      void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
     }
     get().showToast('Deleted', { label: 'Undo', run: () => get().undoDelete() });
   },
@@ -943,6 +991,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           })
           .catch(() => {});
       }
+    } else if (conn && conn.mode === 'server' && s.offline && existing && m.serverId != null) {
+      // Already on the server, editing while offline: record the update so it
+      // replays on reconnect. A brand-new (existing == null) offline
+      // measurement needs no op — its create is still pending.
+      void addPendingOp({ op: 'update', entity: 'measurement', payload: m });
     }
   },
   deleteMeasurement: (id) => {
@@ -957,6 +1010,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const conn = s.connection;
     if (m && m.serverId != null && conn && conn.mode === 'server' && !s.offline) {
       void deleteMeasurementFromServer(conn, m.kind, m.serverId).catch(() => {});
+    } else if (m && m.serverId != null && conn && conn.mode === 'server' && s.offline) {
+      void addPendingOp({ op: 'delete', entity: 'measurement', kind: m.kind, serverId: m.serverId });
     }
   },
   setTE: (patch) =>
@@ -1196,6 +1251,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast('Updated');
       if (s.connection && s.connection.mode === 'server' && !s.offline) {
         void updateEntryOnServer(s.connection, entry).catch(() => {});
+      } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
+        // Already on the server, edited while offline: record the update so
+        // it replays on reconnect. A not-yet-synced local edit needs no op.
+        void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
       }
     } else {
       get().commitWrite(entry);
