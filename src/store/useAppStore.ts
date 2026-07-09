@@ -602,6 +602,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       childSheet: false,
       editingChildId: null,
       showChildSwitcher: false,
+      insightsLoaded: false,
+      insightsEntries: [],
+      insightsError: false,
     });
     get().showToast('Saved');
     const conn = s.connection;
