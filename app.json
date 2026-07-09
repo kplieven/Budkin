@@ -41,6 +41,13 @@
       ],
       "expo-secure-store",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Budkin to access your photos so you can set a child's picture.",
+          "cameraPermission": "Allow Budkin to use the camera so you can take a child's picture."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
