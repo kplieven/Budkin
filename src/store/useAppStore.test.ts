@@ -852,6 +852,22 @@ describe('edit / delete entry', () => {
     await flush();
     expect(h.pushed).toHaveLength(0); // nothing to re-create
   });
+
+  it('undoDelete cancels the queued offline pending-delete op so it does not replay on reconnect', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0);
+    await flush();
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }]);
+
+    s().undoDelete();
+    expect(s().entries).toHaveLength(1);
+    await flush();
+    // The queued delete op must be removed, or a later flushPendingOps would
+    // delete the just-restored entry from the server anyway.
+    expect(h.pendingOps).toHaveLength(0);
+  });
 });
 
 describe('measurements', () => {
