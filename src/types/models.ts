@@ -135,3 +135,20 @@ export interface Measurement {
   date: number;
   notes?: string;
 }
+
+/**
+ * The connected user's Baby Buddy account + general settings, as read from
+ * `/api/profile/`. All fields optional — the server shape varies and some
+ * instances omit fields (or the whole `settings` sub-object). Read-only:
+ * there is no edit UI for these.
+ */
+export interface Profile {
+  username?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  language?: string;
+  timezone?: string;
+  /** dashboard auto-refresh rate string as returned by the server (e.g. "00:01:00"), or null */
+  dashboardRefreshRate?: string | null;
+}

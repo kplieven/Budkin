@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { bathToNoteBody, noteToBathEntry } from '@/api/client';
+import { bathToNoteBody, mapProfile, noteToBathEntry } from '@/api/client';
 import type { BathEntry } from '@/types/models';
 
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
@@ -56,5 +56,75 @@ describe('bath <-> note serialization', () => {
     const body = bathToNoteBody(entry);
     const back = noteToBathEntry({ id: 99, ...body }, 'c1');
     expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'big', tags: ['Fussy'], serverId: 99 });
+  });
+});
+
+// The real Baby Buddy `/api/profile/` response (verified against
+// babybuddy/api/serializers.py `ProfileSerializer` + `UserSerializer`):
+// account fields nest under a `user` object, `language`/`timezone` are
+// top-level on the profile itself (NOT under a `settings` sub-object,
+// despite the backing model being named `Settings`), and
+// `dashboard_refresh_rate` is a real field on that model but is
+// deliberately excluded from `ProfileSerializer.Meta.fields`, so it's never
+// present in a stock server's response.
+describe('mapProfile', () => {
+  it('maps the real /api/profile/ shape: nested user, top-level language/timezone', () => {
+    const raw = {
+      user: { id: 1, username: 'alex', first_name: 'Alex', last_name: 'Doe', email: 'alex@example.com', is_staff: true },
+      language: 'en',
+      timezone: 'America/Chicago',
+      api_key: 'deadbeef',
+    };
+    expect(mapProfile(raw)).toEqual({
+      username: 'alex',
+      firstName: 'Alex',
+      lastName: 'Doe',
+      email: 'alex@example.com',
+      language: 'en',
+      timezone: 'America/Chicago',
+      dashboardRefreshRate: undefined,
+    });
+  });
+
+  it('degrades gracefully when the user object and fields are missing', () => {
+    expect(mapProfile({})).toEqual({
+      username: undefined,
+      firstName: undefined,
+      lastName: undefined,
+      email: undefined,
+      language: undefined,
+      timezone: undefined,
+      dashboardRefreshRate: undefined,
+    });
+  });
+
+  it('degrades gracefully on null/undefined input', () => {
+    expect(mapProfile(null)).toEqual({
+      username: undefined,
+      firstName: undefined,
+      lastName: undefined,
+      email: undefined,
+      language: undefined,
+      timezone: undefined,
+      dashboardRefreshRate: undefined,
+    });
+    expect(mapProfile(undefined)).toEqual({
+      username: undefined,
+      firstName: undefined,
+      lastName: undefined,
+      email: undefined,
+      language: undefined,
+      timezone: undefined,
+      dashboardRefreshRate: undefined,
+    });
+  });
+
+  it('treats empty-string user fields as absent', () => {
+    const raw = { user: { username: '', first_name: '', last_name: '', email: '' }, language: 'en', timezone: 'UTC' };
+    const p = mapProfile(raw);
+    expect(p.username).toBeUndefined();
+    expect(p.firstName).toBeUndefined();
+    expect(p.lastName).toBeUndefined();
+    expect(p.email).toBeUndefined();
   });
 });

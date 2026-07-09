@@ -4,10 +4,11 @@ import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection } from '@/data/storage';
-import { loadFromServer, loadInsightsHistory } from '@/data/repository';
+import { loadFromServer, loadInsightsHistory, loadProfileFromServer } from '@/data/repository';
+import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
-import type { Entry, Timer } from '@/types/models';
+import type { Entry, Profile, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -23,6 +24,9 @@ const h = vi.hoisted(() => ({
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
   pushFails: false,
+  profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
+  profileFails: false,
+  prefs: {} as Record<string, unknown>,
 }));
 
 vi.mock('@/data/storage', () => ({
@@ -68,6 +72,14 @@ vi.mock('@/data/timers', () => ({
   }),
 }));
 
+// REQUIRED: `prefs.ts` imports AsyncStorage; without mocking it here the node
+// test env pulls in the native AsyncStorage module and the suite breaks —
+// mirrors why `@/data/timers` above is fully mocked too.
+vi.mock('@/data/prefs', () => ({
+  loadPrefs: vi.fn(async () => h.prefs),
+  savePrefs: vi.fn(async () => {}),
+}));
+
 vi.mock('@/data/repository', () => ({
   loadFromServer: vi.fn(async () => ({
     children: [],
@@ -106,6 +118,10 @@ vi.mock('@/data/repository', () => ({
     h.childUpdated.push(child);
   }),
   loadInsightsHistory: vi.fn(async () => []),
+  loadProfileFromServer: vi.fn(async () => {
+    if (h.profileFails) throw new Error('500');
+    return h.profile;
+  }),
 }));
 
 const NOW = 1_700_000_000_000;
@@ -125,6 +141,11 @@ beforeEach(() => {
   h.childPushed = [];
   h.childUpdated = [];
   h.pushFails = false;
+  h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
+  h.profileFails = false;
+  h.prefs = {};
+  vi.mocked(loadProfileFromServer).mockClear();
+  vi.mocked(savePrefs).mockClear();
   useAppStore.setState({
     connection: { demo: false, serverUrl: 'http://x', token: 't' },
     connected: true,
@@ -148,6 +169,10 @@ beforeEach(() => {
     editingChildId: null,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
+    profile: null,
+    profileLoading: false,
+    profileError: false,
+    profileLoaded: false,
     toast: null,
     savedServers: [],
   });
@@ -1323,5 +1348,118 @@ describe('insights slice', () => {
     await useAppStore.getState().loadInsights();
     expect(useAppStore.getState().insightsLoaded).toBe(true);
     expect(useAppStore.getState().insightsError).toBe(false);
+  });
+});
+
+describe('theme persistence', () => {
+  it('toggleTheme persists the new mode via savePrefs', () => {
+    useAppStore.setState({ themeMode: 'dark' });
+    s().toggleTheme();
+    expect(s().themeMode).toBe('light');
+    expect(savePrefs).toHaveBeenCalledWith({ themeMode: 'light' });
+  });
+
+  it('toggling back to dark persists dark too', () => {
+    useAppStore.setState({ themeMode: 'light' });
+    s().toggleTheme();
+    expect(s().themeMode).toBe('dark');
+    expect(savePrefs).toHaveBeenCalledWith({ themeMode: 'dark' });
+  });
+
+  it('hydrate applies a persisted themeMode', async () => {
+    h.prefs = { themeMode: 'light' };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ themeMode: 'dark' });
+    await s().hydrate();
+    expect(s().themeMode).toBe('light');
+  });
+
+  it('hydrate leaves themeMode alone when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ themeMode: 'dark' });
+    await s().hydrate();
+    expect(s().themeMode).toBe('dark');
+  });
+
+  it('hydrate applies a persisted theme for a demo connection too', async () => {
+    h.prefs = { themeMode: 'light' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: true, serverUrl: '', token: '' });
+    useAppStore.setState({ themeMode: 'dark' });
+    await s().hydrate();
+    expect(s().themeMode).toBe('light');
+  });
+});
+
+describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
+  it('demo mode: profile stays null, marked loaded, no fetch', async () => {
+    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    await s().loadProfile();
+    expect(s().profile).toBeNull();
+    expect(s().profileLoaded).toBe(true);
+    expect(s().profileLoading).toBe(false);
+    expect(loadProfileFromServer).not.toHaveBeenCalled();
+  });
+
+  it('success: fetches and stores the profile', async () => {
+    h.profile = { username: 'alex', timezone: 'UTC', language: 'en' } as Profile;
+    await s().loadProfile();
+    expect(s().profile).toEqual(h.profile);
+    expect(s().profileLoaded).toBe(true);
+    expect(s().profileLoading).toBe(false);
+    expect(s().profileError).toBe(false);
+    expect(loadProfileFromServer).toHaveBeenCalledWith(s().connection);
+  });
+
+  it('error: sets profileError and clears loading, without throwing', async () => {
+    h.profileFails = true;
+    await expect(s().loadProfile()).resolves.toBeUndefined();
+    expect(s().profileError).toBe(true);
+    expect(s().profileLoading).toBe(false);
+    expect(s().profileLoaded).toBe(false);
+  });
+
+  it('laziness: a second call no-ops once loaded', async () => {
+    await s().loadProfile();
+    expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
+    await s().loadProfile();
+    expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('laziness: a second call no-ops while already loading', async () => {
+    let resolve!: (v: Profile | null) => void;
+    vi.mocked(loadProfileFromServer).mockImplementationOnce(
+      () => new Promise<Profile | null>((r) => { resolve = r; }),
+    );
+    const first = s().loadProfile();
+    const second = s().loadProfile(); // fires while the first is still in flight
+    resolve({ username: 'alex' });
+    await Promise.all([first, second]);
+    expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('no connection: no-ops without fetching', async () => {
+    useAppStore.setState({ connection: null });
+    await s().loadProfile();
+    expect(s().profileLoaded).toBe(false);
+    expect(loadProfileFromServer).not.toHaveBeenCalled();
+  });
+
+  it('disconnect clears the profile state', async () => {
+    await s().loadProfile();
+    expect(s().profileLoaded).toBe(true);
+    s().disconnect();
+    expect(s().profile).toBeNull();
+    expect(s().profileLoaded).toBe(false);
+    expect(s().profileError).toBe(false);
+  });
+
+  it('connect resets profile state so a newly-connected server refetches', async () => {
+    await s().loadProfile();
+    expect(s().profileLoaded).toBe(true);
+    await s().connect('https://new.lan', 'tok2');
+    expect(s().profileLoaded).toBe(false);
+    expect(s().profile).toBeNull();
+    expect(s().profileError).toBe(false);
   });
 });
