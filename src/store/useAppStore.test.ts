@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, useAppStore } from '@/store/useAppStore';
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -13,7 +13,7 @@ import {
   saveChildren,
 } from '@/data/entityStore';
 import { fmtClock } from '@/lib/format';
-import type { Entry, Profile, Timer } from '@/types/models';
+import type { Child, Entry, Measurement, Profile, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -429,6 +429,36 @@ describe('mergeQueuedEntries', () => {
   });
 });
 
+describe('mergeUnsynced', () => {
+  const mkChild = (id: string, serverId?: number): Child => ({
+    id,
+    serverId,
+    first: 'A',
+    last: '',
+    birth: NOW,
+    color: '#fff',
+  });
+
+  it('prepends a serverId==null local not present in the server list', () => {
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('local1')]);
+    expect(merged.map((c) => c.id)).toEqual(['local1', 's1']);
+  });
+
+  it('excludes a local that has a serverId', () => {
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('local1', 2)]);
+    expect(merged.map((c) => c.id)).toEqual(['s1']);
+  });
+
+  it('excludes a local whose id is already in the server list (belt-and-suspenders)', () => {
+    const merged = mergeUnsynced([mkChild('dup', 1)], [mkChild('dup')]);
+    expect(merged.map((c) => c.id)).toEqual(['dup']);
+  });
+
+  it('returns just the server list when nothing is unsynced', () => {
+    expect(mergeUnsynced([mkChild('s1', 1)], [])).toEqual([mkChild('s1', 1)]);
+  });
+});
+
 describe('queued entries survive killing the app', () => {
   const queuedEntry = (id: string): Entry => ({
     id,
@@ -504,6 +534,89 @@ describe('queued entries survive killing the app', () => {
     await s().refresh();
     expect(s().entries).toHaveLength(1);
     expect(s().entries[0].id).toBe('diaper-9');
+  });
+});
+
+describe('offline-created children/measurements survive a cold hydrate (server mode)', () => {
+  const mira = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
+  it('recovers a persisted serverId==null child from loadEntities when the server reload omits it', async () => {
+    const localChild: Child = { id: 'localY', first: 'Persisted', last: 'Local', birth: NOW, color: '#abc' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [localChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localY',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
+  });
+
+  it('recovers a persisted serverId==null measurement from loadEntities when the server reload omits it', async () => {
+    const localMeasurement: Measurement = { id: 'localN', childId: 'c1', kind: 'height', value: 60, date: NOW };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      measurements: [localMeasurement],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().measurements.map((m) => m.id)).toEqual(['localN']);
+  });
+
+  // Scope guard: entries must keep using the queue-only merge
+  // (mergeQueuedEntries), NOT mergeUnsynced — a serverId==null entry that was
+  // persisted but never queued (e.g. it already flushed) must NOT reappear via
+  // loadEntities, or a flushed entry would show up twice (brief's scope note).
+  it('does NOT merge a persisted serverId==null entry that is not in the queue', async () => {
+    const persistedEntry: Entry = {
+      id: 'persisted-e',
+      childId: 'c1',
+      type: 'diaper',
+      time: NOW,
+      wet: true,
+      solid: false,
+      color: null,
+      tags: [],
+    };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [],
+      entries: [persistedEntry],
+      measurements: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().entries.map((e) => e.id)).not.toContain('persisted-e');
   });
 });
 
@@ -927,6 +1040,36 @@ describe('refresh / reconnect', () => {
     await s().loadProfile();
     expect(loadProfileFromServer).toHaveBeenCalled();
     expect(s().profileLoaded).toBe(true);
+  });
+
+  it('keeps an in-memory serverId==null child (created offline) across a refresh whose server data omits it', async () => {
+    const localChild: Child = { id: 'localX', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
+    useAppStore.setState({ children: [...s().children, localChild] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().children.map((c) => c.id)).toEqual(['localX', 'c1']);
+  });
+
+  it('keeps an in-memory serverId==null measurement (created offline) across a refresh whose server data omits it', async () => {
+    const localMeasurement: Measurement = { id: 'localM', childId: 'c1', kind: 'weight', value: 4.2, date: NOW };
+    useAppStore.setState({ measurements: [localMeasurement] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().measurements.map((m) => m.id)).toEqual(['localM']);
   });
 });
 

@@ -228,6 +228,29 @@ export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[
   return [...queuedEntries, ...serverEntries];
 }
 
+/**
+ * Merge locally-created-but-unsynced records (serverId == null) back into a
+ * freshly-loaded server list, so an offline create stays visible across a
+ * wholesale refresh/hydrate. Unsynced locals are prepended (newest-first, like
+ * save()); a local whose id already appears in the server list is skipped
+ * (belt-and-suspenders — a serverId==null local always has a local id, never a
+ * server id, so this only guards against pathological duplicates).
+ *
+ * Children/measurements only — NOT entries. Entries still flow through
+ * `src/data/queue.ts`, whose `flushQueue` pushes them to the server WITHOUT
+ * stamping the in-memory record's `serverId`; merging entries here would
+ * duplicate an entry that has already flushed. See `mergeQueuedEntries` above
+ * for the entry-specific (queue-based) equivalent.
+ */
+export function mergeUnsynced<T extends { id: string; serverId?: number }>(
+  serverList: T[],
+  localList: T[],
+): T[] {
+  const serverIds = new Set(serverList.map((r) => r.id));
+  const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
+  return [...unsynced, ...serverList];
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -359,10 +382,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
       // includes them, naturally dropping the local copy.
+      // Children/measurements created offline (serverId == null) have no flush
+      // yet (Phase 3), so read the durable copy and merge it back in the same
+      // way — see `mergeUnsynced`. Entries are deliberately excluded from this
+      // merge (see `mergeUnsynced`'s doc comment).
+      const e = await loadEntities();
       set({
         connected: true,
         hydrating: false,
         ...data,
+        children: mergeUnsynced(data.children, e?.children ?? []),
+        measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(data.entries, q),
         timers: savedTimers,
       });
@@ -410,11 +440,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
+      // Children/measurements created offline (serverId == null) have no flush
+      // yet (Phase 3): merge the in-memory unsynced ones back in so a wholesale
+      // reload doesn't drop them from view. Entries are deliberately excluded
+      // from this merge (see `mergeUnsynced`'s doc comment) — `...data` below
+      // is entries' only source, unchanged.
       set({
         connected: true,
         offline: false,
         networkOnline: true,
         ...data,
+        children: mergeUnsynced(data.children, s.children),
+        measurements: mergeUnsynced(data.measurements, s.measurements),
         selectedChildId,
         timers: localTimers,
       });
