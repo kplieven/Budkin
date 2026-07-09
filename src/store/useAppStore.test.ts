@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mergeQueuedEntries, mergeUnsynced, useAppStore } from '@/store/useAppStore';
-import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -1412,12 +1412,20 @@ describe('feeding extras', () => {
 });
 
 describe('diaper amount', () => {
-  it('saves an optional amount', () => {
+  it('saves a solid diaper amount (Medium = 2)', () => {
     s().openSheet('diaper');
-    s().setTE({ amount: 3 });
+    s().setTE({ solid: true, amount: 2 });
     s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'diaper' }>;
-    expect(e.amount).toBe(3);
+    expect(e.amount).toBe(2);
+  });
+
+  it('drops the amount when the diaper is not solid (wet only)', () => {
+    s().openSheet('diaper');
+    s().setTE({ wet: true, solid: false, amount: 2 });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'diaper' }>;
+    expect(e.amount).toBeNull();
   });
 });
 
@@ -2370,5 +2378,109 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
 
     expect(s().children.find((c) => c.id === 'localL')).toBeDefined();
     expect(s().children.find((c) => c.id === 'localK')?.serverId).toBe(501);
+  });
+
+  // End-to-end offline-measurement parity: a measurement created while offline
+  // stays local (serverId==null) and syncs on reconnect via flushUnsynced.
+  it('an offline-created measurement persists (serverId==null) and gets stamped on reconnect', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [],
+    });
+    s().openMeasurement('weight');
+    s().saveMeasurement(6.2, NOW);
+    await flush();
+    // Offline: no server push, no serverId — the create is pending on-device.
+    expect(h.measPushed).toHaveLength(0);
+    const created = s().measurements.find((m) => m.value === 6.2);
+    expect(created).toBeDefined();
+    expect(created?.serverId).toBeUndefined();
+
+    // Reconnect and flush.
+    useAppStore.setState({ offline: false });
+    await s().flushUnsynced();
+
+    expect(s().measurements.find((m) => m.value === 6.2)?.serverId).toBe(701);
+  });
+
+  it('shows a "Synced 1 item" toast when it stamps a single unsynced measurement', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [{ id: 'localG', childId: 'c1', kind: 'weight', value: 5, date: NOW }],
+      toast: null,
+    });
+
+    await s().flushUnsynced();
+
+    expect(s().toast).toBe('Synced 1 item');
+  });
+
+  it('the sync toast counts both children and measurements it stamps (plural)', async () => {
+    useAppStore.setState({
+      children: [{ id: 'localF', first: 'Finn', last: '', birth: NOW, color: '#fff' }],
+      measurements: [{ id: 'localG', childId: 'localF', kind: 'weight', value: 5, date: NOW }],
+      toast: null,
+    });
+
+    await s().flushUnsynced();
+
+    expect(s().toast).toBe('Synced 2 items');
+  });
+
+  it('does not toast when the upload leaves records unsynced (nothing actually stamped)', async () => {
+    useAppStore.setState({
+      children: [{ id: 'localM', first: 'M', last: '', birth: NOW, color: '#fff' }],
+      toast: null,
+    });
+    // The push never completes: records come back with serverId still null.
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children,
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    await s().flushUnsynced();
+
+    expect(s().toast).toBeNull();
+  });
+
+  it('does not toast on the offline early-return (nothing synced)', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'localN', first: 'N', last: '', birth: NOW, color: '#fff' }],
+      toast: null,
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+    expect(s().toast).toBeNull();
+  });
+});
+
+describe('selectPendingCount (offline banner pending count)', () => {
+  it('sums queued entries and unsynced (serverId==null) measurements; ignores synced ones', () => {
+    useAppStore.setState({
+      queueCount: 2,
+      measurements: [
+        { id: 'm-unsynced', childId: 'c1', kind: 'weight', value: 5, date: NOW },
+        { id: 'm-synced', serverId: 9, childId: 'c1', kind: 'height', value: 60, date: NOW },
+      ],
+    });
+    expect(selectPendingCount(s())).toBe(3);
+  });
+
+  it('is queueCount alone when no measurement is unsynced', () => {
+    useAppStore.setState({ queueCount: 1, measurements: [] });
+    expect(selectPendingCount(s())).toBe(1);
+  });
+
+  it('counts an offline-created measurement even with an empty entry queue', () => {
+    useAppStore.setState({
+      queueCount: 0,
+      measurements: [{ id: 'm-unsynced', childId: 'c1', kind: 'weight', value: 5, date: NOW }],
+    });
+    expect(selectPendingCount(s())).toBe(1);
   });
 });

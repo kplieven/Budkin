@@ -5,6 +5,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { greetingFor, screenTitleFor } from '@/shell/labels';
+import { selectPendingCount } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -14,7 +15,7 @@ export function TopBar() {
   const pathname = usePathname();
   const now = useAppStore((s) => s.now);
   const offline = useAppStore((s) => s.offline);
-  const queueCount = useAppStore((s) => s.queueCount);
+  const pending = useAppStore(selectPendingCount);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
@@ -72,7 +73,7 @@ export function TopBar() {
           >
             <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
             <Txt weight={600} size={12.5} color={t.text}>
-              {queueCount > 0 ? `Offline · ${queueCount} queued` : 'Offline'}
+              {pending > 0 ? `Offline · ${pending} pending` : 'Offline'}
             </Txt>
           </Pressable>
         )}
