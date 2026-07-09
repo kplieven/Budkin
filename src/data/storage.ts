@@ -16,7 +16,15 @@ export async function loadConnection(): Promise<Connection | null> {
   const s = await kvGet(KEY);
   if (!s) return null;
   try {
-    return JSON.parse(s) as Connection;
+    const raw = JSON.parse(s) as any;
+    // Migrate a legacy `{ demo: boolean; serverUrl; token }` shape (pre-`mode`
+    // union) into the current discriminated union.
+    if (raw && typeof raw === 'object' && 'demo' in raw) {
+      return raw.demo
+        ? { mode: 'local' }
+        : { mode: 'server', serverUrl: raw.serverUrl, token: raw.token };
+    }
+    return raw as Connection;
   } catch {
     return null;
   }

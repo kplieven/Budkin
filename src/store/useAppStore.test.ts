@@ -1,14 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, useAppStore } from '@/store/useAppStore';
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
-import { loadConnection } from '@/data/storage';
-import { loadFromServer, loadInsightsHistory, loadProfileFromServer } from '@/data/repository';
+import { loadConnection, saveConnection } from '@/data/storage';
+import {
+  loadFromServer,
+  loadInsightsHistory,
+  loadProfileFromServer,
+  serverHasData,
+  updateChildOnServer,
+} from '@/data/repository';
+import { matchServerChild, uploadUnsynced } from '@/data/sync';
 import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
+import {
+  clearEntities,
+  loadEntities,
+  saveChildren,
+} from '@/data/entityStore';
+import { clearPendingOps } from '@/data/pendingOps';
+import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import { fmtClock } from '@/lib/format';
-import type { Entry, Profile, Timer } from '@/types/models';
+import type { Child, Entry, Measurement, Profile, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -25,6 +39,8 @@ const h = vi.hoisted(() => ({
   childUpdated: [] as unknown[],
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
+  pendingOps: [] as unknown[],
+  adoptTarget: null as string | null,
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
@@ -75,6 +91,19 @@ vi.mock('@/data/timers', () => ({
   clearTimers: vi.fn(async () => {
     h.timers = [];
   }),
+}));
+
+// The durable entity store (children/entries/measurements/selectedChild/lastFeed).
+// Defaults to "nothing persisted yet" (null); individual tests override via
+// mockResolvedValueOnce to simulate a restart with saved data.
+vi.mock('@/data/entityStore', () => ({
+  loadEntities: vi.fn(async () => null),
+  saveChildren: vi.fn(async () => {}),
+  saveEntries: vi.fn(async () => {}),
+  saveMeasurements: vi.fn(async () => {}),
+  saveSelectedChildId: vi.fn(async () => {}),
+  saveLastFeed: vi.fn(async () => {}),
+  clearEntities: vi.fn(async () => {}),
 }));
 
 // REQUIRED: `prefs.ts` imports AsyncStorage; without mocking it here the node
@@ -130,6 +159,53 @@ vi.mock('@/data/repository', () => ({
     if (h.profileFails) throw new Error('500');
     return h.profile;
   }),
+  serverHasData: vi.fn(async () => false),
+}));
+
+// `@/data/sync`'s real uploader/matcher (Unit J's primitives, from an earlier
+// unit on this branch). Default `uploadUnsynced` is a pure passthrough (no
+// stamping) so it's a no-op for every OTHER test in this file that
+// incidentally triggers `flushUnsynced` via connect/hydrate/refresh/etc (the
+// default seeded child has no serverId, so `flushUnsynced`'s `hasUnsynced`
+// check is true almost everywhere) — only the `adopt`/`flushUnsynced`
+// describe blocks below override this to actually stamp serverIds.
+vi.mock('@/data/sync', () => ({
+  uploadUnsynced: vi.fn(async (state: { children: unknown[]; entries: unknown[]; measurements: unknown[] }) => ({
+    children: state.children,
+    entries: state.entries,
+    measurements: state.measurements,
+  })),
+  matchServerChild: vi.fn(() => null),
+}));
+
+// The offline op-log (Unit D). Tests assert against `h.pendingOps` directly
+// (mirroring how `h.pushed`/`h.updated`/etc. track the repository mocks above)
+// rather than asserting on the mock functions themselves.
+vi.mock('@/data/pendingOps', () => ({
+  addPendingOp: vi.fn(async (op: unknown) => {
+    h.pendingOps.push(op);
+    return h.pendingOps;
+  }),
+  loadPendingOps: vi.fn(async () => h.pendingOps),
+  savePendingOps: vi.fn(async (ops: unknown[]) => {
+    h.pendingOps = ops;
+  }),
+  clearPendingOps: vi.fn(async () => {
+    h.pendingOps = [];
+  }),
+}));
+
+// The persisted adopt target (Finding 2): backs the server-switch reset in
+// `adopt` so it survives an app kill between an abandoned `partial` adoption
+// and a later retry/switch — mirrors the AsyncStorage-backed mocks above.
+vi.mock('@/data/adoptTarget', () => ({
+  loadAdoptTarget: vi.fn(async () => h.adoptTarget),
+  saveAdoptTarget: vi.fn(async (url: string) => {
+    h.adoptTarget = url;
+  }),
+  clearAdoptTarget: vi.fn(async () => {
+    h.adoptTarget = null;
+  }),
 }));
 
 const NOW = 1_700_000_000_000;
@@ -150,14 +226,24 @@ beforeEach(() => {
   h.childUpdated = [];
   h.childPushChange = [];
   h.childUpdateChange = [];
+  h.pendingOps = [];
+  h.adoptTarget = null;
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
   h.prefs = {};
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
+  vi.mocked(loadEntities).mockClear();
+  vi.mocked(loadEntities).mockResolvedValue(null);
+  vi.mocked(saveChildren).mockClear();
+  vi.mocked(clearEntities).mockClear();
+  vi.mocked(clearPendingOps).mockClear();
+  vi.mocked(loadAdoptTarget).mockClear();
+  vi.mocked(saveAdoptTarget).mockClear();
+  vi.mocked(clearAdoptTarget).mockClear();
   useAppStore.setState({
-    connection: { demo: false, serverUrl: 'http://x', token: 't' },
+    connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
     connected: true,
     offline: false,
     networkOnline: true,
@@ -177,6 +263,7 @@ beforeEach(() => {
     showChildSwitcher: false,
     childSheet: false,
     editingChildId: null,
+    adoptSheet: false,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
     profile: null,
@@ -327,6 +414,85 @@ describe('flushQueue', () => {
   });
 });
 
+describe('flushPendingOps', () => {
+  const child: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' };
+  const measurement: Measurement = { id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 6, date: NOW };
+  const entry: Entry = {
+    id: 'feeding-1',
+    serverId: 1,
+    childId: 'c1',
+    type: 'feeding',
+    start: NOW - 30 * M,
+    end: NOW - 10 * M,
+    feedType: 'breast',
+    method: 'left',
+    amount: null,
+    tags: [],
+  };
+
+  it('replays an update/child op to updateChildOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'child', payload: child }];
+    await s().flushPendingOps();
+    expect(h.childUpdated).toEqual([child]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays an update/measurement op to updateMeasurementOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'measurement', payload: measurement }];
+    await s().flushPendingOps();
+    expect(h.measUpdated).toEqual([measurement]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays an update/entry op to updateEntryOnServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'update', entity: 'entry', payload: entry }];
+    await s().flushPendingOps();
+    expect(h.updated).toEqual([entry]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays a delete/measurement op to deleteMeasurementFromServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toEqual([{ kind: 'weight', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('replays a delete/entry op to deleteEntryFromServer and clears it on success', async () => {
+    h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.deleted).toEqual([{ type: 'feeding', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('retains an op that fails to replay, leaving successful ones cleared', async () => {
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+    h.pendingOps = [
+      { op: 'update', entity: 'child', payload: child },
+      { op: 'update', entity: 'measurement', payload: measurement },
+    ];
+    await s().flushPendingOps();
+    expect(h.measUpdated).toEqual([measurement]); // the other op still replayed
+    expect(h.pendingOps).toEqual([{ op: 'update', entity: 'child', payload: child }]); // failed op retained
+  });
+
+  it('is a no-op while offline', async () => {
+    useAppStore.setState({ offline: true });
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(1);
+  });
+
+  it('is a no-op in demo mode', async () => {
+    useAppStore.setState({ connection: { mode: 'local' } });
+    h.pendingOps = [{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.measDeleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(1);
+  });
+});
+
 describe('stopTimer', () => {
   it('converts a timer into an entry', async () => {
     useAppStore.setState({ timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }] });
@@ -344,7 +510,7 @@ describe('timer persistence across restarts', () => {
   it('restores persisted timers on hydrate (real connection)', async () => {
     const saved = [savedTimer('t9')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     await s().hydrate();
     expect(s().timers).toEqual(saved);
   });
@@ -352,7 +518,7 @@ describe('timer persistence across restarts', () => {
   it('restores persisted timers when the server is unreachable at launch', async () => {
     const saved = [savedTimer('t8')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
     expect(s().offline).toBe(true);
@@ -362,7 +528,7 @@ describe('timer persistence across restarts', () => {
   it('prefers persisted timers over the demo seed', async () => {
     const saved = [savedTimer('tD')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: true, serverUrl: '', token: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
     await s().hydrate();
     expect(s().timers).toEqual(saved);
   });
@@ -407,6 +573,36 @@ describe('mergeQueuedEntries', () => {
   });
 });
 
+describe('mergeUnsynced', () => {
+  const mkChild = (id: string, serverId?: number): Child => ({
+    id,
+    serverId,
+    first: 'A',
+    last: '',
+    birth: NOW,
+    color: '#fff',
+  });
+
+  it('prepends a serverId==null local not present in the server list', () => {
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('local1')]);
+    expect(merged.map((c) => c.id)).toEqual(['local1', 's1']);
+  });
+
+  it('excludes a local that has a serverId', () => {
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('local1', 2)]);
+    expect(merged.map((c) => c.id)).toEqual(['s1']);
+  });
+
+  it('excludes a local whose id is already in the server list (belt-and-suspenders)', () => {
+    const merged = mergeUnsynced([mkChild('dup', 1)], [mkChild('dup')]);
+    expect(merged.map((c) => c.id)).toEqual(['dup']);
+  });
+
+  it('returns just the server list when nothing is unsynced', () => {
+    expect(mergeUnsynced([mkChild('s1', 1)], [])).toEqual([mkChild('s1', 1)]);
+  });
+});
+
 describe('queued entries survive killing the app', () => {
   const queuedEntry = (id: string): Entry => ({
     id,
@@ -422,7 +618,7 @@ describe('queued entries survive killing the app', () => {
 
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
     h.q = [queuedEntry('e1')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: [mira],
       entries: [
@@ -440,7 +636,7 @@ describe('queued entries survive killing the app', () => {
 
   it('restores a queued entry into `entries` when the server is unreachable at launch', async () => {
     h.q = [queuedEntry('e2')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
     expect(s().offline).toBe(true);
@@ -450,7 +646,7 @@ describe('queued entries survive killing the app', () => {
 
   it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
     h.q = [queuedEntry('e3')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: [mira],
       entries: [],
@@ -482,6 +678,89 @@ describe('queued entries survive killing the app', () => {
     await s().refresh();
     expect(s().entries).toHaveLength(1);
     expect(s().entries[0].id).toBe('diaper-9');
+  });
+});
+
+describe('offline-created children/measurements survive a cold hydrate (server mode)', () => {
+  const mira = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
+  it('recovers a persisted serverId==null child from loadEntities when the server reload omits it', async () => {
+    const localChild: Child = { id: 'localY', first: 'Persisted', last: 'Local', birth: NOW, color: '#abc' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [localChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localY',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
+  });
+
+  it('recovers a persisted serverId==null measurement from loadEntities when the server reload omits it', async () => {
+    const localMeasurement: Measurement = { id: 'localN', childId: 'c1', kind: 'height', value: 60, date: NOW };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      measurements: [localMeasurement],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().measurements.map((m) => m.id)).toEqual(['localN']);
+  });
+
+  // Scope guard: entries must keep using the queue-only merge
+  // (mergeQueuedEntries), NOT mergeUnsynced — a serverId==null entry that was
+  // persisted but never queued (e.g. it already flushed) must NOT reappear via
+  // loadEntities, or a flushed entry would show up twice (brief's scope note).
+  it('does NOT merge a persisted serverId==null entry that is not in the queue', async () => {
+    const persistedEntry: Entry = {
+      id: 'persisted-e',
+      childId: 'c1',
+      type: 'diaper',
+      time: NOW,
+      wet: true,
+      solid: false,
+      color: null,
+      tags: [],
+    };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [],
+      entries: [persistedEntry],
+      measurements: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().entries.map((e) => e.id)).not.toContain('persisted-e');
   });
 });
 
@@ -551,6 +830,39 @@ describe('edit / delete entry', () => {
     expect(h.deleted).toHaveLength(1);
   });
 
+  it('offline edit of a synced entry records an update pending op instead of pushing', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().openEdit('feeding-1');
+    s().setTE({ method: 'right' });
+    s().save();
+    await flush();
+    expect(h.updated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'entry' });
+    expect((h.pendingOps[0] as { payload: Entry }).payload.id).toBe('feeding-1');
+  });
+
+  it('online edit of a synced entry does NOT record a pending op', async () => {
+    seedFeeding();
+    s().openEdit('feeding-1');
+    s().setTE({ method: 'right' });
+    s().save();
+    await flush();
+    expect(h.updated).toHaveLength(1);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('offline delete of a synced entry records a delete pending op and still removes locally', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0); // still removed locally
+    await flush();
+    expect(h.deleted).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }]);
+  });
+
   it('deleteEntry shows an Undo toast and undoDelete restores + re-creates the entry', async () => {
     seedFeeding();
     s().deleteEntry('feeding-1');
@@ -581,6 +893,22 @@ describe('edit / delete entry', () => {
     await flush();
     expect(h.pushed).toHaveLength(0); // nothing to re-create
   });
+
+  it('undoDelete cancels the queued offline pending-delete op so it does not replay on reconnect', async () => {
+    seedFeeding();
+    useAppStore.setState({ offline: true });
+    s().deleteEntry('feeding-1');
+    expect(s().entries).toHaveLength(0);
+    await flush();
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }]);
+
+    s().undoDelete();
+    expect(s().entries).toHaveLength(1);
+    await flush();
+    // The queued delete op must be removed, or a later flushPendingOps would
+    // delete the just-restored entry from the server anyway.
+    expect(h.pendingOps).toHaveLength(0);
+  });
 });
 
 describe('measurements', () => {
@@ -608,6 +936,32 @@ describe('measurements', () => {
     expect(s().measurements).toHaveLength(0);
     await flush();
     expect(h.measDeleted).toHaveLength(1);
+  });
+
+  it('offline edit of a synced measurement records an update pending op instead of pushing', async () => {
+    useAppStore.setState({
+      offline: true,
+      measurements: [{ id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().openEditMeasurement('weight-1');
+    s().saveMeasurement(6.0, NOW);
+    await flush();
+    expect(h.measUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'measurement' });
+    expect((h.pendingOps[0] as { payload: Measurement }).payload.id).toBe('weight-1');
+  });
+
+  it('offline delete of a synced measurement records a delete pending op and still removes locally', async () => {
+    useAppStore.setState({
+      offline: true,
+      measurements: [{ id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().deleteMeasurement('weight-1');
+    expect(s().measurements).toHaveLength(0); // still removed locally
+    await flush();
+    expect(h.measDeleted).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }]);
   });
 });
 
@@ -662,6 +1016,44 @@ describe('children', () => {
     expect(h.childPushed).toHaveLength(0);
   });
 
+  it('offline edit of a synced child records an update pending op instead of pushing', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+
+    expect(s().children[0].last).toBe('Updated'); // still applied locally
+    await flush();
+    expect(h.childUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.pendingOps).toHaveLength(1);
+    expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'child' });
+    expect((h.pendingOps[0] as { payload: Child }).payload.id).toBe('c1');
+  });
+
+  it('online edit of a synced child does NOT record a pending op', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+    await flush();
+    expect(h.childUpdated).toHaveLength(1);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('offline edit of a NOT-yet-synced child (no serverId) records no pending op (its create is still pending)', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'localOnly', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+    });
+    s().openEditChild('localOnly');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+    await flush();
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
   it('saveChild create with a photo sets picture optimistically, then swaps in the server URL', async () => {
     const photo = { uri: 'file:///tmp/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
     s().openAddChild();
@@ -705,7 +1097,7 @@ describe('children', () => {
   });
 
   it('demo mode: create stays local, no server push', async () => {
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    useAppStore.setState({ connection: { mode: 'local' } });
     s().openAddChild();
     s().saveChild({ first: 'Demo', last: '', birth: NOW });
     expect(s().children).toHaveLength(2);
@@ -727,6 +1119,94 @@ describe('children', () => {
     s().closeChildSheet();
     expect(s().childSheet).toBe(false);
     expect(s().editingChildId).toBeNull();
+  });
+});
+
+describe('adopt sheet open/close (mirrors openAddChild/closeChildSheet)', () => {
+  it('openAdopt opens the sheet', () => {
+    expect(s().adoptSheet).toBe(false);
+    s().openAdopt();
+    expect(s().adoptSheet).toBe(true);
+  });
+
+  it('closeAdopt closes the sheet', () => {
+    s().openAdopt();
+    expect(s().adoptSheet).toBe(true);
+    s().closeAdopt();
+    expect(s().adoptSheet).toBe(false);
+  });
+});
+
+describe('local mode: durable entityStore (empty start, no fake seed)', () => {
+  it('enterLocal sets connection to local mode, connects, and persists it — without seeding fake children', async () => {
+    useAppStore.setState({ connection: null, connected: false, children: [], entries: [] });
+    vi.mocked(loadEntities).mockResolvedValueOnce(null);
+    await s().enterLocal();
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().connected).toBe(true);
+    expect(s().children).toEqual([]); // no demo seed
+    expect(s().entries).toEqual([]);
+    expect(saveConnection).toHaveBeenCalledWith({ mode: 'local' });
+  });
+
+  it('enterLocal loads persisted entities when a prior local session left some', async () => {
+    const savedChild = { id: 'p1', first: 'Persisted', last: '', birth: NOW, color: '#000' };
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [savedChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'p1',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    await s().enterLocal();
+    expect(s().children).toEqual([savedChild]); // restored, not the demo seed
+    expect(s().selectedChildId).toBe('p1');
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+  });
+
+  it('local hydrate loads persisted entities instead of seeding fake ones', async () => {
+    const savedChild = { id: 'h1', first: 'Hydrated', last: '', birth: NOW, color: '#000' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [savedChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'h1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    await s().hydrate();
+    expect(s().connected).toBe(true);
+    expect(s().children).toEqual([savedChild]);
+    expect(s().selectedChildId).toBe('h1');
+  });
+
+  it('local hydrate starts empty when nothing was ever persisted', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().children).toEqual([]);
+    expect(s().entries).toEqual([]);
+    expect(s().measurements).toEqual([]);
+    expect(s().selectedChildId).toBe('');
+  });
+
+  it('the entity subscribe persists children on change (mirrors the timers subscribe)', () => {
+    vi.mocked(saveChildren).mockClear();
+    useAppStore.setState((st) => ({ children: [...st.children, { id: 'newc', first: 'New', last: '', birth: NOW, color: '#111' }] }));
+    expect(saveChildren).toHaveBeenCalledWith(s().children);
+  });
+
+  it('disconnect clears the durable entity store', () => {
+    s().disconnect();
+    expect(clearEntities).toHaveBeenCalled();
+  });
+
+  // Finding 1 (merge blocker): without this, offline edit/delete ops queued
+  // against one server's serverIds would survive a disconnect and replay
+  // against whatever record holds those numeric ids on the NEXT server.
+  it('disconnect clears pendingOps so a stale op cannot replay against a different server', () => {
+    s().disconnect();
+    expect(clearPendingOps).toHaveBeenCalled();
   });
 });
 
@@ -806,7 +1286,7 @@ describe('refresh / reconnect', () => {
 
   it('is a no-op in demo mode', async () => {
     vi.mocked(loadFromServer).mockClear();
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' }, offline: false });
+    useAppStore.setState({ connection: { mode: 'local' }, offline: false });
     await s().refresh();
     expect(loadFromServer).not.toHaveBeenCalled();
     expect(s().offline).toBe(false);
@@ -836,10 +1316,59 @@ describe('refresh / reconnect', () => {
 
     // A later loadProfile (e.g. after reconnecting) can refetch since
     // profileLoaded no longer blocks it.
-    useAppStore.setState({ connection: { demo: false, serverUrl: 'http://x', token: 't2' } });
+    useAppStore.setState({ connection: { mode: 'server', serverUrl: 'http://x', token: 't2' } });
     await s().loadProfile();
     expect(loadProfileFromServer).toHaveBeenCalled();
     expect(s().profileLoaded).toBe(true);
+  });
+
+  it('keeps selectedChildId pointing at an offline-created child still visible after refresh (regression)', async () => {
+    // Bug: refresh() used to check the server's child list only, so an
+    // offline-created child (kept visible via mergeUnsynced) that's currently
+    // selected would get silently deselected back to the server's first child.
+    const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
+    useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().selectedChildId).toBe('localZ'); // not reset to the server's first child
+    expect(s().children.map((c) => c.id)).toContain('localZ');
+  });
+
+  it('keeps an in-memory serverId==null child (created offline) across a refresh whose server data omits it', async () => {
+    const localChild: Child = { id: 'localX', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
+    useAppStore.setState({ children: [...s().children, localChild] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().children.map((c) => c.id)).toEqual(['localX', 'c1']);
+  });
+
+  it('keeps an in-memory serverId==null measurement (created offline) across a refresh whose server data omits it', async () => {
+    const localMeasurement: Measurement = { id: 'localM', childId: 'c1', kind: 'weight', value: 4.2, date: NOW };
+    useAppStore.setState({ measurements: [localMeasurement] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().measurements.map((m) => m.id)).toEqual(['localM']);
   });
 });
 
@@ -1321,7 +1850,7 @@ describe('saved servers', () => {
 
   it('hydrate loads saved servers and migrates the active connection', async () => {
     h.servers = [];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     await s().hydrate();
     expect(s().savedServers.map((x) => x.serverUrl)).toContain('http://x');
     expect(h.servers.map((x: any) => x.serverUrl)).toContain('http://x');
@@ -1341,7 +1870,7 @@ describe('saved servers', () => {
 describe('insights slice', () => {
   it('loadInsights in demo mode fills insightsEntries from local entries scoped to the child', async () => {
     useAppStore.setState({
-      connection: { demo: true, serverUrl: '', token: '' } as any,
+      connection: { mode: 'local' } as any,
       selectedChildId: 'c1',
       entries: [
         { id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
@@ -1365,7 +1894,7 @@ describe('insights slice', () => {
 
   it('loadInsights in non-demo mode fetches deep history from the server', async () => {
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1374,7 +1903,7 @@ describe('insights slice', () => {
     ]);
     await useAppStore.getState().loadInsights();
     expect(loadInsightsHistory).toHaveBeenCalledWith(
-      { demo: false, serverUrl: 'x', token: 'y' },
+      { mode: 'server', serverUrl: 'x', token: 'y' },
       'c1',
       expect.any(Number),
     );
@@ -1386,7 +1915,7 @@ describe('insights slice', () => {
   it('discards an in-flight fetch when the child switches mid-load and reloads for the new child', async () => {
     vi.mocked(loadInsightsHistory).mockClear();
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1415,7 +1944,7 @@ describe('insights slice', () => {
 
   it('loadInsights surfaces an error and recovers on retry', async () => {
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1470,7 +1999,7 @@ describe('theme persistence', () => {
 
   it('hydrate applies a persisted theme for a demo connection too', async () => {
     h.prefs = { themeMode: 'light' };
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: true, serverUrl: '', token: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
     useAppStore.setState({ themeMode: 'dark' });
     await s().hydrate();
     expect(s().themeMode).toBe('light');
@@ -1479,7 +2008,7 @@ describe('theme persistence', () => {
 
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    useAppStore.setState({ connection: { mode: 'local' } });
     await s().loadProfile();
     expect(s().profile).toBeNull();
     expect(s().profileLoaded).toBe(true);
@@ -1550,5 +2079,296 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(s().profileLoaded).toBe(false);
     expect(s().profile).toBeNull();
     expect(s().profileError).toBe(false);
+  });
+});
+
+describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () => {
+  beforeEach(() => {
+    useAppStore.setState({ connection: { mode: 'local' }, connected: true });
+    vi.mocked(serverHasData).mockClear();
+    vi.mocked(uploadUnsynced).mockClear();
+    vi.mocked(matchServerChild).mockClear();
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(saveConnection).mockClear();
+    vi.mocked(serverHasData).mockResolvedValue(false);
+    vi.mocked(matchServerChild).mockReturnValue(null);
+    // Full-success stamping default for this block: any serverId==null record
+    // gets stamped, mirroring uploadUnsynced's real "everything pushed"
+    // outcome. Individual tests override with mockImplementationOnce for the
+    // partial-upload / server-switch scenarios.
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null ? { ...c, serverId: 501 } : c)),
+      entries: state.entries.map((e) => (e.serverId == null ? { ...e, serverId: 601 } : e)),
+      measurements: state.measurements.map((m) => (m.serverId == null ? { ...m, serverId: 701 } : m)),
+    }));
+  });
+
+  it('against an empty server: uploads the local data and switches to server mode', async () => {
+    const localChild: Child = { id: 'localA', first: 'Ann', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(serverHasData).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children).toEqual([localChild]); // the not-yet-synced local child was uploaded
+    expect(s().connection).toEqual({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    expect(s().connected).toBe(true);
+    expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    // Full success clears the persisted adopt target (Finding 2) — a later
+    // adopt against a different server has nothing stale to reset.
+    expect(clearAdoptTarget).toHaveBeenCalled();
+  });
+
+  it('on success, upserts the adopted server into savedServers (so it appears in the reconnect list)', async () => {
+    useAppStore.setState({ savedServers: [] });
+    h.servers = [];
+
+    const result = await s().adopt('https://adopted.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(s().savedServers.map((x) => x.serverUrl)).toContain('https://adopted.lan');
+    expect(h.servers).toHaveLength(1); // persisted, mirroring connect()
+  });
+
+  it('does NOT upsert savedServers on a guard/partial/error outcome (only on done)', async () => {
+    useAppStore.setState({ savedServers: [] });
+    h.servers = [];
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+
+    const result = await s().adopt('https://guarded.lan', 'tok');
+
+    expect(result).toEqual({ status: 'guard' });
+    expect(s().savedServers).toEqual([]);
+    expect(h.servers).toEqual([]);
+  });
+
+  it('against a non-empty server without override: guards instead of uploading, stays local', async () => {
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'guard' });
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().connected).toBe(true);
+  });
+
+  it('non-empty WITH uploadAnyway: dedups against a matching server child, then uploads', async () => {
+    const localChild: Child = { id: 'localB', first: 'Ben', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    vi.mocked(serverHasData).mockResolvedValueOnce(true);
+    const serverChild: Child = { id: '900', serverId: 900, first: 'Ben', last: '', birth: NOW, color: '#eee' };
+    vi.mocked(loadFromServer)
+      .mockResolvedValueOnce({ // the dedup fetch
+        children: [serverChild], entries: [], timers: [], selectedChildId: '900',
+        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+      })
+      .mockResolvedValueOnce({ // the post-success reload
+        children: [serverChild], entries: [], timers: [], selectedChildId: '900',
+        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+      });
+    vi.mocked(matchServerChild).mockReturnValueOnce(900);
+
+    const result = await s().adopt('https://new.lan', 'tok', { uploadAnyway: true });
+
+    expect(matchServerChild).toHaveBeenCalledWith(localChild, [serverChild]);
+    // Attached to the existing server child (not duplicated) BEFORE uploading
+    // — uploadUnsynced then sees serverId already set and skips it.
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children.find((c) => c.id === 'localB')?.serverId).toBe(900);
+    expect(result).toEqual({ status: 'done' });
+  });
+
+  it('when uploadUnsynced leaves a record serverId==null: returns partial, stays local', async () => {
+    const localChild: Child = { id: 'localC', first: 'Cara', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children, // unchanged: the push never completed
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'partial' });
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().children.find((c) => c.id === 'localC')?.serverId).toBeUndefined();
+  });
+
+  it('when serverHasData throws: returns error, stays local', async () => {
+    vi.mocked(serverHasData).mockRejectedValueOnce(new Error('bad token'));
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'error', message: 'bad token' });
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('server-switch reset: adopting a DIFFERENT server clears serverIds stamped by an abandoned adoption (persists across a simulated app restart)', async () => {
+    const childA: Child = { id: 'localD', first: 'Dee', last: '', birth: NOW, color: '#fff' };
+    const childB: Child = { id: 'localE', first: 'Eve', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [childA, childB] });
+    // Server A: only childA's push succeeds -> the overall result is
+    // `partial`, so the persisted adopt target stays pointed at server A (an
+    // "abandoned" adoption in local mode).
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => (c.id === 'localD' ? { ...c, serverId: 111 } : c)),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    const first = await s().adopt('https://server-a.lan', 'tok');
+    expect(first).toEqual({ status: 'partial' });
+    expect(s().children.find((c) => c.id === 'localD')?.serverId).toBe(111);
+
+    // Simulate the app being killed and relaunched between the abandoned
+    // attempt and this retry: the ONLY thing carrying the prior target
+    // forward is durable storage (there is no module-memory fallback left),
+    // so stub `loadAdoptTarget` directly rather than relying on the previous
+    // call's `saveAdoptTarget` having landed in the same in-memory mock.
+    vi.mocked(loadAdoptTarget).mockResolvedValueOnce('https://server-a.lan');
+
+    // Adopting a DIFFERENT server must clear the stale serverId from A BEFORE
+    // uploading, or childA would be wrongly skipped as "already synced" (to
+    // the wrong server).
+    await s().adopt('https://server-b.lan', 'tok');
+    const secondUpload = vi.mocked(uploadUnsynced).mock.calls[1][0];
+    expect(secondUpload.children.every((c) => c.serverId == null)).toBe(true);
+  });
+
+  it('server-switch reset fires purely off a persisted target (loadAdoptTarget -> "A"), even with no prior adopt() call in this session', async () => {
+    const stamped: Child = { id: 'localZ', serverId: 111, first: 'Zed', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [stamped] });
+    vi.mocked(loadAdoptTarget).mockResolvedValueOnce('https://server-a.lan');
+
+    await s().adopt('https://server-b.lan', 'tok');
+
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children.find((c) => c.id === 'localZ')?.serverId).toBeUndefined();
+  });
+});
+
+describe('flushUnsynced (reconnect flush of offline-created children/measurements)', () => {
+  beforeEach(() => {
+    vi.mocked(uploadUnsynced).mockClear();
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null ? { ...c, serverId: 501 } : c)),
+      entries: state.entries,
+      measurements: state.measurements.map((m) => (m.serverId == null ? { ...m, serverId: 701 } : m)),
+    }));
+  });
+
+  it('stamps a serverId==null child while online in server mode', async () => {
+    const localChild: Child = { id: 'localF', first: 'Finn', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).toHaveBeenCalled();
+    // entries: [] passed through untouched — this path never touches entries
+    // (they still flow through queue.ts's flushQueue).
+    expect(vi.mocked(uploadUnsynced).mock.calls[0][0].entries).toEqual([]);
+    expect(s().children.find((c) => c.id === 'localF')?.serverId).toBe(501);
+  });
+
+  it('stamps a serverId==null measurement', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [{ id: 'localG', childId: 'c1', kind: 'weight', value: 5, date: NOW }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(s().measurements.find((m) => m.id === 'localG')?.serverId).toBe(701);
+  });
+
+  it('is a no-op while offline', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'localH', first: 'H', last: '', birth: NOW, color: '#fff' }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op in local mode', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [{ id: 'localI', first: 'I', last: '', birth: NOW, color: '#fff' }],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when nothing is unsynced', async () => {
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 42, first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      measurements: [],
+    });
+
+    await s().flushUnsynced();
+
+    expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  // Finding 3: two concurrent reconnect triggers (e.g. setNetworkOnline(true)
+  // + a foreground refresh()) both calling flushUnsynced must not both POST
+  // the same serverId==null child — that would duplicate it on the server.
+  it('guards against overlapping flushes: a second call while one is in flight is a no-op', async () => {
+    const localChild: Child = { id: 'localJ', first: 'J', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    let resolveUpload!: (v: { children: Child[]; entries: Entry[]; measurements: Measurement[] }) => void;
+    vi.mocked(uploadUnsynced).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+
+    const first = s().flushUnsynced();
+    const second = s().flushUnsynced(); // fires while `first` is still awaiting uploadUnsynced
+
+    expect(uploadUnsynced).toHaveBeenCalledTimes(1);
+    resolveUpload({ children: [{ ...localChild, serverId: 501 }], entries: [], measurements: [] });
+    await first;
+    await second;
+
+    expect(uploadUnsynced).toHaveBeenCalledTimes(1);
+    expect(s().children.find((c) => c.id === 'localJ')?.serverId).toBe(501);
+  });
+
+  // Finding 3 (functional merge): the wholesale `set({ children: result.children,
+  // ... })` off the pre-await snapshot would clobber a create that lands
+  // during the await; the functional merge-by-id must preserve it instead.
+  it('a create landing during the in-flight upload is not dropped by the functional merge', async () => {
+    const localChild: Child = { id: 'localK', first: 'K', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    let resolveUpload!: (v: { children: Child[]; entries: Entry[]; measurements: Measurement[] }) => void;
+    vi.mocked(uploadUnsynced).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+
+    const pending = s().flushUnsynced();
+    // A concurrent create lands mid-flush (e.g. via saveChild) — simulated
+    // directly on state rather than driving the whole saveChild flow.
+    const newChild: Child = { id: 'localL', first: 'L', last: '', birth: NOW, color: '#eee' };
+    useAppStore.setState((st) => ({ children: [...st.children, newChild] }));
+
+    resolveUpload({ children: [{ ...localChild, serverId: 501 }], entries: [], measurements: [] });
+    await pending;
+
+    expect(s().children.find((c) => c.id === 'localL')).toBeDefined();
+    expect(s().children.find((c) => c.id === 'localK')?.serverId).toBe(501);
   });
 });

@@ -14,6 +14,8 @@ export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
 export interface Child {
   id: string;
+  /** server numeric id; present once created on / loaded from a server */
+  serverId?: number;
   first: string;
   last: string;
   /** birth date, epoch ms */

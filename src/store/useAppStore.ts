@@ -22,12 +22,30 @@ import {
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
+  serverHasData,
   updateChildOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
 } from '@/data/repository';
+import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
 import { ApiError, childColor } from '@/api/client';
-import { makeSeed } from '@/data/seed';
+import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
+import {
+  clearEntities,
+  loadEntities,
+  saveChildren,
+  saveEntries,
+  saveLastFeed,
+  saveMeasurements,
+  saveSelectedChildId,
+} from '@/data/entityStore';
+import {
+  addPendingOp,
+  clearPendingOps,
+  loadPendingOps,
+  savePendingOps,
+  type PendingOp,
+} from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -87,6 +105,8 @@ interface AppState {
   childSheet: boolean;
   /** id of the child being edited, or null when creating a new one */
   editingChildId: string | null;
+  /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
+  adoptSheet: boolean;
   sheet: { type: ActivityType } | null;
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
@@ -119,6 +139,16 @@ interface AppState {
   te: TimeEntryState;
 }
 
+/** Outcome of `adopt` — pushing a local-mode user's data up to a Baby Buddy
+ *  server. `partial` means the upload was interrupted (network drop mid-way);
+ *  the app stays in local mode with whatever serverIds got stamped, so a
+ *  retry (calling `adopt` again against the same server) resumes cleanly. */
+export type AdoptResult =
+  | { status: 'guard' } // server already has data; awaiting the user's choice
+  | { status: 'done' } // uploaded (or the server was empty) + now in server mode
+  | { status: 'partial' } // upload interrupted; STILL local mode; retry-able
+  | { status: 'error'; message: string };
+
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
@@ -130,10 +160,22 @@ interface AppActions {
   /** Re-check the server and reload data (on foreground / pull-to-refresh). */
   refresh: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
-  enterDemo: () => void;
+  /** Push a local-mode user's data up to a Baby Buddy server and switch to
+   *  server mode. `opts.uploadAnyway` overrides the non-empty-server guard,
+   *  attaching to matching existing server children (see `matchServerChild`)
+   *  instead of duplicating them. Safe to call again after a `partial` result
+   *  — the upload is resumable (already-stamped records are skipped). */
+  adopt: (serverUrl: string, token: string, opts?: { uploadAnyway?: boolean }) => Promise<AdoptResult>;
+  enterLocal: () => Promise<void>;
   disconnect: () => void;
   forgetServer: (serverUrl: string) => void;
   flushQueue: () => Promise<void>;
+  /** Replay durable offline update/delete ops (Unit D's `pendingOps` log) on reconnect. */
+  flushPendingOps: () => Promise<void>;
+  /** Push offline-created children/measurements (serverId == null) up on
+   *  reconnect. Entries are deliberately excluded — they still flow through
+   *  the queue.ts path (flushQueue); mixing the two would double-push. */
+  flushUnsynced: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
 
   selectChild: (id: string) => void;
@@ -144,6 +186,9 @@ interface AppActions {
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
   saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
+
+  openAdopt: () => void;
+  closeAdopt: () => void;
 
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
@@ -220,6 +265,40 @@ export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[
   return [...queuedEntries, ...serverEntries];
 }
 
+/**
+ * Merge locally-created-but-unsynced records (serverId == null) back into a
+ * freshly-loaded server list, so an offline create stays visible across a
+ * wholesale refresh/hydrate. Unsynced locals are prepended (newest-first, like
+ * save()); a local whose id already appears in the server list is skipped
+ * (belt-and-suspenders — a serverId==null local always has a local id, never a
+ * server id, so this only guards against pathological duplicates).
+ *
+ * Children/measurements only — NOT entries. Entries still flow through
+ * `src/data/queue.ts`, whose `flushQueue` pushes them to the server WITHOUT
+ * stamping the in-memory record's `serverId`; merging entries here would
+ * duplicate an entry that has already flushed. See `mergeQueuedEntries` above
+ * for the entry-specific (queue-based) equivalent.
+ */
+export function mergeUnsynced<T extends { id: string; serverId?: number }>(
+  serverList: T[],
+  localList: T[],
+): T[] {
+  const serverIds = new Set(serverList.map((r) => r.id));
+  const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
+  return [...unsynced, ...serverList];
+}
+
+/** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
+ *  `adopt` and `flushUnsynced` — the only two callers that push local-only
+ *  (serverId == null) records up to the server. */
+function buildUploadDeps(conn: Connection): UploadDeps {
+  return {
+    pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
+    pushEntry: (e) => pushEntryToServer(conn, e),
+    pushMeasurement: (m) => pushMeasurementToServer(conn, m),
+  };
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -228,6 +307,9 @@ let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | nul
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
+// Guards against overlapping flushUnsynced calls (e.g. setNetworkOnline(true)
+// and a foreground refresh() both firing at once) — see `flushUnsynced` below.
+let flushUnsyncedInFlight = false;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -249,6 +331,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   showChildSwitcher: false,
   childSheet: false,
   editingChildId: null,
+  adoptSheet: false,
   sheet: null,
   editingId: null,
   fromTimerId: null,
@@ -285,18 +368,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
+    }
   },
   toggleOffline: () => {
     const sim = !get().simulateOffline;
     const offline = sim || !get().networkOnline;
     set({ simulateOffline: sim, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
+    }
   },
   setNetworkOnline: (online) => {
     const offline = get().simulateOffline || !online;
     set({ networkOnline: online, offline });
-    if (!offline) void get().flushQueue();
+    if (!offline) {
+      void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
+    }
   },
 
   // ---- connection ----
@@ -314,7 +409,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     let savedServers = await loadServers();
     // Migration: ensure the active real server is in the retry list for users
     // who connected before the saved-servers feature existed.
-    if (conn && !conn.demo && conn.serverUrl) {
+    if (conn && conn.mode === 'server') {
       savedServers = upsertServer(savedServers, {
         serverUrl: conn.serverUrl,
         token: conn.token,
@@ -327,20 +422,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ hydrating: false, queueCount: q.length, timers: savedTimers });
       return;
     }
-    if (conn.demo) {
-      const now = Date.now();
-      const seed = makeSeed(now);
+    if (conn.mode === 'local') {
+      const e = await loadEntities();
       set({
         connection: conn,
         connected: true,
         hydrating: false,
-        now,
-        children: seed.children,
-        entries: seed.entries,
-        timers: savedTimers.length ? savedTimers : seed.timers,
-        selectedChildId: seed.selectedChildId,
-        lastFeed: seed.lastFeed,
-        measurements: seed.measurements,
+        children: e?.children ?? [],
+        entries: e?.entries ?? [],
+        measurements: e?.measurements ?? [],
+        selectedChildId: e?.selectedChildId ?? '',
+        lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
+        timers: savedTimers,
         queueCount: q.length,
       });
       return;
@@ -353,14 +446,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
       // includes them, naturally dropping the local copy.
+      // Children/measurements created offline (serverId == null) have no flush
+      // yet (Phase 3), so read the durable copy and merge it back in the same
+      // way — see `mergeUnsynced`. Entries are deliberately excluded from this
+      // merge (see `mergeUnsynced`'s doc comment).
+      const e = await loadEntities();
       set({
         connected: true,
         hydrating: false,
         ...data,
+        children: mergeUnsynced(data.children, e?.children ?? []),
+        measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(data.entries, q),
         timers: savedTimers,
       });
       void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -386,7 +488,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const s = get();
     const conn = s.connection;
     // Nothing to re-check for demo, no connection, or a manual offline override.
-    if (!conn || conn.demo || s.simulateOffline || refreshInFlight) return;
+    if (!conn || conn.mode !== 'server' || s.simulateOffline || refreshInFlight) return;
     refreshInFlight = true;
     // Running timers are local-only (the server has none) and can be mutated
     // out-of-band by the home-screen widget while the app is warm. Re-read the
@@ -399,9 +501,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const localTimers = await loadTimers();
     try {
       const data = await loadFromServer(conn);
-      // Keep the user's current child if the server still has it; otherwise fall
-      // back to the server's first child (matches a cold `hydrate`).
-      const selectedChildId = data.children.some((c) => c.id === s.selectedChildId)
+      // Children/measurements created offline (serverId == null) have no flush
+      // yet (Phase 3): merge the in-memory unsynced ones back in so a wholesale
+      // reload doesn't drop them from view. Entries are deliberately excluded
+      // from this merge (see `mergeUnsynced`'s doc comment) — `...data` below
+      // is entries' only source, unchanged.
+      const mergedChildren = mergeUnsynced(data.children, s.children);
+      // Keep the user's current child if it's still visible — checked against
+      // the MERGED list (not just the server's), so an offline-created child
+      // kept visible by mergeUnsynced above doesn't get silently deselected;
+      // otherwise fall back to the server's first child (matches cold `hydrate`).
+      const selectedChildId = mergedChildren.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
       set({
@@ -409,10 +519,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         offline: false,
         networkOnline: true,
         ...data,
+        children: mergedChildren,
+        measurements: mergeUnsynced(data.measurements, s.measurements),
         selectedChildId,
         timers: localTimers,
       });
       void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         await clearConnection();
@@ -437,7 +551,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   connect: async (serverUrl, token) => {
     set({ connecting: true, connectError: null });
-    const conn: Connection = { demo: false, serverUrl, token };
+    const conn: Connection = { mode: 'server', serverUrl, token };
     try {
       const data = await loadFromServer(conn);
       const savedServers = upsertServer(get().savedServers, {
@@ -460,6 +574,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void saveConnection(conn);
       void persistServers(savedServers);
       void get().flushQueue();
+      void get().flushPendingOps();
+      void get().flushUnsynced();
     } catch (e) {
       set({
         connecting: false,
@@ -467,22 +583,105 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
   },
-  enterDemo: () => {
-    const now = Date.now();
-    const seed = makeSeed(now);
-    const conn: Connection = { demo: true, serverUrl: '', token: '' };
+  adopt: async (serverUrl, token, opts) => {
+    const conn: Connection = { mode: 'server', serverUrl, token };
+    // Server-switch reset: a prior abandoned adoption (a `partial` result)
+    // stamped serverIds against a DIFFERENT server. Those ids must not cause
+    // this adoption to wrongly skip records that were never pushed to
+    // `serverUrl` — clear them before doing anything else. The target is
+    // read from durable storage (not module memory) so this reset still
+    // fires across an app kill between the abandoned attempt and this call.
+    const prevAdoptTarget = await loadAdoptTarget();
+    if (prevAdoptTarget != null && prevAdoptTarget !== serverUrl) {
+      set((st) => ({
+        children: st.children.map((c) => ({ ...c, serverId: undefined })),
+        entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
+        measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
+      }));
+    }
+    await saveAdoptTarget(serverUrl);
+
+    // Probe first — this also validates the token.
+    let hasData: boolean;
+    try {
+      hasData = await serverHasData(conn);
+    } catch (e) {
+      return { status: 'error', message: e instanceof Error ? e.message : "Couldn't reach the server." };
+    }
+    if (hasData && !opts?.uploadAnyway) {
+      // Non-empty server, no override: don't upload — the UI offers "upload
+      // anyway" or "use server data" from here.
+      return { status: 'guard' };
+    }
+
+    const s = get();
+    let state = { children: s.children, entries: s.entries, measurements: s.measurements };
+    if (hasData && opts?.uploadAnyway) {
+      // Dedup: attach each not-yet-synced local child to a matching existing
+      // server child (by name + birth date) instead of duplicating it.
+      const data = await loadFromServer(conn);
+      const serverChildren = data.children;
+      state = {
+        ...state,
+        children: state.children.map((c) => {
+          if (c.serverId != null) return c;
+          const matched = matchServerChild(c, serverChildren);
+          return matched != null ? { ...c, serverId: matched } : c;
+        }),
+      };
+    }
+
+    const result = await uploadUnsynced(state, buildUploadDeps(conn));
+    // Persist stamped serverIds immediately so a partial upload is resumable
+    // on retry, even before we know whether it fully succeeded.
+    set({ children: result.children, entries: result.entries, measurements: result.measurements });
+
+    const stillUnsynced =
+      result.children.some((c) => c.serverId == null) ||
+      result.entries.some((e) => e.serverId == null) ||
+      result.measurements.some((m) => m.serverId == null);
+    if (stillUnsynced) {
+      // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
+      // retry against the SAME server doesn't wrongly reset the ids we just stamped.
+      return { status: 'partial' };
+    }
+
+    // Full success: switch to server mode, mirroring connect()'s structure —
+    // including upserting the server into the "previously connected" retry
+    // list, so an adopted server shows up there too (not just a fresh connect()).
+    const savedServers = upsertServer(get().savedServers, {
+      serverUrl,
+      token,
+      lastUsedAt: Date.now(),
+    });
+    set({ connection: conn, connected: true, savedServers });
+    void saveConnection(conn);
+    void persistServers(savedServers);
+    const data = await loadFromServer(conn);
+    set({
+      ...data,
+      // a newly-adopted server's profile hasn't been fetched yet
+      profile: null,
+      profileLoaded: false,
+      profileError: false,
+      profileLoading: false,
+    });
+    await clearAdoptTarget();
+    return { status: 'done' };
+  },
+  enterLocal: async () => {
+    const conn: Connection = { mode: 'local' };
+    const e = await loadEntities();
     set({
       connection: conn,
       connected: true,
       connecting: false,
       connectError: null,
-      now,
-      children: seed.children,
-      entries: seed.entries,
-      timers: seed.timers,
-      selectedChildId: seed.selectedChildId,
-      lastFeed: seed.lastFeed,
-      measurements: seed.measurements,
+      children: e?.children ?? [],
+      entries: e?.entries ?? [],
+      measurements: e?.measurements ?? [],
+      selectedChildId: e?.selectedChildId ?? '',
+      lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
       profile: null,
       profileLoaded: false,
       profileError: false,
@@ -493,6 +692,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   disconnect: () => {
     void clearConnection();
     void clearQueue();
+    void clearEntities();
+    void clearPendingOps();
     set({
       connection: null,
       connected: false,
@@ -518,7 +719,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   flushQueue: async () => {
     const s = get();
     const conn = s.connection;
-    if (!conn || conn.demo || s.offline) return;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
     const q = await loadQueue();
     if (q.length === 0) return;
     const remaining: Entry[] = [];
@@ -535,10 +736,69 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
     }
   },
+  flushPendingOps: async () => {
+    const s = get();
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
+    const ops = await loadPendingOps();
+    if (ops.length === 0) return;
+    const remaining: PendingOp[] = [];
+    for (const op of ops) {
+      try {
+        if (op.op === 'update' && op.entity === 'child') await updateChildOnServer(conn, op.payload);
+        else if (op.op === 'update' && op.entity === 'measurement') await updateMeasurementOnServer(conn, op.payload);
+        else if (op.op === 'update' && op.entity === 'entry') await updateEntryOnServer(conn, op.payload);
+        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
+      } catch {
+        remaining.push(op);
+      }
+    }
+    await savePendingOps(remaining);
+  },
+  flushUnsynced: async () => {
+    // Guards against overlapping flushes (e.g. setNetworkOnline(true) and a
+    // foreground refresh() both firing at once), which would otherwise both
+    // read the same serverId==null child and both POST it, duplicating it
+    // on the server.
+    if (flushUnsyncedInFlight) return;
+    flushUnsyncedInFlight = true;
+    try {
+      const s = get();
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server' || s.offline) return;
+      // Only children & measurements here — entries still flow through
+      // queue.ts (flushQueue), and mixing would double-push. (Full entry
+      // unification is a later change.) Note: an offline entry created for an
+      // offline-created child while CONNECTED is a niche case not handled here
+      // either — it stays on the queue path.
+      const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
+      if (!hasUnsynced) return;
+      const result = await uploadUnsynced(
+        { children: s.children, entries: [], measurements: s.measurements },
+        buildUploadDeps(conn),
+      );
+      // Functional merge-by-id (reads the CURRENT state via `st`, not the
+      // pre-await snapshot `s`) that only stamps serverIds, so a create that
+      // landed during the await isn't dropped by a wholesale replace.
+      set((st) => ({
+        children: st.children.map((c) => {
+          const u = result.children.find((r) => r.id === c.id);
+          return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
+        }),
+        measurements: st.measurements.map((m) => {
+          const u = result.measurements.find((r) => r.id === m.id);
+          return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
+        }),
+      }));
+    } finally {
+      flushUnsyncedInFlight = false;
+    }
+  },
   commitWrite: (entry) => {
     const s = get();
     const conn = s.connection;
-    if (!conn || conn.demo) return; // demo: local only, nothing to push
+    if (!conn || conn.mode !== 'server') return; // local: nothing to push
     if (s.offline) {
       void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
     } else {
@@ -569,6 +829,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openAddChild: () => set({ childSheet: true, editingChildId: null }),
   openEditChild: (id) => set({ childSheet: true, editingChildId: id }),
   closeChildSheet: () => set({ childSheet: false, editingChildId: null }),
+
+  openAdopt: () => set({ adoptSheet: true }),
+  closeAdopt: () => set({ adoptSheet: false }),
+
   saveChild: (fields) => {
     const s = get();
     const change: PhotoChange = fields.photo ?? { kind: 'none' };
@@ -590,7 +854,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       get().showToast('Updated');
       const conn = s.connection;
-      if (conn && !conn.demo && !s.offline) {
+      if (conn && conn.mode === 'server' && !s.offline) {
         void updateChildOnServer(conn, child, change)
           .then((url) => {
             // Swap the ephemeral local file URI for the durable server URL.
@@ -600,6 +864,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
             }));
           })
           .catch(() => {});
+      } else if (conn && conn.mode === 'server' && s.offline && child.serverId != null) {
+        // Already on the server, editing while offline: record the update so
+        // it replays on reconnect instead of being silently overwritten by the
+        // next refresh(). A not-yet-synced local (serverId == null) needs no
+        // op — its create is still pending.
+        void addPendingOp({ op: 'update', entity: 'child', payload: child });
       }
       return;
     }
@@ -627,7 +897,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast('Saved');
     const conn = s.connection;
-    if (conn && !conn.demo && !s.offline) {
+    if (conn && conn.mode === 'server' && !s.offline) {
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
@@ -657,7 +927,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // Demo: the store's `entries` hold the local seed history for ALL
       // children — scope to the selected child, matching the per-child fetch.
-      const entries = conn.demo
+      const entries = conn.mode === 'local'
         ? s.entries.filter((e) => e.childId === childId)
         : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
       if (get().selectedChildId !== childId) {
@@ -679,7 +949,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (s.profileLoaded || s.profileLoading) return;
     const conn = s.connection;
     if (!conn) return;
-    if (conn.demo) {
+    if (conn.mode === 'local') {
       set({ profile: null, profileLoaded: true });
       return;
     }
@@ -828,7 +1098,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (index === -1) return;
     const entry = s.entries[index];
     const conn = s.connection;
-    const didServerDelete = entry.serverId != null && !!conn && !conn.demo && !s.offline;
+    const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
@@ -837,6 +1107,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     lastDeleted = { entry, index, didServerDelete };
     if (didServerDelete) {
       void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
+    } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
+      // Already on the server, deleted while offline: record the delete so it
+      // replays on reconnect instead of the record resurrecting on the next refresh().
+      void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
     }
     get().showToast('Deleted', { label: 'Undo', run: () => get().undoDelete() });
   },
@@ -853,6 +1127,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Only re-create server-side if the delete actually removed a server record;
     // a local-only (offline/demo) delete leaves the server copy intact.
     if (d.didServerDelete) get().commitWrite(d.entry);
+    // Cancel any queued offline pending-delete op for this entry so it doesn't
+    // replay on reconnect and delete the just-restored record out from under the
+    // user. Harmless no-op if no such op was recorded (online delete, or a
+    // local-only unsynced entry).
+    if (d.entry.serverId != null) {
+      void loadPendingOps().then((ops) =>
+        savePendingOps(ops.filter((o) => !(o.op === 'delete' && o.entity === 'entry' && o.serverId === d.entry.serverId))),
+      );
+    }
     set({ toast: null, toastAction: null });
     if (toastTimer) clearTimeout(toastTimer);
   },
@@ -888,7 +1171,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast(existing ? 'Updated' : 'Saved');
     const conn = s.connection;
-    if (conn && !conn.demo && !s.offline) {
+    if (conn && conn.mode === 'server' && !s.offline) {
       if (existing) {
         void updateMeasurementOnServer(conn, m).catch(() => {});
       } else {
@@ -902,6 +1185,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           })
           .catch(() => {});
       }
+    } else if (conn && conn.mode === 'server' && s.offline && existing && m.serverId != null) {
+      // Already on the server, editing while offline: record the update so it
+      // replays on reconnect. A brand-new (existing == null) offline
+      // measurement needs no op — its create is still pending.
+      void addPendingOp({ op: 'update', entity: 'measurement', payload: m });
     }
   },
   deleteMeasurement: (id) => {
@@ -914,8 +1202,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast('Deleted');
     const conn = s.connection;
-    if (m && m.serverId != null && conn && !conn.demo && !s.offline) {
+    if (m && m.serverId != null && conn && conn.mode === 'server' && !s.offline) {
       void deleteMeasurementFromServer(conn, m.kind, m.serverId).catch(() => {});
+    } else if (m && m.serverId != null && conn && conn.mode === 'server' && s.offline) {
+      void addPendingOp({ op: 'delete', entity: 'measurement', kind: m.kind, serverId: m.serverId });
     }
   },
   setTE: (patch) =>
@@ -1153,12 +1443,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set(patch);
     if (existing) {
       get().showToast('Updated');
-      if (s.connection && !s.connection.demo && !s.offline) {
+      if (s.connection && s.connection.mode === 'server' && !s.offline) {
         void updateEntryOnServer(s.connection, entry).catch(() => {});
+      } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
+        // Already on the server, edited while offline: record the update so
+        // it replays on reconnect. A not-yet-synced local edit needs no op.
+        void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
       }
     } else {
       get().commitWrite(entry);
-      const queued = s.offline && !!s.connection && !s.connection.demo;
+      const queued = s.offline && !!s.connection && s.connection.mode === 'server';
       get().showToast(queued ? 'Saved · queued offline' : 'Saved');
     }
   },
@@ -1241,7 +1535,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
-    const queued = s.offline && !!s.connection && !s.connection.demo;
+    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
     // Only call out the resolved end when the caller asked for a back-dated
     // stop — ending "now" needs no confirmation of what time it is.
     const backdated = endMs != null ? ` · ended ${fmtClock(resolvedEnd)}` : '';
@@ -1277,4 +1571,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
 // updates keep the same reference, so this writes only on an actual change.
 useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
+});
+
+// Persist the durable local-mode entities to on-device storage whenever they
+// change, mirroring the timers subscribe above: reference-equality checks so
+// each key is written only on an actual change, not on every unrelated `set`.
+useAppStore.subscribe((state, prev) => {
+  if (state.children !== prev.children) void saveChildren(state.children);
+  if (state.entries !== prev.entries) void saveEntries(state.entries);
+  if (state.measurements !== prev.measurements) void saveMeasurements(state.measurements);
+  if (state.selectedChildId !== prev.selectedChildId) void saveSelectedChildId(state.selectedChildId);
+  if (state.lastFeed !== prev.lastFeed) void saveLastFeed(state.lastFeed);
 });
