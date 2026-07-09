@@ -24,7 +24,7 @@ export default function Onboarding() {
   const connecting = useAppStore((s) => s.connecting);
   const connectError = useAppStore((s) => s.connectError);
   const connect = useAppStore((s) => s.connect);
-  const enterDemo = useAppStore((s) => s.enterDemo);
+  const enterLocal = useAppStore((s) => s.enterLocal);
   const savedServers = useAppStore((s) => s.savedServers);
   const forgetServer = useAppStore((s) => s.forgetServer);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
@@ -248,12 +248,13 @@ export default function Onboarding() {
       </Txt>
 
       <Pressable
-        onPress={enterDemo}
+        onPress={enterLocal}
         accessibilityRole="button"
         style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
       >
         <Txt unselectable weight={600} size={13.5} color={t.dim}>
-          Just exploring? <Txt unselectable weight={700} size={13.5} color={t.primary}>Try the demo →</Txt>
+          No server?{' '}
+          <Txt unselectable weight={700} size={13.5} color={t.primary}>Start now — connect later →</Txt>
         </Txt>
       </Pressable>
     </ScrollView>
