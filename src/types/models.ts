@@ -26,6 +26,23 @@ export interface Child {
   picture?: string | null;
 }
 
+/** A photo the user picked in the child sheet, normalized off the image-picker
+ *  asset so the store / API layer never import expo-image-picker types.
+ *  `file` is only populated on web (the raw File the picker exposes) and lets
+ *  the upload builder skip a redundant fetch. */
+export interface PickedPhoto {
+  uri: string;
+  name: string;
+  type: string;
+  file?: Blob;
+}
+
+/** What to do with a child's photo on save. */
+export type PhotoChange =
+  | { kind: 'none' }
+  | { kind: 'set'; photo: PickedPhoto }
+  | { kind: 'remove' };
+
 interface EntryBase {
   id: string;
   /** server numeric id; present once created on / loaded from a server */
