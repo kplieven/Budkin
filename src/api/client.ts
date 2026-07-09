@@ -11,6 +11,7 @@
 
 import type {
   ActivityType,
+  BathEntry,
   Child,
   DiaperColor,
   DiaperEntry,
@@ -101,14 +102,51 @@ const FEED_METHOD_FROM_API: Record<string, FeedMethod> = {
 /** Fallback avatar tints for children fetched from a server (API has no color). */
 const CHILD_COLORS = ['#EBA06A', '#9F94D4', '#6FC0A6', '#E6BE5E', '#EA958A'];
 
-/** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times). */
+/** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times).
+ *  Baths have no Baby Buddy resource — they ride on generic Notes. */
 const ENDPOINT: Record<ActivityType, string> = {
   feeding: 'feedings',
   sleep: 'sleep',
   diaper: 'changes',
   pumping: 'pumping',
   tummy: 'tummy-times',
+  bath: 'notes',
 };
+
+// --- bath <-> Baby Buddy Note (tagged-note) serialization ---
+// Baby Buddy has no bath resource, so a bath is a Note tagged `bath` + the wash
+// size (`small`/`big`). The tags are the source of truth on read (a `big` tag
+// means a big wash; anything else is small). The note text reads sensibly on its
+// own so other Baby Buddy clients see a meaningful entry. User tags are kept
+// distinct from these structural tags so they survive a round-trip untouched.
+const BATH_STRUCTURAL_TAGS = ['bath', 'small', 'big'];
+const tagNames = (raw: unknown): string[] =>
+  (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
+
+/** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
+export function bathToNoteBody(entry: BathEntry): Record<string, unknown> {
+  const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t));
+  return {
+    child: entry.childId,
+    time: toISO(entry.time),
+    note: `Bath — ${entry.wash} wash`,
+    tags: ['bath', entry.wash, ...userTags],
+  };
+}
+
+/** Reconstruct a bath entry from a Baby Buddy Note that carries the `bath` tag. */
+export function noteToBathEntry(n: any, childId: string): BathEntry {
+  const tags = tagNames(n.tags);
+  return {
+    id: `bath-${n.id}`,
+    serverId: n.id,
+    childId,
+    type: 'bath',
+    time: fromISO(n.time),
+    wash: tags.includes('big') ? 'big' : 'small',
+    tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
+  };
+}
 
 export function normalizeServerUrl(raw: string): string {
   let url = raw.trim().replace(/\/+$/, '');
@@ -259,6 +297,20 @@ export class BabybuddyClient {
     }));
   }
 
+  /**
+   * List baths, reconstructed from Baby Buddy Notes. Baby Buddy has no `?tags=`
+   * filter on notes, so we fetch the child's recent notes and keep only those
+   * carrying the `bath` tag (other notes — plain user notes — are ignored).
+   */
+  async listNotes(childId: string, limit = 100): Promise<BathEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
+    );
+    return data.results
+      .filter((n) => tagNames(n.tags).includes('bath'))
+      .map((n) => noteToBathEntry(n, childId));
+  }
+
   private buildBody(entry: Entry): Record<string, unknown> {
     const child = entry.childId;
     const tags = entry.tags ?? [];
@@ -301,6 +353,8 @@ export class BabybuddyClient {
           milestone: entry.milestone ?? '',
           tags,
         };
+      case 'bath':
+        return bathToNoteBody(entry);
     }
   }
 

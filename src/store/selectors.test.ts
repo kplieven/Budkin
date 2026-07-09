@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -105,5 +105,58 @@ describe('nextStartSide', () => {
   });
   it('alternates from a single-side method', () => {
     expect(nextStartSide([feed('left', [])])).toBe('right');
+  });
+});
+
+describe('nextWashKind', () => {
+  const bath = (time: number, wash: 'small' | 'big'): Entry => ({
+    id: `b-${time}`,
+    childId: 'c1',
+    type: 'bath',
+    time,
+    wash,
+    tags: [],
+  });
+
+  it('defaults to small with no bath history', () => {
+    expect(nextWashKind([])).toBe('small');
+  });
+  it('is small with fewer than three washes', () => {
+    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'small')])).toBe('small');
+  });
+  it('the three most recent all small => big is due', () => {
+    const entries: Entry[] = [
+      bath(NOW - 3 * M, 'small'),
+      bath(NOW - 2 * M, 'small'),
+      bath(NOW - M, 'small'),
+    ];
+    expect(nextWashKind(entries)).toBe('big');
+  });
+  it('a big as the most recent wash => back to small', () => {
+    const entries: Entry[] = [
+      bath(NOW - 3 * M, 'small'),
+      bath(NOW - 2 * M, 'small'),
+      bath(NOW - M, 'big'),
+    ];
+    expect(nextWashKind(entries)).toBe('small');
+  });
+  it('looks only at the three most recent, ignoring older washes', () => {
+    // three recent smalls => big, even though an older big precedes them
+    const entries: Entry[] = [
+      bath(NOW - 4 * M, 'big'),
+      bath(NOW - 3 * M, 'small'),
+      bath(NOW - 2 * M, 'small'),
+      bath(NOW - M, 'small'),
+    ];
+    expect(nextWashKind(entries)).toBe('big');
+  });
+  it('ignores non-bath entries when reading the rhythm', () => {
+    const entries: Entry[] = [
+      { id: 'f', childId: 'c1', type: 'feeding', start: NOW - M, end: NOW, feedType: 'breast', method: 'left', amount: null, tags: [] },
+      bath(NOW - 3 * M, 'small'),
+      bath(NOW - 2 * M, 'small'),
+      bath(NOW - M, 'small'),
+    ];
+    expect(nextWashKind(entries)).toBe('big');
   });
 });

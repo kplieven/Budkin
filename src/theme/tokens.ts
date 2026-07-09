@@ -6,7 +6,7 @@
 
 export type ThemeMode = 'dark' | 'light';
 
-export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy';
+export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath';
 
 export interface Palette {
   /** true for Night mode */
@@ -82,6 +82,7 @@ const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
   diaper: '#6FC0A6',
   pumping: '#E6BE5E',
   tummy: '#EA958A',
+  bath: '#6FB2D8',
 };
 
 const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
@@ -90,6 +91,7 @@ const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
   diaper: '#3E9D80',
   pumping: '#C79A36',
   tummy: '#D06E62',
+  bath: '#4E96C4',
 };
 
 /** Diaper "solid" stool color swatches — identical in both themes. */

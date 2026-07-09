@@ -37,5 +37,7 @@ export function detailFor(e: Entry): string {
       return [e.amount ? `${e.amount}ml` : '', e.end ? fmtDur((e.end - e.start) / 60000) : ''].filter(Boolean).join(' · ');
     case 'tummy':
       return [e.end ? fmtDur((e.end - e.start) / 60000) : '', e.milestone ?? ''].filter(Boolean).join(' · ');
+    case 'bath':
+      return e.wash === 'big' ? 'Big wash' : 'Small wash';
   }
 }

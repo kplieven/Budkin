@@ -35,6 +35,12 @@ export function makeSeed(now: number): SeedData {
       { id: 'e5', childId: c1, type: 'sleep', start: now - 300 * M, end: now - 182 * M, nap: true, tags: [] },
       { id: 'e6', childId: c1, type: 'diaper', time: now - 250 * M, wet: true, solid: true, color: 'yellow', tags: [] },
       { id: 'e7', childId: c1, type: 'tummy', start: now - 330 * M, end: now - 322 * M, milestone: 'Lifted head', tags: [] },
+      // A small/big wash rhythm: a big wash four days ago, then three small
+      // washes — so a big wash reads as due today (see nextWashKind).
+      { id: 'e8', childId: c1, type: 'bath', time: now - 4 * DAY, wash: 'big', tags: [] },
+      { id: 'e9', childId: c1, type: 'bath', time: now - 3 * DAY, wash: 'small', tags: [] },
+      { id: 'e10', childId: c1, type: 'bath', time: now - 2 * DAY, wash: 'small', tags: [] },
+      { id: 'e11', childId: c1, type: 'bath', time: now - 1 * DAY, wash: 'small', tags: [] },
     ],
     measurements: [
       { id: 'm1', childId: c1, kind: 'weight', value: 5.2, date: now - 2 * DAY },

@@ -67,6 +67,7 @@ export function LogSheet() {
   const setTE = useAppStore((s) => s.setTE);
   const toggleWet = useAppStore((s) => s.toggleWet);
   const toggleSolid = useAppStore((s) => s.toggleSolid);
+  const setWash = useAppStore((s) => s.setWash);
   const toggleTag = useAppStore((s) => s.toggleTag);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
   const setEnded = useAppStore((s) => s.setEnded);
@@ -277,6 +278,34 @@ export function LogSheet() {
             <FieldLabel>Amount — 1 to 10 (optional)</FieldLabel>
             <View style={{ marginBottom: 16 }}>
               <AmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
+            </View>
+          </>
+        )}
+
+        {/* bath fields — small vs big wash */}
+        {type === 'bath' && (
+          <>
+            <FieldLabel hint="follows your rhythm">Wash</FieldLabel>
+            <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
+              {(['small', 'big'] as const).map((w) => {
+                const selected = (te.wash ?? 'small') === w;
+                return (
+                  <Pressable
+                    key={w}
+                    onPress={() => setWash(w)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={(sh) => [
+                      { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: selected ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: selected ? color : t.line, cursor: 'pointer' },
+                      !selected && isHovered(sh) && { borderColor: t.line2 },
+                    ]}
+                  >
+                    <Txt unselectable weight={700} size={14.5}>
+                      {w === 'small' ? 'Small wash' : 'Big wash'}
+                    </Txt>
+                  </Pressable>
+                );
+              })}
             </View>
           </>
         )}

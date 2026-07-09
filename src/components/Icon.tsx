@@ -12,6 +12,7 @@ export type IconName =
   | 'sleep'
   | 'diaper'
   | 'pumping'
+  | 'bath'
   | 'drop'
   | 'solid'
   | 'tummy'
@@ -95,6 +96,17 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
       return (
         <Svg {...common}>
           <Path d="M12 3.2c3.6 4.4 5.6 7.2 5.6 9.8a5.6 5.6 0 0 1-11.2 0c0-2.6 2-5.4 5.6-9.8z" fill={color} />
+        </Svg>
+      );
+    case 'bath':
+      // A bathtub: filled basin, a little faucet spout, short legs, and a
+      // water-line detail — reads as "bath" without a literal figure.
+      return (
+        <Svg {...common}>
+          <Path d="M7 11V7.4a1.9 1.9 0 0 1 3.6-.8" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+          <Path d="M3.4 11h17.2c.5 0 .9.5.8 1l-.3 1.9A5.2 5.2 0 0 1 16 18.3H8a5.2 5.2 0 0 1-5.1-4.4l-.3-1.9c-.1-.5.3-1 .8-1z" fill={color} />
+          <Path d="M6.6 18.3v1.5M17.4 18.3v1.5" stroke={color} strokeWidth={1.8} strokeLinecap="round" />
+          <Path d="M8 13.4h8" stroke={detail} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
     case 'drop':
