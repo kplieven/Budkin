@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
-import { bathToNoteBody, mapProfile, noteToBathEntry } from '@/api/client';
-import type { BathEntry } from '@/types/models';
+import { bathToNoteBody, childBody, mapProfile, nativePicturePart, noteToBathEntry } from '@/api/client';
+import type { BathEntry, Child, PickedPhoto } from '@/types/models';
 
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
+
+// birth built via a local Date so toDateStr (local-time) is timezone-stable
+const CHILD: Child = { id: '5', first: 'Mira', last: 'Doe', birth: new Date(2025, 0, 15).getTime(), color: '#EC9A66' };
+
+describe('child serialization', () => {
+  it('childBody serializes name + birth date, no picture key by default', () => {
+    expect(childBody(CHILD)).toEqual({ first_name: 'Mira', last_name: 'Doe', birth_date: '2025-01-15' });
+  });
+
+  it('childBody sets picture: null when clearing the photo', () => {
+    expect(childBody(CHILD, true)).toEqual({
+      first_name: 'Mira',
+      last_name: 'Doe',
+      birth_date: '2025-01-15',
+      picture: null,
+    });
+  });
+
+  it('nativePicturePart maps a picked photo to the RN file descriptor', () => {
+    const photo: PickedPhoto = { uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' };
+    expect(nativePicturePart(photo)).toEqual({ uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' });
+  });
+});
 
 describe('bath <-> note serialization', () => {
   it('encodes a small wash as a tagged note the tags own as the source of truth', () => {

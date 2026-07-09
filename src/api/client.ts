@@ -21,6 +21,8 @@ import type {
   FeedingEntry,
   Measurement,
   MeasurementKind,
+  PhotoChange,
+  PickedPhoto,
   Profile,
   PumpingEntry,
   SleepEntry,
@@ -187,6 +189,57 @@ export function normalizeServerUrl(raw: string): string {
   return url;
 }
 
+/** JSON body for a child create / PATCH. Pass `clearPicture` to remove the photo. */
+export function childBody(child: Child, clearPicture = false): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    first_name: child.first,
+    last_name: child.last,
+    birth_date: toDateStr(child.birth),
+  };
+  if (clearPicture) body.picture = null;
+  return body;
+}
+
+/** The React Native FormData file descriptor for an uploaded picture. */
+export function nativePicturePart(photo: PickedPhoto): { uri: string; name: string; type: string } {
+  return { uri: photo.uri, name: photo.name, type: photo.type };
+}
+
+/** Web only: cover-crop the picked image onto a 512px square canvas and return a
+ *  compressed JPEG blob — the web picker has no crop/quality step of its own. */
+async function squarePictureBlob(photo: PickedPhoto): Promise<Blob> {
+  const srcBlob = photo.file ? photo.file : await fetch(photo.uri).then((r) => r.blob());
+  const bitmap = await createImageBitmap(srcBlob);
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('no 2d context');
+  const side = Math.min(bitmap.width, bitmap.height);
+  ctx.drawImage(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side, 0, 0, size, size);
+  return await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.7),
+  );
+}
+
+/** Multipart child body including a picture upload. Native appends the picker's
+ *  file descriptor; web appends the square-cropped JPEG blob. Web is detected by
+ *  the presence of `document` (no `react-native` import — keeps this file
+ *  loadable under the node test runner). */
+async function buildChildForm(child: Child, photo: PickedPhoto): Promise<FormData> {
+  const form = new FormData();
+  form.append('first_name', child.first);
+  form.append('last_name', child.last);
+  form.append('birth_date', toDateStr(child.birth));
+  if (typeof document !== 'undefined') {
+    form.append('picture', await squarePictureBlob(photo), photo.name);
+  } else {
+    form.append('picture', nativePicturePart(photo) as unknown as Blob);
+  }
+  return form;
+}
+
 export class BabybuddyClient {
   private readonly apiBase: string;
   private readonly token: string;
@@ -199,11 +252,13 @@ export class BabybuddyClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     let res: Response;
     try {
+      const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData;
       res = await fetch(`${this.apiBase}${path}`, {
         ...init,
         headers: {
           Authorization: `Token ${this.token}`,
-          'Content-Type': 'application/json',
+          // A FormData body must keep its auto-generated multipart boundary header.
+          ...(isForm ? {} : { 'Content-Type': 'application/json' }),
           Accept: 'application/json',
           ...(init?.headers ?? {}),
         },
@@ -247,27 +302,27 @@ export class BabybuddyClient {
     }));
   }
 
-  private childBody(child: Child): Record<string, unknown> {
-    return { first_name: child.first, last_name: child.last, birth_date: toDateStr(child.birth) };
+  /** Create a child on the server; uploads a picture when provided. Returns the
+   *  new server id and the stored picture URL. */
+  async createChild(child: Child, photo?: PickedPhoto): Promise<{ id?: number; picture?: string | null }> {
+    const init: RequestInit = photo
+      ? { method: 'POST', body: await buildChildForm(child, photo) }
+      : { method: 'POST', body: JSON.stringify(childBody(child)) };
+    const res = await this.request<{ id?: number; picture?: string | null }>('/children/', init);
+    return { id: res?.id, picture: res?.picture ?? null };
   }
 
-  /** Create a child on the server; returns the new server id. */
-  async createChild(child: Child): Promise<number | undefined> {
-    const res = await this.request<{ id?: number }>('/children/', {
-      method: 'POST',
-      body: JSON.stringify(this.childBody(child)),
-    });
-    return res?.id;
-  }
-
-  /** Update an existing child on the server (requires a numeric `child.id`). */
-  async updateChild(child: Child): Promise<void> {
+  /** Update a child (requires a numeric id). Applies the photo change and returns
+   *  the stored picture URL (null when cleared/absent, undefined when skipped). */
+  async updateChild(child: Child, change: PhotoChange = { kind: 'none' }): Promise<string | null | undefined> {
     const id = Number(child.id);
-    if (!Number.isFinite(id)) return;
-    await this.request(`/children/${id}/`, {
-      method: 'PATCH',
-      body: JSON.stringify(this.childBody(child)),
-    });
+    if (!Number.isFinite(id)) return undefined;
+    const init: RequestInit =
+      change.kind === 'set'
+        ? { method: 'PATCH', body: await buildChildForm(child, change.photo) }
+        : { method: 'PATCH', body: JSON.stringify(childBody(child, change.kind === 'remove')) };
+    const res = await this.request<{ picture?: string | null }>(`/children/${id}/`, init);
+    return res?.picture ?? null;
   }
 
   async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {
