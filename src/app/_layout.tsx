@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Toast } from '@/components/Toast';
+import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
@@ -100,6 +101,7 @@ function RootLayoutNav() {
 
             {/* overlays rendered above the navigator and tab bar */}
             <ChildSwitcher />
+            <ChildSheet />
             <LogSheet />
             <MeasurementSheet />
             <Toast />

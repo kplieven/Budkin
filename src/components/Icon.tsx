@@ -32,7 +32,8 @@ export type IconName =
   | 'chart'
   | 'insights'
   | 'moon'
-  | 'sun';
+  | 'sun'
+  | 'edit';
 
 interface IconProps {
   name: IconName;
@@ -251,6 +252,19 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
             stroke={color}
             strokeWidth={2}
             strokeLinecap="round"
+          />
+        </Svg>
+      );
+    case 'edit':
+      // A pencil: stroked, matching the other UI (non-activity) icons.
+      return (
+        <Svg {...common}>
+          <Path
+            d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           />
         </Svg>
       );

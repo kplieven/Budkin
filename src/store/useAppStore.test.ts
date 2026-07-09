@@ -20,6 +20,8 @@ const h = vi.hoisted(() => ({
   measPushed: [] as unknown[],
   measUpdated: [] as unknown[],
   measDeleted: [] as unknown[],
+  childPushed: [] as unknown[],
+  childUpdated: [] as unknown[],
   pushFails: false,
 }));
 
@@ -96,6 +98,13 @@ vi.mock('@/data/repository', () => ({
   deleteMeasurementFromServer: vi.fn(async (_c: unknown, kind: unknown, id: unknown) => {
     h.measDeleted.push({ kind, id });
   }),
+  pushChildToServer: vi.fn(async (_c: unknown, child: unknown) => {
+    h.childPushed.push(child);
+    return 777;
+  }),
+  updateChildOnServer: vi.fn(async (_c: unknown, child: unknown) => {
+    h.childUpdated.push(child);
+  }),
   loadInsightsHistory: vi.fn(async () => []),
 }));
 
@@ -113,6 +122,8 @@ beforeEach(() => {
   h.measPushed = [];
   h.measUpdated = [];
   h.measDeleted = [];
+  h.childPushed = [];
+  h.childUpdated = [];
   h.pushFails = false;
   useAppStore.setState({
     connection: { demo: false, serverUrl: 'http://x', token: 't' },
@@ -132,6 +143,9 @@ beforeEach(() => {
     fromTimerId: null,
     measurementSheet: null,
     editingMeasurementId: null,
+    showChildSwitcher: false,
+    childSheet: false,
+    editingChildId: null,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
     toast: null,
@@ -559,6 +573,71 @@ describe('measurements', () => {
     expect(s().measurements).toHaveLength(0);
     await flush();
     expect(h.measDeleted).toHaveLength(1);
+  });
+});
+
+describe('children', () => {
+  it('saveChild creates, auto-selects, and pushes; patches id + selectedChildId to the server id', async () => {
+    s().openAddChild();
+    expect(s().childSheet).toBe(true);
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW - 30 * 86400000 });
+
+    expect(s().children).toHaveLength(2);
+    const created = s().children[1];
+    expect(created.first).toBe('Nova');
+    expect(created.last).toBe('O');
+    expect(created.birth).toBe(NOW - 30 * 86400000);
+    expect(created.id).toMatch(/^child\d+$/);
+    expect(s().selectedChildId).toBe(created.id);
+    expect(s().childSheet).toBe(false);
+    expect(s().editingChildId).toBeNull();
+    expect(s().showChildSwitcher).toBe(false);
+
+    await flush();
+    expect(h.childPushed).toHaveLength(1);
+    // the local id is patched to the server id, and selection follows it
+    expect(s().children[1].id).toBe('777');
+    expect(s().selectedChildId).toBe('777');
+  });
+
+  it('saveChild while editing updates the existing child in place and calls updateChild', async () => {
+    s().openEditChild('c1');
+    expect(s().editingChildId).toBe('c1');
+    s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+
+    expect(s().children).toHaveLength(1);
+    expect(s().children[0]).toMatchObject({ id: 'c1', first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
+    expect(s().childSheet).toBe(false);
+    expect(s().editingChildId).toBeNull();
+
+    await flush();
+    expect(h.childUpdated).toHaveLength(1);
+    expect(h.childPushed).toHaveLength(0);
+  });
+
+  it('demo mode: create stays local, no server push', async () => {
+    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    s().openAddChild();
+    s().saveChild({ first: 'Demo', last: '', birth: NOW });
+    expect(s().children).toHaveLength(2);
+    await flush();
+    expect(h.childPushed).toHaveLength(0);
+  });
+
+  it('offline: create stays local, no server push', async () => {
+    useAppStore.setState({ offline: true });
+    s().openAddChild();
+    s().saveChild({ first: 'Offline', last: '', birth: NOW });
+    expect(s().children).toHaveLength(2);
+    await flush();
+    expect(h.childPushed).toHaveLength(0);
+  });
+
+  it('closeChildSheet clears both childSheet and editingChildId', () => {
+    s().openEditChild('c1');
+    s().closeChildSheet();
+    expect(s().childSheet).toBe(false);
+    expect(s().editingChildId).toBeNull();
   });
 });
 

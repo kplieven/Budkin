@@ -18,12 +18,14 @@ import {
   deleteMeasurementFromServer,
   loadFromServer,
   loadInsightsHistory,
+  pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
+  updateChildOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
 } from '@/data/repository';
-import { ApiError } from '@/api/client';
+import { ApiError, childColor } from '@/api/client';
 import { makeSeed } from '@/data/seed';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -77,6 +79,10 @@ interface AppState {
   /** optional action button shown alongside the current toast (e.g. Undo) */
   toastAction: ToastAction | null;
   showChildSwitcher: boolean;
+  /** true while the add/edit-child sheet is open (layers above the switcher) */
+  childSheet: boolean;
+  /** id of the child being edited, or null when creating a new one */
+  editingChildId: string | null;
   sheet: { type: ActivityType } | null;
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
@@ -122,6 +128,11 @@ interface AppActions {
   selectChild: (id: string) => void;
   openSwitcher: () => void;
   closeSwitcher: () => void;
+
+  openAddChild: () => void;
+  openEditChild: (id: string) => void;
+  closeChildSheet: () => void;
+  saveChild: (fields: { first: string; last: string; birth: number }) => void;
 
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
@@ -225,6 +236,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toast: null,
   toastAction: null,
   showChildSwitcher: false,
+  childSheet: false,
+  editingChildId: null,
   sheet: null,
   editingId: null,
   fromTimerId: null,
@@ -501,6 +514,62 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   openSwitcher: () => set({ showChildSwitcher: true }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
+
+  openAddChild: () => set({ childSheet: true, editingChildId: null }),
+  openEditChild: (id) => set({ childSheet: true, editingChildId: id }),
+  closeChildSheet: () => set({ childSheet: false, editingChildId: null }),
+  saveChild: (fields) => {
+    const s = get();
+    const existing = s.editingChildId ? s.children.find((c) => c.id === s.editingChildId) : null;
+    if (existing) {
+      const child: Child = { ...existing, first: fields.first, last: fields.last, birth: fields.birth };
+      set({
+        children: s.children.map((c) => (c.id === child.id ? child : c)),
+        childSheet: false,
+        editingChildId: null,
+      });
+      get().showToast('Updated');
+      const conn = s.connection;
+      if (conn && !conn.demo && !s.offline) {
+        void updateChildOnServer(conn, child).catch(() => {});
+      }
+      return;
+    }
+    // Creating: assign a local id + the next tint from the shared palette,
+    // optimistically add it, and auto-select it (mirrors saveMeasurement's
+    // optimistic-local-then-push pattern).
+    const localId = 'child' + Date.now();
+    const child: Child = {
+      id: localId,
+      first: fields.first,
+      last: fields.last,
+      birth: fields.birth,
+      color: childColor(s.children.length),
+    };
+    set({
+      children: [...s.children, child],
+      selectedChildId: localId,
+      childSheet: false,
+      editingChildId: null,
+      showChildSwitcher: false,
+    });
+    get().showToast('Saved');
+    const conn = s.connection;
+    if (conn && !conn.demo && !s.offline) {
+      void pushChildToServer(conn, child)
+        .then((serverId) => {
+          if (serverId == null) return;
+          // Patch the local id -> the real server id so the new child stays
+          // selected across the next refresh()/hydrate(), which replaces
+          // `children` wholesale with server data keyed by real ids.
+          set((st) => ({
+            children: st.children.map((c) => (c.id === localId ? { ...c, id: String(serverId) } : c)),
+            selectedChildId: st.selectedChildId === localId ? String(serverId) : st.selectedChildId,
+          }));
+        })
+        .catch(() => {});
+    }
+  },
 
   // ---- insights (lazy deep-history load) ----
   loadInsights: async () => {

@@ -20,6 +20,8 @@ export function ChildSwitcher() {
   const now = useAppStore((s) => s.now);
   const selectChild = useAppStore((s) => s.selectChild);
   const closeSwitcher = useAppStore((s) => s.closeSwitcher);
+  const openAddChild = useAppStore((s) => s.openAddChild);
+  const openEditChild = useAppStore((s) => s.openEditChild);
 
   if (!open) return null;
 
@@ -62,30 +64,48 @@ export function ChildSwitcher() {
                   {ageStr(c.birth, now)}
                 </Txt>
               </View>
+              <Pressable
+                onPress={() => openEditChild(c.id)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${c.first}`}
+                style={(s) => [
+                  { padding: 7, borderRadius: 9, cursor: 'pointer' },
+                  isHovered(s) && { backgroundColor: t.elevated },
+                ]}
+              >
+                <Icon name="edit" color={t.faint} size={16} />
+              </Pressable>
               {selected && <Icon name="check" color={t.primary} size={22} />}
             </Pressable>
           );
         })}
 
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 9,
-            padding: 14,
-            borderRadius: 16,
-            borderWidth: 1.5,
-            borderStyle: 'dashed',
-            borderColor: hexA(t.primary, 0.45),
-            marginTop: 2,
-          }}
+        <Pressable
+          onPress={openAddChild}
+          accessibilityRole="button"
+          style={(s) => [
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 9,
+              padding: 14,
+              borderRadius: 16,
+              borderWidth: 1.5,
+              borderStyle: 'dashed',
+              borderColor: hexA(t.primary, 0.45),
+              marginTop: 2,
+              cursor: 'pointer',
+            },
+            isHovered(s) && { backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.06) },
+          ]}
         >
           <Icon name="plus" color={t.primary} size={18} />
           <Txt weight={700} size={15} color={t.primary}>
             Add a child
           </Txt>
-        </View>
+        </Pressable>
       </ScrollView>
     </BottomSheet>
   );
