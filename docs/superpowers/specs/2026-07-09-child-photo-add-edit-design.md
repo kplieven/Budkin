@@ -44,8 +44,9 @@ Baby Buddy** so it persists and syncs across devices.
 
 ## Non-goals (YAGNI)
 
-- No separate image-manipulator/resize dependency — the picker's built-in square
-  crop + quality compression is sufficient for an avatar.
+- No separate image-manipulator/resize dependency — native relies on the
+  picker's built-in square crop + quality compression, and web uses a built-in
+  `<canvas>` (no library) for the equivalent resize/crop (see §7).
 - No local persistence of demo-mode photos across reloads.
 - No multi-photo / gallery; a child has exactly one avatar photo.
 
@@ -85,9 +86,11 @@ and reflects the pending photo (both read the same local preview state).
 - `onSave` calls the extended
   `saveChild({ first, last, birth, photo: change })`.
 
-`PickedPhoto` is a normalized `{ uri: string; name: string; type: string }`
-(defined alongside the picker wrapper) so the store/repository/client never
-import expo-image-picker asset types.
+`PickedPhoto` is a normalized `{ uri: string; name: string; type: string;
+file?: Blob }` (defined alongside the picker wrapper) so the
+store/repository/client never import expo-image-picker asset types. `file` is
+only populated on web (the raw `File` the picker exposes) and is used by the
+upload builder to skip a redundant `fetch`.
 
 ### 3. Store (`useAppStore.saveChild`)
 
@@ -112,8 +115,11 @@ Extend the signature to
   with `first_name` / `last_name` / `birth_date` + `picture`. Platform-aware
   picture part:
   - native (`Platform.OS !== 'web'`): append `{ uri, name, type }`,
-  - web: `fetch(photo.uri) → Blob`, append the blob with a filename (so the
-    builder is `async` on web; keep a sync-testable native path).
+  - web: resolve the picked image to a `Blob` (prefer `photo.file` when the
+    picker provides it, else `fetch(photo.uri) → Blob`), pass it through the
+    web square-resize helper (see §7), then append the resulting blob with a
+    filename (so the builder is `async` on web; keep a sync-testable native
+    path).
 - `request()` learns to send `FormData`: when the body is a `FormData`, do **not**
   set `Content-Type` (let `fetch` add the multipart boundary), keeping
   `Authorization`/`Accept`.
@@ -146,9 +152,39 @@ Demo short-circuits (return `undefined`) stay.
   `quality: 0.7`.
 - On a non-cancelled result, normalize the first asset to `PickedPhoto`
   (`name` from `fileName` or a default; `type` from `mimeType` or
-  `image/jpeg`).
+  `image/jpeg`; on web, carry the asset's `File` through as `file`).
 
-### 7. Testing
+### 7. Web behavior
+
+The app ships a web build (`Dockerfile.web` / `DesktopShell`); the picker and
+upload paths differ from native and are handled explicitly:
+
+- **Picking**: `launchImageLibraryAsync` opens the browser file dialog via a
+  hidden `<input type="file" accept="image/*">`; `launchCameraAsync` uses
+  `capture`, which opens the camera on mobile browsers and falls back to the
+  same file dialog on desktop. No OS permission prompt is involved, so the
+  permission requests in `photo.ts` resolve as granted (no-op) on web.
+- **`allowsEditing` / `aspect` / `quality` are native-only** — the web picker
+  ignores them, so there is no interactive crop and no built-in downscale on
+  web. To reach rough parity with native's square-crop + compression, the web
+  upload path runs a small **canvas resize/crop helper** (no new dependency):
+  draw the source image cover-cropped and centered onto an ~512×512 `<canvas>`,
+  then `canvas.toBlob(..., 'image/jpeg', 0.7)`. `childFormData`'s web branch
+  uploads that blob.
+- **Upload transport**: the browser sets the `multipart/form-data` boundary
+  automatically **because `request()` omits our `Content-Type` for `FormData`
+  bodies**. Requests hit the same API origin as today's JSON calls, so there is
+  no new CORS surface.
+- **Display**: the optimistic preview renders the picked data/object URL, and
+  after upload the server `picture` URL renders through the existing
+  `expo-image` path already used for server-sourced photos.
+- **Remove**: identical to native — JSON `PATCH { picture: null }`, no file.
+
+The canvas helper is web-guarded (`Platform.OS === 'web'`) and lives next to
+`childFormData`; native keeps using the picker's own crop + quality and never
+touches the canvas.
+
+### 8. Testing
 
 - `src/api/client.test.ts`:
   - `childFormData` produces `first_name`/`last_name`/`birth_date` + a `picture`
@@ -163,6 +199,10 @@ Demo short-circuits (return `undefined`) stay.
   - `none` leaves `child.picture` unchanged.
 - The native-module picker wrapper (`photo.ts`) is not unit-tested (thin,
   side-effectful); logic worth testing lives in the pure `childFormData`.
+- The web canvas resize/crop helper and `childFormData`'s web branch are not
+  unit-tested (jsdom has no real `<canvas>`/`toBlob`); they're verified by
+  running the web build. Unit tests cover the native branch and the
+  platform-independent form fields.
 
 ## Edge cases
 
