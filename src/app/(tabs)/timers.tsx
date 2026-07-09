@@ -9,7 +9,7 @@ import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
-import { fmtAgo, fmtElapsedClock } from '@/lib/format';
+import { fmtAgo, fmtClock, fmtDur, fmtElapsedClock } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -27,14 +27,14 @@ export default function Timers() {
   const setTimerSaveAs = useAppStore((s) => s.setTimerSaveAs);
   const adjustTimerStart = useAppStore((s) => s.adjustTimerStart);
   const setTimerStart = useAppStore((s) => s.setTimerStart);
-  const adjustTimerEnd = useAppStore((s) => s.adjustTimerEnd);
-  const setTimerEnd = useAppStore((s) => s.setTimerEnd);
-  const clearTimerEnd = useAppStore((s) => s.clearTimerEnd);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
   // timer id whose exact-start editor is expanded
   const [exactFor, setExactFor] = useState<string | null>(null);
-  // timer id whose exact-end editor is expanded
-  const [exactEndFor, setExactEndFor] = useState<string | null>(null);
+  // timer id whose ephemeral "Ended earlier…" stop editor is expanded — never
+  // persisted; collapsing (or stopping) discards it without touching the timer.
+  const [endEditFor, setEndEditFor] = useState<string | null>(null);
+  // candidate end (ms) picked in that editor, only meaningful while it's open
+  const [endCandidate, setEndCandidate] = useState(0);
 
   const body = (
     <>
@@ -86,7 +86,7 @@ export default function Timers() {
               </View>
 
               <Txt weight={800} size={52} color={color} style={{ textAlign: 'center', fontVariant: ['tabular-nums'], letterSpacing: -1.5, lineHeight: 56 }}>
-                {fmtElapsedClock(tm.start, tm.stagedEnd ?? now)}
+                {fmtElapsedClock(tm.start, now)}
               </Txt>
 
               <View style={{ flexDirection: 'row', gap: 7, marginTop: 14, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -143,78 +143,6 @@ export default function Timers() {
                 </View>
               )}
 
-              <View style={{ flexDirection: 'row', gap: 7, marginTop: 10, justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
-                <Txt weight={600} size={12.5} color={tm.stagedEnd != null ? color : t.dim}>
-                  {tm.stagedEnd != null ? `Ended ${fmtAgo(tm.stagedEnd, now)}` : 'Ended earlier?'}
-                </Txt>
-                {([
-                  ['−5m', -5],
-                  ['−15m', -15],
-                  ['−30m', -30],
-                ] as const).map(([lbl, d]) => (
-                  <Pressable
-                    key={lbl}
-                    onPress={() => adjustTimerEnd(tm.id, d)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Move end ${-d} minutes earlier`}
-                    style={(s) => [
-                      { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
-                      isHovered(s) && { borderColor: t.line2 },
-                    ]}
-                  >
-                    <Txt unselectable weight={700} size={13}>
-                      {lbl}
-                    </Txt>
-                  </Pressable>
-                ))}
-                <Pressable
-                  onPress={() => setExactEndFor(exactEndFor === tm.id ? null : tm.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Set exact end time"
-                  accessibilityState={{ selected: exactEndFor === tm.id }}
-                  style={(s) => [
-                    {
-                      paddingHorizontal: 12,
-                      paddingVertical: 7,
-                      borderRadius: 11,
-                      backgroundColor: exactEndFor === tm.id ? hexA(color, 0.16) : t.chip,
-                      borderWidth: 1.5,
-                      borderColor: exactEndFor === tm.id ? color : t.line,
-                      cursor: 'pointer',
-                    },
-                    exactEndFor !== tm.id && isHovered(s) && { borderColor: t.line2 },
-                  ]}
-                >
-                  <Txt unselectable weight={700} size={13} color={exactEndFor === tm.id ? color : t.text}>
-                    Exact…
-                  </Txt>
-                </Pressable>
-                {tm.stagedEnd != null && (
-                  <Pressable
-                    onPress={() => {
-                      clearTimerEnd(tm.id);
-                      setExactEndFor(null);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel="End now instead (clear staged end)"
-                    style={(s) => [
-                      { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
-                      isHovered(s) && { borderColor: t.line2 },
-                    ]}
-                  >
-                    <Txt unselectable weight={700} size={13} color={t.dim}>
-                      Now
-                    </Txt>
-                  </Pressable>
-                )}
-              </View>
-
-              {exactEndFor === tm.id && (
-                <View style={{ marginTop: 12 }}>
-                  <TimeAdjuster mode="clock" value={tm.stagedEnd ?? now} now={now} color={color} onChange={(ms) => setTimerEnd(tm.id, ms)} />
-                </View>
-              )}
-
               <View style={{ flexDirection: 'row', gap: 9, marginTop: 14 }}>
                 <Pressable
                   onPress={() => discardTimer(tm.id)}
@@ -256,6 +184,84 @@ export default function Timers() {
                   </Txt>
                 </Pressable>
               </View>
+
+              <Pressable
+                onPress={() => {
+                  if (endEditFor === tm.id) {
+                    setEndEditFor(null);
+                  } else {
+                    setEndEditFor(tm.id);
+                    setEndCandidate(Math.max(tm.start, now - 5 * 60000));
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Stop ${tm.name} timer with an earlier end time`}
+                accessibilityState={{ expanded: endEditFor === tm.id }}
+                style={(s) => [
+                  { alignSelf: 'center', marginTop: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9, cursor: 'pointer' },
+                  isHovered(s) && { backgroundColor: t.chip },
+                ]}
+              >
+                <Txt unselectable weight={600} size={12.5} color={endEditFor === tm.id ? color : t.dim}>
+                  Ended earlier…
+                </Txt>
+              </Pressable>
+
+              {endEditFor === tm.id && (
+                <View style={{ marginTop: 6 }}>
+                  <View style={{ flexDirection: 'row', gap: 7, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                    {([
+                      ['−5m', 5],
+                      ['−15m', 15],
+                      ['−30m', 30],
+                    ] as const).map(([lbl, agoMin]) => (
+                      <Pressable
+                        key={lbl}
+                        onPress={() => setEndCandidate(Math.max(tm.start, now - agoMin * 60000))}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Ended ${agoMin} minutes ago`}
+                        style={(s) => [
+                          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
+                          isHovered(s) && { borderColor: t.line2 },
+                        ]}
+                      >
+                        <Txt unselectable weight={700} size={13}>
+                          {lbl}
+                        </Txt>
+                      </Pressable>
+                    ))}
+                  </View>
+
+                  <TimeAdjuster
+                    mode="clock"
+                    value={endCandidate}
+                    now={now}
+                    color={color}
+                    onChange={(ms) => setEndCandidate(Math.min(now, Math.max(tm.start, ms)))}
+                  />
+
+                  <Txt weight={600} size={13} color={t.dim} style={{ textAlign: 'center', marginBottom: 12 }}>
+                    {fmtClock(tm.start)} → {fmtClock(endCandidate)} · {fmtDur((endCandidate - tm.start) / 60000)}
+                  </Txt>
+
+                  <Pressable
+                    onPress={() => {
+                      stopTimer(tm.id, endCandidate);
+                      setEndEditFor(null);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Save ${tm.name} timer, ended ${fmtClock(endCandidate)}`}
+                    style={(s) => [
+                      { height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+                      isHovered(s) && { boxShadow: t.shadow },
+                    ]}
+                  >
+                    <Txt unselectable weight={800} size={14.5} color={t.onActivity}>
+                      Save · ended {fmtClock(endCandidate)}
+                    </Txt>
+                  </Pressable>
+                </View>
+              )}
 
               <View style={{ flexDirection: 'row', gap: 7, marginTop: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {TIMER_SAVE_OPTIONS.map((o) => {

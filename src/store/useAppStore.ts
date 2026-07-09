@@ -36,6 +36,7 @@ import {
   type SavedServer,
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
+import { fmtClock } from '@/lib/format';
 import { nextStartSide, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
@@ -154,16 +155,11 @@ interface AppActions {
   save: () => void;
 
   startQuickTimer: () => void;
-  stopTimer: (id: string) => void;
+  /** Stop a running timer and log it. `endMs`, if given (from the ephemeral
+   * "Ended earlier…" editor), is clamped into `[start, now]`; omitted = now. */
+  stopTimer: (id: string, endMs?: number) => void;
   adjustTimerStart: (id: string, deltaMin: number) => void;
   setTimerStart: (id: string, ms: number) => void;
-  /** Nudge the staged past end time by `deltaMin` (relative to the current
-   * staged end, or now if none), clamped into `[start, now]`. */
-  adjustTimerEnd: (id: string, deltaMin: number) => void;
-  /** Stage an exact past end time (epoch ms), clamped into `[start, now]`. */
-  setTimerEnd: (id: string, ms: number) => void;
-  /** Clear the staged end so the timer logs at "now" again. */
-  clearTimerEnd: (id: string) => void;
   discardTimer: (id: string) => void;
   setTimerSaveAs: (id: string, saveAs: ActivityType) => void;
   /** Persist `te`'s metadata onto the running timer named by `fromTimerId`,
@@ -1026,16 +1022,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ timers: [...s.timers, timer] });
     get().showToast('Timer started');
   },
-  stopTimer: (id) => {
+  stopTimer: (id, endMs) => {
     const s = get();
     const tm = s.timers.find((t) => t.id === id);
     if (!tm) return;
     const saveAs = tm.saveAs;
     const now = Date.now();
-    // Honor a user-staged past end ("Ended 5m ago"); otherwise end at now.
-    // Re-clamp into [start, now] defensively in case the start was moved
-    // forward past the staged end after it was set (or persistence changed it).
-    const endMs = tm.stagedEnd != null ? Math.min(now, Math.max(tm.start, tm.stagedEnd)) : now;
+    // An explicit past end (from the ephemeral "Ended earlier…" editor) is
+    // clamped into [start, now]; otherwise end at now.
+    const resolvedEnd = endMs != null ? Math.min(now, Math.max(tm.start, endMs)) : now;
     const savedTags = tm.tags ?? [];
     const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags };
     let entry: Entry;
@@ -1047,22 +1042,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
         feedType === 'breast' && method === 'both' && tm.startSide && !savedTags.includes(tm.startSide)
           ? [...savedTags, tm.startSide]
           : savedTags;
-      entry = { ...base, tags, type: 'feeding', start: tm.start, end: endMs, feedType, method, amount: tm.amount ?? null };
+      entry = { ...base, tags, type: 'feeding', start: tm.start, end: resolvedEnd, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
-      entry = { ...base, type: 'pumping', start: tm.start, end: endMs, amount: tm.amount ?? 90, method: tm.method };
+      entry = { ...base, type: 'pumping', start: tm.start, end: resolvedEnd, amount: tm.amount ?? 90, method: tm.method };
     } else if (saveAs === 'tummy') {
-      entry = { ...base, type: 'tummy', start: tm.start, end: endMs, milestone: tm.milestone };
+      entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {
-      // Pass the staged end as buildSleepEntry's existing 2nd arg — it doubles as
-      // the entry `end` and the nap-heuristic clock; deriving nap from the real
-      // logged end is at least as correct, and this keeps the widget builders /
-      // parity tests untouched (no signature change).
-      entry = buildSleepEntry(tm, endMs, s.selectedChildId);
+      entry = buildSleepEntry(tm, resolvedEnd, s.selectedChildId);
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
     const queued = s.offline && !!s.connection && !s.connection.demo;
-    get().showToast(queued ? 'Saved · queued offline' : `Saved as ${ACTIVITY_LABEL[saveAs].toLowerCase()}`);
+    // Only call out the resolved end when the caller asked for a back-dated
+    // stop — ending "now" needs no confirmation of what time it is.
+    const backdated = endMs != null ? ` · ended ${fmtClock(resolvedEnd)}` : '';
+    get().showToast(queued ? `Saved · queued offline${backdated}` : `Saved as ${ACTIVITY_LABEL[saveAs].toLowerCase()}${backdated}`);
   },
   discardTimer: (id) => set((s) => ({ timers: s.timers.filter((t) => t.id !== id) })),
   setTimerSaveAs: (id, saveAs) =>
@@ -1078,25 +1072,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setTimerStart: (id, ms) =>
     set((s) => ({
       timers: s.timers.map((t) => (t.id === id ? { ...t, start: Math.min(Date.now(), ms) } : t)),
-    })),
-  adjustTimerEnd: (id, deltaMin) =>
-    set((s) => ({
-      timers: s.timers.map((t) => {
-        if (t.id !== id) return t;
-        const now = Date.now();
-        const from = t.stagedEnd ?? now;
-        return { ...t, stagedEnd: Math.min(now, Math.max(t.start, from + deltaMin * 60000)) };
-      }),
-    })),
-  setTimerEnd: (id, ms) =>
-    set((s) => ({
-      timers: s.timers.map((t) =>
-        t.id === id ? { ...t, stagedEnd: Math.min(Date.now(), Math.max(t.start, ms)) } : t,
-      ),
-    })),
-  clearTimerEnd: (id) =>
-    set((s) => ({
-      timers: s.timers.map((t) => (t.id === id ? { ...t, stagedEnd: undefined } : t)),
     })),
 
   showToast: (msg, action) => {

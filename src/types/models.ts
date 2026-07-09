@@ -94,13 +94,6 @@ export interface Timer {
   saveAs: ActivityType;
 
   /**
-   * A user-staged past end time (epoch ms) for "Ended 5m ago". When present,
-   * `stopTimer` logs the entry ending here instead of at `Date.now()`. Always
-   * clamped into `[start, now]` by the store setters. Absent = end at now.
-   */
-  stagedEnd?: number;
-
-  /**
    * Metadata saved via editing the running timer (see `saveTimerDetails` in
    * the store) while it keeps ticking. When present, `stopTimer` builds the
    * entry from these instead of its generic per-activity defaults, and
