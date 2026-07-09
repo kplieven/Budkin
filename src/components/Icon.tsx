@@ -33,7 +33,10 @@ export type IconName =
   | 'insights'
   | 'moon'
   | 'sun'
-  | 'edit';
+  | 'edit'
+  | 'image'
+  | 'camera'
+  | 'trash';
 
 interface IconProps {
   name: IconName;
@@ -266,6 +269,39 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
             strokeLinecap="round"
             strokeLinejoin="round"
           />
+        </Svg>
+      );
+    case 'image':
+      return (
+        <Svg {...common}>
+          <Rect x={3.5} y={5} width={17} height={14} rx={2.5} stroke={color} strokeWidth={strokeWidth} />
+          <Circle cx={9} cy={10} r={1.7} stroke={color} strokeWidth={strokeWidth} />
+          <Path d="M4.5 17l4.5-4.5L13 16l2.5-2.5L20 18" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'camera':
+      return (
+        <Svg {...common}>
+          <Path
+            d="M4 8.6A1.6 1.6 0 0 1 5.6 7h2L8.8 5.2A1 1 0 0 1 9.6 4.7h4.8a1 1 0 0 1 .8.5L16.4 7h2A1.6 1.6 0 0 1 20 8.6v8.8A1.6 1.6 0 0 1 18.4 19H5.6A1.6 1.6 0 0 1 4 17.4z"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinejoin="round"
+          />
+          <Circle cx={12} cy={13} r={3.3} stroke={color} strokeWidth={strokeWidth} />
+        </Svg>
+      );
+    case 'trash':
+      return (
+        <Svg {...common}>
+          <Path
+            d="M5 7h14M10 7V5.6A1.1 1.1 0 0 1 11.1 4.5h1.8A1.1 1.1 0 0 1 14 5.6V7M6.6 7l.8 11a1.6 1.6 0 0 0 1.6 1.5h6a1.6 1.6 0 0 0 1.6-1.5L17.4 7"
+            stroke={color}
+            strokeWidth={strokeWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path d="M10 11v5M14 11v5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
         </Svg>
       );
   }
