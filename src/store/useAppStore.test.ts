@@ -19,6 +19,8 @@ import {
   loadEntities,
   saveChildren,
 } from '@/data/entityStore';
+import { clearPendingOps } from '@/data/pendingOps';
+import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import { fmtClock } from '@/lib/format';
 import type { Child, Entry, Measurement, Profile, Timer } from '@/types/models';
 
@@ -38,6 +40,7 @@ const h = vi.hoisted(() => ({
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
   pendingOps: [] as unknown[],
+  adoptTarget: null as string | null,
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
@@ -192,6 +195,19 @@ vi.mock('@/data/pendingOps', () => ({
   }),
 }));
 
+// The persisted adopt target (Finding 2): backs the server-switch reset in
+// `adopt` so it survives an app kill between an abandoned `partial` adoption
+// and a later retry/switch — mirrors the AsyncStorage-backed mocks above.
+vi.mock('@/data/adoptTarget', () => ({
+  loadAdoptTarget: vi.fn(async () => h.adoptTarget),
+  saveAdoptTarget: vi.fn(async (url: string) => {
+    h.adoptTarget = url;
+  }),
+  clearAdoptTarget: vi.fn(async () => {
+    h.adoptTarget = null;
+  }),
+}));
+
 const NOW = 1_700_000_000_000;
 const M = 60000;
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -211,6 +227,7 @@ beforeEach(() => {
   h.childPushChange = [];
   h.childUpdateChange = [];
   h.pendingOps = [];
+  h.adoptTarget = null;
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
@@ -221,6 +238,10 @@ beforeEach(() => {
   vi.mocked(loadEntities).mockResolvedValue(null);
   vi.mocked(saveChildren).mockClear();
   vi.mocked(clearEntities).mockClear();
+  vi.mocked(clearPendingOps).mockClear();
+  vi.mocked(loadAdoptTarget).mockClear();
+  vi.mocked(saveAdoptTarget).mockClear();
+  vi.mocked(clearAdoptTarget).mockClear();
   useAppStore.setState({
     connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
     connected: true,
@@ -1179,6 +1200,14 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
     s().disconnect();
     expect(clearEntities).toHaveBeenCalled();
   });
+
+  // Finding 1 (merge blocker): without this, offline edit/delete ops queued
+  // against one server's serverIds would survive a disconnect and replay
+  // against whatever record holds those numeric ids on the NEXT server.
+  it('disconnect clears pendingOps so a stale op cannot replay against a different server', () => {
+    s().disconnect();
+    expect(clearPendingOps).toHaveBeenCalled();
+  });
 });
 
 describe('connectivity', () => {
@@ -2088,6 +2117,9 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(s().connected).toBe(true);
     expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    // Full success clears the persisted adopt target (Finding 2) — a later
+    // adopt against a different server has nothing stale to reset.
+    expect(clearAdoptTarget).toHaveBeenCalled();
   });
 
   it('on success, upserts the adopted server into savedServers (so it appears in the reconnect list)', async () => {
@@ -2176,13 +2208,13 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(uploadUnsynced).not.toHaveBeenCalled();
   });
 
-  it('server-switch reset: adopting a DIFFERENT server clears serverIds stamped by an abandoned adoption', async () => {
+  it('server-switch reset: adopting a DIFFERENT server clears serverIds stamped by an abandoned adoption (persists across a simulated app restart)', async () => {
     const childA: Child = { id: 'localD', first: 'Dee', last: '', birth: NOW, color: '#fff' };
     const childB: Child = { id: 'localE', first: 'Eve', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [childA, childB] });
     // Server A: only childA's push succeeds -> the overall result is
-    // `partial`, so `adoptTarget` stays pointed at server A (an "abandoned"
-    // adoption in local mode).
+    // `partial`, so the persisted adopt target stays pointed at server A (an
+    // "abandoned" adoption in local mode).
     vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
       children: state.children.map((c) => (c.id === 'localD' ? { ...c, serverId: 111 } : c)),
       entries: state.entries,
@@ -2193,12 +2225,30 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(first).toEqual({ status: 'partial' });
     expect(s().children.find((c) => c.id === 'localD')?.serverId).toBe(111);
 
+    // Simulate the app being killed and relaunched between the abandoned
+    // attempt and this retry: the ONLY thing carrying the prior target
+    // forward is durable storage (there is no module-memory fallback left),
+    // so stub `loadAdoptTarget` directly rather than relying on the previous
+    // call's `saveAdoptTarget` having landed in the same in-memory mock.
+    vi.mocked(loadAdoptTarget).mockResolvedValueOnce('https://server-a.lan');
+
     // Adopting a DIFFERENT server must clear the stale serverId from A BEFORE
     // uploading, or childA would be wrongly skipped as "already synced" (to
     // the wrong server).
     await s().adopt('https://server-b.lan', 'tok');
     const secondUpload = vi.mocked(uploadUnsynced).mock.calls[1][0];
     expect(secondUpload.children.every((c) => c.serverId == null)).toBe(true);
+  });
+
+  it('server-switch reset fires purely off a persisted target (loadAdoptTarget -> "A"), even with no prior adopt() call in this session', async () => {
+    const stamped: Child = { id: 'localZ', serverId: 111, first: 'Zed', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [stamped] });
+    vi.mocked(loadAdoptTarget).mockResolvedValueOnce('https://server-a.lan');
+
+    await s().adopt('https://server-b.lan', 'tok');
+
+    const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
+    expect(uploaded.children.find((c) => c.id === 'localZ')?.serverId).toBeUndefined();
   });
 });
 
@@ -2267,5 +2317,58 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     await s().flushUnsynced();
 
     expect(uploadUnsynced).not.toHaveBeenCalled();
+  });
+
+  // Finding 3: two concurrent reconnect triggers (e.g. setNetworkOnline(true)
+  // + a foreground refresh()) both calling flushUnsynced must not both POST
+  // the same serverId==null child — that would duplicate it on the server.
+  it('guards against overlapping flushes: a second call while one is in flight is a no-op', async () => {
+    const localChild: Child = { id: 'localJ', first: 'J', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    let resolveUpload!: (v: { children: Child[]; entries: Entry[]; measurements: Measurement[] }) => void;
+    vi.mocked(uploadUnsynced).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+
+    const first = s().flushUnsynced();
+    const second = s().flushUnsynced(); // fires while `first` is still awaiting uploadUnsynced
+
+    expect(uploadUnsynced).toHaveBeenCalledTimes(1);
+    resolveUpload({ children: [{ ...localChild, serverId: 501 }], entries: [], measurements: [] });
+    await first;
+    await second;
+
+    expect(uploadUnsynced).toHaveBeenCalledTimes(1);
+    expect(s().children.find((c) => c.id === 'localJ')?.serverId).toBe(501);
+  });
+
+  // Finding 3 (functional merge): the wholesale `set({ children: result.children,
+  // ... })` off the pre-await snapshot would clobber a create that lands
+  // during the await; the functional merge-by-id must preserve it instead.
+  it('a create landing during the in-flight upload is not dropped by the functional merge', async () => {
+    const localChild: Child = { id: 'localK', first: 'K', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild] });
+    let resolveUpload!: (v: { children: Child[]; entries: Entry[]; measurements: Measurement[] }) => void;
+    vi.mocked(uploadUnsynced).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveUpload = resolve;
+        }),
+    );
+
+    const pending = s().flushUnsynced();
+    // A concurrent create lands mid-flush (e.g. via saveChild) — simulated
+    // directly on state rather than driving the whole saveChild flow.
+    const newChild: Child = { id: 'localL', first: 'L', last: '', birth: NOW, color: '#eee' };
+    useAppStore.setState((st) => ({ children: [...st.children, newChild] }));
+
+    resolveUpload({ children: [{ ...localChild, serverId: 501 }], entries: [], measurements: [] });
+    await pending;
+
+    expect(s().children.find((c) => c.id === 'localL')).toBeDefined();
+    expect(s().children.find((c) => c.id === 'localK')?.serverId).toBe(501);
   });
 });
