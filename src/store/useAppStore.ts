@@ -29,6 +29,7 @@ import {
 } from '@/data/repository';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
 import { ApiError, childColor } from '@/api/client';
+import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
   clearEntities,
   loadEntities,
@@ -38,7 +39,13 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
-import { addPendingOp, loadPendingOps, savePendingOps, type PendingOp } from '@/data/pendingOps';
+import {
+  addPendingOp,
+  clearPendingOps,
+  loadPendingOps,
+  savePendingOps,
+  type PendingOp,
+} from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -300,10 +307,9 @@ let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | nul
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
-// The server URL of the most recent (possibly still in-progress/partial)
-// `adopt` call. If a later `adopt` targets a DIFFERENT server, any serverIds
-// stamped by the abandoned attempt must be cleared first — see `adopt` below.
-let adoptTarget: string | null = null;
+// Guards against overlapping flushUnsynced calls (e.g. setNetworkOnline(true)
+// and a foreground refresh() both firing at once) — see `flushUnsynced` below.
+let flushUnsyncedInFlight = false;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -582,15 +588,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Server-switch reset: a prior abandoned adoption (a `partial` result)
     // stamped serverIds against a DIFFERENT server. Those ids must not cause
     // this adoption to wrongly skip records that were never pushed to
-    // `serverUrl` — clear them before doing anything else.
-    if (adoptTarget != null && adoptTarget !== serverUrl) {
+    // `serverUrl` — clear them before doing anything else. The target is
+    // read from durable storage (not module memory) so this reset still
+    // fires across an app kill between the abandoned attempt and this call.
+    const prevAdoptTarget = await loadAdoptTarget();
+    if (prevAdoptTarget != null && prevAdoptTarget !== serverUrl) {
       set((st) => ({
         children: st.children.map((c) => ({ ...c, serverId: undefined })),
         entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
         measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
       }));
     }
-    adoptTarget = serverUrl;
+    await saveAdoptTarget(serverUrl);
 
     // Probe first — this also validates the token.
     let hasData: boolean;
@@ -657,7 +666,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileError: false,
       profileLoading: false,
     });
-    adoptTarget = null;
+    await clearAdoptTarget();
     return { status: 'done' };
   },
   enterLocal: async () => {
@@ -684,6 +693,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void clearConnection();
     void clearQueue();
     void clearEntities();
+    void clearPendingOps();
     set({
       connection: null,
       connected: false,
@@ -747,21 +757,43 @@ export const useAppStore = create<AppStore>((set, get) => ({
     await savePendingOps(remaining);
   },
   flushUnsynced: async () => {
-    const s = get();
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server' || s.offline) return;
-    // Only children & measurements here — entries still flow through
-    // queue.ts (flushQueue), and mixing would double-push. (Full entry
-    // unification is a later change.) Note: an offline entry created for an
-    // offline-created child while CONNECTED is a niche case not handled here
-    // either — it stays on the queue path.
-    const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
-    if (!hasUnsynced) return;
-    const result = await uploadUnsynced(
-      { children: s.children, entries: [], measurements: s.measurements },
-      buildUploadDeps(conn),
-    );
-    set({ children: result.children, measurements: result.measurements });
+    // Guards against overlapping flushes (e.g. setNetworkOnline(true) and a
+    // foreground refresh() both firing at once), which would otherwise both
+    // read the same serverId==null child and both POST it, duplicating it
+    // on the server.
+    if (flushUnsyncedInFlight) return;
+    flushUnsyncedInFlight = true;
+    try {
+      const s = get();
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server' || s.offline) return;
+      // Only children & measurements here — entries still flow through
+      // queue.ts (flushQueue), and mixing would double-push. (Full entry
+      // unification is a later change.) Note: an offline entry created for an
+      // offline-created child while CONNECTED is a niche case not handled here
+      // either — it stays on the queue path.
+      const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
+      if (!hasUnsynced) return;
+      const result = await uploadUnsynced(
+        { children: s.children, entries: [], measurements: s.measurements },
+        buildUploadDeps(conn),
+      );
+      // Functional merge-by-id (reads the CURRENT state via `st`, not the
+      // pre-await snapshot `s`) that only stamps serverIds, so a create that
+      // landed during the await isn't dropped by a wholesale replace.
+      set((st) => ({
+        children: st.children.map((c) => {
+          const u = result.children.find((r) => r.id === c.id);
+          return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
+        }),
+        measurements: st.measurements.map((m) => {
+          const u = result.measurements.find((r) => r.id === m.id);
+          return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
+        }),
+      }));
+    } finally {
+      flushUnsyncedInFlight = false;
+    }
   },
   commitWrite: (entry) => {
     const s = get();
