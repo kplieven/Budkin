@@ -665,9 +665,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       const profile = await loadProfileFromServer(conn);
       set({ profile, profileLoaded: true, profileLoading: false });
-    } catch {
-      // /api/profile/ can 500 on some instances — degrade to a non-blocking
-      // error row, never break the Settings screen.
+    } catch (e) {
+      // /api/profile/ can 500 on some instances (e.g. a user without a Settings
+      // row). Log the status for diagnosis; Settings simply omits the Baby Buddy
+      // group when there's no profile, so this stays non-blocking.
+      console.warn('[settings] /api/profile/ failed:', e instanceof ApiError ? `HTTP ${e.status}` : e);
       set({ profileLoading: false, profileError: true });
     }
   },
