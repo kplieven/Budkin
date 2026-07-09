@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
-import { loadConnection } from '@/data/storage';
+import { loadConnection, saveConnection } from '@/data/storage';
 import { loadFromServer, loadInsightsHistory, loadProfileFromServer } from '@/data/repository';
 import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
+import {
+  clearEntities,
+  loadEntities,
+  saveChildren,
+} from '@/data/entityStore';
 import { fmtClock } from '@/lib/format';
 import type { Entry, Profile, Timer } from '@/types/models';
 
@@ -75,6 +80,19 @@ vi.mock('@/data/timers', () => ({
   clearTimers: vi.fn(async () => {
     h.timers = [];
   }),
+}));
+
+// The durable entity store (children/entries/measurements/selectedChild/lastFeed).
+// Defaults to "nothing persisted yet" (null); individual tests override via
+// mockResolvedValueOnce to simulate a restart with saved data.
+vi.mock('@/data/entityStore', () => ({
+  loadEntities: vi.fn(async () => null),
+  saveChildren: vi.fn(async () => {}),
+  saveEntries: vi.fn(async () => {}),
+  saveMeasurements: vi.fn(async () => {}),
+  saveSelectedChildId: vi.fn(async () => {}),
+  saveLastFeed: vi.fn(async () => {}),
+  clearEntities: vi.fn(async () => {}),
 }));
 
 // REQUIRED: `prefs.ts` imports AsyncStorage; without mocking it here the node
@@ -156,6 +174,10 @@ beforeEach(() => {
   h.prefs = {};
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
+  vi.mocked(loadEntities).mockClear();
+  vi.mocked(loadEntities).mockResolvedValue(null);
+  vi.mocked(saveChildren).mockClear();
+  vi.mocked(clearEntities).mockClear();
   useAppStore.setState({
     connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
     connected: true,
@@ -727,6 +749,71 @@ describe('children', () => {
     s().closeChildSheet();
     expect(s().childSheet).toBe(false);
     expect(s().editingChildId).toBeNull();
+  });
+});
+
+describe('local mode: durable entityStore (empty start, no fake seed)', () => {
+  it('enterLocal sets connection to local mode, connects, and persists it — without seeding fake children', async () => {
+    useAppStore.setState({ connection: null, connected: false, children: [], entries: [] });
+    vi.mocked(loadEntities).mockResolvedValueOnce(null);
+    await s().enterLocal();
+    expect(s().connection).toEqual({ mode: 'local' });
+    expect(s().connected).toBe(true);
+    expect(s().children).toEqual([]); // no demo seed
+    expect(s().entries).toEqual([]);
+    expect(saveConnection).toHaveBeenCalledWith({ mode: 'local' });
+  });
+
+  it('enterLocal loads persisted entities when a prior local session left some', async () => {
+    const savedChild = { id: 'p1', first: 'Persisted', last: '', birth: NOW, color: '#000' };
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [savedChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'p1',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    await s().enterLocal();
+    expect(s().children).toEqual([savedChild]); // restored, not the demo seed
+    expect(s().selectedChildId).toBe('p1');
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+  });
+
+  it('local hydrate loads persisted entities instead of seeding fake ones', async () => {
+    const savedChild = { id: 'h1', first: 'Hydrated', last: '', birth: NOW, color: '#000' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [savedChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'h1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    await s().hydrate();
+    expect(s().connected).toBe(true);
+    expect(s().children).toEqual([savedChild]);
+    expect(s().selectedChildId).toBe('h1');
+  });
+
+  it('local hydrate starts empty when nothing was ever persisted', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().children).toEqual([]);
+    expect(s().entries).toEqual([]);
+    expect(s().measurements).toEqual([]);
+    expect(s().selectedChildId).toBe('');
+  });
+
+  it('the entity subscribe persists children on change (mirrors the timers subscribe)', () => {
+    vi.mocked(saveChildren).mockClear();
+    useAppStore.setState((st) => ({ children: [...st.children, { id: 'newc', first: 'New', last: '', birth: NOW, color: '#111' }] }));
+    expect(saveChildren).toHaveBeenCalledWith(s().children);
+  });
+
+  it('disconnect clears the durable entity store', () => {
+    s().disconnect();
+    expect(clearEntities).toHaveBeenCalled();
   });
 });
 

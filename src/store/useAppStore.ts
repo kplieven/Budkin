@@ -27,7 +27,15 @@ import {
   updateMeasurementOnServer,
 } from '@/data/repository';
 import { ApiError, childColor } from '@/api/client';
-import { makeSeed } from '@/data/seed';
+import {
+  clearEntities,
+  loadEntities,
+  saveChildren,
+  saveEntries,
+  saveLastFeed,
+  saveMeasurements,
+  saveSelectedChildId,
+} from '@/data/entityStore';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -130,7 +138,7 @@ interface AppActions {
   /** Re-check the server and reload data (on foreground / pull-to-refresh). */
   refresh: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
-  enterDemo: () => void;
+  enterLocal: () => Promise<void>;
   disconnect: () => void;
   forgetServer: (serverUrl: string) => void;
   flushQueue: () => Promise<void>;
@@ -328,19 +336,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
     if (conn.mode === 'local') {
-      const now = Date.now();
-      const seed = makeSeed(now);
+      const e = await loadEntities();
       set({
         connection: conn,
         connected: true,
         hydrating: false,
-        now,
-        children: seed.children,
-        entries: seed.entries,
-        timers: savedTimers.length ? savedTimers : seed.timers,
-        selectedChildId: seed.selectedChildId,
-        lastFeed: seed.lastFeed,
-        measurements: seed.measurements,
+        children: e?.children ?? [],
+        entries: e?.entries ?? [],
+        measurements: e?.measurements ?? [],
+        selectedChildId: e?.selectedChildId ?? '',
+        lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
+        timers: savedTimers,
         queueCount: q.length,
       });
       return;
@@ -467,22 +473,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
   },
-  enterDemo: () => {
-    const now = Date.now();
-    const seed = makeSeed(now);
+  enterLocal: async () => {
     const conn: Connection = { mode: 'local' };
+    const e = await loadEntities();
     set({
       connection: conn,
       connected: true,
       connecting: false,
       connectError: null,
-      now,
-      children: seed.children,
-      entries: seed.entries,
-      timers: seed.timers,
-      selectedChildId: seed.selectedChildId,
-      lastFeed: seed.lastFeed,
-      measurements: seed.measurements,
+      children: e?.children ?? [],
+      entries: e?.entries ?? [],
+      measurements: e?.measurements ?? [],
+      selectedChildId: e?.selectedChildId ?? '',
+      lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
       profile: null,
       profileLoaded: false,
       profileError: false,
@@ -493,6 +496,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   disconnect: () => {
     void clearConnection();
     void clearQueue();
+    void clearEntities();
     set({
       connection: null,
       connected: false,
@@ -1277,4 +1281,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
 // updates keep the same reference, so this writes only on an actual change.
 useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
+});
+
+// Persist the durable local-mode entities to on-device storage whenever they
+// change, mirroring the timers subscribe above: reference-equality checks so
+// each key is written only on an actual change, not on every unrelated `set`.
+useAppStore.subscribe((state, prev) => {
+  if (state.children !== prev.children) void saveChildren(state.children);
+  if (state.entries !== prev.entries) void saveEntries(state.entries);
+  if (state.measurements !== prev.measurements) void saveMeasurements(state.measurements);
+  if (state.selectedChildId !== prev.selectedChildId) void saveSelectedChildId(state.selectedChildId);
+  if (state.lastFeed !== prev.lastFeed) void saveLastFeed(state.lastFeed);
 });
