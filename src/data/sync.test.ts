@@ -1,0 +1,194 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { uploadUnsynced } from '@/data/sync';
+import type { UploadDeps, UploadState } from '@/data/sync';
+import type { Child, DiaperEntry, Measurement } from '@/types/models';
+
+const child = (overrides: Partial<Child> = {}): Child => ({
+  id: 'c1',
+  first: 'Ada',
+  last: 'Lovelace',
+  birth: 0,
+  color: '#fff',
+  ...overrides,
+});
+
+const diaperEntry = (overrides: Partial<DiaperEntry> = {}): DiaperEntry => ({
+  id: 'e1',
+  childId: 'c1',
+  tags: [],
+  type: 'diaper',
+  time: 0,
+  wet: true,
+  solid: false,
+  color: null,
+  ...overrides,
+});
+
+const measurement = (overrides: Partial<Measurement> = {}): Measurement => ({
+  id: 'm1',
+  childId: 'c1',
+  kind: 'weight',
+  value: 5,
+  date: 0,
+  ...overrides,
+});
+
+const emptyState = (): UploadState => ({ children: [], entries: [], measurements: [] });
+
+const makeDeps = (overrides: Partial<UploadDeps> = {}): UploadDeps => ({
+  pushChild: vi.fn(async () => 100),
+  pushEntry: vi.fn(async () => 200),
+  pushMeasurement: vi.fn(async () => 300),
+  ...overrides,
+});
+
+describe('uploadUnsynced', () => {
+  it('uploads children before entries and measurements', async () => {
+    const log: string[] = [];
+    const state: UploadState = {
+      children: [child({ id: 'c1' })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
+      measurements: [measurement({ id: 'm1', childId: 'c1' })],
+    };
+    const deps: UploadDeps = {
+      pushChild: vi.fn(async (c) => {
+        log.push(`child:${c.id}`);
+        return 10;
+      }),
+      pushEntry: vi.fn(async (e) => {
+        log.push(`entry:${e.id}`);
+        return 20;
+      }),
+      pushMeasurement: vi.fn(async (m) => {
+        log.push(`measurement:${m.id}`);
+        return 30;
+      }),
+    };
+
+    await uploadUnsynced(state, deps);
+
+    expect(log).toEqual(['child:c1', 'entry:e1', 'measurement:m1']);
+  });
+
+  it('remaps an entry childId to the newly-assigned server child id', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'child1', serverId: undefined })],
+      entries: [diaperEntry({ id: 'e1', childId: 'child1' })],
+      measurements: [],
+    };
+    const pushEntry = vi.fn(async () => 200);
+    const deps = makeDeps({ pushChild: vi.fn(async () => 10), pushEntry });
+
+    await uploadUnsynced(state, deps);
+
+    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: '10' }));
+  });
+
+  it('remaps a measurement childId to the newly-assigned server child id', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'child1', serverId: undefined })],
+      entries: [],
+      measurements: [measurement({ id: 'm1', childId: 'child1' })],
+    };
+    const pushMeasurement = vi.fn(async () => 300);
+    const deps = makeDeps({ pushChild: vi.fn(async () => 42), pushMeasurement });
+
+    await uploadUnsynced(state, deps);
+
+    expect(pushMeasurement).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1', childId: '42' }));
+  });
+
+  it('does not push a child that already has a serverId', async () => {
+    const pushChild = vi.fn(async () => 999);
+    const state: UploadState = {
+      ...emptyState(),
+      children: [child({ id: 'c1', serverId: 5 })],
+    };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushChild }));
+
+    expect(pushChild).not.toHaveBeenCalled();
+    expect(result.children[0].serverId).toBe(5);
+  });
+
+  it('leaves a child unsynced and skips its entries/measurements when pushChild returns undefined', async () => {
+    const pushEntry = vi.fn(async () => 55);
+    const pushMeasurement = vi.fn(async () => 66);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: undefined })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
+      measurements: [measurement({ id: 'm1', childId: 'c1' })],
+    };
+
+    const result = await uploadUnsynced(
+      state,
+      makeDeps({ pushChild: vi.fn(async () => undefined), pushEntry, pushMeasurement }),
+    );
+
+    expect(result.children[0].serverId).toBeUndefined();
+    expect(pushEntry).not.toHaveBeenCalled();
+    expect(pushMeasurement).not.toHaveBeenCalled();
+    expect(result.entries[0].serverId).toBeUndefined();
+    expect(result.measurements[0].serverId).toBeUndefined();
+  });
+
+  it('leaves a child unsynced when pushChild throws, and does not abort the rest', async () => {
+    const otherPushChild = vi.fn(async (_c: Child) => 11);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: undefined }), child({ id: 'c2', serverId: undefined })],
+      entries: [],
+      measurements: [],
+    };
+    const pushChild = vi.fn(async (c: Child) => {
+      if (c.id === 'c1') throw new Error('network down');
+      return otherPushChild(c);
+    });
+
+    const result = await uploadUnsynced(state, makeDeps({ pushChild }));
+
+    expect(result.children.find((c) => c.id === 'c1')?.serverId).toBeUndefined();
+    expect(result.children.find((c) => c.id === 'c2')?.serverId).toBe(11);
+  });
+
+  it('pushes an entry under an already-synced parent using its existing server id', async () => {
+    const pushEntry = vi.fn(async () => 77);
+    const state: UploadState = {
+      children: [child({ id: '7', serverId: 7 })],
+      entries: [diaperEntry({ id: 'e1', childId: '7' })],
+      measurements: [],
+    };
+
+    await uploadUnsynced(state, makeDeps({ pushEntry }));
+
+    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: '7' }));
+  });
+
+  it('calls onProgress once per unsynced record, monotonically reaching total', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: undefined }), child({ id: 'c2', serverId: 2 })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
+      measurements: [measurement({ id: 'm1', childId: 'c1' })],
+    };
+    const calls: Array<[number, number]> = [];
+
+    await uploadUnsynced(state, makeDeps(), (done, total) => calls.push([done, total]));
+
+    // total = 1 unsynced child + 1 entry + 1 measurement (c2 already synced, doesn't count)
+    expect(calls.map(([, total]) => total)).toEqual([3, 3, 3]);
+    expect(calls.map(([done]) => done)).toEqual([1, 2, 3]);
+  });
+
+  it('does not mutate the input state', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'c1' })],
+      entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
+      measurements: [measurement({ id: 'm1', childId: 'c1' })],
+    };
+    const snapshot = JSON.parse(JSON.stringify(state));
+
+    await uploadUnsynced(state, makeDeps());
+
+    expect(state).toEqual(snapshot);
+  });
+});
