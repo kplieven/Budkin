@@ -29,7 +29,7 @@ describe('loadInsightsHistory', () => {
     listFeedings.mockResolvedValue([]);
     listChanges.mockResolvedValue([]);
 
-    const out = await loadInsightsHistory({ demo: false, serverUrl: 'x', token: 'y' }, 'c1', now - 90 * DAY);
+    const out = await loadInsightsHistory({ mode: 'server', serverUrl: 'x', token: 'y' }, 'c1', now - 90 * DAY);
     expect(out.every((e) => entryTimestamp(e) >= now - 90 * DAY)).toBe(true);
     expect(listSleep).toHaveBeenCalledWith('c1', 100, 0);
     expect(listSleep).toHaveBeenCalledWith('c1', 100, 100);
@@ -37,7 +37,7 @@ describe('loadInsightsHistory', () => {
 
   it('returns [] in demo mode without calling the client', async () => {
     listSleep.mockClear();
-    const out = await loadInsightsHistory({ demo: true, serverUrl: '', token: '' }, 'c1', 0);
+    const out = await loadInsightsHistory({ mode: 'local' }, 'c1', 0);
     expect(out).toEqual([]);
     expect(listSleep).not.toHaveBeenCalled();
   });
@@ -46,20 +46,20 @@ describe('loadInsightsHistory', () => {
 describe('loadProfileFromServer', () => {
   it('returns null in demo mode without calling the client', async () => {
     getProfile.mockClear();
-    const out = await loadProfileFromServer({ demo: true, serverUrl: '', token: '' });
+    const out = await loadProfileFromServer({ mode: 'local' });
     expect(out).toBeNull();
     expect(getProfile).not.toHaveBeenCalled();
   });
 
   it('fetches the profile from the client for a real connection', async () => {
     getProfile.mockReset().mockResolvedValueOnce({ username: 'alex', timezone: 'UTC' });
-    const out = await loadProfileFromServer({ demo: false, serverUrl: 'x', token: 'y' });
+    const out = await loadProfileFromServer({ mode: 'server', serverUrl: 'x', token: 'y' });
     expect(out).toEqual({ username: 'alex', timezone: 'UTC' });
     expect(getProfile).toHaveBeenCalled();
   });
 
   it('propagates a client error (caller decides how to degrade)', async () => {
     getProfile.mockReset().mockRejectedValueOnce(new Error('500'));
-    await expect(loadProfileFromServer({ demo: false, serverUrl: 'x', token: 'y' })).rejects.toThrow('500');
+    await expect(loadProfileFromServer({ mode: 'server', serverUrl: 'x', token: 'y' })).rejects.toThrow('500');
   });
 });

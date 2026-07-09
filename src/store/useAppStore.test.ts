@@ -157,7 +157,7 @@ beforeEach(() => {
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
   useAppStore.setState({
-    connection: { demo: false, serverUrl: 'http://x', token: 't' },
+    connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
     connected: true,
     offline: false,
     networkOnline: true,
@@ -344,7 +344,7 @@ describe('timer persistence across restarts', () => {
   it('restores persisted timers on hydrate (real connection)', async () => {
     const saved = [savedTimer('t9')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     await s().hydrate();
     expect(s().timers).toEqual(saved);
   });
@@ -352,7 +352,7 @@ describe('timer persistence across restarts', () => {
   it('restores persisted timers when the server is unreachable at launch', async () => {
     const saved = [savedTimer('t8')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
     expect(s().offline).toBe(true);
@@ -362,7 +362,7 @@ describe('timer persistence across restarts', () => {
   it('prefers persisted timers over the demo seed', async () => {
     const saved = [savedTimer('tD')];
     h.timers = saved;
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: true, serverUrl: '', token: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
     await s().hydrate();
     expect(s().timers).toEqual(saved);
   });
@@ -422,7 +422,7 @@ describe('queued entries survive killing the app', () => {
 
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
     h.q = [queuedEntry('e1')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: [mira],
       entries: [
@@ -440,7 +440,7 @@ describe('queued entries survive killing the app', () => {
 
   it('restores a queued entry into `entries` when the server is unreachable at launch', async () => {
     h.q = [queuedEntry('e2')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
     expect(s().offline).toBe(true);
@@ -450,7 +450,7 @@ describe('queued entries survive killing the app', () => {
 
   it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
     h.q = [queuedEntry('e3')];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: [mira],
       entries: [],
@@ -705,7 +705,7 @@ describe('children', () => {
   });
 
   it('demo mode: create stays local, no server push', async () => {
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    useAppStore.setState({ connection: { mode: 'local' } });
     s().openAddChild();
     s().saveChild({ first: 'Demo', last: '', birth: NOW });
     expect(s().children).toHaveLength(2);
@@ -806,7 +806,7 @@ describe('refresh / reconnect', () => {
 
   it('is a no-op in demo mode', async () => {
     vi.mocked(loadFromServer).mockClear();
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' }, offline: false });
+    useAppStore.setState({ connection: { mode: 'local' }, offline: false });
     await s().refresh();
     expect(loadFromServer).not.toHaveBeenCalled();
     expect(s().offline).toBe(false);
@@ -836,7 +836,7 @@ describe('refresh / reconnect', () => {
 
     // A later loadProfile (e.g. after reconnecting) can refetch since
     // profileLoaded no longer blocks it.
-    useAppStore.setState({ connection: { demo: false, serverUrl: 'http://x', token: 't2' } });
+    useAppStore.setState({ connection: { mode: 'server', serverUrl: 'http://x', token: 't2' } });
     await s().loadProfile();
     expect(loadProfileFromServer).toHaveBeenCalled();
     expect(s().profileLoaded).toBe(true);
@@ -1321,7 +1321,7 @@ describe('saved servers', () => {
 
   it('hydrate loads saved servers and migrates the active connection', async () => {
     h.servers = [];
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: false, serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     await s().hydrate();
     expect(s().savedServers.map((x) => x.serverUrl)).toContain('http://x');
     expect(h.servers.map((x: any) => x.serverUrl)).toContain('http://x');
@@ -1341,7 +1341,7 @@ describe('saved servers', () => {
 describe('insights slice', () => {
   it('loadInsights in demo mode fills insightsEntries from local entries scoped to the child', async () => {
     useAppStore.setState({
-      connection: { demo: true, serverUrl: '', token: '' } as any,
+      connection: { mode: 'local' } as any,
       selectedChildId: 'c1',
       entries: [
         { id: 's1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
@@ -1365,7 +1365,7 @@ describe('insights slice', () => {
 
   it('loadInsights in non-demo mode fetches deep history from the server', async () => {
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1374,7 +1374,7 @@ describe('insights slice', () => {
     ]);
     await useAppStore.getState().loadInsights();
     expect(loadInsightsHistory).toHaveBeenCalledWith(
-      { demo: false, serverUrl: 'x', token: 'y' },
+      { mode: 'server', serverUrl: 'x', token: 'y' },
       'c1',
       expect.any(Number),
     );
@@ -1386,7 +1386,7 @@ describe('insights slice', () => {
   it('discards an in-flight fetch when the child switches mid-load and reloads for the new child', async () => {
     vi.mocked(loadInsightsHistory).mockClear();
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1415,7 +1415,7 @@ describe('insights slice', () => {
 
   it('loadInsights surfaces an error and recovers on retry', async () => {
     useAppStore.setState({
-      connection: { demo: false, serverUrl: 'x', token: 'y' } as any,
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
@@ -1470,7 +1470,7 @@ describe('theme persistence', () => {
 
   it('hydrate applies a persisted theme for a demo connection too', async () => {
     h.prefs = { themeMode: 'light' };
-    vi.mocked(loadConnection).mockResolvedValueOnce({ demo: true, serverUrl: '', token: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
     useAppStore.setState({ themeMode: 'dark' });
     await s().hydrate();
     expect(s().themeMode).toBe('light');
@@ -1479,7 +1479,7 @@ describe('theme persistence', () => {
 
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
-    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    useAppStore.setState({ connection: { mode: 'local' } });
     await s().loadProfile();
     expect(s().profile).toBeNull();
     expect(s().profileLoaded).toBe(true);

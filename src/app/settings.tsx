@@ -76,12 +76,18 @@ export default function Settings() {
     marginHorizontal: 4,
   };
 
-  const host = connection?.demo ? 'Demo mode' : connection?.serverUrl?.replace(/^https?:\/\//, '') || '—';
-  const tokenMask = connection?.demo
-    ? 'No server'
-    : connection?.token
-      ? `Connected · token ••••${connection.token.slice(-4)}`
-      : 'Not connected';
+  const host =
+    connection?.mode === 'local'
+      ? 'Demo mode'
+      : connection?.mode === 'server'
+        ? connection.serverUrl.replace(/^https?:\/\//, '') || '—'
+        : '—';
+  const tokenMask =
+    connection?.mode === 'local'
+      ? 'No server'
+      : connection?.mode === 'server' && connection.token
+        ? `Connected · token ••••${connection.token.slice(-4)}`
+        : 'Not connected';
 
   // Read-only display of the connected user's Baby Buddy general settings
   // (from /api/profile/). The whole group is shown ONLY when the server actually
@@ -96,7 +102,7 @@ export default function Settings() {
     { label: 'Dashboard refresh', value: profile?.dashboardRefreshRate || '—' },
   ];
   const showProfileGroup =
-    !connection?.demo &&
+    connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
   const body = (

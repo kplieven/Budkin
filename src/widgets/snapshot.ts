@@ -87,6 +87,6 @@ export function buildWidgetSnapshot(s: {
     feedsToday,
     diapersToday,
     selectedChildId: s.selectedChildId,
-    canQueueNap: !!s.connection && !s.connection.demo,
+    canQueueNap: s.connection?.mode === 'server',
   };
 }

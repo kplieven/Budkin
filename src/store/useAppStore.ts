@@ -314,7 +314,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     let savedServers = await loadServers();
     // Migration: ensure the active real server is in the retry list for users
     // who connected before the saved-servers feature existed.
-    if (conn && !conn.demo && conn.serverUrl) {
+    if (conn && conn.mode === 'server') {
       savedServers = upsertServer(savedServers, {
         serverUrl: conn.serverUrl,
         token: conn.token,
@@ -327,7 +327,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ hydrating: false, queueCount: q.length, timers: savedTimers });
       return;
     }
-    if (conn.demo) {
+    if (conn.mode === 'local') {
       const now = Date.now();
       const seed = makeSeed(now);
       set({
@@ -386,7 +386,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const s = get();
     const conn = s.connection;
     // Nothing to re-check for demo, no connection, or a manual offline override.
-    if (!conn || conn.demo || s.simulateOffline || refreshInFlight) return;
+    if (!conn || conn.mode !== 'server' || s.simulateOffline || refreshInFlight) return;
     refreshInFlight = true;
     // Running timers are local-only (the server has none) and can be mutated
     // out-of-band by the home-screen widget while the app is warm. Re-read the
@@ -437,7 +437,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   connect: async (serverUrl, token) => {
     set({ connecting: true, connectError: null });
-    const conn: Connection = { demo: false, serverUrl, token };
+    const conn: Connection = { mode: 'server', serverUrl, token };
     try {
       const data = await loadFromServer(conn);
       const savedServers = upsertServer(get().savedServers, {
@@ -470,7 +470,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   enterDemo: () => {
     const now = Date.now();
     const seed = makeSeed(now);
-    const conn: Connection = { demo: true, serverUrl: '', token: '' };
+    const conn: Connection = { mode: 'local' };
     set({
       connection: conn,
       connected: true,
@@ -518,7 +518,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   flushQueue: async () => {
     const s = get();
     const conn = s.connection;
-    if (!conn || conn.demo || s.offline) return;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
     const q = await loadQueue();
     if (q.length === 0) return;
     const remaining: Entry[] = [];
@@ -538,7 +538,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   commitWrite: (entry) => {
     const s = get();
     const conn = s.connection;
-    if (!conn || conn.demo) return; // demo: local only, nothing to push
+    if (!conn || conn.mode !== 'server') return; // local: nothing to push
     if (s.offline) {
       void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
     } else {
@@ -590,7 +590,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       get().showToast('Updated');
       const conn = s.connection;
-      if (conn && !conn.demo && !s.offline) {
+      if (conn && conn.mode === 'server' && !s.offline) {
         void updateChildOnServer(conn, child, change)
           .then((url) => {
             // Swap the ephemeral local file URI for the durable server URL.
@@ -627,7 +627,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast('Saved');
     const conn = s.connection;
-    if (conn && !conn.demo && !s.offline) {
+    if (conn && conn.mode === 'server' && !s.offline) {
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
@@ -657,7 +657,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // Demo: the store's `entries` hold the local seed history for ALL
       // children — scope to the selected child, matching the per-child fetch.
-      const entries = conn.demo
+      const entries = conn.mode === 'local'
         ? s.entries.filter((e) => e.childId === childId)
         : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
       if (get().selectedChildId !== childId) {
@@ -679,7 +679,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (s.profileLoaded || s.profileLoading) return;
     const conn = s.connection;
     if (!conn) return;
-    if (conn.demo) {
+    if (conn.mode === 'local') {
       set({ profile: null, profileLoaded: true });
       return;
     }
@@ -828,7 +828,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (index === -1) return;
     const entry = s.entries[index];
     const conn = s.connection;
-    const didServerDelete = entry.serverId != null && !!conn && !conn.demo && !s.offline;
+    const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
@@ -888,7 +888,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast(existing ? 'Updated' : 'Saved');
     const conn = s.connection;
-    if (conn && !conn.demo && !s.offline) {
+    if (conn && conn.mode === 'server' && !s.offline) {
       if (existing) {
         void updateMeasurementOnServer(conn, m).catch(() => {});
       } else {
@@ -914,7 +914,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast('Deleted');
     const conn = s.connection;
-    if (m && m.serverId != null && conn && !conn.demo && !s.offline) {
+    if (m && m.serverId != null && conn && conn.mode === 'server' && !s.offline) {
       void deleteMeasurementFromServer(conn, m.kind, m.serverId).catch(() => {});
     }
   },
@@ -1153,12 +1153,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set(patch);
     if (existing) {
       get().showToast('Updated');
-      if (s.connection && !s.connection.demo && !s.offline) {
+      if (s.connection && s.connection.mode === 'server' && !s.offline) {
         void updateEntryOnServer(s.connection, entry).catch(() => {});
       }
     } else {
       get().commitWrite(entry);
-      const queued = s.offline && !!s.connection && !s.connection.demo;
+      const queued = s.offline && !!s.connection && s.connection.mode === 'server';
       get().showToast(queued ? 'Saved · queued offline' : 'Saved');
     }
   },
@@ -1241,7 +1241,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
-    const queued = s.offline && !!s.connection && !s.connection.demo;
+    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
     // Only call out the resolved end when the caller asked for a back-dated
     // stop — ending "now" needs no confirmation of what time it is.
     const backdated = endMs != null ? ` · ended ${fmtClock(resolvedEnd)}` : '';
