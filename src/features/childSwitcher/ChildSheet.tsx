@@ -5,14 +5,17 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
-import { Icon } from '@/components/Icon';
+import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
+import { pickChildPhoto } from '@/lib/photo';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-import type { Child } from '@/types/models';
+import type { Child, PhotoChange } from '@/types/models';
+
+const REMOVE_COLOR = '#E2725B'; // destructive accent, matches LogSheet/SwipeableRow
 
 function midnight(): number {
   const d = new Date();
@@ -32,6 +35,49 @@ function clampBirth(yStr: string, mStr: string, dStr: string): number {
   return Math.min(new Date(y, mo - 1, d).getTime(), midnight());
 }
 
+/** A compact icon+label action pill for the photo controls. */
+function PhotoPill({
+  icon,
+  label,
+  onPress,
+  tone = 'default',
+}: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  tone?: 'default' | 'danger';
+}) {
+  const t = useTheme();
+  const color = tone === 'danger' ? REMOVE_COLOR : t.text;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      style={(s) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 7,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderRadius: 13,
+          backgroundColor: t.chip,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          cursor: 'pointer',
+        },
+        isHovered(s) && { borderColor: t.line2 },
+      ]}
+    >
+      <Icon name={icon} color={color} size={17} />
+      <Txt unselectable weight={700} size={14} color={color}>
+        {label}
+      </Txt>
+    </Pressable>
+  );
+}
+
 export function ChildSheet() {
   const open = useAppStore((s) => s.childSheet);
   const editingId = useAppStore((s) => s.editingChildId);
@@ -44,6 +90,7 @@ function Inner({ editingId }: { editingId: string | null }) {
   const insets = useSafeAreaInsets();
   const children = useAppStore((s) => s.children);
   const saveChild = useAppStore((s) => s.saveChild);
+  const showToast = useAppStore((s) => s.showToast);
   const close = useAppStore((s) => s.closeChildSheet);
 
   const editing: Child | null = editingId ? (children.find((c) => c.id === editingId) ?? null) : null;
@@ -54,20 +101,58 @@ function Inner({ editingId }: { editingId: string | null }) {
   const [year, setYear] = useState(String(editingDate.getFullYear()));
   const [month, setMonth] = useState(String(editingDate.getMonth() + 1));
   const [day, setDay] = useState(String(editingDate.getDate()));
+  const [photo, setPhoto] = useState<string | null>(editing?.picture ?? null);
+  const [photoChange, setPhotoChange] = useState<PhotoChange>({ kind: 'none' });
+  const [picking, setPicking] = useState(false);
 
   const canSave = first.trim().length > 0;
+  const previewChild = { first: first.trim() || editing?.first || '?', color: editing?.color ?? t.primary };
+
+  const onPick = async (source: 'library' | 'camera') => {
+    if (picking) return;
+    setPicking(true);
+    try {
+      const res = await pickChildPhoto(source);
+      if (res.ok) {
+        setPhoto(res.photo.uri);
+        setPhotoChange({ kind: 'set', photo: res.photo });
+      } else if (res.reason === 'denied') {
+        showToast(source === 'camera' ? 'Camera permission needed' : 'Photo permission needed');
+      }
+    } finally {
+      setPicking(false);
+    }
+  };
+
+  const onRemovePhoto = () => {
+    setPhoto(null);
+    setPhotoChange({ kind: 'remove' });
+  };
 
   const onSave = () => {
     if (!canSave) return;
     const birth = clampBirth(year, month, day);
-    saveChild({ first: first.trim(), last: last.trim(), birth });
+    saveChild({ first: first.trim(), last: last.trim(), birth, photo: photoChange });
   };
+
+  const inputStyle = {
+    height: 52,
+    borderRadius: 14,
+    backgroundColor: t.surface,
+    borderWidth: 1.5,
+    borderColor: t.line,
+    paddingHorizontal: 14,
+    fontSize: 16,
+    fontFamily: fontFamily(600),
+    color: t.text,
+    marginBottom: 16,
+  } as const;
 
   return (
     <BottomSheet onClose={close}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 14, flexShrink: 0 }}>
-        {editing ? (
-          <Avatar child={editing} size={44} radius={14} fontSize={18} />
+        {photo || editing ? (
+          <Avatar child={{ ...previewChild, picture: photo }} size={44} radius={14} fontSize={18} />
         ) : (
           <View style={{ width: 44, height: 44, borderRadius: 14, backgroundColor: hexA(t.primary, t.dark ? 0.2 : 0.16), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="plus" color={t.primary} size={22} />
@@ -83,6 +168,26 @@ function Inner({ editingId }: { editingId: string | null }) {
 
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+          Photo
+        </Txt>
+        <View style={{ alignItems: 'center', marginBottom: 16 }}>
+          <View style={{ marginBottom: 12 }}>
+            {photo || first.trim() || editing ? (
+              <Avatar child={{ ...previewChild, picture: photo }} size={88} radius={28} fontSize={34} />
+            ) : (
+              <View style={{ width: 88, height: 88, borderRadius: 28, backgroundColor: hexA(t.primary, t.dark ? 0.2 : 0.16), alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="image" color={t.primary} size={32} />
+              </View>
+            )}
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <PhotoPill icon="image" label="Library" onPress={() => onPick('library')} />
+            <PhotoPill icon="camera" label="Camera" onPress={() => onPick('camera')} />
+            {photo ? <PhotoPill icon="trash" label="Remove" tone="danger" onPress={onRemovePhoto} /> : null}
+          </View>
+        </View>
+
+        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
           First name
         </Txt>
         <TextInput
@@ -91,7 +196,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           placeholder="First name"
           placeholderTextColor={t.faint}
           autoFocus={!editing}
-          style={{ height: 52, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, paddingHorizontal: 14, fontSize: 16, fontFamily: fontFamily(600), color: t.text, marginBottom: 16 }}
+          style={inputStyle}
         />
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
@@ -102,7 +207,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           onChangeText={setLast}
           placeholder="Last name"
           placeholderTextColor={t.faint}
-          style={{ height: 52, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, paddingHorizontal: 14, fontSize: 16, fontFamily: fontFamily(600), color: t.text, marginBottom: 16 }}
+          style={inputStyle}
         />
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
