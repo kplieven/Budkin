@@ -3,10 +3,24 @@
  * Kept separate from the store so they're trivially unit-testable.
  */
 
-import type { Entry } from '@/types/models';
+import type { Entry, Measurement } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
+
+/**
+ * Offline "pending sync" count shown in the offline banners: queued entries
+ * (`queueCount`) plus measurements created offline that haven't synced yet
+ * (`serverId == null`). Unsynced CHILDREN are intentionally excluded — their
+ * omission is pre-existing design and out of scope here.
+ *
+ * Takes a structural subset so it doubles as a stable zustand selector:
+ * `useAppStore(selectPendingCount)`. It returns a plain number, so the store's
+ * default `Object.is` equality prevents needless re-renders.
+ */
+export function selectPendingCount(s: { queueCount: number; measurements: Measurement[] }): number {
+  return s.queueCount + s.measurements.filter((m) => m.serverId == null).length;
+}
 
 const DEFAULT_ORDER: TimeField[] = ['end', 'lasted', 'start'];
 

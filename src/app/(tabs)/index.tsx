@@ -24,6 +24,7 @@ import { ageStr } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
 import { TimelineRail } from '@/shell/TimelineRail';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { selectPendingCount } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -34,7 +35,7 @@ export default function Home() {
   const { width } = useWindowDimensions();
   const now = useAppStore((s) => s.now);
   const offline = useAppStore((s) => s.offline);
-  const queueCount = useAppStore((s) => s.queueCount);
+  const pending = useAppStore(selectPendingCount);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
@@ -104,8 +105,8 @@ export default function Home() {
         >
           <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
           <Txt weight={600} size={12.5} style={{ flex: 1 }}>
-            {queueCount > 0
-              ? `Offline — ${queueCount} ${queueCount === 1 ? 'entry' : 'entries'} queued, will sync when reconnected`
+            {pending > 0
+              ? `Offline — ${pending} pending, will sync when reconnected`
               : 'Offline — changes will sync when reconnected'}
           </Txt>
           <Txt weight={700} size={12.5} color="#E2B554">
