@@ -18,6 +18,7 @@ import {
   deleteMeasurementFromServer,
   loadFromServer,
   loadInsightsHistory,
+  loadProfileFromServer,
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
@@ -27,6 +28,7 @@ import {
 } from '@/data/repository';
 import { ApiError, childColor } from '@/api/client';
 import { makeSeed } from '@/data/seed';
+import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
@@ -49,6 +51,7 @@ import type {
   FeedType,
   Measurement,
   MeasurementKind,
+  Profile,
   Timer,
 } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
@@ -103,6 +106,13 @@ interface AppState {
   insightsLoading: boolean;
   insightsError: boolean;
   loadInsights: () => Promise<void>;
+
+  // read-only Baby Buddy server settings (Settings screen "Baby Buddy" group)
+  profile: Profile | null;
+  profileLoading: boolean;
+  profileError: boolean;
+  profileLoaded: boolean;
+  loadProfile: () => Promise<void>;
 
   // working time-entry
   te: TimeEntryState;
@@ -255,13 +265,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
   insightsLoading: false,
   insightsError: false,
 
+  profile: null,
+  profileLoading: false,
+  profileError: false,
+  profileLoaded: false,
+
   te: { shape: 'interval', tags: [] },
 
   // ---- ticking clock ----
   tick: (now) => set({ now }),
 
   // ---- theme / offline ----
-  toggleTheme: () => set((s) => ({ themeMode: s.themeMode === 'dark' ? 'light' : 'dark' })),
+  toggleTheme: () =>
+    set((s) => {
+      const next: ThemeMode = s.themeMode === 'dark' ? 'light' : 'dark';
+      void savePrefs({ themeMode: next });
+      return { themeMode: next };
+    }),
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -283,6 +303,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   hydrate: async () => {
     const conn = await loadConnection();
     const q = await loadQueue();
+    // themeMode is independent of connection state, so apply it once here up
+    // front and it covers every branch below (no connection, demo, real).
+    const prefs = await loadPrefs();
+    if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -413,7 +437,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         token,
         lastUsedAt: Date.now(),
       });
-      set({ connection: conn, connected: true, connecting: false, savedServers, ...data });
+      set({
+        connection: conn,
+        connected: true,
+        connecting: false,
+        savedServers,
+        ...data,
+        // a newly-connected server's profile hasn't been fetched yet
+        profile: null,
+        profileLoaded: false,
+        profileError: false,
+      });
       void saveConnection(conn);
       void persistServers(savedServers);
       void get().flushQueue();
@@ -456,6 +490,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       measurements: [],
       selectedChildId: '',
       queueCount: 0,
+      profile: null,
+      profileLoaded: false,
+      profileError: false,
     });
   },
   forgetServer: (serverUrl) => {
@@ -595,6 +632,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
+    }
+  },
+
+  // ---- read-only Baby Buddy server settings (lazy, fetched on Settings mount) ----
+  loadProfile: async () => {
+    const s = get();
+    if (s.profileLoaded || s.profileLoading) return;
+    const conn = s.connection;
+    if (!conn) return;
+    if (conn.demo) {
+      set({ profile: null, profileLoaded: true });
+      return;
+    }
+    set({ profileLoading: true, profileError: false });
+    try {
+      const profile = await loadProfileFromServer(conn);
+      set({ profile, profileLoaded: true, profileLoading: false });
+    } catch {
+      // /api/profile/ can 500 on some instances — degrade to a non-blocking
+      // error row, never break the Settings screen.
+      set({ profileLoading: false, profileError: true });
     }
   },
 

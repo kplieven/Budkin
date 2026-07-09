@@ -1,0 +1,42 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { loadPrefs, savePrefs } from '@/data/prefs';
+
+// In-memory stand-in for the native AsyncStorage module.
+const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
+vi.mock('@react-native-async-storage/async-storage', () => ({
+  default: {
+    getItem: vi.fn(async (k: string) => mem.store.get(k) ?? null),
+    setItem: vi.fn(async (k: string, v: string) => {
+      mem.store.set(k, v);
+    }),
+    removeItem: vi.fn(async (k: string) => {
+      mem.store.delete(k);
+    }),
+  },
+}));
+
+beforeEach(() => {
+  mem.store.clear();
+});
+
+describe('prefs persistence', () => {
+  it('returns {} when nothing is saved', async () => {
+    expect(await loadPrefs()).toEqual({});
+  });
+
+  it('round-trips a saved theme preference', async () => {
+    await savePrefs({ themeMode: 'light' });
+    expect(await loadPrefs()).toEqual({ themeMode: 'light' });
+  });
+
+  it('returns {} instead of throwing on corrupt persisted JSON', async () => {
+    mem.store.set('babybuddy.prefs.v1', '{not json');
+    expect(await loadPrefs()).toEqual({});
+  });
+
+  it('tolerates a persisted file that predates a field (forward-compat Partial)', async () => {
+    mem.store.set('babybuddy.prefs.v1', JSON.stringify({}));
+    expect(await loadPrefs()).toEqual({});
+  });
+});

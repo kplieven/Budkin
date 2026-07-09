@@ -13,6 +13,7 @@ import {
   type FeedType,
   type Measurement,
   type MeasurementKind,
+  type Profile,
   type Timer,
 } from '@/types/models';
 
@@ -105,6 +106,18 @@ export async function loadInsightsHistory(
     pageAll((l, o) => client.listChanges(childId, l, o)),
   ]);
   return [...s, ...f, ...d];
+}
+
+/**
+ * Fetch the connected user's Baby Buddy account + general settings
+ * (read-only display in Settings). Demo → null (no server). Throws on
+ * error — the store's `loadProfile` action catches it and sets
+ * `profileError`; this must never be treated as fatal to the app.
+ */
+export async function loadProfileFromServer(conn: Connection): Promise<Profile | null> {
+  if (conn.demo) return null;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.getProfile();
 }
 
 /** Push a created measurement; returns its new server id (or undefined). */

@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
-import { Pressable, ScrollView, View } from 'react-native';
+import { useEffect } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
@@ -49,6 +50,14 @@ export default function Settings() {
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
+  const profile = useAppStore((s) => s.profile);
+  const profileLoading = useAppStore((s) => s.profileLoading);
+  const profileError = useAppStore((s) => s.profileError);
+  const loadProfile = useAppStore((s) => s.loadProfile);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
 
   const group = {
     backgroundColor: t.surface,
@@ -75,6 +84,16 @@ export default function Settings() {
     : connection?.token
       ? `Connected · token ••••${connection.token.slice(-4)}`
       : 'Not connected';
+
+  // Read-only display of the connected user's Baby Buddy general settings
+  // (from /api/profile/). Always shows all four rows, dashing out any field
+  // the server didn't return, rather than a jittery variable-length list.
+  const profileRows = [
+    { label: 'Username', value: profile?.username || '—' },
+    { label: 'Timezone', value: profile?.timezone || '—' },
+    { label: 'Language', value: profile?.language || '—' },
+    { label: 'Dashboard refresh', value: profile?.dashboardRefreshRate || '—' },
+  ];
 
   const body = (
     <>
@@ -110,6 +129,46 @@ export default function Settings() {
           </Txt>
           <Toggle on={simulateOffline} />
         </Pressable>
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Baby Buddy
+      </Txt>
+      <View style={group}>
+        {connection?.demo ? (
+          <View style={row}>
+            <Txt weight={500} size={14} color={t.dim}>
+              Demo mode — no server settings
+            </Txt>
+          </View>
+        ) : profileLoading ? (
+          <View style={[row, { gap: 10 }]}>
+            <ActivityIndicator size="small" color={t.dim} />
+            <Txt weight={500} size={14} color={t.dim}>
+              Loading…
+            </Txt>
+          </View>
+        ) : profileError ? (
+          <View style={row}>
+            <Txt weight={500} size={14} color={t.dim}>
+              Couldn&apos;t load server settings
+            </Txt>
+          </View>
+        ) : (
+          profileRows.map((r, i) => (
+            <View
+              key={r.label}
+              style={[row, i < profileRows.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line }]}
+            >
+              <Txt weight={600} size={16} style={{ flex: 1 }}>
+                {r.label}
+              </Txt>
+              <Txt weight={500} size={13} color={t.dim}>
+                {r.value}
+              </Txt>
+            </View>
+          ))
+        )}
       </View>
 
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>

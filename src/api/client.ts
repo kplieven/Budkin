@@ -21,6 +21,7 @@ import type {
   FeedingEntry,
   Measurement,
   MeasurementKind,
+  Profile,
   PumpingEntry,
   SleepEntry,
   TummyEntry,
@@ -154,6 +155,32 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
   };
 }
 
+/**
+ * Map a raw `/api/profile/` response onto our `Profile` shape. Baby Buddy's
+ * `ProfileSerializer` nests the account fields (username/first/last/email)
+ * under a `user` object, with `language`/`timezone` top-level on the profile
+ * itself — NOT under a `settings` sub-object, despite the backing model
+ * being named `Settings`. `dashboard_refresh_rate` is a real field on that
+ * model but is deliberately excluded from `ProfileSerializer.Meta.fields`,
+ * so it's never present on a stock server; mapped defensively in case a
+ * fork/future version adds it. Optional chaining throughout so a missing or
+ * reshaped response degrades to an all-undefined `Profile` instead of
+ * throwing (the caller must never let this break the Settings screen).
+ */
+export function mapProfile(raw: unknown): Profile {
+  const p = (raw ?? {}) as any;
+  const u = p.user ?? {};
+  return {
+    username: u.username || undefined,
+    firstName: u.first_name || undefined,
+    lastName: u.last_name || undefined,
+    email: u.email || undefined,
+    language: p.language || undefined,
+    timezone: p.timezone || undefined,
+    dashboardRefreshRate: p.dashboard_refresh_rate ?? undefined,
+  };
+}
+
 export function normalizeServerUrl(raw: string): string {
   let url = raw.trim().replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
@@ -201,9 +228,10 @@ export class BabybuddyClient {
     return (await res.json()) as T;
   }
 
-  /** Validate the token + reachability. */
-  async getProfile(): Promise<unknown> {
-    return this.request('/profile/');
+  /** Fetch the connected user's Baby Buddy account + general settings (read-only display). */
+  async getProfile(): Promise<Profile> {
+    const raw = await this.request<unknown>('/profile/');
+    return mapProfile(raw);
   }
 
   async listChildren(): Promise<Child[]> {
