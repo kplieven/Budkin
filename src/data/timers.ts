@@ -16,7 +16,12 @@ const KEY = 'babybuddy.timers.v1';
 export async function loadTimers(): Promise<Timer[]> {
   try {
     const s = await AsyncStorage.getItem(KEY);
-    return s ? (JSON.parse(s) as Timer[]) : [];
+    if (!s) return [];
+    // Older builds persisted a `stagedEnd` field (the removed "Ended earlier?"
+    // staged-end model). Strip it so it doesn't linger as dead data — nothing
+    // reads it anymore, but leaving it round-tripping forever is just noise.
+    const parsed = JSON.parse(s) as (Timer & { stagedEnd?: number })[];
+    return parsed.map(({ stagedEnd: _stagedEnd, ...t }) => t);
   } catch (e) {
     console.warn('[timers] loadTimers failed:', e);
     return [];
