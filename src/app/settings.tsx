@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
@@ -51,8 +51,6 @@ export default function Settings() {
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
-  const profileLoading = useAppStore((s) => s.profileLoading);
-  const profileError = useAppStore((s) => s.profileError);
   const loadProfile = useAppStore((s) => s.loadProfile);
 
   useEffect(() => {
@@ -86,14 +84,20 @@ export default function Settings() {
       : 'Not connected';
 
   // Read-only display of the connected user's Baby Buddy general settings
-  // (from /api/profile/). Always shows all four rows, dashing out any field
-  // the server didn't return, rather than a jittery variable-length list.
+  // (from /api/profile/). The whole group is shown ONLY when the server actually
+  // returned some settings: /api/profile/ 500s on some instances (e.g. a user
+  // without a Settings row), so rather than surface a scary error we simply omit
+  // the group — the fetch failure is logged in the store's loadProfile. Demo mode
+  // has no server, so it's hidden there too. Present fields render; missing ones dash.
   const profileRows = [
     { label: 'Username', value: profile?.username || '—' },
     { label: 'Timezone', value: profile?.timezone || '—' },
     { label: 'Language', value: profile?.language || '—' },
     { label: 'Dashboard refresh', value: profile?.dashboardRefreshRate || '—' },
   ];
+  const showProfileGroup =
+    !connection?.demo &&
+    !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
   const body = (
     <>
@@ -131,45 +135,28 @@ export default function Settings() {
         </Pressable>
       </View>
 
-      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-        Baby Buddy
-      </Txt>
-      <View style={group}>
-        {connection?.demo ? (
-          <View style={row}>
-            <Txt weight={500} size={14} color={t.dim}>
-              Demo mode — no server settings
-            </Txt>
+      {showProfileGroup && (
+        <>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+            Baby Buddy
+          </Txt>
+          <View style={group}>
+            {profileRows.map((r, i) => (
+              <View
+                key={r.label}
+                style={[row, i < profileRows.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line }]}
+              >
+                <Txt weight={600} size={16} style={{ flex: 1 }}>
+                  {r.label}
+                </Txt>
+                <Txt weight={500} size={13} color={t.dim}>
+                  {r.value}
+                </Txt>
+              </View>
+            ))}
           </View>
-        ) : profileLoading ? (
-          <View style={[row, { gap: 10 }]}>
-            <ActivityIndicator size="small" color={t.dim} />
-            <Txt weight={500} size={14} color={t.dim}>
-              Loading…
-            </Txt>
-          </View>
-        ) : profileError ? (
-          <View style={row}>
-            <Txt weight={500} size={14} color={t.dim}>
-              Couldn&apos;t load server settings
-            </Txt>
-          </View>
-        ) : (
-          profileRows.map((r, i) => (
-            <View
-              key={r.label}
-              style={[row, i < profileRows.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line }]}
-            >
-              <Txt weight={600} size={16} style={{ flex: 1 }}>
-                {r.label}
-              </Txt>
-              <Txt weight={500} size={13} color={t.dim}>
-                {r.value}
-              </Txt>
-            </View>
-          ))
-        )}
-      </View>
+        </>
+      )}
 
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
         Server

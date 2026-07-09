@@ -1445,12 +1445,15 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(loadProfileFromServer).toHaveBeenCalledWith(s().connection);
   });
 
-  it('error: sets profileError and clears loading, without throwing', async () => {
+  it('error: sets profileError and clears loading, logs the status, without throwing', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     h.profileFails = true;
     await expect(s().loadProfile()).resolves.toBeUndefined();
     expect(s().profileError).toBe(true);
     expect(s().profileLoading).toBe(false);
     expect(s().profileLoaded).toBe(false);
+    expect(warn).toHaveBeenCalled(); // diagnostic log fired for the failed /api/profile/
+    warn.mockRestore();
   });
 
   it('laziness: a second call no-ops once loaded', async () => {
