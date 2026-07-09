@@ -15,8 +15,7 @@ let started = false;
 export function initTimerNotificationSync(): void {
   if (started) return;
   started = true;
-  const run = async () => {
-    const s = useAppStore.getState();
+  const run = async (s: ReturnType<typeof useAppStore.getState>) => {
     const child = s.children.find((c) => c.id === s.selectedChildId);
     const next = desiredTimerNotifications(s.timers, child?.first ?? '');
     const { toPost, toDismiss } = diffTimerNotifications(prev, next);
@@ -24,6 +23,18 @@ export function initTimerNotificationSync(): void {
     for (const n of toPost) await postTimerNotification(n);
     for (const id of toDismiss) await dismissTimerNotification(id);
   };
-  useAppStore.subscribe(run);
-  void run();
+  // Notifications derive only from `timers` and the selected child's name, so
+  // gate on those slices: the per-second `now` tick changes nothing here and
+  // early-returns — no rebuild, no diff, no notification round-trip.
+  useAppStore.subscribe((state, previous) => {
+    if (
+      state.timers === previous.timers &&
+      state.children === previous.children &&
+      state.selectedChildId === previous.selectedChildId
+    ) {
+      return;
+    }
+    void run(state);
+  });
+  void run(useAppStore.getState());
 }

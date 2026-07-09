@@ -23,8 +23,10 @@ export async function pushWidgetUpdate(snapshot: WidgetSnapshot): Promise<void> 
       renderWidget: () => <StatusWidget snapshot={snapshot} now={now} />,
       widgetNotFound: () => {},
     });
-  } catch {
-    /* widget not present / not android */
+  } catch (err) {
+    // Don't swallow: a failed update is exactly why a widget silently goes stale
+    // until the 30-min OS poll. Log with context so it's diagnosable from logcat.
+    console.warn('[widget] requestWidgetUpdate failed for the Status widget:', err);
   }
   try {
     requestWidgetUpdate({
@@ -32,7 +34,7 @@ export async function pushWidgetUpdate(snapshot: WidgetSnapshot): Promise<void> 
       renderWidget: () => <NapWidget snapshot={snapshot} now={now} />,
       widgetNotFound: () => {},
     });
-  } catch {
-    /* widget not present / not android */
+  } catch (err) {
+    console.warn('[widget] requestWidgetUpdate failed for the Nap widget:', err);
   }
 }
