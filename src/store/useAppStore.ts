@@ -276,12 +276,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
   tick: (now) => set({ now }),
 
   // ---- theme / offline ----
-  toggleTheme: () =>
-    set((s) => {
-      const next: ThemeMode = s.themeMode === 'dark' ? 'light' : 'dark';
-      void savePrefs({ themeMode: next });
-      return { themeMode: next };
-    }),
+  toggleTheme: () => {
+    const next: ThemeMode = get().themeMode === 'dark' ? 'light' : 'dark';
+    set({ themeMode: next });
+    void savePrefs({ themeMode: next });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -369,6 +368,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connected: false,
           hydrating: false,
           connectError: 'Session expired — please reconnect.',
+          profile: null,
+          profileLoaded: false,
+          profileError: false,
+          profileLoading: false,
         });
       } else {
         // network/server unreachable: enter the app in offline mode. There's
@@ -416,6 +419,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connection: null,
           connected: false,
           connectError: 'Session expired — please reconnect.',
+          profile: null,
+          profileLoaded: false,
+          profileError: false,
+          profileLoading: false,
         });
       } else {
         // server unreachable — stay/enter offline; queued writes hold until the
@@ -447,6 +454,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         profile: null,
         profileLoaded: false,
         profileError: false,
+        profileLoading: false,
       });
       void saveConnection(conn);
       void persistServers(savedServers);
@@ -474,6 +482,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       selectedChildId: seed.selectedChildId,
       lastFeed: seed.lastFeed,
       measurements: seed.measurements,
+      profile: null,
+      profileLoaded: false,
+      profileError: false,
+      profileLoading: false,
     });
     void saveConnection(conn);
   },
@@ -493,6 +505,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profile: null,
       profileLoaded: false,
       profileError: false,
+      profileLoading: false,
     });
   },
   forgetServer: (serverUrl) => {
