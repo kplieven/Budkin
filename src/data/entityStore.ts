@@ -43,40 +43,55 @@ function parseOr<T>(raw: string | null, fallback: T): T {
 }
 
 /**
- * Returns null ONLY when nothing has ever been persisted (all keys absent);
- * otherwise returns a full object with any absent/corrupt collection defaulted.
+ * Reads a single key, returning its raw string or `null` when the key is
+ * absent OR the read itself rejects (a native I/O error). Guarding each read
+ * individually means one key's infra failure can never take down the other
+ * four — it's indistinguishable from that one key being absent.
  */
-export async function loadEntities(): Promise<StoredEntities | null> {
+async function getItemOrNull(key: string): Promise<string | null> {
   try {
-    const [childrenRaw, entriesRaw, measurementsRaw, selectedChildIdRaw, lastFeedRaw] = await Promise.all([
-      AsyncStorage.getItem(KEY_CHILDREN),
-      AsyncStorage.getItem(KEY_ENTRIES),
-      AsyncStorage.getItem(KEY_MEASUREMENTS),
-      AsyncStorage.getItem(KEY_SELECTED_CHILD),
-      AsyncStorage.getItem(KEY_LAST_FEED),
-    ]);
-
-    if (
-      childrenRaw == null &&
-      entriesRaw == null &&
-      measurementsRaw == null &&
-      selectedChildIdRaw == null &&
-      lastFeedRaw == null
-    ) {
-      return null;
-    }
-
-    return {
-      children: parseOr<Child[]>(childrenRaw, []),
-      entries: parseOr<Entry[]>(entriesRaw, []),
-      measurements: parseOr<Measurement[]>(measurementsRaw, []),
-      selectedChildId: parseOr<string>(selectedChildIdRaw, ''),
-      lastFeed: parseOr<{ feedType: FeedType; method: FeedMethod }>(lastFeedRaw, DEFAULT_LAST_FEED),
-    };
+    return await AsyncStorage.getItem(key);
   } catch (e) {
-    console.warn('[entityStore] loadEntities failed:', e);
+    console.warn(`[entityStore] failed to read "${key}", treating as absent:`, e);
     return null;
   }
+}
+
+/**
+ * Returns null ONLY when all five keys come back absent-or-unreadable
+ * (nothing has ever been persisted, or every read failed); otherwise returns
+ * a full object with any absent/corrupt/unreadable field defaulted.
+ *
+ * Each key is read via `getItemOrNull`, which never rejects, so a native
+ * I/O error on one key degrades only that key's field to its default — it
+ * cannot mask real data successfully read from the other keys.
+ */
+export async function loadEntities(): Promise<StoredEntities | null> {
+  const [childrenRaw, entriesRaw, measurementsRaw, selectedChildIdRaw, lastFeedRaw] = await Promise.all([
+    getItemOrNull(KEY_CHILDREN),
+    getItemOrNull(KEY_ENTRIES),
+    getItemOrNull(KEY_MEASUREMENTS),
+    getItemOrNull(KEY_SELECTED_CHILD),
+    getItemOrNull(KEY_LAST_FEED),
+  ]);
+
+  if (
+    childrenRaw == null &&
+    entriesRaw == null &&
+    measurementsRaw == null &&
+    selectedChildIdRaw == null &&
+    lastFeedRaw == null
+  ) {
+    return null;
+  }
+
+  return {
+    children: parseOr<Child[]>(childrenRaw, []),
+    entries: parseOr<Entry[]>(entriesRaw, []),
+    measurements: parseOr<Measurement[]>(measurementsRaw, []),
+    selectedChildId: parseOr<string>(selectedChildIdRaw, ''),
+    lastFeed: parseOr<{ feedType: FeedType; method: FeedMethod }>(lastFeedRaw, DEFAULT_LAST_FEED),
+  };
 }
 
 export async function saveChildren(v: Child[]): Promise<void> {

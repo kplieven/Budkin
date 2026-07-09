@@ -12,10 +12,13 @@ import {
 import type { Child, Entry, Measurement } from '@/types/models';
 
 // In-memory stand-in for the native AsyncStorage module.
-const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
+const mem = vi.hoisted(() => ({ store: new Map<string, string>(), rejectKeys: new Set<string>() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
-    getItem: vi.fn(async (k: string) => mem.store.get(k) ?? null),
+    getItem: vi.fn(async (k: string) => {
+      if (mem.rejectKeys.has(k)) throw new Error(`simulated native I/O error reading "${k}"`);
+      return mem.store.get(k) ?? null;
+    }),
     setItem: vi.fn(async (k: string, v: string) => {
       mem.store.set(k, v);
     }),
@@ -53,6 +56,7 @@ const measurement = (id: string): Measurement => ({
 
 beforeEach(() => {
   mem.store.clear();
+  mem.rejectKeys.clear();
 });
 
 describe('entityStore persistence', () => {
@@ -111,6 +115,21 @@ describe('entityStore persistence', () => {
     const loaded = await loadEntities();
     expect(loaded?.children).toEqual([child('a')]);
     expect(loaded?.entries).toEqual([]);
+  });
+
+  it('does not mask real persisted data as null when one key rejects (native I/O error)', async () => {
+    await saveChildren([child('a')]);
+    mem.rejectKeys.add('babybuddy.entries.v1');
+
+    const loaded = await loadEntities();
+
+    expect(loaded).toEqual({
+      children: [child('a')],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
   });
 
   it('clears all entity keys so a subsequent load returns null', async () => {
