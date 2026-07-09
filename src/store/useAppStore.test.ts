@@ -625,6 +625,18 @@ describe('children', () => {
     expect(s().selectedChildId).toBe('777');
   });
 
+  it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {
+    useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any], insightsError: true });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW - 30 * 86400000 });
+
+    const created = s().children[1];
+    expect(s().selectedChildId).toBe(created.id);
+    expect(s().insightsLoaded).toBe(false);
+    expect(s().insightsEntries).toEqual([]);
+    expect(s().insightsError).toBe(false);
+  });
+
   it('saveChild while editing updates the existing child in place and calls updateChild', async () => {
     s().openEditChild('c1');
     expect(s().editingChildId).toBe('c1');
