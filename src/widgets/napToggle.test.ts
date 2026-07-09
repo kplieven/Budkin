@@ -41,20 +41,34 @@ const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
   ...over,
 });
 
+// Capture what the toggle renders. The toggle no longer returns the snapshot — it
+// invokes a render callback at the point the widget should repaint, so we record
+// every rendered snapshot and read the last one.
+function capture() {
+  const rendered: (WidgetSnapshot | null)[] = [];
+  const render = (s: WidgetSnapshot | null) => {
+    rendered.push(s);
+  };
+  return { render, rendered, last: () => rendered[rendered.length - 1] };
+}
+
 beforeEach(() => {
   mem.store.clear();
   vi.clearAllMocks();
 });
 
 describe('toggleNapFromWidget', () => {
-  it('returns null when there is no snapshot yet', async () => {
-    expect(await toggleNapFromWidget(1000)).toBeNull();
+  it('renders null when there is no snapshot yet', async () => {
+    const { render, rendered } = capture();
+    await toggleNapFromWidget(1000, render);
+    expect(rendered).toEqual([null]);
   });
 
   it('start: creates a sleep timer and sets sleepStart, queues nothing', async () => {
     await writeWidgetSnapshot(snap());
-    const next = await toggleNapFromWidget(1000);
-    expect(next?.sleepStart).toBe(1000);
+    const { render, last } = capture();
+    await toggleNapFromWidget(1000, render);
+    expect(last()?.sleepStart).toBe(1000);
     const timers = await loadTimers();
     expect(timers).toHaveLength(1);
     expect(timers[0]).toMatchObject({ activity: 'sleep', start: 1000 });
@@ -64,8 +78,9 @@ describe('toggleNapFromWidget', () => {
   it('stop: queues the nap, clears the timer, clears sleepStart', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
     await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
-    const next = await toggleNapFromWidget(5000);
-    expect(next?.sleepStart).toBeNull();
+    const { render, last } = capture();
+    await toggleNapFromWidget(5000, render);
+    expect(last()?.sleepStart).toBeNull();
     expect(await loadTimers()).toHaveLength(0);
     const q = await loadQueue();
     expect(q).toHaveLength(1);
@@ -75,15 +90,17 @@ describe('toggleNapFromWidget', () => {
   it('stop in demo mode: clears the timer but queues nothing', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000, canQueueNap: false }));
     await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
-    const next = await toggleNapFromWidget(5000);
-    expect(next?.sleepStart).toBeNull();
+    const { render, last } = capture();
+    await toggleNapFromWidget(5000, render);
+    expect(last()?.sleepStart).toBeNull();
     expect(await loadTimers()).toHaveLength(0);
     expect(await loadQueue()).toHaveLength(0);
   });
 
   it('start: posts a sticky notification for the new nap', async () => {
     await writeWidgetSnapshot(snap({ childName: 'Ada' }));
-    await toggleNapFromWidget(1000);
+    const { render } = capture();
+    await toggleNapFromWidget(1000, render);
     expect(postTimerNotification).toHaveBeenCalledTimes(1);
     expect(vi.mocked(postTimerNotification).mock.calls[0][0]).toMatchObject({
       title: 'Ada · Sleep',
@@ -94,26 +111,70 @@ describe('toggleNapFromWidget', () => {
   it('stop: dismisses the nap notification by timer id', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
     await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
-    await toggleNapFromWidget(5000);
+    const { render } = capture();
+    await toggleNapFromWidget(5000, render);
     expect(dismissTimerNotification).toHaveBeenCalledWith('t1');
+  });
+
+  it('start: renders before posting the notification (tap feedback beats the native round-trip)', async () => {
+    await writeWidgetSnapshot(snap());
+    const order: string[] = [];
+    vi.mocked(postTimerNotification).mockImplementation(async () => {
+      order.push('notify');
+    });
+    const render = () => {
+      order.push('render');
+    };
+    await toggleNapFromWidget(1000, render);
+    expect(order).toEqual(['render', 'notify']);
+    // and the state mutation is durable by the time we render
+    expect(await loadTimers()).toHaveLength(1);
+  });
+
+  it('stop: renders before dismissing the notification', async () => {
+    await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    const order: string[] = [];
+    vi.mocked(dismissTimerNotification).mockImplementation(async () => {
+      order.push('dismiss');
+    });
+    const render = () => {
+      order.push('render');
+    };
+    await toggleNapFromWidget(5000, render);
+    expect(order).toEqual(['render', 'dismiss']);
+    // the finished nap is durably queued before we render
+    expect(await loadQueue()).toHaveLength(1);
   });
 
   it('debounce: a second toggle within the window is ignored (no stop, no 0-min entry)', async () => {
     await writeWidgetSnapshot(snap());
-    await toggleNapFromWidget(1000); // start
+    await toggleNapFromWidget(1000, () => {}); // start
     expect(await loadTimers()).toHaveLength(1);
 
-    const dup = await toggleNapFromWidget(1200); // duplicate delivery 200ms later
-    expect(dup?.sleepStart).toBe(1000); // still napping — the stop was swallowed
+    const { render, last } = capture();
+    await toggleNapFromWidget(1200, render); // duplicate delivery 200ms later
+    expect(last()?.sleepStart).toBe(1000); // still napping — the stop was swallowed
     expect(await loadTimers()).toHaveLength(1); // timer untouched
     expect(await loadQueue()).toHaveLength(0); // no phantom 0-minute nap logged
   });
 
+  it('debounce: the swallowed tap still re-renders promptly (never feels dead)', async () => {
+    await writeWidgetSnapshot(snap());
+    await toggleNapFromWidget(1000, () => {}); // start
+    const { render, rendered } = capture();
+    await toggleNapFromWidget(1200, render); // duplicate
+    expect(rendered).toHaveLength(1); // it repainted the widget
+    expect(rendered[0]?.sleepStart).toBe(1000); // from the current (napping) snapshot
+    expect(postTimerNotification).toHaveBeenCalledTimes(1); // only the real start posted
+  });
+
   it('debounce: a stop is accepted once the window has passed', async () => {
     await writeWidgetSnapshot(snap());
-    await toggleNapFromWidget(1000); // start
-    const stopped = await toggleNapFromWidget(1000 + 1500); // exactly at the window edge
-    expect(stopped?.sleepStart).toBeNull();
+    await toggleNapFromWidget(1000, () => {}); // start
+    const { render, last } = capture();
+    await toggleNapFromWidget(1000 + 1500, render); // exactly at the window edge
+    expect(last()?.sleepStart).toBeNull();
     expect(await loadTimers()).toHaveLength(0);
     expect(await loadQueue()).toHaveLength(1); // the real nap is still logged
   });

@@ -2,8 +2,14 @@
  * Headless nap start/stop toggle for the home-screen widget. Runs inside the
  * widget task handler (no app, no store), mutating the same AsyncStorage the app
  * reads: start appends a sleep timer; stop appends the finished nap to the
- * offline queue (drained by the app on next open) and clears the timer. Returns
- * the snapshot the caller should render.
+ * offline queue (drained by the app on next open) and clears the timer.
+ *
+ * The caller passes a `render` callback rather than reading a return value: we
+ * invoke it the instant the new state is durable (timers + snapshot + queue
+ * write on stop) and BEFORE the expo-notifications native round-trip, so the tap
+ * repaints the widget immediately instead of waiting on the notification call.
+ * The notification work is still awaited afterwards, keeping the headless task
+ * alive until it completes (never fire-and-forget into a torn-down context).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -41,17 +47,33 @@ async function writeLastToggleAt(now: number): Promise<void> {
   }
 }
 
-export async function toggleNapFromWidget(now: number): Promise<WidgetSnapshot | null> {
-  const snap = await readWidgetSnapshot();
-  if (!snap) return null; // no snapshot yet (widget added before first app launch) — nothing to toggle
+export async function toggleNapFromWidget(
+  now: number,
+  render: (snapshot: WidgetSnapshot | null) => void,
+): Promise<void> {
+  // These three reads are independent, so fire them together: on the tap's hot
+  // path they were ~3 sequential AsyncStorage round-trips before the widget
+  // could repaint.
+  const [snap, lastAt, timers] = await Promise.all([
+    readWidgetSnapshot(),
+    readLastToggleAt(),
+    loadTimers(),
+  ]);
 
-  // Debounce duplicate/rapid delivery: re-render the widget from the current
-  // snapshot without mutating any timer or logging an entry.
-  const lastAt = await readLastToggleAt();
-  if (lastAt != null && now - lastAt < TOGGLE_MIN_INTERVAL_MS) return snap;
+  if (!snap) {
+    render(null); // no snapshot yet (widget added before first app launch) — nothing to toggle
+    return;
+  }
+
+  // Debounce duplicate/rapid delivery: repaint the widget from the current
+  // snapshot without mutating any timer or logging an entry. Repainting (rather
+  // than doing nothing) keeps a swallowed tap from feeling dead.
+  if (lastAt != null && now - lastAt < TOGGLE_MIN_INTERVAL_MS) {
+    render(snap);
+    return;
+  }
   await writeLastToggleAt(now);
 
-  const timers = await loadTimers();
   const running = timers.find((t) => t.activity === 'sleep');
 
   if (running) {
@@ -60,10 +82,11 @@ export async function toggleNapFromWidget(now: number): Promise<WidgetSnapshot |
       await enqueueEntry(buildSleepEntry(running, now, snap.selectedChildId));
     }
     await saveTimers(timers.filter((t) => t !== running));
-    await dismissTimerNotification(running.id);
     const next: WidgetSnapshot = { ...snap, sleepStart: null };
     await writeWidgetSnapshot(next);
-    return next;
+    render(next); // repaint now — state is durable; dismiss the notification after.
+    await dismissTimerNotification(running.id);
+    return;
   }
 
   // Start: append a running sleep timer in place.
@@ -71,6 +94,6 @@ export async function toggleNapFromWidget(now: number): Promise<WidgetSnapshot |
   await saveTimers([...timers, timer]);
   const next: WidgetSnapshot = { ...snap, sleepStart: now };
   await writeWidgetSnapshot(next);
+  render(next); // repaint now — state is durable; post the notification after.
   await postTimerNotification(buildTimerNotification(timer, snap.childName));
-  return next;
 }
