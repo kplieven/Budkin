@@ -778,6 +778,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         { children: s.children, entries: [], measurements: s.measurements },
         buildUploadDeps(conn),
       );
+      // Count only records that WERE serverId==null in the pre-upload snapshot
+      // `s` and actually came back stamped in `result` (a push that didn't
+      // complete leaves serverId==null and must not be counted).
+      const syncedCount =
+        s.children.filter(
+          (c) => c.serverId == null && result.children.find((r) => r.id === c.id)?.serverId != null,
+        ).length +
+        s.measurements.filter(
+          (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
+        ).length;
       // Functional merge-by-id (reads the CURRENT state via `st`, not the
       // pre-await snapshot `s`) that only stamps serverIds, so a create that
       // landed during the await isn't dropped by a wholesale replace.
@@ -791,6 +801,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
         }),
       }));
+      // Mirrors flushQueue's `Synced N entries`; here the flush legitimately
+      // pushes both children & measurements, so report the true total.
+      if (syncedCount > 0) {
+        get().showToast(`Synced ${syncedCount} ${syncedCount === 1 ? 'item' : 'items'}`);
+      }
     } finally {
       flushUnsyncedInFlight = false;
     }
