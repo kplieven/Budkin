@@ -102,6 +102,12 @@ const FEED_METHOD_FROM_API: Record<string, FeedMethod> = {
 /** Fallback avatar tints for children fetched from a server (API has no color). */
 const CHILD_COLORS = ['#EBA06A', '#9F94D4', '#6FC0A6', '#E6BE5E', '#EA958A'];
 
+/** Cycle through the child avatar tint palette — the single source of truth
+ *  for child colors, shared by `listChildren` and the store's local-create path. */
+export function childColor(index: number): string {
+  return CHILD_COLORS[index % CHILD_COLORS.length];
+}
+
 /** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times).
  *  Baths have no Baby Buddy resource — they ride on generic Notes. */
 const ENDPOINT: Record<ActivityType, string> = {
@@ -207,10 +213,33 @@ export class BabybuddyClient {
       first: c.first_name ?? '',
       last: c.last_name ?? '',
       birth: c.birth_date ? fromISO(c.birth_date) : Date.now(),
-      color: CHILD_COLORS[i % CHILD_COLORS.length],
+      color: childColor(i),
       slug: c.slug,
       picture: c.picture ?? null,
     }));
+  }
+
+  private childBody(child: Child): Record<string, unknown> {
+    return { first_name: child.first, last_name: child.last, birth_date: toDateStr(child.birth) };
+  }
+
+  /** Create a child on the server; returns the new server id. */
+  async createChild(child: Child): Promise<number | undefined> {
+    const res = await this.request<{ id?: number }>('/children/', {
+      method: 'POST',
+      body: JSON.stringify(this.childBody(child)),
+    });
+    return res?.id;
+  }
+
+  /** Update an existing child on the server (requires a numeric `child.id`). */
+  async updateChild(child: Child): Promise<void> {
+    const id = Number(child.id);
+    if (!Number.isFinite(id)) return;
+    await this.request(`/children/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify(this.childBody(child)),
+    });
   }
 
   async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {

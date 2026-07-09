@@ -133,6 +133,19 @@ export async function deleteMeasurementFromServer(
   await client.deleteMeasurement(kind, serverId);
 }
 
+/** Push a newly created child; returns its new server id (or undefined). */
+export async function pushChildToServer(conn: Connection, child: Child): Promise<number | undefined> {
+  if (conn.demo) return undefined;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.createChild(child);
+}
+
+export async function updateChildOnServer(conn: Connection, child: Child): Promise<void> {
+  if (conn.demo) return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.updateChild(child);
+}
+
 /** Push a created entry to the server; returns its new server id (or undefined). */
 export async function pushEntryToServer(
   conn: Connection,
