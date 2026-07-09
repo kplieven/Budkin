@@ -51,6 +51,7 @@ import type {
   FeedType,
   Measurement,
   MeasurementKind,
+  PhotoChange,
   Profile,
   Timer,
 } from '@/types/models';
@@ -142,7 +143,7 @@ interface AppActions {
   openAddChild: () => void;
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
-  saveChild: (fields: { first: string; last: string; birth: number }) => void;
+  saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
 
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
@@ -570,9 +571,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
   closeChildSheet: () => set({ childSheet: false, editingChildId: null }),
   saveChild: (fields) => {
     const s = get();
+    const change: PhotoChange = fields.photo ?? { kind: 'none' };
+    // Optimistic picture: the local URI on set, null on remove, unchanged on none.
+    const pending = change.kind === 'set' ? change.photo.uri : change.kind === 'remove' ? null : undefined;
     const existing = s.editingChildId ? s.children.find((c) => c.id === s.editingChildId) : null;
     if (existing) {
-      const child: Child = { ...existing, first: fields.first, last: fields.last, birth: fields.birth };
+      const child: Child = {
+        ...existing,
+        first: fields.first,
+        last: fields.last,
+        birth: fields.birth,
+        picture: change.kind === 'none' ? existing.picture : pending,
+      };
       set({
         children: s.children.map((c) => (c.id === child.id ? child : c)),
         childSheet: false,
@@ -581,7 +591,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast('Updated');
       const conn = s.connection;
       if (conn && !conn.demo && !s.offline) {
-        void updateChildOnServer(conn, child).catch(() => {});
+        void updateChildOnServer(conn, child, change)
+          .then((url) => {
+            // Swap the ephemeral local file URI for the durable server URL.
+            if (change.kind === 'none' || url === undefined) return;
+            set((st) => ({
+              children: st.children.map((c) => (c.id === child.id ? { ...c, picture: url } : c)),
+            }));
+          })
+          .catch(() => {});
       }
       return;
     }
@@ -595,6 +613,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       last: fields.last,
       birth: fields.birth,
       color: childColor(s.children.length),
+      picture: change.kind === 'set' ? change.photo.uri : null,
     };
     set({
       children: [...s.children, child],
@@ -609,15 +628,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast('Saved');
     const conn = s.connection;
     if (conn && !conn.demo && !s.offline) {
-      void pushChildToServer(conn, child)
-        .then((serverId) => {
-          if (serverId == null) return;
+      void pushChildToServer(conn, child, change)
+        .then((res) => {
+          if (!res || res.id == null) return;
           // Patch the local id -> the real server id so the new child stays
           // selected across the next refresh()/hydrate(), which replaces
-          // `children` wholesale with server data keyed by real ids.
+          // `children` wholesale with server data keyed by real ids. Adopt the
+          // server picture URL in place of the local file URI.
           set((st) => ({
-            children: st.children.map((c) => (c.id === localId ? { ...c, id: String(serverId) } : c)),
-            selectedChildId: st.selectedChildId === localId ? String(serverId) : st.selectedChildId,
+            children: st.children.map((c) =>
+              c.id === localId ? { ...c, id: String(res.id), picture: res.picture ?? c.picture } : c,
+            ),
+            selectedChildId: st.selectedChildId === localId ? String(res.id) : st.selectedChildId,
           }));
         })
         .catch(() => {});

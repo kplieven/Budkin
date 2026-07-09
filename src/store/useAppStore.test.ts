@@ -23,11 +23,16 @@ const h = vi.hoisted(() => ({
   measDeleted: [] as unknown[],
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
+  childPushChange: [] as unknown[],
+  childUpdateChange: [] as unknown[],
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
   prefs: {} as Record<string, unknown>,
 }));
+
+// Hoisted so the repository mock factory (also hoisted) can reference it.
+const SERVER_PIC = vi.hoisted(() => 'https://srv.example/media/child/xyz.jpg');
 
 vi.mock('@/data/storage', () => ({
   saveConnection: vi.fn(async () => {}),
@@ -110,12 +115,15 @@ vi.mock('@/data/repository', () => ({
   deleteMeasurementFromServer: vi.fn(async (_c: unknown, kind: unknown, id: unknown) => {
     h.measDeleted.push({ kind, id });
   }),
-  pushChildToServer: vi.fn(async (_c: unknown, child: unknown) => {
+  pushChildToServer: vi.fn(async (_c: unknown, child: unknown, change: any) => {
     h.childPushed.push(child);
-    return 777;
+    h.childPushChange.push(change);
+    return { id: 777, picture: change?.kind === 'set' ? SERVER_PIC : null };
   }),
-  updateChildOnServer: vi.fn(async (_c: unknown, child: unknown) => {
+  updateChildOnServer: vi.fn(async (_c: unknown, child: unknown, change: any) => {
     h.childUpdated.push(child);
+    h.childUpdateChange.push(change);
+    return change?.kind === 'set' ? SERVER_PIC : null;
   }),
   loadInsightsHistory: vi.fn(async () => []),
   loadProfileFromServer: vi.fn(async () => {
@@ -140,6 +148,8 @@ beforeEach(() => {
   h.measDeleted = [];
   h.childPushed = [];
   h.childUpdated = [];
+  h.childPushChange = [];
+  h.childUpdateChange = [];
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
@@ -650,6 +660,48 @@ describe('children', () => {
     await flush();
     expect(h.childUpdated).toHaveLength(1);
     expect(h.childPushed).toHaveLength(0);
+  });
+
+  it('saveChild create with a photo sets picture optimistically, then swaps in the server URL', async () => {
+    const photo = { uri: 'file:///tmp/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
+
+    expect(s().children[1].picture).toBe('file:///tmp/pick.jpg'); // optimistic local URI
+    await flush();
+    expect(h.childPushChange[0]).toEqual({ kind: 'set', photo });
+    expect(s().children[1].picture).toBe(SERVER_PIC); // swapped to durable URL
+  });
+
+  it('saveChild edit with a photo swaps the local URI for the server URL', async () => {
+    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg' };
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'set', photo } });
+
+    expect(s().children[0].picture).toBe('file:///tmp/e.jpg');
+    await flush();
+    expect(h.childUpdateChange[0]).toEqual({ kind: 'set', photo });
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+  });
+
+  it('saveChild edit with remove clears the picture and passes a remove change', async () => {
+    useAppStore.setState((st) => ({ children: st.children.map((c) => ({ ...c, picture: 'file:///old.jpg' })) }));
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'remove' } });
+
+    expect(s().children[0].picture).toBeNull();
+    await flush();
+    expect(h.childUpdateChange[0]).toEqual({ kind: 'remove' });
+  });
+
+  it('saveChild edit with no photo change leaves the existing picture untouched', async () => {
+    useAppStore.setState((st) => ({ children: st.children.map((c) => ({ ...c, picture: 'file:///keep.jpg' })) }));
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: '', birth: NOW });
+
+    expect(s().children[0].picture).toBe('file:///keep.jpg');
+    await flush();
+    expect(h.childUpdateChange[0]).toEqual({ kind: 'none' });
   });
 
   it('demo mode: create stays local, no server push', async () => {
