@@ -755,6 +755,28 @@ describe('refresh / reconnect', () => {
     expect(s().connected).toBe(false);
     expect(s().connectError).toBeTruthy();
   });
+
+  it('resets profile state on session expiry (401/403) so a later loadProfile refetches', async () => {
+    useAppStore.setState({
+      profile: { username: 'alex' },
+      profileLoaded: true,
+      profileLoading: false,
+      profileError: false,
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token'));
+    await s().refresh();
+    expect(s().profile).toBeNull();
+    expect(s().profileLoaded).toBe(false);
+    expect(s().profileError).toBe(false);
+    expect(s().profileLoading).toBe(false);
+
+    // A later loadProfile (e.g. after reconnecting) can refetch since
+    // profileLoaded no longer blocks it.
+    useAppStore.setState({ connection: { demo: false, serverUrl: 'http://x', token: 't2' } });
+    await s().loadProfile();
+    expect(loadProfileFromServer).toHaveBeenCalled();
+    expect(s().profileLoaded).toBe(true);
+  });
 });
 
 describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
