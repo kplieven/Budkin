@@ -552,25 +552,28 @@ export class BabybuddyClient {
   }
 
   /**
-   * Read the child's recent `/api/notes/` ONCE and partition it by the `bath`
-   * tag: bath-tagged notes become `BathEntry`s, everything else becomes general
-   * `NoteEntry`s. Baths and general notes share this one endpoint, so a single
-   * fetch feeds both — no double-fetch. `isBathNote` is the shared discriminator.
+   * Read the child's recent `/api/notes/` ONCE and partition it three ways:
+   * `milestone`-tagged notes become `MilestoneEntry`s, `bath`-tagged notes become
+   * `BathEntry`s, and everything else becomes general `NoteEntry`s. All three
+   * share this one endpoint, so a single fetch feeds them all — no double-fetch.
+   * Milestone is checked first, so a note carrying both marker tags is a milestone.
    */
   async listChildNotes(
     childId: string,
     limit = 100,
-  ): Promise<{ baths: BathEntry[]; notes: NoteEntry[] }> {
+  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[] }> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
     );
     const baths: BathEntry[] = [];
+    const milestones: MilestoneEntry[] = [];
     const notes: NoteEntry[] = [];
     for (const n of data.results) {
-      if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
+      if (isMilestoneNote(n)) milestones.push(noteToMilestoneEntry(n, childId));
+      else if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
       else notes.push(noteToNoteEntry(n, childId));
     }
-    return { baths, notes };
+    return { baths, milestones, notes };
   }
 
   private buildBody(entry: Entry): Record<string, unknown> {

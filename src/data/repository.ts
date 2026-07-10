@@ -64,11 +64,11 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
       client.listChanges(selectedChildId).catch(() => []),
       client.listPumping(selectedChildId).catch(() => []),
       client.listTummy(selectedChildId).catch(() => []),
-      // ONE /api/notes/ request, partitioned into baths + general notes.
-      client.listChildNotes(selectedChildId).catch(() => ({ baths: [], notes: [] })),
+      // ONE /api/notes/ request, partitioned into milestones + baths + general notes.
+      client.listChildNotes(selectedChildId).catch(() => ({ baths: [], milestones: [], notes: [] })),
       client.listTemperature(selectedChildId).catch(() => []),
     ]);
-    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.notes, ...temp];
+    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp];
   }
 
   const lastFeeding = entries
