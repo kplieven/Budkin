@@ -80,7 +80,11 @@ export default function Notes() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
-  const notes = useAppStore((s) => s.entries.filter((e): e is NoteEntry => e.type === 'note'));
+  // Select the raw `entries` array (a stable reference) and filter in render —
+  // filtering *inside* the selector returns a fresh array every call, which
+  // makes zustand v5's useSyncExternalStore see a perpetually-changed snapshot
+  // and loop forever ("Maximum update depth exceeded"). Mirrors History.
+  const notes = useAppStore((s) => s.entries).filter((e): e is NoteEntry => e.type === 'note');
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
