@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -113,13 +113,36 @@ export interface BathEntry extends EntryBase {
   wash: 'small' | 'big';
 }
 
-export type Entry = FeedingEntry | SleepEntry | DiaperEntry | PumpingEntry | TummyEntry | BathEntry;
+/**
+ * A body-temperature reading (Baby Buddy `/api/temperature/`). Point event — a
+ * single `time` carrying a numeric reading (°C) plus optional notes, like a
+ * diaper change. Not timer-eligible.
+ */
+export interface TemperatureEntry extends EntryBase {
+  type: 'temperature';
+  time: number;
+  /** the reading (°C) */
+  value: number;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
+}
+
+export type Entry =
+  | FeedingEntry
+  | SleepEntry
+  | DiaperEntry
+  | PumpingEntry
+  | TummyEntry
+  | BathEntry
+  | TemperatureEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
-export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath'];
+export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' || e.type === 'bath' ? e.time : (e.end ?? e.start);
+  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature'
+    ? e.time
+    : (e.end ?? e.start);
 }
 
 export interface Timer {

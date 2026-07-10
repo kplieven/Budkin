@@ -41,6 +41,9 @@ export function makeSeed(now: number): SeedData {
       { id: 'e9', childId: c1, type: 'bath', time: now - 3 * DAY, wash: 'small', tags: [] },
       { id: 'e10', childId: c1, type: 'bath', time: now - 2 * DAY, wash: 'small', tags: [] },
       { id: 'e11', childId: c1, type: 'bath', time: now - 1 * DAY, wash: 'small', tags: [] },
+      // A normal reading yesterday and a slightly warm one a few hours ago.
+      { id: 'e12', childId: c1, type: 'temperature', time: now - 26 * 60 * M, value: 36.9, tags: [] },
+      { id: 'e13', childId: c1, type: 'temperature', time: now - 5 * 60 * M, value: 37.8, notes: 'a little warm after her nap', tags: [] },
     ],
     measurements: [
       { id: 'm1', childId: c1, kind: 'weight', value: 5.2, date: now - 2 * DAY },

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -53,6 +54,53 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
         </Txt>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * Decimal temperature reading (°C). The Stepper is integer-only and AmountScale
+ * is 1–10, so neither fits 37.4 — this is a free decimal TextInput (styled like
+ * MeasurementSheet's value input). Local text state holds the raw string so a
+ * trailing "." while typing "37." isn't dropped; the parsed number is pushed to
+ * the store. The block is conditionally rendered, so it remounts (and re-seeds
+ * from the store) on every temperature sheet open.
+ */
+function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
+  const t = useTheme();
+  const [text, setText] = useState(value != null ? String(value) : '');
+  return (
+    <>
+      <FieldLabel>Temperature</FieldLabel>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          borderRadius: 16,
+          paddingHorizontal: 16,
+          marginBottom: 16,
+        }}
+      >
+        <TextInput
+          value={text}
+          onChangeText={(v) => {
+            setText(v);
+            const n = parseFloat(v.replace(',', '.'));
+            onChange(Number.isNaN(n) ? undefined : n);
+          }}
+          placeholder="37.0"
+          placeholderTextColor={t.faint}
+          keyboardType="decimal-pad"
+          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+        />
+        <Txt weight={600} size={16} color={t.dim}>
+          °C
+        </Txt>
+      </View>
+    </>
   );
 }
 
@@ -343,6 +391,11 @@ export function LogSheet() {
               }}
             />
           </>
+        )}
+
+        {/* temperature field — a decimal reading with a °C unit */}
+        {type === 'temperature' && (
+          <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
         )}
 
         {/* time entry */}

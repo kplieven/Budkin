@@ -26,6 +26,7 @@ import type {
   Profile,
   PumpingEntry,
   SleepEntry,
+  TemperatureEntry,
   TummyEntry,
 } from '@/types/models';
 
@@ -120,6 +121,7 @@ const ENDPOINT: Record<ActivityType, string> = {
   pumping: 'pumping',
   tummy: 'tummy-times',
   bath: 'notes',
+  temperature: 'temperature',
 };
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
@@ -380,6 +382,22 @@ export class BabybuddyClient {
     }));
   }
 
+  async listTemperature(childId: string, limit = 50): Promise<TemperatureEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/temperature/?child=${childId}&ordering=-time&limit=${limit}`,
+    );
+    return data.results.map((r) => ({
+      id: `temperature-${r.id}`,
+      serverId: r.id,
+      childId,
+      type: 'temperature',
+      time: fromISO(r.time),
+      value: Number(r.temperature),
+      notes: r.notes || undefined,
+      tags: (r.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
   async listPumping(childId: string, limit = 50): Promise<PumpingEntry[]> {
     const data = await this.request<Paginated<any>>(
       `/pumping/?child=${childId}&ordering=-start&limit=${limit}`,
@@ -474,6 +492,8 @@ export class BabybuddyClient {
           notes: entry.notes ?? '',
           tags,
         };
+      case 'temperature':
+        return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
       case 'bath':
         return bathToNoteBody(entry);
     }

@@ -56,7 +56,9 @@ export interface TimeEntryState {
   milestone?: string;
   /** bath (point): which wash was given */
   wash?: 'small' | 'big';
-  /** free-text notes (feeding/sleep/diaper/pumping/tummy — not bath) */
+  /** temperature (point): the numeric reading being entered (°C) */
+  temperature?: number;
+  /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature — not bath) */
   notes?: string;
 
   tags: string[];
