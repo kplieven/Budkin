@@ -11,6 +11,7 @@ import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measure
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -34,14 +35,21 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const desktop = useDesktopShell();
   const [width, setWidth] = useState(0);
   const measurements = useAppStore((s) => s.measurements);
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openMeasurement = useAppStore((s) => s.openMeasurement);
   const openEditMeasurement = useAppStore((s) => s.openEditMeasurement);
 
   const meta = MEAS_META[kind];
-  const points = seriesFor(measurements, kind);
-  const latest = points.length ? points[points.length - 1] : null;
+  const unit = unitLabel(kind, unitSystem);
+  // Stored values are canonical metric. Convert the whole series to the display
+  // unit up front so the hero, delta chip, chart (line + y-axis labels + hover)
+  // and ticks all agree. (These kinds are weight/height/head/bmi — no additive
+  // offset — so a converted delta stays a true difference.)
+  const rawPoints = seriesFor(measurements, kind);
+  const points = rawPoints.map((p) => ({ ...p, value: toDisplay(kind, p.value, unitSystem) }));
+  const latest = rawPoints.length ? rawPoints[rawPoints.length - 1] : null;
   const change = changeSince(points);
   const { ticks, fmtY } = yTicksFor(points);
   const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
@@ -55,8 +63,8 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexShrink: 1 }}>
           {latest ? (
             <>
-              <Txt weight={800} size={34} tracking={-0.6}>{latest.value}</Txt>
-              {meta.unit ? <Txt weight={600} size={16} color={t.dim}>{meta.unit}</Txt> : null}
+              <Txt weight={800} size={34} tracking={-0.6}>{fmtValue(kind, latest.value, unitSystem)}</Txt>
+              {unit ? <Txt weight={600} size={16} color={t.dim}>{unit}</Txt> : null}
             </>
           ) : (
             <Txt weight={700} size={20} color={t.dim}>No data yet</Txt>
@@ -78,7 +86,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16 }}>
           <View style={{ backgroundColor: change.delta >= 0 ? hexA(GOOD, 0.14) : t.chip, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 }}>
             <Txt weight={700} size={12} color={change.delta >= 0 ? GOOD : t.faint}>
-              {change.delta >= 0 ? '+' : ''}{Math.round(change.delta * 100) / 100}{meta.unit ? ` ${meta.unit}` : ''}
+              {change.delta >= 0 ? '+' : ''}{Math.round(change.delta * 100) / 100}{unit ? ` ${unit}` : ''}
             </Txt>
           </View>
           <Txt weight={500} size={12.5} color={t.faint}>since {shortDate(change.sinceT)}</Txt>
@@ -101,7 +109,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             fmtX={fmtX}
             dots="all"
             hover
-            unit={meta.unit}
+            unit={unit}
             fmtHoverDate={tipDate}
           />
         ) : (
@@ -129,7 +137,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
               ]}
             >
               <View style={{ flex: 1 }}>
-                <Txt weight={700} size={15.5} tracking={-0.2}>{mm.value}{meta.unit ? ` ${meta.unit}` : ''}</Txt>
+                <Txt weight={700} size={15.5} tracking={-0.2}>{fmtValue(kind, mm.value, unitSystem)}{unit ? ` ${unit}` : ''}</Txt>
                 {mm.notes ? <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 1 }}>{mm.notes}</Txt> : null}
               </View>
               <Txt weight={600} size={13} color={t.faint} style={{ fontVariant: ['tabular-nums'] }}>{rowDate(mm.date)}</Txt>

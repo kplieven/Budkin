@@ -1,4 +1,6 @@
 import { fmtDur } from '@/lib/format';
+import { fmtValue, unitLabel } from '@/lib/units';
+import { useAppStore } from '@/store/useAppStore';
 import { type Entry } from '@/types/models';
 
 const FEED_TYPE_LABEL: Record<string, string> = {
@@ -51,7 +53,11 @@ export function detailFor(e: Entry): string {
     case 'bath':
       return e.wash === 'big' ? 'Big wash' : 'Small wash';
     case 'temperature': {
-      const base = `${e.value} °C`;
+      // `e.value` is canonical °C; relabel + convert to the user's units lens.
+      // Read non-reactively from the store — the timeline re-renders often (the
+      // per-second `now` tick, navigation) so a units toggle is reflected there.
+      const system = useAppStore.getState().unitSystem;
+      const base = `${fmtValue('temperature', e.value, system)} ${unitLabel('temperature', system)}`;
       return e.notes ? `${base} · ${e.notes}` : base;
     }
     case 'note':
