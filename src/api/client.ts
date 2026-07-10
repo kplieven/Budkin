@@ -354,6 +354,7 @@ export class BabybuddyClient {
     const data = await this.request<Paginated<any>>('/children/?limit=100');
     return data.results.map((c, i) => ({
       id: String(c.id),
+      serverId: c.id,
       first: c.first_name ?? '',
       last: c.last_name ?? '',
       birth: c.birth_date ? fromISO(c.birth_date) : Date.now(),
@@ -376,8 +377,8 @@ export class BabybuddyClient {
   /** Update a child (requires a numeric id). Applies the photo change and returns
    *  the stored picture URL (null when cleared/absent, undefined when skipped). */
   async updateChild(child: Child, change: PhotoChange = { kind: 'none' }): Promise<string | null | undefined> {
-    const id = Number(child.id);
-    if (!Number.isFinite(id)) return undefined;
+    const id = child.serverId;
+    if (id == null) return undefined;
     const init: RequestInit =
       change.kind === 'set'
         ? { method: 'PATCH', body: await buildChildForm(child, change.photo) }

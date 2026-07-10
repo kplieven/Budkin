@@ -198,11 +198,21 @@ export default function Timers() {
                 accessibilityLabel={`Stop ${tm.name} timer with an earlier end time`}
                 accessibilityState={{ expanded: endEditFor === tm.id }}
                 style={(s) => [
-                  { alignSelf: 'center', marginTop: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 9, cursor: 'pointer' },
-                  isHovered(s) && { backgroundColor: t.chip },
+                  {
+                    alignSelf: 'center',
+                    marginTop: 10,
+                    paddingHorizontal: 12,
+                    paddingVertical: 7,
+                    borderRadius: 11,
+                    backgroundColor: endEditFor === tm.id ? hexA(color, 0.16) : t.chip,
+                    borderWidth: 1.5,
+                    borderColor: endEditFor === tm.id ? color : t.line,
+                    cursor: 'pointer',
+                  },
+                  endEditFor !== tm.id && isHovered(s) && { borderColor: t.line2 },
                 ]}
               >
-                <Txt unselectable weight={600} size={12.5} color={endEditFor === tm.id ? color : t.dim}>
+                <Txt unselectable weight={700} size={13} color={endEditFor === tm.id ? color : t.text}>
                   Ended earlier…
                 </Txt>
               </Pressable>

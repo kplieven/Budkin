@@ -11,6 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Toast } from '@/components/Toast';
 import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
+import { AdoptSheet } from '@/features/connect/AdoptSheet';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
 import { DesktopShell } from '@/shell/DesktopShell';
@@ -102,6 +103,7 @@ function RootLayoutNav() {
             {/* overlays rendered above the navigator and tab bar */}
             <ChildSwitcher />
             <ChildSheet />
+            <AdoptSheet />
             <LogSheet />
             <MeasurementSheet />
             <Toast />

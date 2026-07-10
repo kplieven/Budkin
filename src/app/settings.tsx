@@ -55,6 +55,9 @@ export default function Settings() {
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
   const loadProfile = useAppStore((s) => s.loadProfile);
+  const openAdopt = useAppStore((s) => s.openAdopt);
+  const children = useAppStore((s) => s.children);
+  const entries = useAppStore((s) => s.entries);
 
   useEffect(() => {
     loadProfile();
@@ -79,12 +82,18 @@ export default function Settings() {
     marginHorizontal: 4,
   };
 
-  const host = connection?.demo ? 'Demo mode' : connection?.serverUrl?.replace(/^https?:\/\//, '') || '—';
-  const tokenMask = connection?.demo
-    ? 'No server'
-    : connection?.token
-      ? `Connected · token ••••${connection.token.slice(-4)}`
-      : 'Not connected';
+  const host =
+    connection?.mode === 'local'
+      ? 'Local mode'
+      : connection?.mode === 'server'
+        ? connection.serverUrl.replace(/^https?:\/\//, '') || '—'
+        : '—';
+  const tokenMask =
+    connection?.mode === 'local'
+      ? 'No server'
+      : connection?.mode === 'server' && connection.token
+        ? `Connected · token ••••${connection.token.slice(-4)}`
+        : 'Not connected';
 
   // Read-only display of the connected user's Baby Buddy general settings
   // (from /api/profile/). The whole group is shown ONLY when the server actually
@@ -99,7 +108,7 @@ export default function Settings() {
     { label: 'Dashboard refresh', value: profile?.dashboardRefreshRate || '—' },
   ];
   const showProfileGroup =
-    !connection?.demo &&
+    connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
   const body = (
@@ -206,18 +215,37 @@ export default function Settings() {
           </View>
           <View style={{ width: 9, height: 9, borderRadius: 99, backgroundColor: '#5FB39B' }} />
         </View>
-        <Pressable
-          onPress={() => {
-            disconnect();
-            router.replace('/onboarding');
-          }}
-          accessibilityRole="button"
-          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
-        >
-          <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
-            Reconnect / change server
-          </Txt>
-        </Pressable>
+        {connection?.mode === 'local' && (
+          <Pressable
+            onPress={openAdopt}
+            accessibilityRole="button"
+            style={(s) => [row, { borderBottomWidth: connection?.mode === 'local' ? 0 : 1, borderBottomColor: t.line, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+          >
+            <View style={{ flex: 1 }}>
+              <Txt unselectable weight={600} size={16} color={t.primary}>
+                Connect Baby Buddy
+              </Txt>
+              <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                {children.length} {children.length === 1 ? 'child' : 'children'} · {entries.length}{' '}
+                {entries.length === 1 ? 'entry' : 'entries'} stored on this device
+              </Txt>
+            </View>
+          </Pressable>
+        )}
+        {connection?.mode !== 'local' && (
+          <Pressable
+            onPress={() => {
+              disconnect();
+              router.replace('/onboarding');
+            }}
+            accessibilityRole="button"
+            style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+          >
+            <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
+              Reconnect / change server
+            </Txt>
+          </Pressable>
+        )}
       </View>
     </>
   );
