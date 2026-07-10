@@ -766,6 +766,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ tagsLoading: true });
     try {
       const tags = await loadTagsFromServer(conn);
+      // If the session changed while /api/tags/ was in flight (switch server,
+      // disconnect, session-expiry), drop this stale result rather than
+      // repopulating another account's tags into the picker.
+      if (get().connection !== conn) return;
       set({ tags, tagsLoaded: true, tagsLoading: false });
     } catch {
       // Tolerate staleness: keep whatever tags were already cached and leave

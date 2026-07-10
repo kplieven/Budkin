@@ -1820,6 +1820,25 @@ describe('loadTags (lazy, cached server tag list for the picker)', () => {
     expect(s().tagsLoading).toBe(false);
     expect(s().tagsLoaded).toBe(false); // can retry on the next open
   });
+
+  it('drops a stale result if the session changed while /api/tags/ was in flight', async () => {
+    let resolve!: (v: Tag[]) => void;
+    vi.mocked(loadTagsFromServer).mockImplementationOnce(
+      () => new Promise<Tag[]>((r) => { resolve = r; }),
+    );
+    const p = s().loadTags();
+    // session switches to a different server mid-fetch (as a reset would)
+    useAppStore.setState({
+      connection: { demo: false, serverUrl: 'https://b', token: 'b' },
+      tags: [],
+      tagsLoaded: false,
+    });
+    resolve([{ name: 'ServerA-only' }]);
+    await p;
+    // server A's tags must NOT repopulate server B's picker
+    expect(s().tags).toEqual([]);
+    expect(s().tagsLoaded).toBe(false);
+  });
 });
 
 describe('createTag (free-form tag creation)', () => {
