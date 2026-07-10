@@ -1858,6 +1858,25 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
   });
 
+  it('drops a stale result if the session changed while /api/profile/ was in flight', async () => {
+    let resolve!: (v: Profile | null) => void;
+    vi.mocked(loadProfileFromServer).mockImplementationOnce(
+      () => new Promise<Profile | null>((r) => { resolve = r; }),
+    );
+    const p = s().loadProfile();
+    // session switches to a different server mid-fetch (as a reset would)
+    useAppStore.setState({
+      connection: { demo: false, serverUrl: 'https://b', token: 'b' },
+      profile: null,
+      profileLoaded: false,
+    });
+    resolve({ username: 'server-a-user' });
+    await p;
+    // server A's profile must NOT repopulate server B's settings
+    expect(s().profile).toBeNull();
+    expect(s().profileLoaded).toBe(false);
+  });
+
   it('no connection: no-ops without fetching', async () => {
     useAppStore.setState({ connection: null });
     await s().loadProfile();
