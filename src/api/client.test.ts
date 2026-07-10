@@ -656,3 +656,46 @@ describe('milestone note serialization', () => {
     expect((noteToNoteBody(note).tags as string[])).toEqual(['keep']);
   });
 });
+
+describe('listChildNotes three-way partition', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('splits milestones, baths, and general notes from one fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 3,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, time: '2026-03-04T18:30:00.000Z', note: '🎉 First steps', tags: ['milestone', 'mk:first-steps'] },
+          { id: 2, time: '2026-03-04T18:00:00.000Z', note: 'Bath — small wash', tags: ['bath', 'small'] },
+          { id: 3, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const { baths, milestones, notes } = await client.listChildNotes('5');
+    expect(milestones.map((m) => m.key)).toEqual(['first-steps']);
+    expect(baths.map((b) => b.wash)).toEqual(['small']);
+    expect(notes.map((n) => n.text)).toEqual(['plain note']);
+  });
+
+  it('classifies a note carrying both milestone and bath tags as a milestone', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 9, time: '2026-03-04T18:30:00.000Z', note: '🎉 First bath', tags: ['milestone', 'mk:first-bath', 'bath'] }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const { baths, milestones } = await client.listChildNotes('5');
+    expect(milestones).toHaveLength(1);
+    expect(baths).toHaveLength(0);
+  });
+});
