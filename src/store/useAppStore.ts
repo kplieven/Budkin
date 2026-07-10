@@ -14,6 +14,7 @@ import {
 } from '@/lib/activities';
 import {
   type Connection,
+  deleteChildFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   loadFromServer,
@@ -152,6 +153,9 @@ interface AppActions {
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
   saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
+  /** Delete a child (cascades all their history server-side; NOT undoable). See
+   *  the implementation for the selection re-point + in-memory purge rules. */
+  deleteChild: (id: string) => void;
 
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
@@ -699,6 +703,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
         })
         .catch(() => {});
     }
+  },
+
+  deleteChild: (id) => {
+    const s = get();
+    const child = s.children.find((c) => c.id === id);
+    if (!child) return;
+    const conn = s.connection;
+    // A server-backed child has a numeric id (mirrors updateChild's guard); a
+    // local-only child (created offline) has id = 'child'+timestamp → NaN.
+    const serverBacked = Number.isFinite(Number(child.id));
+    // Server delete only when it can be made durable now: server-backed +
+    // online + non-demo. Otherwise the removal is in-memory only (the UI blocks
+    // an offline server-backed delete, since a refresh would resurrect it).
+    const doServerDelete = serverBacked && !!conn && !conn.demo && !s.offline;
+
+    const nextChildren = s.children.filter((c) => c.id !== id);
+    const patch: Partial<AppState> = {
+      children: nextChildren,
+      childSheet: false,
+      editingChildId: null,
+      showChildSwitcher: false,
+    };
+    if (s.selectedChildId === id) {
+      // Deleting the selected child: re-point selection (mirrors refresh's
+      // fallback), purge its loaded entries/measurements, clear the running
+      // timers (they implicitly belong to the selected child, so a later stop
+      // must not log against a different one), and reset insights (as
+      // selectChild does). A non-selected child has nothing else loaded.
+      patch.selectedChildId = nextChildren[0]?.id ?? '';
+      patch.entries = s.entries.filter((e) => e.childId !== id);
+      patch.measurements = s.measurements.filter((m) => m.childId !== id);
+      patch.timers = [];
+      patch.insightsLoaded = false;
+      patch.insightsEntries = [];
+      patch.insightsError = false;
+    }
+    set(patch);
+    if (doServerDelete) {
+      void deleteChildFromServer(conn, Number(child.id)).catch(() => {});
+    }
+    get().showToast(`${child.first} deleted`);
   },
 
   // ---- insights (lazy deep-history load) ----

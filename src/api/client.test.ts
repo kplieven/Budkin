@@ -488,3 +488,28 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
     expect(notes[0]).toMatchObject({ type: 'note', time: TIME, text: 'evening fuss', tags: ['Fussy'], serverId: 55 });
   });
 });
+
+// Deleting a child on the server: a single DELETE /children/{id}/ — Baby Buddy
+// cascades the child's feedings/sleep/changes/etc. server-side, so no per-entry
+// cleanup calls are needed. Mirrors deleteEntry/deleteMeasurement.
+describe('deleteChild', () => {
+  function stubFetch(response: unknown) {
+    const calls: { url: string; method?: string }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method });
+      return { ok: true, status: 204, json: async () => response, text: async () => '' } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const client = () => new BabybuddyClient('https://x', 't');
+
+  it('issues a DELETE to /children/{id}/', async () => {
+    const calls = stubFetch(undefined);
+    await client().deleteChild(5);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain('/children/5/');
+    expect(calls[0].method).toBe('DELETE');
+  });
+});

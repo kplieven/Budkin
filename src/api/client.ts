@@ -386,6 +386,12 @@ export class BabybuddyClient {
     return res?.picture ?? null;
   }
 
+  /** Delete a child on the server (requires a numeric id). Baby Buddy cascades
+   *  the child's feedings/sleep/changes/etc., so no per-entry cleanup is needed. */
+  async deleteChild(id: number): Promise<void> {
+    await this.request(`/children/${id}/`, { method: 'DELETE' });
+  }
+
   async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {
     const data = await this.request<Paginated<any>>(
       `/feedings/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
