@@ -15,7 +15,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { Child, PhotoChange } from '@/types/models';
 
-const REMOVE_COLOR = '#E2725B'; // destructive accent, matches LogSheet/SwipeableRow
+const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the LogSheet Delete button
 
 function midnight(): number {
   const d = new Date();

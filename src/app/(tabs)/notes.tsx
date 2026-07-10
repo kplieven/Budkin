@@ -7,7 +7,6 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { SwipeableRow } from '@/features/activity/SwipeableRow';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { hexA } from '@/lib/color';
@@ -19,7 +18,7 @@ import { useTheme } from '@/theme/useTheme';
 import { entryTimestamp, type NoteEntry } from '@/types/models';
 
 /** A single general-note card: the full multi-line body + time + tags. Tapping
- *  opens the editor; phone rows also swipe to delete (see below). */
+ *  opens the editor, where a note can be edited or deleted. */
 function NoteRow({ note, now, onPress }: { note: NoteEntry; now: number; onPress: () => void }) {
   const t = useTheme();
   const color = t.activity.note;
@@ -87,7 +86,6 @@ export default function Notes() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openSheet = useAppStore((s) => s.openSheet);
   const openEdit = useAppStore((s) => s.openEdit);
-  const deleteEntry = useAppStore((s) => s.deleteEntry);
   const refresh = useAppStore((s) => s.refresh);
 
   // Pull-to-refresh, mirroring History: native uses RefreshControl, touch-web a
@@ -157,14 +155,7 @@ export default function Notes() {
             <View style={{ gap: 9 }}>
               {g.items.map((e) => {
                 const note = e as NoteEntry;
-                const row = <NoteRow note={note} now={now} onPress={() => openEdit(note.id)} />;
-                return desktop ? (
-                  <View key={note.id}>{row}</View>
-                ) : (
-                  <SwipeableRow key={note.id} onDelete={() => deleteEntry(note.id)}>
-                    {row}
-                  </SwipeableRow>
-                );
+                return <NoteRow key={note.id} note={note} now={now} onPress={() => openEdit(note.id)} />;
               })}
             </View>
           </View>
