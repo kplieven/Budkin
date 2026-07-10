@@ -18,6 +18,7 @@ export type IconName =
   | 'tummy'
   | 'temperature'
   | 'note'
+  | 'milestone'
   | 'timer'
   | 'home'
   | 'list'
@@ -145,6 +146,8 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
           <Path d="M12 8.5v7" stroke={detail} strokeWidth={1.6} strokeLinecap="round" />
         </Svg>
       );
+    case 'milestone':
+    // Milestones are note-backed; reuse the note page glyph.
     case 'note':
       // A soft-filled note page with a folded corner + a few text lines.
       return (

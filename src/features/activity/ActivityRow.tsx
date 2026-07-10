@@ -20,7 +20,8 @@ export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number
     entry.type === 'diaper' ||
     entry.type === 'bath' ||
     entry.type === 'temperature' ||
-    entry.type === 'note'
+    entry.type === 'note' ||
+    entry.type === 'milestone'
       ? entry.time
       : entry.start;
   const color = t.activity[entry.type];

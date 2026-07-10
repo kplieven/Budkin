@@ -6,7 +6,7 @@
 
 export type ThemeMode = 'dark' | 'light';
 
-export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note';
+export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note' | 'milestone';
 
 export interface Palette {
   /** true for Night mode */
@@ -88,6 +88,8 @@ const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
   // calm neutral stone-grey — a note is "paper", deliberately unsaturated so it
   // reads as neutral next to the vivid activity hues
   note: '#9AA0A6',
+  // milestones share the note surface (both are tagged notes); same neutral tint
+  milestone: '#9AA0A6',
 };
 
 const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
@@ -99,6 +101,7 @@ const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
   bath: '#4E96C4',
   temperature: '#CB4A40',
   note: '#787E85',
+  milestone: '#787E85',
 };
 
 /** Diaper "solid" stool color swatches — identical in both themes. */

@@ -62,5 +62,7 @@ export function detailFor(e: Entry): string {
     }
     case 'note':
       return e.text;
+    case 'milestone':
+      return e.text;
   }
 }

@@ -44,19 +44,22 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
     entry.type === 'diaper' ||
     entry.type === 'bath' ||
     entry.type === 'temperature' ||
-    entry.type === 'note';
+    entry.type === 'note' ||
+    entry.type === 'milestone';
   const start =
     entry.type === 'diaper' ||
     entry.type === 'bath' ||
     entry.type === 'temperature' ||
-    entry.type === 'note'
+    entry.type === 'note' ||
+    entry.type === 'milestone'
       ? entry.time
       : entry.start;
   const endTs =
     entry.type === 'diaper' ||
     entry.type === 'bath' ||
     entry.type === 'temperature' ||
-    entry.type === 'note'
+    entry.type === 'note' ||
+    entry.type === 'milestone'
       ? null
       : entry.end;
   const ongoing = !isPoint && endTs == null;
