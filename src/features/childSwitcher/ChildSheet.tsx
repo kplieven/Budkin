@@ -114,11 +114,11 @@ function Inner({ editingId }: { editingId: string | null }) {
 
   // Delete is gated behind typing the child's first name (front-loaded
   // confirmation — the cascade is NOT undoable, so there's no undo toast).
-  // A server-backed child (numeric id, mirrors updateChild's guard) can only be
-  // deleted durably while online + non-demo; offline the next refresh would
-  // resurrect it, so block it. Local-only + demo children delete in memory.
-  const serverBacked = !!editing && Number.isFinite(Number(editing.id));
-  const deleteBlocked = serverBacked && !!connection && !connection.demo && offline;
+  // A server-backed child (has a serverId, mirrors the store's delete gating)
+  // can only be deleted durably while online in server mode; offline the next
+  // refresh would resurrect it, so block it. Local-mode children delete in memory.
+  const serverBacked = !!editing && editing.serverId != null;
+  const deleteBlocked = serverBacked && !!connection && connection.mode === 'server' && offline;
   const nameConfirmed =
     !!editing && confirmName.trim().toLowerCase() === editing.first.trim().toLowerCase();
   const canDelete = nameConfirmed && !deleteBlocked;

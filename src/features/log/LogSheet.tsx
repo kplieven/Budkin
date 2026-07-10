@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AmountScale } from '@/components/AmountScale';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
+import { DiaperAmountScale } from '@/components/DiaperAmountScale';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -397,10 +398,14 @@ export function LogSheet() {
                 </View>
               </>
             )}
-            <FieldLabel>Amount — 1 to 10 (optional)</FieldLabel>
-            <View style={{ marginBottom: 16 }}>
-              <AmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
-            </View>
+            {te.solid && (
+              <>
+                <FieldLabel>Amount (optional)</FieldLabel>
+                <View style={{ marginBottom: 16 }}>
+                  <DiaperAmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
+                </View>
+              </>
+            )}
           </>
         )}
 

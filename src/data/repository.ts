@@ -20,11 +20,9 @@ import {
   type Timer,
 } from '@/types/models';
 
-export interface Connection {
-  demo: boolean;
-  serverUrl: string;
-  token: string;
-}
+export type Connection =
+  | { mode: 'local' }
+  | { mode: 'server'; serverUrl: string; token: string };
 
 export interface LoadResult {
   children: Child[];
@@ -37,6 +35,19 @@ export interface LoadResult {
 
 /** Validate the connection and load children + recent entries from the server. */
 export async function loadFromServer(conn: Connection): Promise<LoadResult> {
+  // Dead default: this is only ever called with a real server connection, but
+  // the union needs a guard here to narrow `conn` for the `serverUrl`/`token`
+  // access below.
+  if (conn.mode !== 'server') {
+    return {
+      children: [],
+      entries: [],
+      timers: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    };
+  }
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   // Validate auth by listing children — which we need anyway and which throws
   // ApiError(401/403) on a bad token. We deliberately do NOT use /api/profile/
@@ -89,7 +100,7 @@ export async function loadInsightsHistory(
   childId: string,
   sinceMs: number,
 ): Promise<Entry[]> {
-  if (conn.demo || !childId) return [];
+  if (conn.mode !== 'server' || !childId) return [];
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   const LIMIT = 100;
   const MAX_PAGES = 20; // hard backstop: ≤2000 entries/type
@@ -120,7 +131,7 @@ export async function loadInsightsHistory(
  * `profileError`; this must never be treated as fatal to the app.
  */
 export async function loadProfileFromServer(conn: Connection): Promise<Profile | null> {
-  if (conn.demo) return null;
+  if (conn.mode !== 'server') return null;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.getProfile();
 }
@@ -132,7 +143,7 @@ export async function loadProfileFromServer(conn: Connection): Promise<Profile |
  * action catches it and keeps whatever tags were already cached.
  */
 export async function loadTagsFromServer(conn: Connection): Promise<Tag[]> {
-  if (conn.demo) return DEMO_TAGS;
+  if (conn.mode !== 'server') return DEMO_TAGS;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.listTags();
 }
@@ -142,13 +153,13 @@ export async function pushMeasurementToServer(
   conn: Connection,
   m: Measurement,
 ): Promise<number | undefined> {
-  if (conn.demo) return undefined;
+  if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.createMeasurement(m);
 }
 
 export async function updateMeasurementOnServer(conn: Connection, m: Measurement): Promise<void> {
-  if (conn.demo) return;
+  if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.updateMeasurement(m);
 }
@@ -158,7 +169,7 @@ export async function deleteMeasurementFromServer(
   kind: MeasurementKind,
   serverId: number,
 ): Promise<void> {
-  if (conn.demo) return;
+  if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteMeasurement(kind, serverId);
 }
@@ -170,7 +181,7 @@ export async function pushChildToServer(
   child: Child,
   change: PhotoChange = { kind: 'none' },
 ): Promise<{ id?: number; picture?: string | null } | undefined> {
-  if (conn.demo) return undefined;
+  if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.createChild(child, change.kind === 'set' ? change.photo : undefined);
 }
@@ -181,15 +192,15 @@ export async function updateChildOnServer(
   child: Child,
   change: PhotoChange = { kind: 'none' },
 ): Promise<string | null | undefined> {
-  if (conn.demo) return undefined;
+  if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.updateChild(child, change);
 }
 
-/** Delete a child on the server (no-op in demo mode). Baby Buddy cascades the
+/** Delete a child on the server (no-op in local mode). Baby Buddy cascades the
  *  child's history server-side, so this single call is enough. */
 export async function deleteChildFromServer(conn: Connection, id: number): Promise<void> {
-  if (conn.demo) return;
+  if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteChild(id);
 }
@@ -199,14 +210,14 @@ export async function pushEntryToServer(
   conn: Connection,
   entry: Entry,
 ): Promise<number | undefined> {
-  if (conn.demo) return undefined;
+  if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.createEntry(entry);
 }
 
 /** Update an existing entry on the server (no-op in demo mode). */
 export async function updateEntryOnServer(conn: Connection, entry: Entry): Promise<void> {
-  if (conn.demo) return;
+  if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.updateEntry(entry);
 }
@@ -217,7 +228,16 @@ export async function deleteEntryFromServer(
   type: ActivityType,
   serverId: number,
 ): Promise<void> {
-  if (conn.demo) return;
+  if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteEntry(type, serverId);
+}
+
+/** True if the server already has at least one child (i.e. it is NOT a fresh,
+ *  empty instance). Used by the adopt flow to decide the empty vs guarded path. */
+export async function serverHasData(conn: Connection): Promise<boolean> {
+  if (conn.mode !== 'server') return false;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  const children = await client.listChildren();
+  return children.length > 0;
 }

@@ -14,6 +14,18 @@ import {
 } from '@/api/client';
 import type { BathEntry, Child, Entry, NoteEntry, PickedPhoto } from '@/types/models';
 
+/** Minimal Fetch `Response` stand-in for stubbing `global.fetch` around a
+ *  `BabybuddyClient` instance — the client's `request()` is private, so the
+ *  fetch layer is the seam these tests mock. */
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as Response;
+}
+
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
 
 // birth built via a local Date so toDateStr (local-time) is timezone-stable
@@ -36,6 +48,63 @@ describe('child serialization', () => {
   it('nativePicturePart maps a picked photo to the RN file descriptor', () => {
     const photo: PickedPhoto = { uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' };
     expect(nativePicturePart(photo)).toEqual({ uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' });
+  });
+});
+
+describe('listChildren', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('maps a server child to a stable string id plus a numeric serverId', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 7, first_name: 'A', birth_date: '2024-01-01' }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+
+    const children = await client.listChildren();
+
+    expect(children).toHaveLength(1);
+    expect(children[0]).toMatchObject({ id: '7', serverId: 7, first: 'A' });
+  });
+});
+
+describe('updateChild', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('returns undefined and skips the network call when the child has no serverId', async () => {
+    // `id` deliberately looks numeric to prove the source of truth is
+    // `serverId`, not a parse of the (now-stable, server-independent) `id`.
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, id: '99' };
+
+    const result = await client.updateChild(child);
+
+    expect(result).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('PATCHes /children/<serverId>/ using serverId, regardless of the local id shape', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ picture: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, id: 'local-abc', serverId: 42 };
+
+    await client.updateChild(child);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://example.com/api/children/42/');
   });
 });
 

@@ -8,17 +8,17 @@ const baseState = { children: [child], selectedChildId: 'c1', entries: [], timer
 
 describe('buildWidgetSnapshot child + queue fields', () => {
   it('passes through selectedChildId', () => {
-    const s = buildWidgetSnapshot({ ...baseState, connection: { demo: false, serverUrl: 'http://x', token: 't' } });
+    const s = buildWidgetSnapshot({ ...baseState, connection: { mode: 'server', serverUrl: 'http://x', token: 't' } });
     expect(s.selectedChildId).toBe('c1');
   });
 
   it('canQueueNap is true for a real connection', () => {
-    const s = buildWidgetSnapshot({ ...baseState, connection: { demo: false, serverUrl: 'http://x', token: 't' } });
+    const s = buildWidgetSnapshot({ ...baseState, connection: { mode: 'server', serverUrl: 'http://x', token: 't' } });
     expect(s.canQueueNap).toBe(true);
   });
 
   it('canQueueNap is false in demo mode', () => {
-    const s = buildWidgetSnapshot({ ...baseState, connection: { demo: true, serverUrl: '', token: '' } });
+    const s = buildWidgetSnapshot({ ...baseState, connection: { mode: 'local' } });
     expect(s.canQueueNap).toBe(false);
   });
 
