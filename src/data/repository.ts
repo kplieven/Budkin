@@ -4,6 +4,7 @@
  */
 
 import { BabybuddyClient } from '@/api/client';
+import { DEMO_TAGS } from '@/data/seed';
 import {
   entryTimestamp,
   type ActivityType,
@@ -15,6 +16,7 @@ import {
   type MeasurementKind,
   type PhotoChange,
   type Profile,
+  type Tag,
   type Timer,
 } from '@/types/models';
 
@@ -121,6 +123,18 @@ export async function loadProfileFromServer(conn: Connection): Promise<Profile |
   if (conn.demo) return null;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.getProfile();
+}
+
+/**
+ * Fetch the server's tag list for the picker (lazy — called on first LogSheet
+ * open, cached in the store, staleness tolerated). Demo → the local fallback
+ * seed list so the picker isn't empty. Throws on error; the store's `loadTags`
+ * action catches it and keeps whatever tags were already cached.
+ */
+export async function loadTagsFromServer(conn: Connection): Promise<Tag[]> {
+  if (conn.demo) return DEMO_TAGS;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.listTags();
 }
 
 /** Push a created measurement; returns its new server id (or undefined). */

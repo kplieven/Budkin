@@ -19,6 +19,7 @@ import {
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
+  loadTagsFromServer,
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
@@ -26,8 +27,8 @@ import {
   updateEntryOnServer,
   updateMeasurementOnServer,
 } from '@/data/repository';
-import { ApiError, childColor } from '@/api/client';
-import { makeSeed } from '@/data/seed';
+import { ApiError, childColor, HIDDEN_TAGS } from '@/api/client';
+import { DEMO_TAGS, makeSeed } from '@/data/seed';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -53,6 +54,7 @@ import type {
   MeasurementKind,
   PhotoChange,
   Profile,
+  Tag,
   Timer,
 } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
@@ -115,6 +117,12 @@ interface AppState {
   profileLoaded: boolean;
   loadProfile: () => Promise<void>;
 
+  // server tag list for the log-sheet picker (lazy, cached like `profile`)
+  tags: Tag[];
+  tagsLoading: boolean;
+  tagsLoaded: boolean;
+  loadTags: () => Promise<void>;
+
   // working time-entry
   te: TimeEntryState;
 }
@@ -165,6 +173,9 @@ interface AppActions {
   /** bath: pick the wash size (small/big) */
   setWash: (wash: 'small' | 'big') => void;
   toggleTag: (tag: string) => void;
+  /** Add a brand-new free-form tag as selected. Trims, rejects blank / structural
+   *  (HIDDEN_TAGS) names, and no-ops on a tag already selected. */
+  createTag: (name: string) => void;
   setEnded: (agoMin: number) => void;
   setEndedAbs: (ms: number) => void;
   setOngoing: () => void;
@@ -220,6 +231,31 @@ export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[
   return [...queuedEntries, ...serverEntries];
 }
 
+/**
+ * The chip set the tag picker renders: the union of the server tag list and the
+ * entry's currently-selected tags, MINUS the structural `HIDDEN_TAGS`. Server
+ * tags come first (carrying their display color); a selected tag not in the
+ * server list (created elsewhere) is appended colorless so it still shows as a
+ * selected chip. De-duplicated by name. Structural markers (`bath`/`small`/`big`,
+ * breastfeeding `left`/`right`) are dropped from BOTH sides so they never appear
+ * as chips even though they still round-trip on the entries that carry them.
+ */
+export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
+  const seen = new Set<string>();
+  const out: Tag[] = [];
+  for (const tag of serverTags) {
+    if (HIDDEN_TAGS.has(tag.name) || seen.has(tag.name)) continue;
+    seen.add(tag.name);
+    out.push(tag);
+  }
+  for (const name of selected) {
+    if (HIDDEN_TAGS.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name });
+  }
+  return out;
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -270,6 +306,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   profileLoading: false,
   profileError: false,
   profileLoaded: false,
+
+  tags: [],
+  tagsLoading: false,
+  tagsLoaded: false,
 
   te: { shape: 'interval', tags: [] },
 
@@ -373,6 +413,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           profileLoaded: false,
           profileError: false,
           profileLoading: false,
+          tags: [],
+          tagsLoaded: false,
+          tagsLoading: false,
         });
       } else {
         // network/server unreachable: enter the app in offline mode. There's
@@ -424,6 +467,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           profileLoaded: false,
           profileError: false,
           profileLoading: false,
+          tags: [],
+          tagsLoaded: false,
+          tagsLoading: false,
         });
       } else {
         // server unreachable — stay/enter offline; queued writes hold until the
@@ -451,11 +497,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         connecting: false,
         savedServers,
         ...data,
-        // a newly-connected server's profile hasn't been fetched yet
+        // a newly-connected server's profile + tags haven't been fetched yet
         profile: null,
         profileLoaded: false,
         profileError: false,
         profileLoading: false,
+        tags: [],
+        tagsLoaded: false,
+        tagsLoading: false,
       });
       void saveConnection(conn);
       void persistServers(savedServers);
@@ -487,6 +536,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileLoaded: false,
       profileError: false,
       profileLoading: false,
+      tags: [],
+      tagsLoaded: false,
+      tagsLoading: false,
     });
     void saveConnection(conn);
   },
@@ -507,6 +559,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileLoaded: false,
       profileError: false,
       profileLoading: false,
+      tags: [],
+      tagsLoaded: false,
+      tagsLoading: false,
     });
   },
   forgetServer: (serverUrl) => {
@@ -693,6 +748,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // group when there's no profile, so this stays non-blocking.
       console.warn('[settings] /api/profile/ failed:', e instanceof ApiError ? `HTTP ${e.status}` : e);
       set({ profileLoading: false, profileError: true });
+    }
+  },
+
+  // ---- server tag list (lazy, fetched on first LogSheet open, cached) ----
+  loadTags: async () => {
+    const s = get();
+    if (s.tagsLoaded || s.tagsLoading) return;
+    const conn = s.connection;
+    if (!conn) return;
+    if (conn.demo) {
+      // No server to read /api/tags/ — seed the fallback list so the picker
+      // isn't empty (keeps the old hardcoded defaults).
+      set({ tags: DEMO_TAGS, tagsLoaded: true });
+      return;
+    }
+    set({ tagsLoading: true });
+    try {
+      const tags = await loadTagsFromServer(conn);
+      set({ tags, tagsLoaded: true, tagsLoading: false });
+    } catch {
+      // Tolerate staleness: keep whatever tags were already cached and leave
+      // tagsLoaded false so the next LogSheet open retries. A new tag typed in
+      // the meantime still saves fine (Baby Buddy auto-creates it on POST).
+      set({ tagsLoading: false });
     }
   },
 
@@ -959,6 +1038,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const has = s.te.tags.includes(tag);
       return { te: { ...s.te, tags: has ? s.te.tags.filter((t) => t !== tag) : [...s.te.tags, tag] } };
     }),
+  createTag: (name) => {
+    const trimmed = name.trim();
+    // Reject blanks and the structural tags (bath/small/big, breastfeeding
+    // left/right) — those must never be user-created. No server call: Baby Buddy
+    // auto-creates the tag when the entry is POSTed with the new name.
+    if (!trimmed || HIDDEN_TAGS.has(trimmed)) return;
+    set((s) => (s.te.tags.includes(trimmed) ? {} : { te: { ...s.te, tags: [...s.te.tags, trimmed] } }));
+  },
   // ----- interval time-entry (keep the last two of start/end/lasted) -----
   setEnded: (agoMin) =>
     set((s) => {

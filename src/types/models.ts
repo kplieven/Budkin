@@ -189,6 +189,21 @@ export interface Timer {
   tags?: string[];
 }
 
+/**
+ * A Baby Buddy tag (`/api/tags/`). Tags are referenced by NAME on entries
+ * (`EntryBase.tags` is a `string[]`); this shape is only the selectable list the
+ * picker reads, carrying the server-provided display `color` and `lastUsed`.
+ * Baby Buddy auto-creates a tag when an entry is POSTed with a new name, so
+ * there is no create endpoint — a brand-new tag just rides along on the entry.
+ */
+export interface Tag {
+  name: string;
+  /** server-provided display color (hex), when set */
+  color?: string;
+  /** last time this tag was used, epoch ms */
+  lastUsed?: number;
+}
+
 export type MeasurementKind = 'weight' | 'height' | 'head' | 'bmi';
 
 /** A point-in-time growth measurement (value + date). */

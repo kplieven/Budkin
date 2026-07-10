@@ -4,6 +4,7 @@ import {
   BabybuddyClient,
   bathToNoteBody,
   childBody,
+  HIDDEN_TAGS,
   isBathNote,
   mapProfile,
   nativePicturePart,
@@ -89,6 +90,66 @@ describe('bath <-> note serialization', () => {
     const body = bathToNoteBody(entry);
     const back = noteToBathEntry({ id: 99, ...body }, 'c1');
     expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'big', tags: ['Fussy'], serverId: 99 });
+  });
+});
+
+// The tag system: `/api/tags/` returns { name, color, last_used } objects, and
+// entries carry tag NAMES (string[]). listTags maps the color (dropping an
+// empty one) and parses last_used to epoch ms. HIDDEN_TAGS names structural
+// tags the picker must never surface or let the user create.
+describe('listTags + HIDDEN_TAGS', () => {
+  const ISO = '2026-03-04T18:30:00.000Z';
+  const TIME = Date.parse(ISO);
+
+  function stubFetch(response: unknown) {
+    const calls: { url: string; body: any }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const raw = init?.body;
+      calls.push({ url, body: typeof raw === 'string' ? JSON.parse(raw) : raw });
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const client = () => new BabybuddyClient('https://x', 't');
+
+  it('maps name + color + last_used, hitting /api/tags/ with a limit', async () => {
+    const calls = stubFetch({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ name: 'Fussy', color: '#ff8800', last_used: ISO }],
+    });
+    const tags = await client().listTags();
+    expect(calls[0].url).toContain('/tags/');
+    expect(calls[0].url).toContain('limit=100');
+    expect(tags).toEqual([{ name: 'Fussy', color: '#ff8800', lastUsed: TIME }]);
+  });
+
+  it('tolerates a missing/empty color and a missing last_used', async () => {
+    stubFetch({
+      count: 2,
+      next: null,
+      previous: null,
+      results: [
+        { name: 'Cluster' },
+        { name: 'Sleepy', color: '' },
+      ],
+    });
+    const tags = await client().listTags();
+    expect(tags).toEqual([
+      { name: 'Cluster', color: undefined, lastUsed: undefined },
+      { name: 'Sleepy', color: undefined, lastUsed: undefined },
+    ]);
+  });
+
+  it('HIDDEN_TAGS covers the bath structural tags plus the breastfeeding side markers', () => {
+    for (const t of ['bath', 'small', 'big', 'left', 'right']) {
+      expect(HIDDEN_TAGS.has(t)).toBe(true);
+    }
+    expect(HIDDEN_TAGS.has('Fussy')).toBe(false);
+    expect(HIDDEN_TAGS.has('Left side')).toBe(false);
   });
 });
 
