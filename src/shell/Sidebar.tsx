@@ -20,13 +20,14 @@ interface NavItem {
 
 // Dashboard lives at the (tabs) group index, which resolves to "/".
 const NAV: NavItem[] = [
+  // Timers is not listed: like the phone bar, it folded into the Dashboard (the
+  // live-timer card + "Timers" link there open /timers).
   { label: 'Dashboard', icon: 'home', href: '/(tabs)', match: (p) => p === '/' },
-  { label: 'Timers', icon: 'timer', href: '/timers', match: (p) => p.startsWith('/timers') },
   { label: 'History', icon: 'list', href: '/history', match: (p) => p.startsWith('/history') },
-  { label: 'Notes', icon: 'note', href: '/notes', match: (p) => p.startsWith('/notes') },
+  { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
   { label: 'Growth', icon: 'chart', href: '/growth', match: (p) => p.startsWith('/growth') },
   { label: 'Milestones', icon: 'milestone', href: '/milestones', match: (p) => p.startsWith('/milestones') },
-  { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
+  { label: 'Notes', icon: 'note', href: '/notes', match: (p) => p.startsWith('/notes') },
   { label: 'Settings', icon: 'settings', href: '/settings', match: (p) => p.startsWith('/settings') },
 ];
 
