@@ -744,6 +744,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
     };
+    // Free-text notes exist on every real activity but bath (whose note body is
+    // structural) — seed it so an edit doesn't silently drop an existing note.
+    if (entry.type !== 'bath') te.notes = entry.notes;
     if (entry.type === 'diaper') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -1060,6 +1063,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         feedType: te.feedType ?? 'breast',
         method: te.method ?? 'left',
         amount: te.amount ?? null,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'sleep') {
@@ -1070,6 +1074,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         start: teStart(te, now) as number,
         end: te.ongoing ? null : teEnd(te, now),
         nap: te.nap ?? false,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'pumping') {
@@ -1081,6 +1086,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         end: te.ongoing ? null : teEnd(te, now),
         amount: te.amount ?? null,
         method: te.method,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'tummy') {
@@ -1091,6 +1097,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         start: teStart(te, now) as number,
         end: te.ongoing ? null : teEnd(te, now),
         milestone: te.milestone,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'bath') {
@@ -1114,6 +1121,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         solid: te.solid ?? false,
         color: te.solid ? (te.color ?? null) : null,
         amount: te.amount && te.amount > 0 ? te.amount : null,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     }

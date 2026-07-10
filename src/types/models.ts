@@ -58,6 +58,8 @@ export interface FeedingEntry extends EntryBase {
   feedType: FeedType;
   method: FeedMethod;
   amount: number | null;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface SleepEntry extends EntryBase {
@@ -65,6 +67,8 @@ export interface SleepEntry extends EntryBase {
   start: number;
   end: number | null;
   nap: boolean;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface DiaperEntry extends EntryBase {
@@ -74,6 +78,8 @@ export interface DiaperEntry extends EntryBase {
   solid: boolean;
   color: DiaperColor | null;
   amount?: number | null;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface PumpingEntry extends EntryBase {
@@ -82,6 +88,8 @@ export interface PumpingEntry extends EntryBase {
   end: number | null;
   amount: number | null;
   method?: FeedMethod;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface TummyEntry extends EntryBase {
@@ -89,6 +97,8 @@ export interface TummyEntry extends EntryBase {
   start: number;
   end: number | null;
   milestone?: string;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 /**
