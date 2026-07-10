@@ -24,6 +24,7 @@ const h = vi.hoisted(() => ({
   measDeleted: [] as unknown[],
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
+  childDeleted: [] as unknown[],
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
   pushFails: false,
@@ -128,6 +129,9 @@ vi.mock('@/data/repository', () => ({
     h.childUpdateChange.push(change);
     return change?.kind === 'set' ? SERVER_PIC : null;
   }),
+  deleteChildFromServer: vi.fn(async (_c: unknown, id: unknown) => {
+    h.childDeleted.push(id);
+  }),
   loadInsightsHistory: vi.fn(async () => []),
   loadProfileFromServer: vi.fn(async () => {
     if (h.profileFails) throw new Error('500');
@@ -155,6 +159,7 @@ beforeEach(() => {
   h.measDeleted = [];
   h.childPushed = [];
   h.childUpdated = [];
+  h.childDeleted = [];
   h.childPushChange = [];
   h.childUpdateChange = [];
   h.pushFails = false;
@@ -861,6 +866,118 @@ describe('children', () => {
     s().closeChildSheet();
     expect(s().childSheet).toBe(false);
     expect(s().editingChildId).toBeNull();
+  });
+});
+
+describe('deleteChild', () => {
+  const serverChild = (id: string, first: string) => ({
+    id,
+    first,
+    last: '',
+    birth: NOW,
+    color: '#fff',
+    slug: first.toLowerCase(),
+  });
+  const feeding = (id: string, childId: string): Entry => ({
+    id,
+    serverId: 1,
+    childId,
+    type: 'feeding',
+    start: NOW - 20 * M,
+    end: NOW,
+    feedType: 'breast',
+    method: 'left',
+    amount: null,
+    tags: [],
+  });
+  const timer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+
+  it('local-only child: deletes in memory only, no server call', async () => {
+    // the seeded child id 'c1' is non-numeric => local-only
+    s().openEditChild('c1');
+    s().deleteChild('c1');
+    expect(s().children).toHaveLength(0);
+    expect(s().selectedChildId).toBe('');
+    expect(s().childSheet).toBe(false);
+    expect(s().editingChildId).toBeNull();
+    expect(s().toast).toBe('Mira deleted');
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
+  });
+
+  it('server-backed selected child while online: server delete + purge + re-point', async () => {
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+      measurements: [{ id: 'weight-1', serverId: 2, childId: '5', kind: 'weight', value: 5, date: NOW }],
+      timers: [timer],
+      insightsLoaded: true,
+      insightsEntries: [{ id: 'x' } as any],
+      insightsError: true,
+    });
+    s().deleteChild('5');
+    expect(s().children.map((c) => c.id)).toEqual(['6']);
+    expect(s().selectedChildId).toBe('6'); // re-pointed to the surviving child
+    expect(s().entries).toHaveLength(0); // deleted child's entries purged
+    expect(s().measurements).toHaveLength(0); // measurements purged
+    expect(s().timers).toHaveLength(0); // running timers cleared
+    expect(s().insightsLoaded).toBe(false);
+    expect(s().insightsEntries).toEqual([]);
+    expect(s().insightsError).toBe(false);
+    expect(s().childSheet).toBe(false);
+    expect(s().showChildSwitcher).toBe(false);
+    await flush();
+    expect(h.childDeleted).toEqual([5]); // numeric id passed to the server delete
+  });
+
+  it('deleting the last remaining child leaves selectedChildId empty', async () => {
+    useAppStore.setState({ children: [serverChild('5', 'Mira')], selectedChildId: '5' });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    expect(s().selectedChildId).toBe('');
+    await flush();
+    expect(h.childDeleted).toEqual([5]);
+  });
+
+  it('deleting a non-selected child leaves selection + loaded data intact', async () => {
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+      timers: [timer],
+    });
+    s().deleteChild('6');
+    expect(s().children.map((c) => c.id)).toEqual(['5']);
+    expect(s().selectedChildId).toBe('5'); // unchanged
+    expect(s().entries).toHaveLength(1); // selected child's data untouched
+    expect(s().timers).toHaveLength(1); // timers not cleared
+    await flush();
+    expect(h.childDeleted).toEqual([6]);
+  });
+
+  it('demo mode: deletes in memory only, no server call', async () => {
+    useAppStore.setState({
+      connection: { demo: true, serverUrl: '', token: '' },
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+    });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
+  });
+
+  it('server-backed child while offline: in-memory only, never an undurable server delete', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+    });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
   });
 });
 

@@ -186,6 +186,14 @@ export async function updateChildOnServer(
   return client.updateChild(child, change);
 }
 
+/** Delete a child on the server (no-op in demo mode). Baby Buddy cascades the
+ *  child's history server-side, so this single call is enough. */
+export async function deleteChildFromServer(conn: Connection, id: number): Promise<void> {
+  if (conn.demo) return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.deleteChild(id);
+}
+
 /** Push a created entry to the server; returns its new server id (or undefined). */
 export async function pushEntryToServer(
   conn: Connection,
