@@ -43,6 +43,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
+import type { UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
@@ -75,6 +76,9 @@ interface AppState {
 
   // ui / theme
   themeMode: ThemeMode;
+  /** Budkin-local metric/imperial display lens (default 'metric'). Stored
+   *  values stay canonical metric; this only relabels + converts on display. */
+  unitSystem: UnitSystem;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -131,6 +135,8 @@ interface AppState {
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
+  setUnitSystem: (system: UnitSystem) => void;
+  toggleUnitSystem: () => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -280,6 +286,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   savedServers: [],
 
   themeMode: 'dark',
+  unitSystem: 'metric',
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -326,6 +333,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ themeMode: next });
     void savePrefs({ themeMode: next });
   },
+  setUnitSystem: (system) => {
+    set({ unitSystem: system });
+    void savePrefs({ unitSystem: system });
+  },
+  toggleUnitSystem: () => {
+    const next: UnitSystem = get().unitSystem === 'metric' ? 'imperial' : 'metric';
+    set({ unitSystem: next });
+    void savePrefs({ unitSystem: next });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -351,6 +367,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // front and it covers every branch below (no connection, demo, real).
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
+    if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.

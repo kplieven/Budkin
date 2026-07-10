@@ -13,6 +13,7 @@ import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
 import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { fmtValue, toMetric, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
 import { useAppStore, visibleTags } from '@/store/useAppStore';
@@ -119,16 +120,19 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 }
 
 /**
- * Decimal temperature reading (°C). The Stepper is integer-only and AmountScale
- * is 1–10, so neither fits 37.4 — this is a free decimal TextInput (styled like
+ * Decimal temperature reading. The Stepper is integer-only and AmountScale is
+ * 1–10, so neither fits 37.4 — this is a free decimal TextInput (styled like
  * MeasurementSheet's value input). Local text state holds the raw string so a
- * trailing "." while typing "37." isn't dropped; the parsed number is pushed to
- * the store. The block is conditionally rendered, so it remounts (and re-seeds
- * from the store) on every temperature sheet open.
+ * trailing "." while typing "37." isn't dropped. The stored value (`te.temperature`)
+ * is always canonical °C: the field shows it in the user's units lens and
+ * converts the typed value back to °C before pushing it to the store. The block
+ * is conditionally rendered, so it remounts (re-seeding from the store) on every
+ * temperature sheet open.
  */
 function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
   const t = useTheme();
-  const [text, setText] = useState(value != null ? String(value) : '');
+  const unitSystem = useAppStore((s) => s.unitSystem);
+  const [text, setText] = useState(value != null ? fmtValue('temperature', value, unitSystem) : '');
   return (
     <>
       <FieldLabel>Temperature</FieldLabel>
@@ -150,15 +154,15 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           onChangeText={(v) => {
             setText(v);
             const n = parseFloat(v.replace(',', '.'));
-            onChange(Number.isNaN(n) ? undefined : n);
+            onChange(Number.isNaN(n) ? undefined : toMetric('temperature', n, unitSystem));
           }}
-          placeholder="37.0"
+          placeholder={unitSystem === 'imperial' ? '98.6' : '37.0'}
           placeholderTextColor={t.faint}
           keyboardType="decimal-pad"
           style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
         />
         <Txt weight={600} size={16} color={t.dim}>
-          °C
+          {unitLabel('temperature', unitSystem)}
         </Txt>
       </View>
     </>

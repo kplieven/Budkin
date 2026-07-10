@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
@@ -44,10 +45,12 @@ export default function Settings() {
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
   const themeMode = useAppStore((s) => s.themeMode);
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const simulateOffline = useAppStore((s) => s.simulateOffline);
   const networkOnline = useAppStore((s) => s.networkOnline);
   const connection = useAppStore((s) => s.connection);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
+  const setUnitSystem = useAppStore((s) => s.setUnitSystem);
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
@@ -121,6 +124,25 @@ export default function Settings() {
           </Txt>
           <Toggle on={themeMode === 'dark'} />
         </Pressable>
+        <View style={[row, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
+          <Txt weight={600} size={16} style={{ flex: 1 }}>
+            Units
+          </Txt>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {(['metric', 'imperial'] as const).map((sys) => (
+              <Chip
+                key={sys}
+                label={sys === 'metric' ? 'Metric' : 'Imperial'}
+                color={t.primary}
+                selected={unitSystem === sys}
+                onPress={() => setUnitSystem(sys)}
+                padH={13}
+                padV={7}
+                fontSize={13.5}
+              />
+            ))}
+          </View>
+        </View>
         <Pressable
           onPress={toggleOffline}
           accessibilityRole="switch"

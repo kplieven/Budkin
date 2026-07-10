@@ -1808,6 +1808,41 @@ describe('theme persistence', () => {
   });
 });
 
+describe('unit-system persistence', () => {
+  it('setUnitSystem updates state and persists via savePrefs', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().setUnitSystem('imperial');
+    expect(s().unitSystem).toBe('imperial');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+  });
+
+  it('toggleUnitSystem flips metric <-> imperial and persists each direction', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('imperial');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('metric');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric' });
+  });
+
+  it('hydrate applies a persisted unitSystem', async () => {
+    h.prefs = { unitSystem: 'imperial' };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ unitSystem: 'metric' });
+    await s().hydrate();
+    expect(s().unitSystem).toBe('imperial');
+  });
+
+  it('hydrate leaves unitSystem at its default when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ unitSystem: 'metric' });
+    await s().hydrate();
+    expect(s().unitSystem).toBe('metric');
+  });
+});
+
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
     useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
