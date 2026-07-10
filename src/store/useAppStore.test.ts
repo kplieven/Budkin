@@ -1127,6 +1127,25 @@ describe('children', () => {
     // the local id is patched to the server id, and selection follows it
     expect(s().children[1].id).toBe('777');
     expect(s().selectedChildId).toBe('777');
+    // serverId is stamped too (like entries/measurements) so server-child ops
+    // (update / delete / sync) recognise it before the next refresh.
+    expect(s().children[1].serverId).toBe(777);
+  });
+
+  it('a child created online can immediately be deleted on the server (no resurrection)', async () => {
+    // Regression: saveChild must stamp serverId on create, else deleteChild
+    // (which gates the server DELETE on serverId != null) would only remove the
+    // child locally and it would reappear on the next refresh.
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+    await flush();
+    const created = s().children[1];
+    expect(created.serverId).toBe(777);
+
+    h.childDeleted = [];
+    s().deleteChild(created.id);
+    expect(h.childDeleted).toEqual([777]); // server DELETE fired with the stamped serverId
+    expect(s().children.find((c) => c.id === created.id)).toBeUndefined();
   });
 
   it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {

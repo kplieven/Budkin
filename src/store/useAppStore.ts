@@ -996,10 +996,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // Patch the local id -> the real server id so the new child stays
           // selected across the next refresh()/hydrate(), which replaces
           // `children` wholesale with server data keyed by real ids. Adopt the
-          // server picture URL in place of the local file URI.
+          // server picture URL in place of the local file URI. Stamp `serverId`
+          // too (like commitWrite/saveMeasurement do for entries/measurements):
+          // server-child ops — updateChild, deleteChild, flushUnsynced's
+          // synced-vs-unsynced check — all key off `serverId`, so leaving it
+          // unset until the next refresh loses edits, skips deletes (the child
+          // resurrects), and re-uploads a duplicate on reconnect.
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === localId ? { ...c, id: String(res.id), picture: res.picture ?? c.picture } : c,
+              c.id === localId
+                ? { ...c, id: String(res.id), serverId: res.id, picture: res.picture ?? c.picture }
+                : c,
             ),
             selectedChildId: st.selectedChildId === localId ? String(res.id) : st.selectedChildId,
           }));
