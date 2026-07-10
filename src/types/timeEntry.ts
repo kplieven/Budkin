@@ -56,6 +56,8 @@ export interface TimeEntryState {
   milestone?: string;
   /** bath (point): which wash was given */
   wash?: 'small' | 'big';
+  /** free-text notes (feeding/sleep/diaper/pumping/tummy — not bath) */
+  notes?: string;
 
   tags: string[];
 }

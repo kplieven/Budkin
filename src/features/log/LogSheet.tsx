@@ -348,6 +348,35 @@ export function LogSheet() {
         {/* time entry */}
         <TimeEntry type={type} color={color} />
 
+        {/* notes (every real activity but bath, whose note body is structural) */}
+        {type !== 'bath' && (
+          <>
+            <FieldLabel>Notes (optional)</FieldLabel>
+            <TextInput
+              value={te.notes ?? ''}
+              onChangeText={(v) => setTE({ notes: v })}
+              placeholder="Anything worth remembering…"
+              placeholderTextColor={t.faint}
+              multiline
+              style={{
+                minHeight: 72,
+                borderRadius: 14,
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                paddingHorizontal: 14,
+                paddingTop: 12,
+                paddingBottom: 12,
+                textAlignVertical: 'top',
+                fontSize: 14.5,
+                fontFamily: fontFamily(500),
+                color: t.text,
+                marginBottom: 16,
+              }}
+            />
+          </>
+        )}
+
         {/* tags */}
         <FieldLabel>Tags</FieldLabel>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>

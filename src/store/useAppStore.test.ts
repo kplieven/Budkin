@@ -892,6 +892,56 @@ describe('diaper amount', () => {
   });
 });
 
+describe('per-entry notes', () => {
+  it('save() writes a trimmed notes onto a feeding entry', () => {
+    s().openSheet('feeding');
+    s().setTE({ notes: '  fussy at the end  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.notes).toBe('fussy at the end');
+  });
+
+  it('save() omits notes when blank (whitespace trims to undefined)', () => {
+    s().openSheet('sleep');
+    s().setTE({ notes: '   ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.notes).toBeUndefined();
+  });
+
+  it('save() never puts notes on a bath entry (bath excluded)', () => {
+    s().openSheet('bath');
+    s().setTE({ notes: 'should be ignored' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'bath' }>;
+    expect((e as { notes?: string }).notes).toBeUndefined();
+  });
+
+  it('openEdit prefills notes from the entry', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'tummy-1', serverId: 3, childId: 'c1', type: 'tummy', start: NOW - 20 * M, end: NOW - 5 * M, milestone: 'rolled', notes: 'on the mat', tags: [] },
+      ],
+    });
+    s().openEdit('tummy-1');
+    expect(s().te.notes).toBe('on the mat');
+  });
+
+  it('edit round-trip: openEdit prefills, edited notes survives save', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'pumping-1', serverId: 4, childId: 'c1', type: 'pumping', start: NOW - 15 * M, end: NOW, amount: 90, notes: 'left side', tags: [] },
+      ],
+    });
+    s().openEdit('pumping-1');
+    expect(s().te.notes).toBe('left side');
+    s().setTE({ notes: 'both sides now' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'pumping' }>;
+    expect(e.notes).toBe('both sides now');
+  });
+});
+
 describe('adjustTimerStart', () => {
   it('shifts a timer start earlier', () => {
     useAppStore.setState({

@@ -339,6 +339,7 @@ export class BabybuddyClient {
       feedType: FEED_TYPE_FROM_API[f.type] ?? 'breast',
       method: FEED_METHOD_FROM_API[f.method] ?? 'left',
       amount: f.amount != null ? Number(f.amount) : null,
+      notes: f.notes || undefined,
       tags: (f.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -355,6 +356,7 @@ export class BabybuddyClient {
       start: fromISO(s.start),
       end: s.end ? fromISO(s.end) : null,
       nap: s.nap === true || s.nap === 'true',
+      notes: s.notes || undefined,
       tags: (s.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -373,6 +375,7 @@ export class BabybuddyClient {
       solid: !!c.solid,
       color: (c.color || null) as DiaperColor | null,
       amount: c.amount != null ? Number(c.amount) : null,
+      notes: c.notes || undefined,
       tags: (c.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -389,6 +392,7 @@ export class BabybuddyClient {
       start: p.start ? fromISO(p.start) : fromISO(p.time),
       end: p.end ? fromISO(p.end) : null,
       amount: p.amount != null ? Number(p.amount) : null,
+      notes: p.notes || undefined,
       tags: (p.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -405,6 +409,7 @@ export class BabybuddyClient {
       start: fromISO(t.start),
       end: t.end ? fromISO(t.end) : null,
       milestone: t.milestone || undefined,
+      notes: t.notes || undefined,
       tags: (t.tags ?? []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)),
     }));
   }
@@ -435,10 +440,11 @@ export class BabybuddyClient {
           type: FEED_TYPE_TO_API[entry.feedType],
           method: FEED_METHOD_TO_API[entry.method],
           amount: entry.amount,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'sleep':
-        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), tags };
+        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), notes: entry.notes ?? '', tags };
       case 'diaper':
         return {
           child,
@@ -447,6 +453,7 @@ export class BabybuddyClient {
           solid: entry.solid,
           color: entry.color ?? '',
           amount: entry.amount ?? null,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'pumping':
@@ -455,6 +462,7 @@ export class BabybuddyClient {
           start: toISO(entry.start),
           end: toISO(entry.end ?? entry.start),
           amount: entry.amount,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'tummy':
@@ -463,6 +471,7 @@ export class BabybuddyClient {
           start: toISO(entry.start),
           end: toISO(entry.end ?? entry.start),
           milestone: entry.milestone ?? '',
+          notes: entry.notes ?? '',
           tags,
         };
       case 'bath':
