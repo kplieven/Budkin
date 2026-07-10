@@ -8,7 +8,6 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
-import { SwipeableRow } from '@/features/activity/SwipeableRow';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -25,7 +24,6 @@ export default function History() {
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openEdit = useAppStore((s) => s.openEdit);
-  const deleteEntry = useAppStore((s) => s.deleteEntry);
   const refresh = useAppStore((s) => s.refresh);
 
   // Pull-to-refresh, mirroring Home: native uses RefreshControl, touch-web a
@@ -64,27 +62,19 @@ export default function History() {
           <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 6, textTransform: 'uppercase' }}>
             {g.label}
           </Txt>
-          {/* A continuous timeline spine per day. Phone rows swipe to delete;
-              the mouse-driven desktop keeps plain rows (tap to edit). */}
+          {/* A continuous timeline spine per day. Tap a row to open the
+              editor, where entries can be edited or deleted. */}
           <View>
-            {g.items.map((e, i) => {
-              const row = (
-                <TimelineEntry
-                  entry={e}
-                  now={now}
-                  onPress={() => openEdit(e.id)}
-                  isFirst={i === 0}
-                  isLast={i === g.items.length - 1}
-                />
-              );
-              return desktop ? (
-                <View key={e.id}>{row}</View>
-              ) : (
-                <SwipeableRow key={e.id} onDelete={() => deleteEntry(e.id)}>
-                  {row}
-                </SwipeableRow>
-              );
-            })}
+            {g.items.map((e, i) => (
+              <TimelineEntry
+                key={e.id}
+                entry={e}
+                now={now}
+                onPress={() => openEdit(e.id)}
+                isFirst={i === 0}
+                isLast={i === g.items.length - 1}
+              />
+            ))}
           </View>
         </View>
       ))
