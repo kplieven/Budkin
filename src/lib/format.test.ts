@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ageMonths,
   ageStr,
   dayGroupLabel,
   fmtAgo,
@@ -73,5 +74,18 @@ describe('fmtElapsedClock', () => {
   it('formats M:SS and H:MM:SS', () => {
     expect(fmtElapsedClock(NOW - 65 * 1000, NOW)).toBe('1:05');
     expect(fmtElapsedClock(NOW - (3600 + 125) * 1000, NOW)).toBe('1:02:05');
+  });
+});
+
+describe('ageMonths', () => {
+  const DAY = 86400000;
+  it('returns whole months elapsed since birth', () => {
+    const birth = Date.parse('2025-01-01T00:00:00Z');
+    expect(ageMonths(birth, birth)).toBe(0);
+    expect(ageMonths(birth, birth + 200 * DAY)).toBe(6); // 200 / 30.4 = 6.5 -> 6
+  });
+  it('never returns negative for a future birth', () => {
+    const birth = Date.parse('2025-01-01T00:00:00Z');
+    expect(ageMonths(birth, birth - 10 * DAY)).toBe(0);
   });
 });

@@ -54,6 +54,11 @@ export function ageStr(birth: number, now: number): string {
   return `${mo} months old`;
 }
 
+/** Whole months of age, matching ageStr's 30.4-day month. Floored, never negative. */
+export function ageMonths(birth: number, now: number): number {
+  return Math.max(0, Math.floor((now - birth) / 86400000 / 30.4));
+}
+
 /** Point-event sub-label: "Today, 12m ago" / "Yesterday" */
 export function relDayLabel(ms: number, now: number): string {
   const d = new Date(ms);
