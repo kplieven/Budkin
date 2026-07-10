@@ -6,6 +6,8 @@ import { Txt } from '@/components/Txt';
 import type { TrendPoint } from '@/features/insights/compute';
 import { hexA } from '@/lib/color';
 import { MEAS_META } from '@/lib/measurements';
+import { fmtValue, unitLabel } from '@/lib/units';
+import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { MeasurementKind } from '@/types/models';
 import { Sparkline } from './Sparkline';
@@ -16,8 +18,13 @@ export function MetricCard({ kind, points, onPress }: {
   kind: MeasurementKind; points: TrendPoint[]; onPress: () => void;
 }) {
   const t = useTheme();
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const meta = MEAS_META[kind];
+  const unit = unitLabel(kind, unitSystem);
   const [w, setW] = useState(0);
+  // `points` values are canonical metric; the Sparkline is shape-only (it
+  // normalizes by min/max, so a linear unit change leaves the curve identical),
+  // so only the latest numeric value shown needs converting to the display unit.
   const latest = points.length ? points[points.length - 1] : null;
 
   return (
@@ -37,8 +44,8 @@ export function MetricCard({ kind, points, onPress }: {
       {latest ? (
         <>
           <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-            <Txt weight={800} size={24} tracking={-0.4}>{latest.value}</Txt>
-            {meta.unit ? <Txt weight={600} size={13} color={t.dim} style={{ marginLeft: 3 }}>{meta.unit}</Txt> : null}
+            <Txt weight={800} size={24} tracking={-0.4}>{fmtValue(kind, latest.value, unitSystem)}</Txt>
+            {unit ? <Txt weight={600} size={13} color={t.dim} style={{ marginLeft: 3 }}>{unit}</Txt> : null}
           </View>
           {points.length >= 2 ? (
             <View onLayout={(e) => setW(e.nativeEvent.layout.width)} style={{ marginTop: 8, height: 30 }}>

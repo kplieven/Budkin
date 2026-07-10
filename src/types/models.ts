@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -60,6 +60,8 @@ export interface FeedingEntry extends EntryBase {
   feedType: FeedType;
   method: FeedMethod;
   amount: number | null;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface SleepEntry extends EntryBase {
@@ -67,6 +69,8 @@ export interface SleepEntry extends EntryBase {
   start: number;
   end: number | null;
   nap: boolean;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface DiaperEntry extends EntryBase {
@@ -76,6 +80,8 @@ export interface DiaperEntry extends EntryBase {
   solid: boolean;
   color: DiaperColor | null;
   amount?: number | null;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface PumpingEntry extends EntryBase {
@@ -84,6 +90,8 @@ export interface PumpingEntry extends EntryBase {
   end: number | null;
   amount: number | null;
   method?: FeedMethod;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 export interface TummyEntry extends EntryBase {
@@ -91,6 +99,8 @@ export interface TummyEntry extends EntryBase {
   start: number;
   end: number | null;
   milestone?: string;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
 }
 
 /**
@@ -105,13 +115,52 @@ export interface BathEntry extends EntryBase {
   wash: 'small' | 'big';
 }
 
-export type Entry = FeedingEntry | SleepEntry | DiaperEntry | PumpingEntry | TummyEntry | BathEntry;
+/**
+ * A body-temperature reading (Baby Buddy `/api/temperature/`). Point event — a
+ * single `time` carrying a numeric reading (°C) plus optional notes, like a
+ * diaper change. Not timer-eligible.
+ */
+export interface TemperatureEntry extends EntryBase {
+  type: 'temperature';
+  time: number;
+  /** the reading (°C) */
+  value: number;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
+}
+
+/**
+ * A general free-text note (Baby Buddy `/api/notes/`). Point event — a single
+ * `time` whose PRIMARY content is the `text` body. Shares the `/api/notes/`
+ * endpoint with baths (which ride on a `bath` tag); a general note carries no
+ * structural tag. Kept a DISTINCT type from `BathEntry`: notes surface only in
+ * the dedicated Notes tab, never in the activity timeline. `text` is the note
+ * body — NOT the secondary per-entry `notes` annotation on other activities.
+ */
+export interface NoteEntry extends EntryBase {
+  type: 'note';
+  time: number;
+  /** the note body (Baby Buddy `note` field) */
+  text: string;
+}
+
+export type Entry =
+  | FeedingEntry
+  | SleepEntry
+  | DiaperEntry
+  | PumpingEntry
+  | TummyEntry
+  | BathEntry
+  | TemperatureEntry
+  | NoteEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
-export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath'];
+export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature', 'note'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' || e.type === 'bath' ? e.time : (e.end ?? e.start);
+  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'note'
+    ? e.time
+    : (e.end ?? e.start);
 }
 
 export interface Timer {
@@ -138,7 +187,23 @@ export interface Timer {
   amount?: number;
   nap?: boolean;
   milestone?: string;
+  notes?: string;
   tags?: string[];
+}
+
+/**
+ * A Baby Buddy tag (`/api/tags/`). Tags are referenced by NAME on entries
+ * (`EntryBase.tags` is a `string[]`); this shape is only the selectable list the
+ * picker reads, carrying the server-provided display `color` and `lastUsed`.
+ * Baby Buddy auto-creates a tag when an entry is POSTed with a new name, so
+ * there is no create endpoint — a brand-new tag just rides along on the entry.
+ */
+export interface Tag {
+  name: string;
+  /** server-provided display color (hex), when set */
+  color?: string;
+  /** last time this tag was used, epoch ms */
+  lastUsed?: number;
 }
 
 export type MeasurementKind = 'weight' | 'height' | 'head' | 'bmi';

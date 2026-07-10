@@ -23,9 +23,12 @@ import type {
   MeasurementKind,
   PhotoChange,
   PickedPhoto,
+  NoteEntry,
   Profile,
   PumpingEntry,
   SleepEntry,
+  Tag,
+  TemperatureEntry,
   TummyEntry,
 } from '@/types/models';
 
@@ -120,6 +123,8 @@ const ENDPOINT: Record<ActivityType, string> = {
   pumping: 'pumping',
   tummy: 'tummy-times',
   bath: 'notes',
+  temperature: 'temperature',
+  note: 'notes',
 };
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
@@ -129,8 +134,27 @@ const ENDPOINT: Record<ActivityType, string> = {
 // own so other Baby Buddy clients see a meaningful entry. User tags are kept
 // distinct from these structural tags so they survive a round-trip untouched.
 const BATH_STRUCTURAL_TAGS = ['bath', 'small', 'big'];
+
+/**
+ * Tags the tag picker must never surface or let the user create: the bath
+ * structural tags (`bath`/`small`/`big`) plus the breastfeeding "both" side
+ * markers (`left`/`right`) that `save()` folds into an entry's tags. They must
+ * still round-trip untouched on entries that legitimately carry them — this set
+ * only gates the UI (display + creation), not serialization.
+ */
+export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'right']);
+
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
+
+/**
+ * The single discriminator between the two things that share `/api/notes/`: a
+ * bath carries the `bath` structural tag, a general note does not. Used by BOTH
+ * partition paths (baths vs notes) so the classification can never diverge.
+ */
+export function isBathNote(n: any): boolean {
+  return tagNames(n?.tags).includes('bath');
+}
 
 /** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
 export function bathToNoteBody(entry: BathEntry): Record<string, unknown> {
@@ -154,6 +178,32 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
     time: fromISO(n.time),
     wash: tags.includes('big') ? 'big' : 'small',
     tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
+  };
+}
+
+/** Reconstruct a general note from a Baby Buddy Note (one WITHOUT the `bath`
+ *  tag). The `note` field is the primary body; all tag names are kept as-is
+ *  (a general note carries no structural tags to strip). */
+export function noteToNoteEntry(n: any, childId: string): NoteEntry {
+  return {
+    id: `note-${n.id}`,
+    serverId: n.id,
+    childId,
+    type: 'note',
+    time: fromISO(n.time),
+    text: n.note ?? '',
+    tags: tagNames(n.tags),
+  };
+}
+
+/** Encode a general note as the body for a Baby Buddy Note (create/update). The
+ *  structural bath tags are stripped so a note can never be misread as a bath. */
+export function noteToNoteBody(entry: NoteEntry): Record<string, unknown> {
+  return {
+    child: entry.childId,
+    time: toISO(entry.time),
+    note: entry.text,
+    tags: entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
   };
 }
 
@@ -289,6 +339,17 @@ export class BabybuddyClient {
     return mapProfile(raw);
   }
 
+  /** List the server's tags for the picker. No create endpoint — Baby Buddy
+   *  auto-creates a tag when an entry is POSTed carrying a new name. */
+  async listTags(): Promise<Tag[]> {
+    const data = await this.request<Paginated<any>>('/tags/?limit=100');
+    return data.results.map((c) => ({
+      name: c.name,
+      color: c.color || undefined,
+      lastUsed: c.last_used ? fromISO(c.last_used) : undefined,
+    }));
+  }
+
   async listChildren(): Promise<Child[]> {
     const data = await this.request<Paginated<any>>('/children/?limit=100');
     return data.results.map((c, i) => ({
@@ -326,6 +387,12 @@ export class BabybuddyClient {
     return res?.picture ?? null;
   }
 
+  /** Delete a child on the server (requires a numeric id). Baby Buddy cascades
+   *  the child's feedings/sleep/changes/etc., so no per-entry cleanup is needed. */
+  async deleteChild(id: number): Promise<void> {
+    await this.request(`/children/${id}/`, { method: 'DELETE' });
+  }
+
   async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {
     const data = await this.request<Paginated<any>>(
       `/feedings/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
@@ -340,6 +407,7 @@ export class BabybuddyClient {
       feedType: FEED_TYPE_FROM_API[f.type] ?? 'breast',
       method: FEED_METHOD_FROM_API[f.method] ?? 'left',
       amount: f.amount != null ? Number(f.amount) : null,
+      notes: f.notes || undefined,
       tags: (f.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -356,6 +424,7 @@ export class BabybuddyClient {
       start: fromISO(s.start),
       end: s.end ? fromISO(s.end) : null,
       nap: s.nap === true || s.nap === 'true',
+      notes: s.notes || undefined,
       tags: (s.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -374,7 +443,24 @@ export class BabybuddyClient {
       solid: !!c.solid,
       color: (c.color || null) as DiaperColor | null,
       amount: c.amount != null ? Number(c.amount) : null,
+      notes: c.notes || undefined,
       tags: (c.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
+  async listTemperature(childId: string, limit = 50): Promise<TemperatureEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/temperature/?child=${childId}&ordering=-time&limit=${limit}`,
+    );
+    return data.results.map((r) => ({
+      id: `temperature-${r.id}`,
+      serverId: r.id,
+      childId,
+      type: 'temperature',
+      time: fromISO(r.time),
+      value: Number(r.temperature),
+      notes: r.notes || undefined,
+      tags: (r.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
 
@@ -390,6 +476,7 @@ export class BabybuddyClient {
       start: p.start ? fromISO(p.start) : fromISO(p.time),
       end: p.end ? fromISO(p.end) : null,
       amount: p.amount != null ? Number(p.amount) : null,
+      notes: p.notes || undefined,
       tags: (p.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
     }));
   }
@@ -406,22 +493,31 @@ export class BabybuddyClient {
       start: fromISO(t.start),
       end: t.end ? fromISO(t.end) : null,
       milestone: t.milestone || undefined,
+      notes: t.notes || undefined,
       tags: (t.tags ?? []).map((tag: any) => (typeof tag === 'string' ? tag : tag.name)),
     }));
   }
 
   /**
-   * List baths, reconstructed from Baby Buddy Notes. Baby Buddy has no `?tags=`
-   * filter on notes, so we fetch the child's recent notes and keep only those
-   * carrying the `bath` tag (other notes — plain user notes — are ignored).
+   * Read the child's recent `/api/notes/` ONCE and partition it by the `bath`
+   * tag: bath-tagged notes become `BathEntry`s, everything else becomes general
+   * `NoteEntry`s. Baths and general notes share this one endpoint, so a single
+   * fetch feeds both — no double-fetch. `isBathNote` is the shared discriminator.
    */
-  async listNotes(childId: string, limit = 100): Promise<BathEntry[]> {
+  async listChildNotes(
+    childId: string,
+    limit = 100,
+  ): Promise<{ baths: BathEntry[]; notes: NoteEntry[] }> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
     );
-    return data.results
-      .filter((n) => tagNames(n.tags).includes('bath'))
-      .map((n) => noteToBathEntry(n, childId));
+    const baths: BathEntry[] = [];
+    const notes: NoteEntry[] = [];
+    for (const n of data.results) {
+      if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
+      else notes.push(noteToNoteEntry(n, childId));
+    }
+    return { baths, notes };
   }
 
   private buildBody(entry: Entry): Record<string, unknown> {
@@ -436,10 +532,11 @@ export class BabybuddyClient {
           type: FEED_TYPE_TO_API[entry.feedType],
           method: FEED_METHOD_TO_API[entry.method],
           amount: entry.amount,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'sleep':
-        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), tags };
+        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), notes: entry.notes ?? '', tags };
       case 'diaper':
         return {
           child,
@@ -448,6 +545,7 @@ export class BabybuddyClient {
           solid: entry.solid,
           color: entry.color ?? '',
           amount: entry.amount ?? null,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'pumping':
@@ -456,6 +554,7 @@ export class BabybuddyClient {
           start: toISO(entry.start),
           end: toISO(entry.end ?? entry.start),
           amount: entry.amount,
+          notes: entry.notes ?? '',
           tags,
         };
       case 'tummy':
@@ -464,10 +563,15 @@ export class BabybuddyClient {
           start: toISO(entry.start),
           end: toISO(entry.end ?? entry.start),
           milestone: entry.milestone ?? '',
+          notes: entry.notes ?? '',
           tags,
         };
+      case 'temperature':
+        return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
       case 'bath':
         return bathToNoteBody(entry);
+      case 'note':
+        return noteToNoteBody(entry);
     }
   }
 

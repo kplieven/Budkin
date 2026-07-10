@@ -1,13 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, mergeUnsynced, useAppStore } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, useAppStore, visibleTags } from '@/store/useAppStore';
 import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
+import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
 import {
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
+  loadTagsFromServer,
   serverHasData,
   updateChildOnServer,
 } from '@/data/repository';
@@ -22,7 +24,7 @@ import {
 import { clearPendingOps } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import { fmtClock } from '@/lib/format';
-import type { Child, Entry, Measurement, Profile, Timer } from '@/types/models';
+import type { Child, Entry, Measurement, Profile, Tag, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -37,6 +39,7 @@ const h = vi.hoisted(() => ({
   measDeleted: [] as unknown[],
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
+  childDeleted: [] as unknown[],
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
   pendingOps: [] as unknown[],
@@ -44,6 +47,8 @@ const h = vi.hoisted(() => ({
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
+  tags: [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }] as unknown,
+  tagsFails: false,
   prefs: {} as Record<string, unknown>,
 }));
 
@@ -154,10 +159,17 @@ vi.mock('@/data/repository', () => ({
     h.childUpdateChange.push(change);
     return change?.kind === 'set' ? SERVER_PIC : null;
   }),
+  deleteChildFromServer: vi.fn(async (_c: unknown, id: unknown) => {
+    h.childDeleted.push(id);
+  }),
   loadInsightsHistory: vi.fn(async () => []),
   loadProfileFromServer: vi.fn(async () => {
     if (h.profileFails) throw new Error('500');
     return h.profile;
+  }),
+  loadTagsFromServer: vi.fn(async () => {
+    if (h.tagsFails) throw new Error('500');
+    return h.tags;
   }),
   serverHasData: vi.fn(async () => false),
 }));
@@ -224,6 +236,7 @@ beforeEach(() => {
   h.measDeleted = [];
   h.childPushed = [];
   h.childUpdated = [];
+  h.childDeleted = [];
   h.childPushChange = [];
   h.childUpdateChange = [];
   h.pendingOps = [];
@@ -231,8 +244,11 @@ beforeEach(() => {
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
+  h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
+  h.tagsFails = false;
   h.prefs = {};
   vi.mocked(loadProfileFromServer).mockClear();
+  vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
   vi.mocked(loadEntities).mockClear();
   vi.mocked(loadEntities).mockResolvedValue(null);
@@ -270,6 +286,9 @@ beforeEach(() => {
     profileLoading: false,
     profileError: false,
     profileLoaded: false,
+    tags: [],
+    tagsLoaded: false,
+    tagsLoading: false,
     toast: null,
     savedServers: [],
   });
@@ -344,6 +363,127 @@ describe('bath tracking', () => {
     await flush();
     expect(h.pushed).toHaveLength(1);
     expect((h.pushed[0] as Extract<Entry, { type: 'bath' }>).type).toBe('bath');
+  });
+});
+
+describe('temperature tracking', () => {
+  it('openSheet: point shape, seeds a default reading', () => {
+    s().openSheet('temperature');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.temperature).toBe(37.0);
+  });
+
+  it('save builds a point temperature entry (value + trimmed notes) and pushes it', async () => {
+    s().openSheet('temperature');
+    s().setTE({ temperature: 38.2, notes: '  slight fever  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'temperature' }>;
+    expect(e.type).toBe('temperature');
+    expect(e.time).toBe(NOW);
+    expect(e.value).toBe(38.2);
+    expect(e.notes).toBe('slight fever');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'temperature' }>).type).toBe('temperature');
+  });
+
+  it('save falls back to the default reading when none was entered', () => {
+    s().openSheet('temperature');
+    s().setTE({ temperature: undefined });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'temperature' }>;
+    expect(e.value).toBe(37.0);
+  });
+
+  it('openEdit prefills value + notes and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'temperature-1', serverId: 5, childId: 'c1', type: 'temperature', time: NOW - 20 * M, value: 37.8, notes: 'after nap', tags: [] },
+      ],
+    });
+    s().openEdit('temperature-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.temperature).toBe(37.8);
+    expect(s().te.notes).toBe('after nap');
+    expect(s().te.agoMin).toBe(20);
+  });
+});
+
+describe('general notes', () => {
+  it('openSheet: point shape, empty note body', () => {
+    s().openSheet('note');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.noteText).toBe('');
+  });
+
+  it('save builds a point note entry (trimmed body) and pushes it', async () => {
+    s().openSheet('note');
+    s().setTE({ noteText: '  remember the follow-up  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'note' }>;
+    expect(e.type).toBe('note');
+    expect(e.time).toBe(NOW);
+    expect(e.text).toBe('remember the follow-up');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'note' }>).type).toBe('note');
+  });
+
+  it('refuses to save a blank note (whitespace only): no entry, sheet stays open', async () => {
+    s().openSheet('note');
+    s().setTE({ noteText: '   ' });
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().sheet).not.toBeNull(); // still open — nothing created
+    await flush();
+    expect(h.pushed).toHaveLength(0);
+  });
+
+  it('openEdit prefills the note body + tags and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'note-1', serverId: 5, childId: 'c1', type: 'note', time: NOW - 20 * M, text: 'first giggle', tags: ['Milestone'] },
+      ],
+    });
+    s().openEdit('note-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.noteText).toBe('first giggle');
+    expect(s().te.tags).toEqual(['Milestone']);
+    expect(s().te.agoMin).toBe(20);
+    // a note has no secondary per-entry `notes` annotation
+    expect(s().te.notes).toBeUndefined();
+  });
+
+  it('a note lives in the shared entries array, so delete/undo work like any entry', () => {
+    useAppStore.setState({
+      entries: [{ id: 'note-2', serverId: 7, childId: 'c1', type: 'note', time: NOW, text: 'x', tags: [] }],
+    });
+    s().deleteEntry('note-2');
+    expect(s().entries).toHaveLength(0);
+    s().undoDelete();
+    expect(s().entries[0].id).toBe('note-2');
+  });
+
+  it('notes are excluded from the activity timeline while activities are kept', () => {
+    // The History/rail views group `entries.filter(e => e.type !== 'note')`.
+    useAppStore.setState({
+      entries: [
+        { id: 'note-3', childId: 'c1', type: 'note', time: NOW, text: 'note body', tags: [] },
+        { id: 'diaper-1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] },
+      ],
+    });
+    const activityEntries = s().entries.filter((e) => e.type !== 'note');
+    expect(activityEntries.map((e) => e.type)).toEqual(['diaper']);
+    const noteEntries = s().entries.filter((e) => e.type === 'note');
+    expect(noteEntries.map((e) => e.id)).toEqual(['note-3']);
   });
 });
 
@@ -987,6 +1127,25 @@ describe('children', () => {
     // the local id is patched to the server id, and selection follows it
     expect(s().children[1].id).toBe('777');
     expect(s().selectedChildId).toBe('777');
+    // serverId is stamped too (like entries/measurements) so server-child ops
+    // (update / delete / sync) recognise it before the next refresh.
+    expect(s().children[1].serverId).toBe(777);
+  });
+
+  it('a child created online can immediately be deleted on the server (no resurrection)', async () => {
+    // Regression: saveChild must stamp serverId on create, else deleteChild
+    // (which gates the server DELETE on serverId != null) would only remove the
+    // child locally and it would reappear on the next refresh.
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+    await flush();
+    const created = s().children[1];
+    expect(created.serverId).toBe(777);
+
+    h.childDeleted = [];
+    s().deleteChild(created.id);
+    expect(h.childDeleted).toEqual([777]); // server DELETE fired with the stamped serverId
+    expect(s().children.find((c) => c.id === created.id)).toBeUndefined();
   });
 
   it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {
@@ -1119,6 +1278,121 @@ describe('children', () => {
     s().closeChildSheet();
     expect(s().childSheet).toBe(false);
     expect(s().editingChildId).toBeNull();
+  });
+});
+
+describe('deleteChild', () => {
+  // A server-backed child in the new model carries a numeric `serverId` (the
+  // stable local `id` is server-independent). Mirror that: `serverId = Number(id)`.
+  const serverChild = (id: string, first: string) => ({
+    id,
+    serverId: Number(id),
+    first,
+    last: '',
+    birth: NOW,
+    color: '#fff',
+    slug: first.toLowerCase(),
+  });
+  const feeding = (id: string, childId: string): Entry => ({
+    id,
+    serverId: 1,
+    childId,
+    type: 'feeding',
+    start: NOW - 20 * M,
+    end: NOW,
+    feedType: 'breast',
+    method: 'left',
+    amount: null,
+    tags: [],
+  });
+  const timer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+
+  it('local-only child: deletes in memory only, no server call', async () => {
+    // the seeded child 'c1' has no serverId => local-only
+    s().openEditChild('c1');
+    s().deleteChild('c1');
+    expect(s().children).toHaveLength(0);
+    expect(s().selectedChildId).toBe('');
+    expect(s().childSheet).toBe(false);
+    expect(s().editingChildId).toBeNull();
+    expect(s().toast).toBe('Mira deleted');
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
+  });
+
+  it('server-backed selected child while online: server delete + purge + re-point', async () => {
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+      measurements: [{ id: 'weight-1', serverId: 2, childId: '5', kind: 'weight', value: 5, date: NOW }],
+      timers: [timer],
+      insightsLoaded: true,
+      insightsEntries: [{ id: 'x' } as any],
+      insightsError: true,
+    });
+    s().deleteChild('5');
+    expect(s().children.map((c) => c.id)).toEqual(['6']);
+    expect(s().selectedChildId).toBe('6'); // re-pointed to the surviving child
+    expect(s().entries).toHaveLength(0); // deleted child's entries purged
+    expect(s().measurements).toHaveLength(0); // measurements purged
+    expect(s().timers).toHaveLength(0); // running timers cleared
+    expect(s().insightsLoaded).toBe(false);
+    expect(s().insightsEntries).toEqual([]);
+    expect(s().insightsError).toBe(false);
+    expect(s().childSheet).toBe(false);
+    expect(s().showChildSwitcher).toBe(false);
+    await flush();
+    expect(h.childDeleted).toEqual([5]); // numeric id passed to the server delete
+  });
+
+  it('deleting the last remaining child leaves selectedChildId empty', async () => {
+    useAppStore.setState({ children: [serverChild('5', 'Mira')], selectedChildId: '5' });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    expect(s().selectedChildId).toBe('');
+    await flush();
+    expect(h.childDeleted).toEqual([5]);
+  });
+
+  it('deleting a non-selected child leaves selection + loaded data intact', async () => {
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+      timers: [timer],
+    });
+    s().deleteChild('6');
+    expect(s().children.map((c) => c.id)).toEqual(['5']);
+    expect(s().selectedChildId).toBe('5'); // unchanged
+    expect(s().entries).toHaveLength(1); // selected child's data untouched
+    expect(s().timers).toHaveLength(1); // timers not cleared
+    await flush();
+    expect(h.childDeleted).toEqual([6]);
+  });
+
+  it('local mode: deletes in memory only, no server call', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+    });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
+  });
+
+  it('server-backed child while offline: in-memory only, never an undurable server delete', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+    });
+    s().deleteChild('5');
+    expect(s().children).toHaveLength(0);
+    await flush();
+    expect(h.childDeleted).toHaveLength(0);
   });
 });
 
@@ -1429,6 +1703,56 @@ describe('diaper amount', () => {
   });
 });
 
+describe('per-entry notes', () => {
+  it('save() writes a trimmed notes onto a feeding entry', () => {
+    s().openSheet('feeding');
+    s().setTE({ notes: '  fussy at the end  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.notes).toBe('fussy at the end');
+  });
+
+  it('save() omits notes when blank (whitespace trims to undefined)', () => {
+    s().openSheet('sleep');
+    s().setTE({ notes: '   ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.notes).toBeUndefined();
+  });
+
+  it('save() never puts notes on a bath entry (bath excluded)', () => {
+    s().openSheet('bath');
+    s().setTE({ notes: 'should be ignored' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'bath' }>;
+    expect((e as { notes?: string }).notes).toBeUndefined();
+  });
+
+  it('openEdit prefills notes from the entry', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'tummy-1', serverId: 3, childId: 'c1', type: 'tummy', start: NOW - 20 * M, end: NOW - 5 * M, milestone: 'rolled', notes: 'on the mat', tags: [] },
+      ],
+    });
+    s().openEdit('tummy-1');
+    expect(s().te.notes).toBe('on the mat');
+  });
+
+  it('edit round-trip: openEdit prefills, edited notes survives save', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'pumping-1', serverId: 4, childId: 'c1', type: 'pumping', start: NOW - 15 * M, end: NOW, amount: 90, notes: 'left side', tags: [] },
+      ],
+    });
+    s().openEdit('pumping-1');
+    expect(s().te.notes).toBe('left side');
+    s().setTE({ notes: 'both sides now' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'pumping' }>;
+    expect(e.notes).toBe('both sides now');
+  });
+});
+
 describe('adjustTimerStart', () => {
   it('shifts a timer start earlier', () => {
     useAppStore.setState({
@@ -1680,6 +2004,36 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     s().stopTimer('t1');
     const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
     expect(e.tags).toContain('left');
+  });
+
+  it('carries a note typed while editing a running timer through saveTimerDetails → reopen → stopTimer', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ notes: '  spit up a little  ' });
+    s().saveTimerDetails();
+    // persisted on the still-running timer (trimmed), not lost
+    expect(s().timers[0].notes).toBe('spit up a little');
+    // reopening the editor shows it again
+    s().openTimerEdit('t1');
+    expect(s().te.notes).toBe('spit up a little');
+    // and it survives the final stop into the entry
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.notes).toBe('spit up a little');
+  });
+
+  it('carries a note through a sleep timer stop (buildSleepEntry path)', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    s().setTE({ notes: 'down easy' });
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.type).toBe('sleep');
+    expect(e.notes).toBe('down easy');
   });
 
   it('a timer with no saved metadata still stops with the existing default behavior (regression guard)', () => {
@@ -2014,6 +2368,41 @@ describe('theme persistence', () => {
   });
 });
 
+describe('unit-system persistence', () => {
+  it('setUnitSystem updates state and persists via savePrefs', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().setUnitSystem('imperial');
+    expect(s().unitSystem).toBe('imperial');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+  });
+
+  it('toggleUnitSystem flips metric <-> imperial and persists each direction', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('imperial');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('metric');
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric' });
+  });
+
+  it('hydrate applies a persisted unitSystem', async () => {
+    h.prefs = { unitSystem: 'imperial' };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ unitSystem: 'metric' });
+    await s().hydrate();
+    expect(s().unitSystem).toBe('imperial');
+  });
+
+  it('hydrate leaves unitSystem at its default when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ unitSystem: 'metric' });
+    await s().hydrate();
+    expect(s().unitSystem).toBe('metric');
+  });
+});
+
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
     useAppStore.setState({ connection: { mode: 'local' } });
@@ -2064,6 +2453,25 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
   });
 
+  it('drops a stale result if the session changed while /api/profile/ was in flight', async () => {
+    let resolve!: (v: Profile | null) => void;
+    vi.mocked(loadProfileFromServer).mockImplementationOnce(
+      () => new Promise<Profile | null>((r) => { resolve = r; }),
+    );
+    const p = s().loadProfile();
+    // session switches to a different server mid-fetch (as a reset would)
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'https://b', token: 'b' },
+      profile: null,
+      profileLoaded: false,
+    });
+    resolve({ username: 'server-a-user' });
+    await p;
+    // server A's profile must NOT repopulate server B's settings
+    expect(s().profile).toBeNull();
+    expect(s().profileLoaded).toBe(false);
+  });
+
   it('no connection: no-ops without fetching', async () => {
     useAppStore.setState({ connection: null });
     await s().loadProfile();
@@ -2087,6 +2495,154 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(s().profileLoaded).toBe(false);
     expect(s().profile).toBeNull();
     expect(s().profileError).toBe(false);
+  });
+});
+
+describe('loadTags (lazy, cached server tag list for the picker)', () => {
+  it('success: fetches, stores the tag list, and marks loaded', async () => {
+    h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
+    await s().loadTags();
+    expect(s().tags).toEqual(h.tags);
+    expect(s().tagsLoaded).toBe(true);
+    expect(s().tagsLoading).toBe(false);
+    expect(loadTagsFromServer).toHaveBeenCalledWith(s().connection);
+  });
+
+  it('laziness: a second call no-ops once loaded', async () => {
+    await s().loadTags();
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+    await s().loadTags();
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('laziness: a second call no-ops while already loading', async () => {
+    let resolve!: (v: Tag[]) => void;
+    vi.mocked(loadTagsFromServer).mockImplementationOnce(
+      () => new Promise<Tag[]>((r) => { resolve = r; }),
+    );
+    const first = s().loadTags();
+    const second = s().loadTags();
+    resolve([{ name: 'Fussy' }]);
+    await Promise.all([first, second]);
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('local mode: seeds the fallback tag list without hitting the server', async () => {
+    useAppStore.setState({ connection: { mode: 'local' } });
+    await s().loadTags();
+    expect(s().tags).toEqual(DEMO_TAGS);
+    expect(s().tags.map((t) => t.name)).toEqual(['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy']);
+    expect(s().tagsLoaded).toBe(true);
+    expect(loadTagsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('no connection: no-ops without fetching', async () => {
+    useAppStore.setState({ connection: null });
+    await s().loadTags();
+    expect(s().tagsLoaded).toBe(false);
+    expect(loadTagsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('error: tolerates staleness — keeps existing tags, clears loading, stays unloaded for retry', async () => {
+    useAppStore.setState({ tags: [{ name: 'Cached' }] });
+    h.tagsFails = true;
+    await expect(s().loadTags()).resolves.toBeUndefined();
+    expect(s().tags).toEqual([{ name: 'Cached' }]); // not wiped
+    expect(s().tagsLoading).toBe(false);
+    expect(s().tagsLoaded).toBe(false); // can retry on the next open
+  });
+
+  it('drops a stale result if the session changed while /api/tags/ was in flight', async () => {
+    let resolve!: (v: Tag[]) => void;
+    vi.mocked(loadTagsFromServer).mockImplementationOnce(
+      () => new Promise<Tag[]>((r) => { resolve = r; }),
+    );
+    const p = s().loadTags();
+    // session switches to a different server mid-fetch (as a reset would)
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'https://b', token: 'b' },
+      tags: [],
+      tagsLoaded: false,
+    });
+    resolve([{ name: 'ServerA-only' }]);
+    await p;
+    // server A's tags must NOT repopulate server B's picker
+    expect(s().tags).toEqual([]);
+    expect(s().tagsLoaded).toBe(false);
+  });
+});
+
+describe('createTag (free-form tag creation)', () => {
+  it('trims a new name and selects it onto the working entry', () => {
+    s().openSheet('feeding');
+    s().createTag('  Growth spurt  ');
+    expect(s().te.tags).toContain('Growth spurt');
+  });
+
+  it('rejects a blank / whitespace-only name', () => {
+    s().openSheet('feeding');
+    s().createTag('   ');
+    s().createTag('');
+    expect(s().te.tags).toEqual([]);
+  });
+
+  it('rejects the structural HIDDEN_TAGS so they can never be created', () => {
+    s().openSheet('feeding');
+    for (const t of ['bath', 'small', 'big', 'left', 'right']) s().createTag(t);
+    expect(s().te.tags).toEqual([]);
+  });
+
+  it('does not duplicate an already-selected tag', () => {
+    s().openSheet('feeding');
+    s().createTag('Fussy');
+    s().createTag('Fussy');
+    expect(s().te.tags.filter((t) => t === 'Fussy')).toHaveLength(1);
+  });
+
+  it('a created tag rides onto the saved entry.tags', () => {
+    s().openSheet('feeding');
+    s().createTag('Teething');
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('Teething');
+  });
+});
+
+describe('visibleTags (union of server + selected, minus structural)', () => {
+  const server: Tag[] = [
+    { name: 'Fussy', color: '#f80' },
+    { name: 'Sleepy', color: '#08f' },
+    { name: 'left' }, // a structural marker that leaked into the server list
+  ];
+
+  it('unions server tags with entry-only tags and drops HIDDEN_TAGS', () => {
+    const out = visibleTags(server, ['Cluster', 'right']);
+    expect(out.map((t) => t.name)).toEqual(['Fussy', 'Sleepy', 'Cluster']);
+    // structural 'left' (server) and 'right' (selected) never surface
+    expect(out.map((t) => t.name)).not.toContain('left');
+    expect(out.map((t) => t.name)).not.toContain('right');
+  });
+
+  it('carries the server color through and leaves entry-only tags colorless', () => {
+    const out = visibleTags(server, ['Cluster']);
+    expect(out.find((t) => t.name === 'Fussy')?.color).toBe('#f80');
+    expect(out.find((t) => t.name === 'Cluster')?.color).toBeUndefined();
+  });
+
+  it('does not duplicate a selected tag that is already a server tag', () => {
+    const out = visibleTags(server, ['Fussy']);
+    expect(out.filter((t) => t.name === 'Fussy')).toHaveLength(1);
+  });
+
+  it('a breastfeeding "both" entry folds left/right into tags, but they never show as chips', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'left' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('left'); // structural side marker survives on the entry
+    const chips = visibleTags(server, e.tags).map((t) => t.name);
+    expect(chips).not.toContain('left');
+    expect(chips).not.toContain('right');
   });
 });
 

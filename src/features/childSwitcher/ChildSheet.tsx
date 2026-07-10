@@ -90,8 +90,11 @@ function Inner({ editingId }: { editingId: string | null }) {
   const insets = useSafeAreaInsets();
   const children = useAppStore((s) => s.children);
   const saveChild = useAppStore((s) => s.saveChild);
+  const deleteChild = useAppStore((s) => s.deleteChild);
   const showToast = useAppStore((s) => s.showToast);
   const close = useAppStore((s) => s.closeChildSheet);
+  const connection = useAppStore((s) => s.connection);
+  const offline = useAppStore((s) => s.offline);
 
   const editing: Child | null = editingId ? (children.find((c) => c.id === editingId) ?? null) : null;
   const editingDate = editing ? new Date(editing.birth) : new Date();
@@ -104,9 +107,26 @@ function Inner({ editingId }: { editingId: string | null }) {
   const [photo, setPhoto] = useState<string | null>(editing?.picture ?? null);
   const [photoChange, setPhotoChange] = useState<PhotoChange>({ kind: 'none' });
   const [picking, setPicking] = useState(false);
+  const [confirmName, setConfirmName] = useState('');
 
   const canSave = first.trim().length > 0;
   const previewChild = { first: first.trim() || editing?.first || '?', color: editing?.color ?? t.primary };
+
+  // Delete is gated behind typing the child's first name (front-loaded
+  // confirmation — the cascade is NOT undoable, so there's no undo toast).
+  // A server-backed child (has a serverId, mirrors the store's delete gating)
+  // can only be deleted durably while online in server mode; offline the next
+  // refresh would resurrect it, so block it. Local-mode children delete in memory.
+  const serverBacked = !!editing && editing.serverId != null;
+  const deleteBlocked = serverBacked && !!connection && connection.mode === 'server' && offline;
+  const nameConfirmed =
+    !!editing && confirmName.trim().toLowerCase() === editing.first.trim().toLowerCase();
+  const canDelete = nameConfirmed && !deleteBlocked;
+
+  const onDelete = () => {
+    if (!canDelete || !editing) return;
+    deleteChild(editing.id);
+  };
 
   const onPick = async (source: 'library' | 'camera') => {
     if (picking) return;
@@ -260,6 +280,61 @@ function Inner({ editingId }: { editingId: string | null }) {
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 8 }}>
           Can&apos;t be in the future — out-of-range values are clamped when you save.
         </Txt>
+
+        {editing ? (
+          <View style={{ marginTop: 24, paddingTop: 20, borderTopWidth: 1, borderTopColor: t.line }}>
+            <Txt weight={800} size={15} color={REMOVE_COLOR} style={{ marginBottom: 6 }}>
+              Delete child
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginBottom: 14, lineHeight: 19 }}>
+              This permanently removes {editing.first} and all their history. This can&apos;t be
+              undone.
+            </Txt>
+            <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+              Type &ldquo;{editing.first}&rdquo; to confirm
+            </Txt>
+            <TextInput
+              value={confirmName}
+              onChangeText={setConfirmName}
+              placeholder={editing.first}
+              placeholderTextColor={t.faint}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!deleteBlocked}
+              style={{ ...inputStyle, marginBottom: 12, opacity: deleteBlocked ? 0.5 : 1 }}
+            />
+            <Pressable
+              onPress={onDelete}
+              disabled={!canDelete}
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${editing.first}`}
+              accessibilityState={{ disabled: !canDelete }}
+              style={(st) => [
+                {
+                  height: 52,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: hexA(REMOVE_COLOR, t.dark ? 0.16 : 0.12),
+                  borderWidth: 1.5,
+                  borderColor: hexA(REMOVE_COLOR, canDelete ? 0.9 : 0.35),
+                  opacity: canDelete ? 1 : 0.5,
+                  cursor: canDelete ? 'pointer' : 'auto',
+                },
+                canDelete && isHovered(st) && { backgroundColor: hexA(REMOVE_COLOR, t.dark ? 0.24 : 0.18) },
+              ]}
+            >
+              <Txt unselectable weight={800} size={15.5} color={REMOVE_COLOR}>
+                Delete {editing.first}
+              </Txt>
+            </Pressable>
+            {deleteBlocked ? (
+              <Txt weight={600} size={12} color={t.faint} style={{ marginTop: 10, textAlign: 'center' }}>
+                Reconnect to delete {editing.first}
+              </Txt>
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>

@@ -30,6 +30,29 @@ describe('prefs persistence', () => {
     expect(await loadPrefs()).toEqual({ themeMode: 'light' });
   });
 
+  it('round-trips a saved units preference', async () => {
+    await savePrefs({ unitSystem: 'imperial' });
+    expect(await loadPrefs()).toEqual({ unitSystem: 'imperial' });
+  });
+
+  it('a partial save of unitSystem does NOT clobber a previously saved themeMode', async () => {
+    await savePrefs({ themeMode: 'light' });
+    await savePrefs({ unitSystem: 'imperial' });
+    expect(await loadPrefs()).toEqual({ themeMode: 'light', unitSystem: 'imperial' });
+  });
+
+  it('a partial save of themeMode does NOT clobber a previously saved unitSystem', async () => {
+    await savePrefs({ unitSystem: 'imperial' });
+    await savePrefs({ themeMode: 'dark' });
+    expect(await loadPrefs()).toEqual({ unitSystem: 'imperial', themeMode: 'dark' });
+  });
+
+  it('a later save overwrites the same field but keeps the others', async () => {
+    await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
+    await savePrefs({ unitSystem: 'metric' });
+    expect(await loadPrefs()).toEqual({ themeMode: 'light', unitSystem: 'metric' });
+  });
+
   it('returns {} instead of throwing on corrupt persisted JSON', async () => {
     mem.store.set('babybuddy.prefs.v1', '{not json');
     expect(await loadPrefs()).toEqual({});

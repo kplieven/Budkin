@@ -14,11 +14,13 @@ import {
 } from '@/lib/activities';
 import {
   type Connection,
+  deleteChildFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
+  loadTagsFromServer,
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
@@ -28,7 +30,8 @@ import {
   updateMeasurementOnServer,
 } from '@/data/repository';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
-import { ApiError, childColor } from '@/api/client';
+import { ApiError, childColor, HIDDEN_TAGS } from '@/api/client';
+import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
   clearEntities,
@@ -59,6 +62,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
+import type { UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
@@ -71,6 +75,7 @@ import type {
   MeasurementKind,
   PhotoChange,
   Profile,
+  Tag,
   Timer,
 } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
@@ -90,6 +95,9 @@ interface AppState {
 
   // ui / theme
   themeMode: ThemeMode;
+  /** Budkin-local metric/imperial display lens (default 'metric'). Stored
+   *  values stay canonical metric; this only relabels + converts on display. */
+  unitSystem: UnitSystem;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -135,6 +143,12 @@ interface AppState {
   profileLoaded: boolean;
   loadProfile: () => Promise<void>;
 
+  // server tag list for the log-sheet picker (lazy, cached like `profile`)
+  tags: Tag[];
+  tagsLoading: boolean;
+  tagsLoaded: boolean;
+  loadTags: () => Promise<void>;
+
   // working time-entry
   te: TimeEntryState;
 }
@@ -152,6 +166,8 @@ export type AdoptResult =
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
+  setUnitSystem: (system: UnitSystem) => void;
+  toggleUnitSystem: () => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -186,6 +202,9 @@ interface AppActions {
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
   saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
+  /** Delete a child (cascades all their history server-side; NOT undoable). See
+   *  the implementation for the selection re-point + in-memory purge rules. */
+  deleteChild: (id: string) => void;
 
   openAdopt: () => void;
   closeAdopt: () => void;
@@ -210,6 +229,9 @@ interface AppActions {
   /** bath: pick the wash size (small/big) */
   setWash: (wash: 'small' | 'big') => void;
   toggleTag: (tag: string) => void;
+  /** Add a brand-new free-form tag as selected. Trims, rejects blank / structural
+   *  (HIDDEN_TAGS) names, and no-ops on a tag already selected. */
+  createTag: (name: string) => void;
   setEnded: (agoMin: number) => void;
   setEndedAbs: (ms: number) => void;
   setOngoing: () => void;
@@ -263,6 +285,31 @@ export type AppStore = AppState & AppActions;
  */
 export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[]): Entry[] {
   return [...queuedEntries, ...serverEntries];
+}
+
+/**
+ * The chip set the tag picker renders: the union of the server tag list and the
+ * entry's currently-selected tags, MINUS the structural `HIDDEN_TAGS`. Server
+ * tags come first (carrying their display color); a selected tag not in the
+ * server list (created elsewhere) is appended colorless so it still shows as a
+ * selected chip. De-duplicated by name. Structural markers (`bath`/`small`/`big`,
+ * breastfeeding `left`/`right`) are dropped from BOTH sides so they never appear
+ * as chips even though they still round-trip on the entries that carry them.
+ */
+export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
+  const seen = new Set<string>();
+  const out: Tag[] = [];
+  for (const tag of serverTags) {
+    if (HIDDEN_TAGS.has(tag.name) || seen.has(tag.name)) continue;
+    seen.add(tag.name);
+    out.push(tag);
+  }
+  for (const name of selected) {
+    if (HIDDEN_TAGS.has(name) || seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name });
+  }
+  return out;
 }
 
 /**
@@ -322,6 +369,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   savedServers: [],
 
   themeMode: 'dark',
+  unitSystem: 'metric',
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -354,6 +402,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   profileError: false,
   profileLoaded: false,
 
+  tags: [],
+  tagsLoading: false,
+  tagsLoaded: false,
+
   te: { shape: 'interval', tags: [] },
 
   // ---- ticking clock ----
@@ -364,6 +416,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next: ThemeMode = get().themeMode === 'dark' ? 'light' : 'dark';
     set({ themeMode: next });
     void savePrefs({ themeMode: next });
+  },
+  setUnitSystem: (system) => {
+    set({ unitSystem: system });
+    void savePrefs({ unitSystem: system });
+  },
+  toggleUnitSystem: () => {
+    const next: UnitSystem = get().unitSystem === 'metric' ? 'imperial' : 'metric';
+    set({ unitSystem: next });
+    void savePrefs({ unitSystem: next });
   },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
@@ -402,6 +463,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // front and it covers every branch below (no connection, demo, real).
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
+    if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -475,6 +537,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           profileLoaded: false,
           profileError: false,
           profileLoading: false,
+          tags: [],
+          tagsLoaded: false,
+          tagsLoading: false,
         });
       } else {
         // network/server unreachable: enter the app in offline mode. There's
@@ -538,6 +603,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           profileLoaded: false,
           profileError: false,
           profileLoading: false,
+          tags: [],
+          tagsLoaded: false,
+          tagsLoading: false,
         });
       } else {
         // server unreachable — stay/enter offline; queued writes hold until the
@@ -565,11 +633,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         connecting: false,
         savedServers,
         ...data,
-        // a newly-connected server's profile hasn't been fetched yet
+        // a newly-connected server's profile + tags haven't been fetched yet
         profile: null,
         profileLoaded: false,
         profileError: false,
         profileLoading: false,
+        tags: [],
+        tagsLoaded: false,
+        tagsLoading: false,
       });
       void saveConnection(conn);
       void persistServers(savedServers);
@@ -686,6 +757,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileLoaded: false,
       profileError: false,
       profileLoading: false,
+      tags: [],
+      tagsLoaded: false,
+      tagsLoading: false,
     });
     void saveConnection(conn);
   },
@@ -708,6 +782,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileLoaded: false,
       profileError: false,
       profileLoading: false,
+      tags: [],
+      tagsLoaded: false,
+      tagsLoading: false,
     });
   },
   forgetServer: (serverUrl) => {
@@ -919,16 +996,71 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // Patch the local id -> the real server id so the new child stays
           // selected across the next refresh()/hydrate(), which replaces
           // `children` wholesale with server data keyed by real ids. Adopt the
-          // server picture URL in place of the local file URI.
+          // server picture URL in place of the local file URI. Stamp `serverId`
+          // too (like commitWrite/saveMeasurement do for entries/measurements):
+          // server-child ops — updateChild, deleteChild, flushUnsynced's
+          // synced-vs-unsynced check — all key off `serverId`, so leaving it
+          // unset until the next refresh loses edits, skips deletes (the child
+          // resurrects), and re-uploads a duplicate on reconnect.
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === localId ? { ...c, id: String(res.id), picture: res.picture ?? c.picture } : c,
+              c.id === localId
+                ? { ...c, id: String(res.id), serverId: res.id, picture: res.picture ?? c.picture }
+                : c,
             ),
             selectedChildId: st.selectedChildId === localId ? String(res.id) : st.selectedChildId,
           }));
         })
         .catch(() => {});
     }
+  },
+
+  deleteChild: (id) => {
+    const s = get();
+    const child = s.children.find((c) => c.id === id);
+    if (!child) return;
+    const conn = s.connection;
+    // A server-backed child carries a numeric `serverId` (stamped on
+    // create/sync; mirrors updateChild keying off serverId). A local-only child
+    // (created in local mode / offline) has none.
+    const serverBacked = child.serverId != null;
+    // Server delete only when it can be made durable now: server-backed +
+    // server mode + online. Otherwise the removal is in-memory only — in local
+    // mode it persists to the entity store via the subscription below (the UI
+    // blocks an offline server-backed delete, which a refresh would resurrect).
+    const doServerDelete = serverBacked && !!conn && conn.mode === 'server' && !s.offline;
+
+    const nextChildren = s.children.filter((c) => c.id !== id);
+    // Purge the deleted child's entries/measurements. In local mode every
+    // child's data lives in state, so this drops the orphans — and, via the
+    // persistence subscription, from the durable entity store (saveEntries /
+    // saveMeasurements fire on the new array refs). In server mode only the
+    // selected child's entries are loaded, so this is a no-op for a
+    // non-selected child there.
+    const patch: Partial<AppState> = {
+      children: nextChildren,
+      entries: s.entries.filter((e) => e.childId !== id),
+      measurements: s.measurements.filter((m) => m.childId !== id),
+      childSheet: false,
+      editingChildId: null,
+      showChildSwitcher: false,
+    };
+    if (s.selectedChildId === id) {
+      // Deleting the selected child: re-point selection (mirrors refresh's
+      // fallback), clear the running timers (they implicitly belong to the
+      // selected child, so a later stop must not log against a different one),
+      // and reset insights (as selectChild does).
+      patch.selectedChildId = nextChildren[0]?.id ?? '';
+      patch.timers = [];
+      patch.insightsLoaded = false;
+      patch.insightsEntries = [];
+      patch.insightsError = false;
+    }
+    set(patch);
+    if (doServerDelete) {
+      void deleteChildFromServer(conn, child.serverId as number).catch(() => {});
+    }
+    get().showToast(`${child.first} deleted`);
   },
 
   // ---- insights (lazy deep-history load) ----
@@ -971,6 +1103,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ profileLoading: true, profileError: false });
     try {
       const profile = await loadProfileFromServer(conn);
+      // If the session changed while /api/profile/ was in flight (switch server,
+      // disconnect, session-expiry), drop this stale result rather than
+      // repopulating another account's profile. Mirrors the loadTags guard.
+      if (get().connection !== conn) return;
       set({ profile, profileLoaded: true, profileLoading: false });
     } catch (e) {
       // /api/profile/ can 500 on some instances (e.g. a user without a Settings
@@ -978,6 +1114,34 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // group when there's no profile, so this stays non-blocking.
       console.warn('[settings] /api/profile/ failed:', e instanceof ApiError ? `HTTP ${e.status}` : e);
       set({ profileLoading: false, profileError: true });
+    }
+  },
+
+  // ---- server tag list (lazy, fetched on first LogSheet open, cached) ----
+  loadTags: async () => {
+    const s = get();
+    if (s.tagsLoaded || s.tagsLoading) return;
+    const conn = s.connection;
+    if (!conn) return;
+    if (conn.mode !== 'server') {
+      // No server to read /api/tags/ — seed the fallback list so the picker
+      // isn't empty (keeps the old hardcoded defaults).
+      set({ tags: DEMO_TAGS, tagsLoaded: true });
+      return;
+    }
+    set({ tagsLoading: true });
+    try {
+      const tags = await loadTagsFromServer(conn);
+      // If the session changed while /api/tags/ was in flight (switch server,
+      // disconnect, session-expiry), drop this stale result rather than
+      // repopulating another account's tags into the picker.
+      if (get().connection !== conn) return;
+      set({ tags, tagsLoaded: true, tagsLoading: false });
+    } catch {
+      // Tolerate staleness: keep whatever tags were already cached and leave
+      // tagsLoaded false so the next LogSheet open retries. A new tag typed in
+      // the meantime still saves fine (Baby Buddy auto-creates it on POST).
+      set({ tagsLoading: false });
     }
   },
 
@@ -1017,6 +1181,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Pre-select the wash that's due from the small/big rhythm.
       te.wash = nextWashKind(get().entries);
     }
+    if (type === 'temperature') {
+      // Seed a normal baseline so the decimal input opens on a sensible value.
+      te.temperature = 37.0;
+    }
+    if (type === 'note') {
+      // Blank body — the multiline note input opens empty.
+      te.noteText = '';
+    }
     set({ sheet: { type }, te, editingId: null, fromTimerId: null });
   },
   openEdit: (entryId) => {
@@ -1024,11 +1196,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const entry = s.entries.find((e) => e.id === entryId);
     if (!entry) return;
     const now = s.now;
-    const isPoint = entry.type === 'diaper' || entry.type === 'bath';
+    const isPoint =
+      entry.type === 'diaper' ||
+      entry.type === 'bath' ||
+      entry.type === 'temperature' ||
+      entry.type === 'note';
     const te: TimeEntryState = {
       shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
     };
+    // Free-text notes exist on every real activity but bath (structural note
+    // body) and note (whose body IS its primary text, not an annotation) —
+    // seed it so an edit doesn't silently drop an existing note.
+    if (entry.type !== 'bath' && entry.type !== 'note') te.notes = entry.notes;
     if (entry.type === 'diaper') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -1040,6 +1220,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.wash = entry.wash;
+    } else if (entry.type === 'temperature') {
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.temperature = entry.value;
+    } else if (entry.type === 'note') {
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.noteText = entry.text;
     } else {
       if (entry.end != null) {
         te.endAbs = entry.end;
@@ -1104,6 +1292,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.nap = tm.nap ?? (hr >= 7 && hr < 19);
     }
     if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
+    if (tm.notes != null) te.notes = tm.notes;
     set({ sheet: { type }, te, editingId: null, fromTimerId: timerId });
   },
   closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
@@ -1239,6 +1428,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const has = s.te.tags.includes(tag);
       return { te: { ...s.te, tags: has ? s.te.tags.filter((t) => t !== tag) : [...s.te.tags, tag] } };
     }),
+  createTag: (name) => {
+    const trimmed = name.trim();
+    // Reject blanks and the structural tags (bath/small/big, breastfeeding
+    // left/right) — those must never be user-created. No server call: Baby Buddy
+    // auto-creates the tag when the entry is POSTed with the new name.
+    if (!trimmed || HIDDEN_TAGS.has(trimmed)) return;
+    set((s) => (s.te.tags.includes(trimmed) ? {} : { te: { ...s.te, tags: [...s.te.tags, trimmed] } }));
+  },
   // ----- interval time-entry (keep the last two of start/end/lasted) -----
   setEnded: (agoMin) =>
     set((s) => {
@@ -1338,6 +1535,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().saveTimerDetails();
       return;
     }
+    // A general note whose body trims to empty isn't worth saving — no-op and
+    // leave the sheet open (the X closes it) so a stray tap can't create a blank.
+    if (type === 'note' && !s.te.noteText?.trim()) return;
     const te = s.te;
     const now = s.now;
     const childId = s.selectedChildId;
@@ -1365,6 +1565,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         feedType: te.feedType ?? 'breast',
         method: te.method ?? 'left',
         amount: te.amount ?? null,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'sleep') {
@@ -1375,6 +1576,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         start: teStart(te, now) as number,
         end: te.ongoing ? null : teEnd(te, now),
         nap: te.nap ?? false,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'pumping') {
@@ -1386,6 +1588,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         end: te.ongoing ? null : teEnd(te, now),
         amount: te.amount ?? null,
         method: te.method,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'tummy') {
@@ -1396,6 +1599,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         start: teStart(te, now) as number,
         end: te.ongoing ? null : teEnd(te, now),
         milestone: te.milestone,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else if (type === 'bath') {
@@ -1406,6 +1610,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
         type: 'bath',
         time: teEnd(te, now),
         wash: te.wash ?? 'small',
+        tags,
+      };
+    } else if (type === 'temperature') {
+      // temperature (point) — a decimal reading + notes
+      entry = {
+        id,
+        childId,
+        type: 'temperature',
+        time: teEnd(te, now),
+        value: te.temperature ?? 37.0,
+        notes: te.notes?.trim() || undefined,
+        tags,
+      };
+    } else if (type === 'note') {
+      // note (point) — the trimmed body is the primary content (guaranteed
+      // non-empty by the blank-note guard above)
+      entry = {
+        id,
+        childId,
+        type: 'note',
+        time: teEnd(te, now),
+        text: te.noteText?.trim() ?? '',
         tags,
       };
     } else {
@@ -1419,6 +1645,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         solid: te.solid ?? false,
         color: te.solid ? (te.color ?? null) : null,
         amount: te.solid && te.amount && te.amount > 0 ? te.amount : null,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     }
@@ -1485,7 +1712,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // and can make `start` a DERIVED value (end − duration ≈ now − 30m),
     // unrelated to the real elapsed start — persisting that would silently
     // corrupt the running timer. In that case keep tm.start (details still save).
-    const patch: Partial<Timer> = { tags: te.tags };
+    const patch: Partial<Timer> = { tags: te.tags, notes: te.notes?.trim() || undefined };
     if (te.ongoing) patch.start = teStart(te, s.now) ?? tm.start;
     if (tm.saveAs === 'feeding') {
       patch.feedType = te.feedType;
@@ -1530,7 +1757,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // clamped into [start, now]; otherwise end at now.
     const resolvedEnd = endMs != null ? Math.min(now, Math.max(tm.start, endMs)) : now;
     const savedTags = tm.tags ?? [];
-    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags };
+    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags, notes: tm.notes };
     let entry: Entry;
     if (saveAs === 'feeding') {
       const feedType = tm.feedType ?? 'breast';
