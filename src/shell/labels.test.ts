@@ -38,7 +38,7 @@ describe('screenTitleFor', () => {
   it('titles the other routes', () => {
     expect(screenTitleFor('/timers', 'Mara')).toBe('Timers');
     expect(screenTitleFor('/history', 'Mara')).toBe('History');
-    expect(screenTitleFor('/growth', 'Mara')).toBe('Growth');
+    expect(screenTitleFor('/growth', 'Mara')).toBe('Growth & Development');
     expect(screenTitleFor('/settings', 'Mara')).toBe('Settings');
   });
 

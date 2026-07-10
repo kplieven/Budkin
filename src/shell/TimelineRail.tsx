@@ -20,7 +20,7 @@ export function TimelineRail() {
   const openEdit = useAppStore((s) => s.openEdit);
 
   // Notes have their own dedicated tab — keep them out of the recent-activity rail.
-  const activityEntries = entries.filter((e) => e.type !== 'note');
+  const activityEntries = entries.filter((e) => e.type !== 'note' && e.type !== 'milestone');
   const groups = groupByDay(activityEntries, now);
 
   return (
