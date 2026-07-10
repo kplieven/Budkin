@@ -65,7 +65,7 @@ export function MilestoneRow({
           {def.title}
         </Txt>
         <Txt weight={500} size={12.5} color={t.faint} style={{ marginTop: 1 }}>
-          {reached ? reachedDateLabel(reachedAt as number) : `typ. ${def.minMonths}-${def.maxMonths} mo`}
+          {reached ? reachedDateLabel(reachedAt as number) : `typically ${def.minMonths} to ${def.maxMonths} months`}
         </Txt>
       </View>
     </Pressable>
