@@ -40,13 +40,23 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
 }) {
   const t = useTheme();
   const color = t.activity[entry.type];
-  const isPoint = entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature';
+  const isPoint =
+    entry.type === 'diaper' ||
+    entry.type === 'bath' ||
+    entry.type === 'temperature' ||
+    entry.type === 'note';
   const start =
-    entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature'
+    entry.type === 'diaper' ||
+    entry.type === 'bath' ||
+    entry.type === 'temperature' ||
+    entry.type === 'note'
       ? entry.time
       : entry.start;
   const endTs =
-    entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature'
+    entry.type === 'diaper' ||
+    entry.type === 'bath' ||
+    entry.type === 'temperature' ||
+    entry.type === 'note'
       ? null
       : entry.end;
   const ongoing = !isPoint && endTs == null;

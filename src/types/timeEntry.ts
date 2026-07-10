@@ -58,7 +58,10 @@ export interface TimeEntryState {
   wash?: 'small' | 'big';
   /** temperature (point): the numeric reading being entered (°C) */
   temperature?: number;
-  /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature — not bath) */
+  /** note (point): the note BODY being edited — the primary free-text field of a
+   *  general note. Distinct from `notes` (the secondary per-entry annotation). */
+  noteText?: string;
+  /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature — not bath/note) */
   notes?: string;
 
   tags: string[];

@@ -17,6 +17,7 @@ const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Home', icon: 'home' },
   timers: { label: 'Timers', icon: 'timer' },
   history: { label: 'History', icon: 'list' },
+  notes: { label: 'Notes', icon: 'note' },
   growth: { label: 'Growth', icon: 'chart' },
   insights: { label: 'Insights', icon: 'insights' },
 };

@@ -398,11 +398,44 @@ export function LogSheet() {
           <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
         )}
 
+        {/* note field — the PRIMARY multiline body (taller than the secondary
+            per-entry notes input, which is suppressed for a note below) */}
+        {type === 'note' && (
+          <>
+            <FieldLabel>Note</FieldLabel>
+            <TextInput
+              value={te.noteText ?? ''}
+              onChangeText={(v) => setTE({ noteText: v })}
+              placeholder="Write a note…"
+              placeholderTextColor={t.faint}
+              multiline
+              autoFocus
+              style={{
+                minHeight: 132,
+                borderRadius: 14,
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                paddingHorizontal: 14,
+                paddingTop: 12,
+                paddingBottom: 12,
+                textAlignVertical: 'top',
+                fontSize: 15.5,
+                fontFamily: fontFamily(500),
+                color: t.text,
+                marginBottom: 16,
+              }}
+            />
+          </>
+        )}
+
         {/* time entry */}
         <TimeEntry type={type} color={color} />
 
-        {/* notes (every real activity but bath, whose note body is structural) */}
-        {type !== 'bath' && (
+        {/* notes — the secondary per-entry annotation. Shown for the 5 real
+            activities; NOT for bath (structural note body) and NOT for a general
+            note (its body IS its primary text — a note doesn't annotate itself). */}
+        {type !== 'bath' && type !== 'note' && (
           <>
             <FieldLabel>Notes (optional)</FieldLabel>
             <TextInput

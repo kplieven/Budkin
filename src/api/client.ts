@@ -23,6 +23,7 @@ import type {
   MeasurementKind,
   PhotoChange,
   PickedPhoto,
+  NoteEntry,
   Profile,
   PumpingEntry,
   SleepEntry,
@@ -122,6 +123,7 @@ const ENDPOINT: Record<ActivityType, string> = {
   tummy: 'tummy-times',
   bath: 'notes',
   temperature: 'temperature',
+  note: 'notes',
 };
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
@@ -133,6 +135,15 @@ const ENDPOINT: Record<ActivityType, string> = {
 const BATH_STRUCTURAL_TAGS = ['bath', 'small', 'big'];
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
+
+/**
+ * The single discriminator between the two things that share `/api/notes/`: a
+ * bath carries the `bath` structural tag, a general note does not. Used by BOTH
+ * partition paths (baths vs notes) so the classification can never diverge.
+ */
+export function isBathNote(n: any): boolean {
+  return tagNames(n?.tags).includes('bath');
+}
 
 /** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
 export function bathToNoteBody(entry: BathEntry): Record<string, unknown> {
@@ -156,6 +167,32 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
     time: fromISO(n.time),
     wash: tags.includes('big') ? 'big' : 'small',
     tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
+  };
+}
+
+/** Reconstruct a general note from a Baby Buddy Note (one WITHOUT the `bath`
+ *  tag). The `note` field is the primary body; all tag names are kept as-is
+ *  (a general note carries no structural tags to strip). */
+export function noteToNoteEntry(n: any, childId: string): NoteEntry {
+  return {
+    id: `note-${n.id}`,
+    serverId: n.id,
+    childId,
+    type: 'note',
+    time: fromISO(n.time),
+    text: n.note ?? '',
+    tags: tagNames(n.tags),
+  };
+}
+
+/** Encode a general note as the body for a Baby Buddy Note (create/update). The
+ *  structural bath tags are stripped so a note can never be misread as a bath. */
+export function noteToNoteBody(entry: NoteEntry): Record<string, unknown> {
+  return {
+    child: entry.childId,
+    time: toISO(entry.time),
+    note: entry.text,
+    tags: entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
   };
 }
 
@@ -433,17 +470,25 @@ export class BabybuddyClient {
   }
 
   /**
-   * List baths, reconstructed from Baby Buddy Notes. Baby Buddy has no `?tags=`
-   * filter on notes, so we fetch the child's recent notes and keep only those
-   * carrying the `bath` tag (other notes — plain user notes — are ignored).
+   * Read the child's recent `/api/notes/` ONCE and partition it by the `bath`
+   * tag: bath-tagged notes become `BathEntry`s, everything else becomes general
+   * `NoteEntry`s. Baths and general notes share this one endpoint, so a single
+   * fetch feeds both — no double-fetch. `isBathNote` is the shared discriminator.
    */
-  async listNotes(childId: string, limit = 100): Promise<BathEntry[]> {
+  async listChildNotes(
+    childId: string,
+    limit = 100,
+  ): Promise<{ baths: BathEntry[]; notes: NoteEntry[] }> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
     );
-    return data.results
-      .filter((n) => tagNames(n.tags).includes('bath'))
-      .map((n) => noteToBathEntry(n, childId));
+    const baths: BathEntry[] = [];
+    const notes: NoteEntry[] = [];
+    for (const n of data.results) {
+      if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
+      else notes.push(noteToNoteEntry(n, childId));
+    }
+    return { baths, notes };
   }
 
   private buildBody(entry: Entry): Record<string, unknown> {
@@ -496,6 +541,8 @@ export class BabybuddyClient {
         return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
       case 'bath':
         return bathToNoteBody(entry);
+      case 'note':
+        return noteToNoteBody(entry);
     }
   }
 

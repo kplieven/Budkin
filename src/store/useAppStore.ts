@@ -736,6 +736,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Seed a normal baseline so the decimal input opens on a sensible value.
       te.temperature = 37.0;
     }
+    if (type === 'note') {
+      // Blank body — the multiline note input opens empty.
+      te.noteText = '';
+    }
     set({ sheet: { type }, te, editingId: null, fromTimerId: null });
   },
   openEdit: (entryId) => {
@@ -743,14 +747,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const entry = s.entries.find((e) => e.id === entryId);
     if (!entry) return;
     const now = s.now;
-    const isPoint = entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature';
+    const isPoint =
+      entry.type === 'diaper' ||
+      entry.type === 'bath' ||
+      entry.type === 'temperature' ||
+      entry.type === 'note';
     const te: TimeEntryState = {
       shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
     };
-    // Free-text notes exist on every real activity but bath (whose note body is
-    // structural) — seed it so an edit doesn't silently drop an existing note.
-    if (entry.type !== 'bath') te.notes = entry.notes;
+    // Free-text notes exist on every real activity but bath (structural note
+    // body) and note (whose body IS its primary text, not an annotation) —
+    // seed it so an edit doesn't silently drop an existing note.
+    if (entry.type !== 'bath' && entry.type !== 'note') te.notes = entry.notes;
     if (entry.type === 'diaper') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -766,6 +775,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.temperature = entry.value;
+    } else if (entry.type === 'note') {
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.noteText = entry.text;
     } else {
       if (entry.end != null) {
         te.endAbs = entry.end;
@@ -1045,6 +1058,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().saveTimerDetails();
       return;
     }
+    // A general note whose body trims to empty isn't worth saving — no-op and
+    // leave the sheet open (the X closes it) so a stray tap can't create a blank.
+    if (type === 'note' && !s.te.noteText?.trim()) return;
     const te = s.te;
     const now = s.now;
     const childId = s.selectedChildId;
@@ -1128,6 +1144,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         time: teEnd(te, now),
         value: te.temperature ?? 37.0,
         notes: te.notes?.trim() || undefined,
+        tags,
+      };
+    } else if (type === 'note') {
+      // note (point) — the trimmed body is the primary content (guaranteed
+      // non-empty by the blank-note guard above)
+      entry = {
+        id,
+        childId,
+        type: 'note',
+        time: teEnd(te, now),
+        text: te.noteText?.trim() ?? '',
         tags,
       };
     } else {

@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -127,6 +127,21 @@ export interface TemperatureEntry extends EntryBase {
   notes?: string;
 }
 
+/**
+ * A general free-text note (Baby Buddy `/api/notes/`). Point event — a single
+ * `time` whose PRIMARY content is the `text` body. Shares the `/api/notes/`
+ * endpoint with baths (which ride on a `bath` tag); a general note carries no
+ * structural tag. Kept a DISTINCT type from `BathEntry`: notes surface only in
+ * the dedicated Notes tab, never in the activity timeline. `text` is the note
+ * body — NOT the secondary per-entry `notes` annotation on other activities.
+ */
+export interface NoteEntry extends EntryBase {
+  type: 'note';
+  time: number;
+  /** the note body (Baby Buddy `note` field) */
+  text: string;
+}
+
 export type Entry =
   | FeedingEntry
   | SleepEntry
@@ -134,13 +149,14 @@ export type Entry =
   | PumpingEntry
   | TummyEntry
   | BathEntry
-  | TemperatureEntry;
+  | TemperatureEntry
+  | NoteEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
-export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature'];
+export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature', 'note'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature'
+  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'note'
     ? e.time
     : (e.end ?? e.start);
 }
