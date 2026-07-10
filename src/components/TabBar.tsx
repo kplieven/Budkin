@@ -13,13 +13,16 @@ interface TabBarProps {
   navigation: { navigate: (name: string) => void };
 }
 
+// Timers is intentionally absent: it folded into Home, so it never renders in the
+// bottom bar even though /timers still exists as a route (AppTabBar returns null
+// for any route without a meta entry).
 const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Home', icon: 'home' },
-  timers: { label: 'Timers', icon: 'timer' },
   history: { label: 'History', icon: 'list' },
-  notes: { label: 'Notes', icon: 'note' },
-  growth: { label: 'Growth', icon: 'chart' },
   insights: { label: 'Insights', icon: 'insights' },
+  growth: { label: 'Growth', icon: 'chart' },
+  milestones: { label: 'Milestones', icon: 'milestone' },
+  notes: { label: 'Notes', icon: 'note' },
 };
 
 export function AppTabBar({ state, navigation }: TabBarProps) {

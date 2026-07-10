@@ -1,48 +1,23 @@
-import { router } from 'expo-router';
-import { ScrollView, View, Pressable } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
-import { MetricCard } from '@/features/measurements/MetricCard';
-import { seriesFor } from '@/features/measurements/growthChart';
-import { MEAS_KINDS } from '@/lib/measurements';
+import { MilestonesView } from '@/features/milestones/MilestonesView';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-export default function Growth() {
+export default function Milestones() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
-  const measurements = useAppStore((s) => s.measurements);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
-  const openMeasurement = useAppStore((s) => s.openMeasurement);
 
-  const body = (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
-      {MEAS_KINDS.map((kind) => {
-        const points = seriesFor(measurements, kind);
-        return (
-          <MetricCard
-            key={kind}
-            kind={kind}
-            points={points}
-            onPress={() =>
-              points.length
-                ? router.push({ pathname: '/metric/[kind]', params: { kind } })
-                : openMeasurement(kind)
-            }
-          />
-        );
-      })}
-    </View>
-  );
-
-  if (desktop) return <DesktopPage maxWidth={640}>{body}</DesktopPage>;
+  if (desktop) return <DesktopPage maxWidth={640}><MilestonesView /></DesktopPage>;
 
   return (
     <ScrollView
@@ -51,7 +26,7 @@ export default function Growth() {
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
         <Txt weight={800} size={27} tracking={-0.6}>
-          Growth
+          Milestones
         </Txt>
         <Pressable
           onPress={openSwitcher}
@@ -62,7 +37,7 @@ export default function Growth() {
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>
       </View>
-      {body}
+      <MilestonesView />
     </ScrollView>
   );
 }

@@ -27,11 +27,15 @@ export default function TabsLayout() {
       tabBar={desktop ? () => null : (props) => <AppTabBar state={props.state} navigation={props.navigation} />}
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
-      <Tabs.Screen name="timers" options={{ title: 'Timers' }} />
       <Tabs.Screen name="history" options={{ title: 'History' }} />
-      <Tabs.Screen name="notes" options={{ title: 'Notes' }} />
-      <Tabs.Screen name="growth" options={{ title: 'Growth' }} />
       <Tabs.Screen name="insights" options={{ title: 'Insights' }} />
+      <Tabs.Screen name="growth" options={{ title: 'Growth' }} />
+      <Tabs.Screen name="milestones" options={{ title: 'Milestones' }} />
+      <Tabs.Screen name="notes" options={{ title: 'Notes' }} />
+      {/* Timers is no longer a bottom tab: it is reached from Home (the live-timer
+          card + the "Timers" link) and the widget deep link. Kept as a route here
+          (AppTabBar omits it) so /timers still resolves. */}
+      <Tabs.Screen name="timers" options={{ title: 'Timers' }} />
     </Tabs>
   );
 }
