@@ -40,7 +40,7 @@ export default function History() {
 
   // General notes live in the shared `entries` array (for queue/undo/sync reuse)
   // but have their OWN dedicated tab — exclude them from the activity timeline.
-  const activityEntries = entries.filter((e) => e.type !== 'note');
+  const activityEntries = entries.filter((e) => e.type !== 'note' && e.type !== 'milestone');
   const groups = groupByDay(activityEntries, now);
 
   const body =
