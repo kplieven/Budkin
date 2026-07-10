@@ -147,7 +147,13 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'milestone':
-    // Milestones are note-backed; reuse the note page glyph.
+      // A pennant flag on a pole: the "milestone reached" marker.
+      return (
+        <Svg {...common}>
+          <Path d="M6 3.4v17.2" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
+          <Path d="M7.4 4.6h9.9l-2.7 3.4 2.7 3.4H7.4z" fill={color} />
+        </Svg>
+      );
     case 'note':
       // A soft-filled note page with a folded corner + a few text lines.
       return (

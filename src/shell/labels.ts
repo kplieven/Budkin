@@ -24,7 +24,9 @@ export function screenTitleFor(pathname: string, childFirst?: string): string {
     case '/notes':
       return 'Notes';
     case '/growth':
-      return 'Growth & Development';
+      return 'Growth';
+    case '/milestones':
+      return 'Milestones';
     case '/settings':
       return 'Settings';
     case '/insights':

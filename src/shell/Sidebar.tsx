@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { label: 'History', icon: 'list', href: '/history', match: (p) => p.startsWith('/history') },
   { label: 'Notes', icon: 'note', href: '/notes', match: (p) => p.startsWith('/notes') },
   { label: 'Growth', icon: 'chart', href: '/growth', match: (p) => p.startsWith('/growth') },
+  { label: 'Milestones', icon: 'milestone', href: '/milestones', match: (p) => p.startsWith('/milestones') },
   { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
   { label: 'Settings', icon: 'settings', href: '/settings', match: (p) => p.startsWith('/settings') },
 ];
