@@ -3,10 +3,19 @@
  * (no server) so the app is fully explorable. Timestamps are relative to `now`.
  */
 
-import type { Child, Entry, FeedMethod, FeedType, Measurement, Timer } from '@/types/models';
+import type { Child, Entry, FeedMethod, FeedType, Measurement, Tag, Timer } from '@/types/models';
 
 const M = 60000;
 const DAY = 86400000;
+
+/**
+ * Demo-mode fallback tag list (no server to read `/api/tags/`). Keeps the old
+ * hardcoded picker defaults so the tag picker isn't empty in demo mode. No
+ * colors — demo chips render without a swatch, which is fine.
+ */
+export const DEMO_TAGS: Tag[] = ['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy'].map((name) => ({
+  name,
+}));
 
 export interface SeedData {
   children: Child[];

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,7 +15,7 @@ import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
-import { useAppStore } from '@/store/useAppStore';
+import { useAppStore, visibleTags } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { DiaperColor, FeedMethod, FeedType } from '@/types/models';
 
@@ -39,7 +39,68 @@ const COLORS: [DiaperColor, string][] = [
   ['green', SOLID_COLORS.green],
   ['yellow', SOLID_COLORS.yellow],
 ];
-const TAGS = ['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy'];
+/**
+ * Free-form tag creator: type a brand-new tag name and submit to add it as a
+ * selected tag. No server call — Baby Buddy auto-creates the tag when the entry
+ * is POSTed with the new name (createTag rejects blank / structural names). The
+ * text state clears on submit; the component unmounts with the sheet, so it
+ * re-seeds empty on every open.
+ */
+function TagCreator({ color, onCreate }: { color: string; onCreate: (name: string) => void }) {
+  const t = useTheme();
+  const [text, setText] = useState('');
+  const submit = () => {
+    if (!text.trim()) return;
+    onCreate(text);
+    setText('');
+  };
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onSubmitEditing={submit}
+        placeholder="New tag…"
+        placeholderTextColor={t.faint}
+        returnKeyType="done"
+        style={{
+          flex: 1,
+          minHeight: 44,
+          borderRadius: 12,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          paddingHorizontal: 14,
+          fontSize: 14,
+          fontFamily: fontFamily(600),
+          color: t.text,
+        }}
+      />
+      <Pressable
+        onPress={submit}
+        accessibilityRole="button"
+        accessibilityLabel="Add tag"
+        style={(s) => [
+          {
+            paddingHorizontal: 16,
+            borderRadius: 12,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: t.chip,
+            borderWidth: 1.5,
+            borderColor: t.line,
+            cursor: 'pointer',
+          },
+          isHovered(s) && { borderColor: t.line2 },
+        ]}
+      >
+        <Txt unselectable weight={700} size={14} color={color}>
+          Add
+        </Txt>
+      </Pressable>
+    </View>
+  );
+}
 
 function FieldLabel({ children, hint }: { children: string; hint?: string }) {
   const t = useTheme();
@@ -117,12 +178,21 @@ export function LogSheet() {
   const toggleSolid = useAppStore((s) => s.toggleSolid);
   const setWash = useAppStore((s) => s.setWash);
   const toggleTag = useAppStore((s) => s.toggleTag);
+  const createTag = useAppStore((s) => s.createTag);
+  const tags = useAppStore((s) => s.tags);
+  const loadTags = useAppStore((s) => s.loadTags);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
   const setEnded = useAppStore((s) => s.setEnded);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const save = useAppStore((s) => s.save);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
+
+  // Lazy-load the server tag list on first sheet open (cached in the store;
+  // subsequent opens no-op). Mirrors how Settings lazy-loads the profile.
+  useEffect(() => {
+    if (sheet) loadTags();
+  }, [sheet, loadTags]);
 
   if (!sheet) return null;
   const type = sheet.type;
@@ -463,22 +533,26 @@ export function LogSheet() {
           </>
         )}
 
-        {/* tags */}
+        {/* tags — the server list ∪ the entry's own tags, minus the structural
+            ones (bath/small/big, breastfeeding left/right). Server colors render
+            via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
         <FieldLabel>Tags</FieldLabel>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-          {TAGS.map((tag) => (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {visibleTags(tags, te.tags).map((tag) => (
             <Chip
-              key={tag}
-              label={tag}
+              key={tag.name}
+              label={tag.name}
               color={color}
-              selected={te.tags.includes(tag)}
-              onPress={() => toggleTag(tag)}
+              swatch={tag.color}
+              selected={te.tags.includes(tag.name)}
+              onPress={() => toggleTag(tag.name)}
               padH={13}
               padV={8}
               fontSize={13.5}
             />
           ))}
         </View>
+        <TagCreator color={color} onCreate={createTag} />
       </ScrollView>
 
       {/* save bar */}

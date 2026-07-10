@@ -27,6 +27,7 @@ import type {
   Profile,
   PumpingEntry,
   SleepEntry,
+  Tag,
   TemperatureEntry,
   TummyEntry,
 } from '@/types/models';
@@ -133,6 +134,16 @@ const ENDPOINT: Record<ActivityType, string> = {
 // own so other Baby Buddy clients see a meaningful entry. User tags are kept
 // distinct from these structural tags so they survive a round-trip untouched.
 const BATH_STRUCTURAL_TAGS = ['bath', 'small', 'big'];
+
+/**
+ * Tags the tag picker must never surface or let the user create: the bath
+ * structural tags (`bath`/`small`/`big`) plus the breastfeeding "both" side
+ * markers (`left`/`right`) that `save()` folds into an entry's tags. They must
+ * still round-trip untouched on entries that legitimately carry them — this set
+ * only gates the UI (display + creation), not serialization.
+ */
+export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'right']);
+
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
 
@@ -326,6 +337,17 @@ export class BabybuddyClient {
   async getProfile(): Promise<Profile> {
     const raw = await this.request<unknown>('/profile/');
     return mapProfile(raw);
+  }
+
+  /** List the server's tags for the picker. No create endpoint — Baby Buddy
+   *  auto-creates a tag when an entry is POSTed carrying a new name. */
+  async listTags(): Promise<Tag[]> {
+    const data = await this.request<Paginated<any>>('/tags/?limit=100');
+    return data.results.map((c) => ({
+      name: c.name,
+      color: c.color || undefined,
+      lastUsed: c.last_used ? fromISO(c.last_used) : undefined,
+    }));
   }
 
   async listChildren(): Promise<Child[]> {

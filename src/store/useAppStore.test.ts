@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, useAppStore } from '@/store/useAppStore';
+import { mergeQueuedEntries, useAppStore, visibleTags } from '@/store/useAppStore';
 import { isActive, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
+import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection } from '@/data/storage';
-import { loadFromServer, loadInsightsHistory, loadProfileFromServer } from '@/data/repository';
+import { loadFromServer, loadInsightsHistory, loadProfileFromServer, loadTagsFromServer } from '@/data/repository';
 import { savePrefs } from '@/data/prefs';
 import { saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
-import type { Entry, Profile, Timer } from '@/types/models';
+import type { Entry, Profile, Tag, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -28,6 +29,8 @@ const h = vi.hoisted(() => ({
   pushFails: false,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
+  tags: [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }] as unknown,
+  tagsFails: false,
   prefs: {} as Record<string, unknown>,
 }));
 
@@ -130,6 +133,10 @@ vi.mock('@/data/repository', () => ({
     if (h.profileFails) throw new Error('500');
     return h.profile;
   }),
+  loadTagsFromServer: vi.fn(async () => {
+    if (h.tagsFails) throw new Error('500');
+    return h.tags;
+  }),
 }));
 
 const NOW = 1_700_000_000_000;
@@ -153,8 +160,11 @@ beforeEach(() => {
   h.pushFails = false;
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
+  h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
+  h.tagsFails = false;
   h.prefs = {};
   vi.mocked(loadProfileFromServer).mockClear();
+  vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
   useAppStore.setState({
     connection: { demo: false, serverUrl: 'http://x', token: 't' },
@@ -183,6 +193,9 @@ beforeEach(() => {
     profileLoading: false,
     profileError: false,
     profileLoaded: false,
+    tags: [],
+    tagsLoaded: false,
+    tagsLoading: false,
     toast: null,
     savedServers: [],
   });
@@ -1751,5 +1764,134 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(s().profileLoaded).toBe(false);
     expect(s().profile).toBeNull();
     expect(s().profileError).toBe(false);
+  });
+});
+
+describe('loadTags (lazy, cached server tag list for the picker)', () => {
+  it('success: fetches, stores the tag list, and marks loaded', async () => {
+    h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
+    await s().loadTags();
+    expect(s().tags).toEqual(h.tags);
+    expect(s().tagsLoaded).toBe(true);
+    expect(s().tagsLoading).toBe(false);
+    expect(loadTagsFromServer).toHaveBeenCalledWith(s().connection);
+  });
+
+  it('laziness: a second call no-ops once loaded', async () => {
+    await s().loadTags();
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+    await s().loadTags();
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('laziness: a second call no-ops while already loading', async () => {
+    let resolve!: (v: Tag[]) => void;
+    vi.mocked(loadTagsFromServer).mockImplementationOnce(
+      () => new Promise<Tag[]>((r) => { resolve = r; }),
+    );
+    const first = s().loadTags();
+    const second = s().loadTags();
+    resolve([{ name: 'Fussy' }]);
+    await Promise.all([first, second]);
+    expect(vi.mocked(loadTagsFromServer)).toHaveBeenCalledTimes(1);
+  });
+
+  it('demo mode: seeds the fallback tag list without hitting the server', async () => {
+    useAppStore.setState({ connection: { demo: true, serverUrl: '', token: '' } });
+    await s().loadTags();
+    expect(s().tags).toEqual(DEMO_TAGS);
+    expect(s().tags.map((t) => t.name)).toEqual(['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy']);
+    expect(s().tagsLoaded).toBe(true);
+    expect(loadTagsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('no connection: no-ops without fetching', async () => {
+    useAppStore.setState({ connection: null });
+    await s().loadTags();
+    expect(s().tagsLoaded).toBe(false);
+    expect(loadTagsFromServer).not.toHaveBeenCalled();
+  });
+
+  it('error: tolerates staleness — keeps existing tags, clears loading, stays unloaded for retry', async () => {
+    useAppStore.setState({ tags: [{ name: 'Cached' }] });
+    h.tagsFails = true;
+    await expect(s().loadTags()).resolves.toBeUndefined();
+    expect(s().tags).toEqual([{ name: 'Cached' }]); // not wiped
+    expect(s().tagsLoading).toBe(false);
+    expect(s().tagsLoaded).toBe(false); // can retry on the next open
+  });
+});
+
+describe('createTag (free-form tag creation)', () => {
+  it('trims a new name and selects it onto the working entry', () => {
+    s().openSheet('feeding');
+    s().createTag('  Growth spurt  ');
+    expect(s().te.tags).toContain('Growth spurt');
+  });
+
+  it('rejects a blank / whitespace-only name', () => {
+    s().openSheet('feeding');
+    s().createTag('   ');
+    s().createTag('');
+    expect(s().te.tags).toEqual([]);
+  });
+
+  it('rejects the structural HIDDEN_TAGS so they can never be created', () => {
+    s().openSheet('feeding');
+    for (const t of ['bath', 'small', 'big', 'left', 'right']) s().createTag(t);
+    expect(s().te.tags).toEqual([]);
+  });
+
+  it('does not duplicate an already-selected tag', () => {
+    s().openSheet('feeding');
+    s().createTag('Fussy');
+    s().createTag('Fussy');
+    expect(s().te.tags.filter((t) => t === 'Fussy')).toHaveLength(1);
+  });
+
+  it('a created tag rides onto the saved entry.tags', () => {
+    s().openSheet('feeding');
+    s().createTag('Teething');
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('Teething');
+  });
+});
+
+describe('visibleTags (union of server + selected, minus structural)', () => {
+  const server: Tag[] = [
+    { name: 'Fussy', color: '#f80' },
+    { name: 'Sleepy', color: '#08f' },
+    { name: 'left' }, // a structural marker that leaked into the server list
+  ];
+
+  it('unions server tags with entry-only tags and drops HIDDEN_TAGS', () => {
+    const out = visibleTags(server, ['Cluster', 'right']);
+    expect(out.map((t) => t.name)).toEqual(['Fussy', 'Sleepy', 'Cluster']);
+    // structural 'left' (server) and 'right' (selected) never surface
+    expect(out.map((t) => t.name)).not.toContain('left');
+    expect(out.map((t) => t.name)).not.toContain('right');
+  });
+
+  it('carries the server color through and leaves entry-only tags colorless', () => {
+    const out = visibleTags(server, ['Cluster']);
+    expect(out.find((t) => t.name === 'Fussy')?.color).toBe('#f80');
+    expect(out.find((t) => t.name === 'Cluster')?.color).toBeUndefined();
+  });
+
+  it('does not duplicate a selected tag that is already a server tag', () => {
+    const out = visibleTags(server, ['Fussy']);
+    expect(out.filter((t) => t.name === 'Fussy')).toHaveLength(1);
+  });
+
+  it('a breastfeeding "both" entry folds left/right into tags, but they never show as chips', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'left' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.tags).toContain('left'); // structural side marker survives on the entry
+    const chips = visibleTags(server, e.tags).map((t) => t.name);
+    expect(chips).not.toContain('left');
+    expect(chips).not.toContain('right');
   });
 });
