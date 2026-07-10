@@ -30,7 +30,7 @@ import {
   updateMeasurementOnServer,
 } from '@/data/repository';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
-import { ApiError, childColor, HIDDEN_TAGS } from '@/api/client';
+import { ApiError, childColor, isHiddenTag } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
@@ -300,12 +300,12 @@ export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
   const seen = new Set<string>();
   const out: Tag[] = [];
   for (const tag of serverTags) {
-    if (HIDDEN_TAGS.has(tag.name) || seen.has(tag.name)) continue;
+    if (isHiddenTag(tag.name) || seen.has(tag.name)) continue;
     seen.add(tag.name);
     out.push(tag);
   }
   for (const name of selected) {
-    if (HIDDEN_TAGS.has(name) || seen.has(name)) continue;
+    if (isHiddenTag(name) || seen.has(name)) continue;
     seen.add(name);
     out.push({ name });
   }
@@ -1200,15 +1200,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       entry.type === 'diaper' ||
       entry.type === 'bath' ||
       entry.type === 'temperature' ||
-      entry.type === 'note';
+      entry.type === 'note' ||
+      entry.type === 'milestone';
     const te: TimeEntryState = {
       shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
     };
     // Free-text notes exist on every real activity but bath (structural note
-    // body) and note (whose body IS its primary text, not an annotation) —
-    // seed it so an edit doesn't silently drop an existing note.
-    if (entry.type !== 'bath' && entry.type !== 'note') te.notes = entry.notes;
+    // body), note (whose body IS its primary text), and milestone (edited via its
+    // own sheet) — seed it so an edit doesn't silently drop an existing note.
+    if (entry.type !== 'bath' && entry.type !== 'note' && entry.type !== 'milestone') te.notes = entry.notes;
     if (entry.type === 'diaper') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -1228,6 +1229,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.noteText = entry.text;
+    } else if (entry.type === 'milestone') {
+      // Milestones are edited via their own sheet, never this generic editor;
+      // this branch only keeps the point/interval narrowing total.
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
     } else {
       if (entry.end != null) {
         te.endAbs = entry.end;
@@ -1431,9 +1437,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   createTag: (name) => {
     const trimmed = name.trim();
     // Reject blanks and the structural tags (bath/small/big, breastfeeding
-    // left/right) — those must never be user-created. No server call: Baby Buddy
-    // auto-creates the tag when the entry is POSTed with the new name.
-    if (!trimmed || HIDDEN_TAGS.has(trimmed)) return;
+    // left/right, milestone/mk:*), which must never be user-created. No server
+    // call: Baby Buddy auto-creates the tag when the entry is POSTed with the name.
+    if (!trimmed || isHiddenTag(trimmed)) return;
     set((s) => (s.te.tags.includes(trimmed) ? {} : { te: { ...s.te, tags: [...s.te.tags, trimmed] } }));
   },
   // ----- interval time-entry (keep the last two of start/end/lasted) -----

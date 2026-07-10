@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note' | 'milestone';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -144,6 +144,22 @@ export interface NoteEntry extends EntryBase {
   text: string;
 }
 
+/**
+ * A reached developmental milestone (e.g. "first steps"). Baby Buddy has no
+ * milestone resource, so like a bath this is stored as a tagged Note: a
+ * `milestone` marker tag plus an `mk:<key>` tag naming which one. Point event.
+ * Surfaces only in the Growth & Development milestone checklist, never in the
+ * History timeline or the Notes tab. `key` is the catalog key; `text` is a
+ * display-title snapshot; `note` is the parent's optional free-text line.
+ */
+export interface MilestoneEntry extends EntryBase {
+  type: 'milestone';
+  key: string;
+  time: number;
+  text: string;
+  note?: string;
+}
+
 export type Entry =
   | FeedingEntry
   | SleepEntry
@@ -152,13 +168,14 @@ export type Entry =
   | TummyEntry
   | BathEntry
   | TemperatureEntry
-  | NoteEntry;
+  | NoteEntry
+  | MilestoneEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
 export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature', 'note'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'note'
+  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'note' || e.type === 'milestone'
     ? e.time
     : (e.end ?? e.start);
 }

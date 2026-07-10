@@ -21,6 +21,7 @@ import type {
   FeedingEntry,
   Measurement,
   MeasurementKind,
+  MilestoneEntry,
   PhotoChange,
   PickedPhoto,
   NoteEntry,
@@ -125,6 +126,7 @@ const ENDPOINT: Record<ActivityType, string> = {
   bath: 'notes',
   temperature: 'temperature',
   note: 'notes',
+  milestone: 'notes',
 };
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
@@ -147,6 +149,17 @@ export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'ri
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
 
+// --- milestone <-> Baby Buddy Note (tagged-note) serialization ---
+// Baby Buddy has no milestone resource, so a reached milestone is a Note tagged
+// `milestone` (marker) + `mk:<key>` (which one). Same pattern as baths.
+const isStructuralMilestoneTag = (t: string): boolean => t === 'milestone' || t.startsWith('mk:');
+
+/** True for any tag the picker must never surface or let the user create:
+ *  the bath/side structural tags plus the milestone marker and mk:<key> tags. */
+export function isHiddenTag(name: string): boolean {
+  return HIDDEN_TAGS.has(name) || isStructuralMilestoneTag(name);
+}
+
 /**
  * The single discriminator between the two things that share `/api/notes/`: a
  * bath carries the `bath` structural tag, a general note does not. Used by BOTH
@@ -158,7 +171,7 @@ export function isBathNote(n: any): boolean {
 
 /** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
 export function bathToNoteBody(entry: BathEntry): Record<string, unknown> {
-  const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t));
+  const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
   return {
     child: entry.childId,
     time: toISO(entry.time),
@@ -203,7 +216,47 @@ export function noteToNoteBody(entry: NoteEntry): Record<string, unknown> {
     child: entry.childId,
     time: toISO(entry.time),
     note: entry.text,
-    tags: entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
+    tags: entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t)),
+  };
+}
+
+/** The single discriminator: a milestone note carries the `milestone` tag. */
+export function isMilestoneNote(n: any): boolean {
+  return tagNames(n?.tags).includes('milestone');
+}
+
+/** Encode a milestone entry as the body for a Baby Buddy Note (create/update).
+ *  Body is `🎉 <title>` with the optional parent note on a second line. */
+export function milestoneToNoteBody(entry: MilestoneEntry): Record<string, unknown> {
+  const userTags = entry.tags.filter((t) => !isStructuralMilestoneTag(t));
+  const note = entry.note?.trim();
+  return {
+    child: entry.childId,
+    time: toISO(entry.time),
+    note: note ? `🎉 ${entry.text}\n${note}` : `🎉 ${entry.text}`,
+    tags: ['milestone', `mk:${entry.key}`, ...userTags],
+  };
+}
+
+/** Reconstruct a milestone entry from a Baby Buddy Note carrying the `milestone`
+ *  tag. `key` comes from the mk:<key> tag; the body's first line (emoji stripped)
+ *  is the title snapshot and any later lines are the parent note. */
+export function noteToMilestoneEntry(n: any, childId: string): MilestoneEntry {
+  const tags = tagNames(n.tags);
+  const keyTag = tags.find((t) => t.startsWith('mk:'));
+  const lines = String(n.note ?? '').split('\n');
+  const title = (lines[0] ?? '').replace(/^🎉\s*/, '').trim();
+  const rest = lines.slice(1).join('\n').trim();
+  return {
+    id: `milestone-${n.id}`,
+    serverId: n.id,
+    childId,
+    type: 'milestone',
+    key: keyTag ? keyTag.slice(3) : '',
+    time: fromISO(n.time),
+    text: title,
+    note: rest || undefined,
+    tags: tags.filter((t) => !isStructuralMilestoneTag(t)),
   };
 }
 
@@ -572,6 +625,8 @@ export class BabybuddyClient {
         return bathToNoteBody(entry);
       case 'note':
         return noteToNoteBody(entry);
+      case 'milestone':
+        return milestoneToNoteBody(entry);
     }
   }
 

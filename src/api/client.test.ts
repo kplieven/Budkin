@@ -6,13 +6,17 @@ import {
   childBody,
   HIDDEN_TAGS,
   isBathNote,
+  isHiddenTag,
+  isMilestoneNote,
   mapProfile,
+  milestoneToNoteBody,
   nativePicturePart,
   noteToBathEntry,
+  noteToMilestoneEntry,
   noteToNoteBody,
   noteToNoteEntry,
 } from '@/api/client';
-import type { BathEntry, Child, Entry, NoteEntry, PickedPhoto } from '@/types/models';
+import type { BathEntry, Child, Entry, MilestoneEntry, NoteEntry, PickedPhoto } from '@/types/models';
 
 /** Minimal Fetch `Response` stand-in for stubbing `global.fetch` around a
  *  `BabybuddyClient` instance — the client's `request()` is private, so the
@@ -580,5 +584,75 @@ describe('deleteChild', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/children/5/');
     expect(calls[0].method).toBe('DELETE');
+  });
+});
+
+describe('milestone note serialization', () => {
+  const MS: MilestoneEntry = {
+    id: 'e1',
+    childId: '5',
+    type: 'milestone',
+    key: 'first-steps',
+    time: TIME,
+    text: 'First steps',
+    note: 'took three',
+    tags: ['proud'],
+  };
+
+  it('isMilestoneNote is true only when the milestone tag is present', () => {
+    expect(isMilestoneNote({ tags: ['milestone', 'mk:first-steps'] })).toBe(true);
+    expect(isMilestoneNote({ tags: ['bath', 'small'] })).toBe(false);
+    expect(isMilestoneNote({ tags: [] })).toBe(false);
+    expect(isMilestoneNote({})).toBe(false);
+  });
+
+  it('milestoneToNoteBody writes the structural tags, keeps user tags, two-line body', () => {
+    const body = milestoneToNoteBody(MS);
+    expect(body.child).toBe('5');
+    expect(body.note).toBe('🎉 First steps\ntook three');
+    expect(body.tags).toEqual(['milestone', 'mk:first-steps', 'proud']);
+  });
+
+  it('milestoneToNoteBody omits the second line when there is no note', () => {
+    const body = milestoneToNoteBody({ ...MS, note: undefined });
+    expect(body.note).toBe('🎉 First steps');
+    expect(body.tags).toEqual(['milestone', 'mk:first-steps', 'proud']);
+  });
+
+  it('round-trips key, time, note, and user tags; drops structural tags', () => {
+    const server = { id: 42, time: '2026-03-04T18:30:00.000Z', note: '🎉 First steps\ntook three', tags: ['milestone', 'mk:first-steps', 'proud'] };
+    const back = noteToMilestoneEntry(server, '5');
+    expect(back).toEqual({
+      id: 'milestone-42',
+      serverId: 42,
+      childId: '5',
+      type: 'milestone',
+      key: 'first-steps',
+      time: TIME,
+      text: 'First steps',
+      note: 'took three',
+      tags: ['proud'],
+    });
+  });
+
+  it('recovers a milestone with no user note (single body line)', () => {
+    const server = { id: 7, time: '2026-03-04T18:30:00.000Z', note: '🎉 First word', tags: ['milestone', 'mk:first-word'] };
+    const back = noteToMilestoneEntry(server, '5');
+    expect(back.key).toBe('first-word');
+    expect(back.text).toBe('First word');
+    expect(back.note).toBeUndefined();
+    expect(back.tags).toEqual([]);
+  });
+
+  it('isHiddenTag hides structural milestone tags but not user tags', () => {
+    expect(isHiddenTag('milestone')).toBe(true);
+    expect(isHiddenTag('mk:first-steps')).toBe(true);
+    expect(isHiddenTag('bath')).toBe(true);
+    expect(isHiddenTag('proud')).toBe(false);
+  });
+
+  it('noteToNoteBody strips milestone structural tags from a general note', () => {
+    const note: NoteEntry = { id: 'n1', childId: '5', type: 'note', time: TIME, text: 'hi', tags: ['milestone', 'mk:x', 'keep'] };
+    expect((noteToNoteBody(note).tags as string[])).toEqual(['keep']);
   });
 });
