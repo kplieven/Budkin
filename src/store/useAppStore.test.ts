@@ -24,7 +24,7 @@ import {
 import { clearPendingOps } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import { fmtClock } from '@/lib/format';
-import type { Child, Entry, Measurement, Profile, Tag, Timer } from '@/types/models';
+import type { Child, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -3038,5 +3038,23 @@ describe('selectPendingCount (offline banner pending count)', () => {
       measurements: [{ id: 'm-unsynced', childId: 'c1', kind: 'weight', value: 5, date: NOW }],
     });
     expect(selectPendingCount(s())).toBe(1);
+  });
+});
+
+describe('milestone store actions', () => {
+  it('logMilestone prepends a milestone entry with the catalog title and empty user tags', () => {
+    useAppStore.setState({ selectedChildId: '5', entries: [], connection: null });
+    useAppStore.getState().logMilestone('first-steps', 1_000_000, 'took three');
+    const e = useAppStore.getState().entries[0];
+    expect(e.type).toBe('milestone');
+    expect(e).toMatchObject({ key: 'first-steps', text: 'First steps', note: 'took three', time: 1_000_000, childId: '5', tags: [] });
+  });
+
+  it('editMilestone updates date and note in place', () => {
+    const existing: MilestoneEntry = { id: 'e-x', childId: '5', type: 'milestone', key: 'first-word', time: 1, text: 'First word', note: 'a', tags: [] };
+    useAppStore.setState({ selectedChildId: '5', entries: [existing], connection: null });
+    useAppStore.getState().editMilestone('e-x', 2_000_000, undefined);
+    const e = useAppStore.getState().entries.find((x) => x.id === 'e-x');
+    expect(e).toMatchObject({ time: 2_000_000, note: undefined });
   });
 });
