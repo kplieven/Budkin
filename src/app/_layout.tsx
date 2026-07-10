@@ -89,6 +89,7 @@ function RootLayoutNav() {
       <Stack.Screen name="onboarding" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="settings" />
+      <Stack.Screen name="milestones" />
       <Stack.Screen name="metric/[kind]" />
     </Stack>
   );

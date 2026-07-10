@@ -91,14 +91,10 @@ export default function Growth() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const [segment, setSegment] = useState<Segment>('measurements');
 
-  const body = (
-    <>
-      <SegmentToggle value={segment} onChange={setSegment} />
-      {segment === 'measurements' ? <MeasurementsView /> : <MilestonesView />}
-    </>
-  );
-
-  if (desktop) return <DesktopPage maxWidth={640}>{body}</DesktopPage>;
+  // Desktop gives Milestones its own sidebar page, so Growth is measurements-only
+  // there. On phone there is no room for a 7th tab, so the two share this screen
+  // via a segment.
+  if (desktop) return <DesktopPage maxWidth={640}><MeasurementsView /></DesktopPage>;
 
   return (
     <ScrollView
@@ -118,7 +114,8 @@ export default function Growth() {
           <Avatar child={child} size={38} radius={12} fontSize={16} />
         </Pressable>
       </View>
-      {body}
+      <SegmentToggle value={segment} onChange={setSegment} />
+      {segment === 'measurements' ? <MeasurementsView /> : <MilestonesView />}
     </ScrollView>
   );
 }
