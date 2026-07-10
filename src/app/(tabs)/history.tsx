@@ -40,10 +40,13 @@ export default function History() {
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
-  const groups = groupByDay(entries, now);
+  // General notes live in the shared `entries` array (for queue/undo/sync reuse)
+  // but have their OWN dedicated tab — exclude them from the activity timeline.
+  const activityEntries = entries.filter((e) => e.type !== 'note');
+  const groups = groupByDay(activityEntries, now);
 
   const body =
-    entries.length === 0 ? (
+    activityEntries.length === 0 ? (
       <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
         <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="list" color={t.faint} size={34} />

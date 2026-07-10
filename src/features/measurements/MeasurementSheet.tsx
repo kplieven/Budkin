@@ -9,6 +9,7 @@ import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_META } from '@/lib/measurements';
+import { fmtValue, resolveMetricInput, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -34,14 +35,18 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const measurements = useAppStore((s) => s.measurements);
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
   const saveMeasurement = useAppStore((s) => s.saveMeasurement);
   const deleteMeasurement = useAppStore((s) => s.deleteMeasurement);
   const close = useAppStore((s) => s.closeMeasurementSheet);
 
   const meta = MEAS_META[kind];
+  const unit = unitLabel(kind, unitSystem);
   const editing = editingId ? measurements.find((m) => m.id === editingId) : null;
-  const [value, setValue] = useState(editing ? String(editing.value) : '');
+  // The stored value is canonical metric; show it in the user's chosen system
+  // and (in onSave) convert what they type back to metric before persisting.
+  const [value, setValue] = useState(editing ? fmtValue(kind, editing.value, unitSystem) : '');
   const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
   const [notes, setNotes] = useState(editing?.notes ?? '');
 
@@ -56,12 +61,15 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const stepDay = (delta: number) => setDateMs((d) => Math.min(today, d + delta * ONE_DAY));
 
   const onSave = () => {
-    const v = parseFloat(value.replace(',', '.'));
-    if (Number.isNaN(v)) {
+    // Persist canonical metric regardless of the display system the user typed
+    // in. An unchanged edit keeps the exact stored value (no rounded-display
+    // drift); a blank/invalid value cancels. See resolveMetricInput.
+    const metric = resolveMetricInput(kind, value, unitSystem, editing?.value);
+    if (metric == null) {
       close();
       return;
     }
-    saveMeasurement(v, dateMs, notes.trim() || undefined);
+    saveMeasurement(metric, dateMs, notes.trim() || undefined);
   };
 
   return (
@@ -97,14 +105,16 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             autoFocus={!editing}
             style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
           />
-          {meta.unit ? (
+          {unit ? (
             <Txt weight={600} size={16} color={t.dim}>
-              {meta.unit}
+              {unit}
             </Txt>
           ) : null}
         </View>
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 16 }}>
-          Unit follows your Baby Buddy server settings.
+          {kind === 'bmi'
+            ? 'BMI is unitless.'
+            : `Shown in ${unitSystem} units — change in Settings.`}
         </Txt>
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>

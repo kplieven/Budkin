@@ -16,6 +16,8 @@ export type IconName =
   | 'drop'
   | 'solid'
   | 'tummy'
+  | 'temperature'
+  | 'note'
   | 'timer'
   | 'home'
   | 'list'
@@ -132,6 +134,24 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
       return (
         <Svg {...common}>
           <Path d="M12 2 Q14.4 9.6 22 12 Q14.4 14.4 12 22 Q9.6 14.4 2 12 Q9.6 9.6 12 2 Z" fill={color} />
+        </Svg>
+      );
+    case 'temperature':
+      // A thermometer: soft-filled stem + bulb with a mercury-column detail line.
+      return (
+        <Svg {...common}>
+          <Rect x={10} y={3} width={4} height={13} rx={2} fill={color} />
+          <Circle cx={12} cy={17.5} r={4} fill={color} />
+          <Path d="M12 8.5v7" stroke={detail} strokeWidth={1.6} strokeLinecap="round" />
+        </Svg>
+      );
+    case 'note':
+      // A soft-filled note page with a folded corner + a few text lines.
+      return (
+        <Svg {...common}>
+          <Path d="M6 3h8l4 4v12.5A1.5 1.5 0 0 1 16.5 21h-10A1.5 1.5 0 0 1 5 19.5v-15A1.5 1.5 0 0 1 6 3z" fill={color} />
+          <Path d="M13.6 3.2V7.2a.8.8 0 0 0 .8.8h3.8" fill={detail} />
+          <Path d="M8 11h8M8 14h8M8 17h5" stroke={detail} strokeWidth={1.4} strokeLinecap="round" />
         </Svg>
       );
     case 'timer':

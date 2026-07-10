@@ -4,6 +4,7 @@
  */
 
 import { BabybuddyClient } from '@/api/client';
+import { DEMO_TAGS } from '@/data/seed';
 import {
   entryTimestamp,
   type ActivityType,
@@ -15,6 +16,7 @@ import {
   type MeasurementKind,
   type PhotoChange,
   type Profile,
+  type Tag,
   type Timer,
 } from '@/types/models';
 
@@ -56,15 +58,17 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
 
   let entries: Entry[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt, b] = await Promise.all([
+    const [f, s, d, p, tt, notesData, temp] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
       client.listPumping(selectedChildId).catch(() => []),
       client.listTummy(selectedChildId).catch(() => []),
-      client.listNotes(selectedChildId).catch(() => []),
+      // ONE /api/notes/ request, partitioned into baths + general notes.
+      client.listChildNotes(selectedChildId).catch(() => ({ baths: [], notes: [] })),
+      client.listTemperature(selectedChildId).catch(() => []),
     ]);
-    entries = [...f, ...s, ...d, ...p, ...tt, ...b];
+    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.notes, ...temp];
   }
 
   const lastFeeding = entries
@@ -132,6 +136,18 @@ export async function loadProfileFromServer(conn: Connection): Promise<Profile |
   return client.getProfile();
 }
 
+/**
+ * Fetch the server's tag list for the picker (lazy — called on first LogSheet
+ * open, cached in the store, staleness tolerated). Demo → the local fallback
+ * seed list so the picker isn't empty. Throws on error; the store's `loadTags`
+ * action catches it and keeps whatever tags were already cached.
+ */
+export async function loadTagsFromServer(conn: Connection): Promise<Tag[]> {
+  if (conn.mode !== 'server') return DEMO_TAGS;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.listTags();
+}
+
 /** Push a created measurement; returns its new server id (or undefined). */
 export async function pushMeasurementToServer(
   conn: Connection,
@@ -179,6 +195,14 @@ export async function updateChildOnServer(
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.updateChild(child, change);
+}
+
+/** Delete a child on the server (no-op in local mode). Baby Buddy cascades the
+ *  child's history server-side, so this single call is enough. */
+export async function deleteChildFromServer(conn: Connection, id: number): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.deleteChild(id);
 }
 
 /** Push a created entry to the server; returns its new server id (or undefined). */

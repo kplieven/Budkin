@@ -14,9 +14,15 @@ import { detailFor } from './detail';
  *  the History screen and the desktop timeline rail. */
 export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number; onPress: () => void }) {
   const t = useTheme();
-  // Duration activities show their START time; point events (diaper, bath) show
-  // their single time.
-  const ts = entry.type === 'diaper' || entry.type === 'bath' ? entry.time : entry.start;
+  // Duration activities show their START time; point events (diaper, bath,
+  // temperature, note) show their single time.
+  const ts =
+    entry.type === 'diaper' ||
+    entry.type === 'bath' ||
+    entry.type === 'temperature' ||
+    entry.type === 'note'
+      ? entry.time
+      : entry.start;
   const color = t.activity[entry.type];
   return (
     <Pressable

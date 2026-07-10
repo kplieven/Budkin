@@ -29,6 +29,10 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   pumping: 'pumping',
   tummy: 'tummy',
   bath: 'bath',
+  temperature: 'temperature',
+  // Notes are never in ALL_ACTIVITIES, so this tile never renders — present only
+  // to satisfy the Record<ActivityType, …> completeness check.
+  note: 'note',
 };
 
 /**
@@ -88,6 +92,9 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     pumping: 'Tap to log',
     tummy: 'Tap to log',
     bath: washHint,
+    temperature: 'Tap to log',
+    // never rendered (notes aren't on the Home grid) — completeness only
+    note: 'Tap to log',
   };
 
   const status = [

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,9 +14,10 @@ import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
 import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { fmtValue, toMetric, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
-import { useAppStore } from '@/store/useAppStore';
+import { useAppStore, visibleTags } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { DiaperColor, FeedMethod, FeedType } from '@/types/models';
 
@@ -39,7 +41,68 @@ const COLORS: [DiaperColor, string][] = [
   ['green', SOLID_COLORS.green],
   ['yellow', SOLID_COLORS.yellow],
 ];
-const TAGS = ['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy'];
+/**
+ * Free-form tag creator: type a brand-new tag name and submit to add it as a
+ * selected tag. No server call — Baby Buddy auto-creates the tag when the entry
+ * is POSTed with the new name (createTag rejects blank / structural names). The
+ * text state clears on submit; the component unmounts with the sheet, so it
+ * re-seeds empty on every open.
+ */
+function TagCreator({ color, onCreate }: { color: string; onCreate: (name: string) => void }) {
+  const t = useTheme();
+  const [text, setText] = useState('');
+  const submit = () => {
+    if (!text.trim()) return;
+    onCreate(text);
+    setText('');
+  };
+  return (
+    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onSubmitEditing={submit}
+        placeholder="New tag…"
+        placeholderTextColor={t.faint}
+        returnKeyType="done"
+        style={{
+          flex: 1,
+          minHeight: 44,
+          borderRadius: 12,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          paddingHorizontal: 14,
+          fontSize: 14,
+          fontFamily: fontFamily(600),
+          color: t.text,
+        }}
+      />
+      <Pressable
+        onPress={submit}
+        accessibilityRole="button"
+        accessibilityLabel="Add tag"
+        style={(s) => [
+          {
+            paddingHorizontal: 16,
+            borderRadius: 12,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: t.chip,
+            borderWidth: 1.5,
+            borderColor: t.line,
+            cursor: 'pointer',
+          },
+          isHovered(s) && { borderColor: t.line2 },
+        ]}
+      >
+        <Txt unselectable weight={700} size={14} color={color}>
+          Add
+        </Txt>
+      </Pressable>
+    </View>
+  );
+}
 
 function FieldLabel({ children, hint }: { children: string; hint?: string }) {
   const t = useTheme();
@@ -57,6 +120,56 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
   );
 }
 
+/**
+ * Decimal temperature reading. The Stepper is integer-only and AmountScale is
+ * 1–10, so neither fits 37.4 — this is a free decimal TextInput (styled like
+ * MeasurementSheet's value input). Local text state holds the raw string so a
+ * trailing "." while typing "37." isn't dropped. The stored value (`te.temperature`)
+ * is always canonical °C: the field shows it in the user's units lens and
+ * converts the typed value back to °C before pushing it to the store. The block
+ * is conditionally rendered, so it remounts (re-seeding from the store) on every
+ * temperature sheet open.
+ */
+function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
+  const t = useTheme();
+  const unitSystem = useAppStore((s) => s.unitSystem);
+  const [text, setText] = useState(value != null ? fmtValue('temperature', value, unitSystem) : '');
+  return (
+    <>
+      <FieldLabel>Temperature</FieldLabel>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          borderRadius: 16,
+          paddingHorizontal: 16,
+          marginBottom: 16,
+        }}
+      >
+        <TextInput
+          value={text}
+          onChangeText={(v) => {
+            setText(v);
+            const n = parseFloat(v.replace(',', '.'));
+            onChange(Number.isNaN(n) ? undefined : toMetric('temperature', n, unitSystem));
+          }}
+          placeholder={unitSystem === 'imperial' ? '98.6' : '37.0'}
+          placeholderTextColor={t.faint}
+          keyboardType="decimal-pad"
+          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+        />
+        <Txt weight={600} size={16} color={t.dim}>
+          {unitLabel('temperature', unitSystem)}
+        </Txt>
+      </View>
+    </>
+  );
+}
+
 export function LogSheet() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -70,12 +183,21 @@ export function LogSheet() {
   const toggleSolid = useAppStore((s) => s.toggleSolid);
   const setWash = useAppStore((s) => s.setWash);
   const toggleTag = useAppStore((s) => s.toggleTag);
+  const createTag = useAppStore((s) => s.createTag);
+  const tags = useAppStore((s) => s.tags);
+  const loadTags = useAppStore((s) => s.loadTags);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
   const setEnded = useAppStore((s) => s.setEnded);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const save = useAppStore((s) => s.save);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
+
+  // Lazy-load the server tag list on first sheet open (cached in the store;
+  // subsequent opens no-op). Mirrors how Settings lazy-loads the profile.
+  useEffect(() => {
+    if (sheet) loadTags();
+  }, [sheet, loadTags]);
 
   if (!sheet) return null;
   const type = sheet.type;
@@ -350,25 +472,96 @@ export function LogSheet() {
           </>
         )}
 
+        {/* temperature field — a decimal reading with a °C unit */}
+        {type === 'temperature' && (
+          <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
+        )}
+
+        {/* note field — the PRIMARY multiline body (taller than the secondary
+            per-entry notes input, which is suppressed for a note below) */}
+        {type === 'note' && (
+          <>
+            <FieldLabel>Note</FieldLabel>
+            <TextInput
+              value={te.noteText ?? ''}
+              onChangeText={(v) => setTE({ noteText: v })}
+              placeholder="Write a note…"
+              placeholderTextColor={t.faint}
+              multiline
+              autoFocus
+              style={{
+                minHeight: 132,
+                borderRadius: 14,
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                paddingHorizontal: 14,
+                paddingTop: 12,
+                paddingBottom: 12,
+                textAlignVertical: 'top',
+                fontSize: 15.5,
+                fontFamily: fontFamily(500),
+                color: t.text,
+                marginBottom: 16,
+              }}
+            />
+          </>
+        )}
+
         {/* time entry */}
         <TimeEntry type={type} color={color} />
 
-        {/* tags */}
+        {/* notes — the secondary per-entry annotation. Shown for the 5 real
+            activities; NOT for bath (structural note body) and NOT for a general
+            note (its body IS its primary text — a note doesn't annotate itself). */}
+        {type !== 'bath' && type !== 'note' && (
+          <>
+            <FieldLabel>Notes (optional)</FieldLabel>
+            <TextInput
+              value={te.notes ?? ''}
+              onChangeText={(v) => setTE({ notes: v })}
+              placeholder="Anything worth remembering…"
+              placeholderTextColor={t.faint}
+              multiline
+              style={{
+                minHeight: 72,
+                borderRadius: 14,
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                paddingHorizontal: 14,
+                paddingTop: 12,
+                paddingBottom: 12,
+                textAlignVertical: 'top',
+                fontSize: 14.5,
+                fontFamily: fontFamily(500),
+                color: t.text,
+                marginBottom: 16,
+              }}
+            />
+          </>
+        )}
+
+        {/* tags — the server list ∪ the entry's own tags, minus the structural
+            ones (bath/small/big, breastfeeding left/right). Server colors render
+            via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
         <FieldLabel>Tags</FieldLabel>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
-          {TAGS.map((tag) => (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {visibleTags(tags, te.tags).map((tag) => (
             <Chip
-              key={tag}
-              label={tag}
+              key={tag.name}
+              label={tag.name}
               color={color}
-              selected={te.tags.includes(tag)}
-              onPress={() => toggleTag(tag)}
+              swatch={tag.color}
+              selected={te.tags.includes(tag.name)}
+              onPress={() => toggleTag(tag.name)}
               padH={13}
               padV={8}
               fontSize={13.5}
             />
           ))}
         </View>
+        <TagCreator color={color} onCreate={createTag} />
       </ScrollView>
 
       {/* save bar */}
