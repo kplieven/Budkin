@@ -77,3 +77,25 @@ export function fmtValue(kind: UnitKind, metricValue: number, system: UnitSystem
   if (system === 'metric' || kind === 'bmi') return String(v);
   return String(Math.round(v * 10) / 10);
 }
+
+/**
+ * Resolve the canonical-metric value to persist from a sheet's text input.
+ * Returns null for non-numeric input (the caller should cancel the save).
+ *
+ * When editing an existing value whose text is UNCHANGED from its display
+ * (`fmtValue(original)`), the original metric value is returned untouched —
+ * otherwise re-deriving it from the 1-decimal display would nudge the stored
+ * canonical value on a no-op edit (e.g. 5.2 kg → shown "11.5" lb → 5.216 kg).
+ * A genuinely edited value is converted back to metric.
+ */
+export function resolveMetricInput(
+  kind: UnitKind,
+  text: string,
+  system: UnitSystem,
+  original?: number,
+): number | null {
+  const v = parseFloat(text.replace(',', '.'));
+  if (Number.isNaN(v)) return null;
+  if (original != null && text.trim() === fmtValue(kind, original, system)) return original;
+  return toMetric(kind, v, system);
+}
