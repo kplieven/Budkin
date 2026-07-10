@@ -50,5 +50,9 @@ export function detailFor(e: Entry): string {
         .join(' · ');
     case 'bath':
       return e.wash === 'big' ? 'Big wash' : 'Small wash';
+    case 'temperature': {
+      const base = `${e.value} °C`;
+      return e.notes ? `${base} · ${e.notes}` : base;
+    }
   }
 }

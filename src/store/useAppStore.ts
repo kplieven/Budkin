@@ -732,6 +732,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Pre-select the wash that's due from the small/big rhythm.
       te.wash = nextWashKind(get().entries);
     }
+    if (type === 'temperature') {
+      // Seed a normal baseline so the decimal input opens on a sensible value.
+      te.temperature = 37.0;
+    }
     set({ sheet: { type }, te, editingId: null, fromTimerId: null });
   },
   openEdit: (entryId) => {
@@ -739,7 +743,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const entry = s.entries.find((e) => e.id === entryId);
     if (!entry) return;
     const now = s.now;
-    const isPoint = entry.type === 'diaper' || entry.type === 'bath';
+    const isPoint = entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature';
     const te: TimeEntryState = {
       shape: isPoint ? 'point' : 'interval',
       tags: entry.tags ?? [],
@@ -758,6 +762,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.wash = entry.wash;
+    } else if (entry.type === 'temperature') {
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.temperature = entry.value;
     } else {
       if (entry.end != null) {
         te.endAbs = entry.end;
@@ -1109,6 +1117,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         type: 'bath',
         time: teEnd(te, now),
         wash: te.wash ?? 'small',
+        tags,
+      };
+    } else if (type === 'temperature') {
+      // temperature (point) — a decimal reading + notes
+      entry = {
+        id,
+        childId,
+        type: 'temperature',
+        time: teEnd(te, now),
+        value: te.temperature ?? 37.0,
+        notes: te.notes?.trim() || undefined,
         tags,
       };
     } else {

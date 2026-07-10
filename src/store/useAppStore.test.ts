@@ -260,6 +260,53 @@ describe('bath tracking', () => {
   });
 });
 
+describe('temperature tracking', () => {
+  it('openSheet: point shape, seeds a default reading', () => {
+    s().openSheet('temperature');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.temperature).toBe(37.0);
+  });
+
+  it('save builds a point temperature entry (value + trimmed notes) and pushes it', async () => {
+    s().openSheet('temperature');
+    s().setTE({ temperature: 38.2, notes: '  slight fever  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'temperature' }>;
+    expect(e.type).toBe('temperature');
+    expect(e.time).toBe(NOW);
+    expect(e.value).toBe(38.2);
+    expect(e.notes).toBe('slight fever');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'temperature' }>).type).toBe('temperature');
+  });
+
+  it('save falls back to the default reading when none was entered', () => {
+    s().openSheet('temperature');
+    s().setTE({ temperature: undefined });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'temperature' }>;
+    expect(e.value).toBe(37.0);
+  });
+
+  it('openEdit prefills value + notes and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'temperature-1', serverId: 5, childId: 'c1', type: 'temperature', time: NOW - 20 * M, value: 37.8, notes: 'after nap', tags: [] },
+      ],
+    });
+    s().openEdit('temperature-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.temperature).toBe(37.8);
+    expect(s().te.notes).toBe('after nap');
+    expect(s().te.agoMin).toBe(20);
+  });
+});
+
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
     s().openSheet('feeding');

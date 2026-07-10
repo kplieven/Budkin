@@ -40,9 +40,15 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
 }) {
   const t = useTheme();
   const color = t.activity[entry.type];
-  const isPoint = entry.type === 'diaper' || entry.type === 'bath';
-  const start = entry.type === 'diaper' || entry.type === 'bath' ? entry.time : entry.start;
-  const endTs = entry.type === 'diaper' || entry.type === 'bath' ? null : entry.end;
+  const isPoint = entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature';
+  const start =
+    entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature'
+      ? entry.time
+      : entry.start;
+  const endTs =
+    entry.type === 'diaper' || entry.type === 'bath' || entry.type === 'temperature'
+      ? null
+      : entry.end;
   const ongoing = !isPoint && endTs == null;
 
   const durMin = isPoint ? 0 : ((endTs ?? now) - start) / 60000;

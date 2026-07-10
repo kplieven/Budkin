@@ -29,6 +29,7 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   pumping: 'pumping',
   tummy: 'tummy',
   bath: 'bath',
+  temperature: 'temperature',
 };
 
 /**
@@ -88,6 +89,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     pumping: 'Tap to log',
     tummy: 'Tap to log',
     bath: washHint,
+    temperature: 'Tap to log',
   };
 
   const status = [

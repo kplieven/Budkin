@@ -248,3 +248,70 @@ describe('per-entry notes', () => {
     expect(back.notes).toBe('spit up a lot');
   });
 });
+
+// Temperature is a POINT event on Baby Buddy's /api/temperature/ resource:
+// a decimal reading + a single `time` + notes + tags. These exercise buildBody
+// (via createEntry/updateEntry) and the listTemperature mapper.
+describe('temperature serialization', () => {
+  const ISO = '2026-03-04T18:30:00.000Z';
+
+  function stubFetch(response: unknown) {
+    const calls: { url: string; body: any }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const raw = init?.body;
+      calls.push({ url, body: typeof raw === 'string' ? JSON.parse(raw) : raw });
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const client = () => new BabybuddyClient('https://x', 't');
+
+  it('buildBody sends child/time/temperature/notes/tags to the temperature endpoint on create', async () => {
+    const calls = stubFetch({ id: 1 });
+    const entry: Entry = { id: 'tp1', childId: 'c1', type: 'temperature', time: TIME, value: 37.4, notes: 'warm', tags: ['Fussy'] };
+    await client().createEntry(entry);
+    expect(calls[0].url).toContain('/temperature/');
+    expect(calls[0].body).toEqual({ child: 'c1', time: ISO, temperature: 37.4, notes: 'warm', tags: ['Fussy'] });
+  });
+
+  it('buildBody sends an empty-string notes to clear on a temperature update', async () => {
+    const calls = stubFetch({});
+    const entry: Entry = { id: 'tp2', serverId: 9, childId: 'c1', type: 'temperature', time: TIME, value: 36.8, tags: [] };
+    await client().updateEntry(entry);
+    expect(calls[0].body.notes).toBe('');
+    expect(calls[0].body.temperature).toBe(36.8);
+  });
+
+  it('listTemperature maps id/serverId/time/value/notes/tags', async () => {
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 12, time: ISO, temperature: '37.60', notes: 'slight fever', tags: ['Fussy'] }] });
+    const [e] = await client().listTemperature('c1');
+    expect(e).toEqual({
+      id: 'temperature-12',
+      serverId: 12,
+      childId: 'c1',
+      type: 'temperature',
+      time: TIME,
+      value: 37.6,
+      notes: 'slight fever',
+      tags: ['Fussy'],
+    });
+  });
+
+  it('listTemperature drops an empty notes to undefined and reads object-shaped tags', async () => {
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 13, time: ISO, temperature: '37.0', notes: '', tags: [{ name: 'Sleepy' }] }] });
+    const [e] = await client().listTemperature('c1');
+    expect(e.notes).toBeUndefined();
+    expect(e.tags).toEqual(['Sleepy']);
+  });
+
+  it('round-trips a reading through buildBody -> server echo -> list mapper', async () => {
+    const entry: Entry = { id: 'tp3', childId: 'c1', type: 'temperature', time: TIME, value: 38.1, notes: 'evening', tags: [] };
+    const create = stubFetch({ id: 77 });
+    await client().createEntry(entry);
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 77, ...create[0].body }] });
+    const back = (await client().listTemperature('c1'))[0];
+    expect(back).toMatchObject({ type: 'temperature', time: TIME, value: 38.1, notes: 'evening', serverId: 77 });
+  });
+});
