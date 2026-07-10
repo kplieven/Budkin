@@ -62,6 +62,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { fmtClock } from '@/lib/format';
+import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import type { UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
@@ -73,6 +74,7 @@ import type {
   FeedType,
   Measurement,
   MeasurementKind,
+  MilestoneEntry,
   PhotoChange,
   Profile,
   Tag,
@@ -216,6 +218,10 @@ interface AppActions {
   deleteEntry: (id: string) => void;
   /** Restore the entry removed by the most recent deleteEntry (undo). */
   undoDelete: () => void;
+  /** Record a reached milestone as a tagged note (create). */
+  logMilestone: (key: string, dateMs: number, note?: string) => void;
+  /** Edit a reached milestone's date/note. Remove reuses deleteEntry(id). */
+  editMilestone: (id: string, dateMs: number, note?: string) => void;
 
   openMeasurement: (kind: MeasurementKind) => void;
   openEditMeasurement: (id: string) => void;
@@ -1348,6 +1354,38 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ toast: null, toastAction: null });
     if (toastTimer) clearTimeout(toastTimer);
+  },
+  logMilestone: (key, dateMs, note) => {
+    const s = get();
+    const childId = s.selectedChildId;
+    if (!childId) return;
+    const entry: MilestoneEntry = {
+      id: 'e' + Date.now(),
+      childId,
+      type: 'milestone',
+      key,
+      time: dateMs,
+      text: MILESTONE_BY_KEY[key]?.title ?? key,
+      note: note?.trim() || undefined,
+      tags: [],
+    };
+    set({ entries: [entry, ...s.entries] });
+    get().commitWrite(entry);
+    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
+    get().showToast(queued ? 'Milestone saved · queued offline' : 'Milestone reached');
+  },
+  editMilestone: (id, dateMs, note) => {
+    const s = get();
+    const existing = s.entries.find((e) => e.id === id);
+    if (!existing || existing.type !== 'milestone') return;
+    const entry: MilestoneEntry = { ...existing, time: dateMs, note: note?.trim() || undefined };
+    set({ entries: s.entries.map((e) => (e.id === id ? entry : e)) });
+    get().showToast('Updated');
+    if (s.connection && s.connection.mode === 'server' && !s.offline) {
+      void updateEntryOnServer(s.connection, entry).catch(() => {});
+    } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
+      void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
+    }
   },
   openMeasurement: (kind) => set({ measurementSheet: { kind }, editingMeasurementId: null }),
   openEditMeasurement: (id) => {
