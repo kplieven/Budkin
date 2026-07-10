@@ -45,16 +45,17 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
 
   let entries: Entry[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt, b, temp] = await Promise.all([
+    const [f, s, d, p, tt, notesData, temp] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
       client.listPumping(selectedChildId).catch(() => []),
       client.listTummy(selectedChildId).catch(() => []),
-      client.listNotes(selectedChildId).catch(() => []),
+      // ONE /api/notes/ request, partitioned into baths + general notes.
+      client.listChildNotes(selectedChildId).catch(() => ({ baths: [], notes: [] })),
       client.listTemperature(selectedChildId).catch(() => []),
     ]);
-    entries = [...f, ...s, ...d, ...p, ...tt, ...b, ...temp];
+    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.notes, ...temp];
   }
 
   const lastFeeding = entries

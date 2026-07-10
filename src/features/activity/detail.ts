@@ -54,5 +54,7 @@ export function detailFor(e: Entry): string {
       const base = `${e.value} °C`;
       return e.notes ? `${base} · ${e.notes}` : base;
     }
+    case 'note':
+      return e.text;
   }
 }

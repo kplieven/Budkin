@@ -44,6 +44,9 @@ export function makeSeed(now: number): SeedData {
       // A normal reading yesterday and a slightly warm one a few hours ago.
       { id: 'e12', childId: c1, type: 'temperature', time: now - 26 * 60 * M, value: 36.9, tags: [] },
       { id: 'e13', childId: c1, type: 'temperature', time: now - 5 * 60 * M, value: 37.8, notes: 'a little warm after her nap', tags: [] },
+      // General notes (plain — NO bath tag) live in the dedicated Notes tab.
+      { id: 'e14', childId: c1, type: 'note', time: now - 9 * 60 * M, text: 'Pediatrician follow-up booked for next Tuesday at 10am.', tags: [] },
+      { id: 'e15', childId: c1, type: 'note', time: now - 30 * 60 * M, text: 'First real giggle today when we played peekaboo — melted us.', tags: ['Milestone'] },
     ],
     measurements: [
       { id: 'm1', childId: c1, kind: 'weight', value: 5.2, date: now - 2 * DAY },

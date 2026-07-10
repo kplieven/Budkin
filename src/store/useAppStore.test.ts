@@ -307,6 +307,80 @@ describe('temperature tracking', () => {
   });
 });
 
+describe('general notes', () => {
+  it('openSheet: point shape, empty note body', () => {
+    s().openSheet('note');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.noteText).toBe('');
+  });
+
+  it('save builds a point note entry (trimmed body) and pushes it', async () => {
+    s().openSheet('note');
+    s().setTE({ noteText: '  remember the follow-up  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'note' }>;
+    expect(e.type).toBe('note');
+    expect(e.time).toBe(NOW);
+    expect(e.text).toBe('remember the follow-up');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'note' }>).type).toBe('note');
+  });
+
+  it('refuses to save a blank note (whitespace only): no entry, sheet stays open', async () => {
+    s().openSheet('note');
+    s().setTE({ noteText: '   ' });
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().sheet).not.toBeNull(); // still open — nothing created
+    await flush();
+    expect(h.pushed).toHaveLength(0);
+  });
+
+  it('openEdit prefills the note body + tags and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'note-1', serverId: 5, childId: 'c1', type: 'note', time: NOW - 20 * M, text: 'first giggle', tags: ['Milestone'] },
+      ],
+    });
+    s().openEdit('note-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.noteText).toBe('first giggle');
+    expect(s().te.tags).toEqual(['Milestone']);
+    expect(s().te.agoMin).toBe(20);
+    // a note has no secondary per-entry `notes` annotation
+    expect(s().te.notes).toBeUndefined();
+  });
+
+  it('a note lives in the shared entries array, so delete/undo work like any entry', () => {
+    useAppStore.setState({
+      entries: [{ id: 'note-2', serverId: 7, childId: 'c1', type: 'note', time: NOW, text: 'x', tags: [] }],
+    });
+    s().deleteEntry('note-2');
+    expect(s().entries).toHaveLength(0);
+    s().undoDelete();
+    expect(s().entries[0].id).toBe('note-2');
+  });
+
+  it('notes are excluded from the activity timeline while activities are kept', () => {
+    // The History/rail views group `entries.filter(e => e.type !== 'note')`.
+    useAppStore.setState({
+      entries: [
+        { id: 'note-3', childId: 'c1', type: 'note', time: NOW, text: 'note body', tags: [] },
+        { id: 'diaper-1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] },
+      ],
+    });
+    const activityEntries = s().entries.filter((e) => e.type !== 'note');
+    expect(activityEntries.map((e) => e.type)).toEqual(['diaper']);
+    const noteEntries = s().entries.filter((e) => e.type === 'note');
+    expect(noteEntries.map((e) => e.id)).toEqual(['note-3']);
+  });
+});
+
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
     s().openSheet('feeding');

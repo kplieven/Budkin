@@ -19,7 +19,9 @@ export function TimelineRail() {
   const now = useAppStore((s) => s.now);
   const openEdit = useAppStore((s) => s.openEdit);
 
-  const groups = groupByDay(entries, now);
+  // Notes have their own dedicated tab — keep them out of the recent-activity rail.
+  const activityEntries = entries.filter((e) => e.type !== 'note');
+  const groups = groupByDay(activityEntries, now);
 
   return (
     <View
@@ -55,7 +57,7 @@ export function TimelineRail() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-        {entries.length === 0 ? (
+        {activityEntries.length === 0 ? (
           <Txt weight={500} size={13.5} color={t.faint} style={{ paddingTop: 8, lineHeight: 20 }}>
             Logged activity shows up here.
           </Txt>

@@ -1,7 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BabybuddyClient, bathToNoteBody, childBody, mapProfile, nativePicturePart, noteToBathEntry } from '@/api/client';
-import type { BathEntry, Child, Entry, PickedPhoto } from '@/types/models';
+import {
+  BabybuddyClient,
+  bathToNoteBody,
+  childBody,
+  isBathNote,
+  mapProfile,
+  nativePicturePart,
+  noteToBathEntry,
+  noteToNoteBody,
+  noteToNoteEntry,
+} from '@/api/client';
+import type { BathEntry, Child, Entry, NoteEntry, PickedPhoto } from '@/types/models';
 
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
 
@@ -313,5 +323,107 @@ describe('temperature serialization', () => {
     stubFetch({ count: 1, next: null, previous: null, results: [{ id: 77, ...create[0].body }] });
     const back = (await client().listTemperature('c1'))[0];
     expect(back).toMatchObject({ type: 'temperature', time: TIME, value: 38.1, notes: 'evening', serverId: 77 });
+  });
+});
+
+// General notes ride on the SAME `/api/notes/` endpoint as baths, discriminated
+// only by the `bath` tag. These exercise the single-fetch partition
+// (listChildNotes), the note body builder (strips structural tags), and the
+// note<->entry mappers.
+describe('general notes transport (shared /api/notes/ endpoint with baths)', () => {
+  const ISO = '2026-03-04T18:30:00.000Z';
+
+  function stubFetch(response: unknown) {
+    const calls: { url: string; body: any }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const raw = init?.body;
+      calls.push({ url, body: typeof raw === 'string' ? JSON.parse(raw) : raw });
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const client = () => new BabybuddyClient('https://x', 't');
+
+  it('isBathNote discriminates purely on the bath tag (string- or object-shaped)', () => {
+    expect(isBathNote({ tags: ['bath', 'small'] })).toBe(true);
+    expect(isBathNote({ tags: [{ name: 'bath' }] })).toBe(true);
+    expect(isBathNote({ tags: ['Milestone'] })).toBe(false);
+    expect(isBathNote({ tags: [] })).toBe(false);
+    expect(isBathNote({})).toBe(false);
+  });
+
+  it('listChildNotes reads /notes/ ONCE and partitions baths vs general notes', async () => {
+    const calls = stubFetch({
+      count: 3,
+      next: null,
+      previous: null,
+      results: [
+        { id: 1, time: ISO, note: 'Bath — small wash', tags: ['bath', 'small'] },
+        { id: 2, time: ISO, note: 'Doctor follow-up Tuesday', tags: ['Milestone'] },
+        { id: 3, time: ISO, note: 'First giggle today', tags: [] },
+      ],
+    });
+    const { baths, notes } = await client().listChildNotes('c1');
+    expect(calls).toHaveLength(1); // single fetch — no double-read of /notes/
+    expect(calls[0].url).toContain('/notes/');
+    expect(baths).toHaveLength(1);
+    expect(baths[0]).toMatchObject({ type: 'bath', wash: 'small', serverId: 1 });
+    expect(notes).toHaveLength(2);
+    expect(notes[0]).toEqual({
+      id: 'note-2',
+      serverId: 2,
+      childId: 'c1',
+      type: 'note',
+      time: TIME,
+      text: 'Doctor follow-up Tuesday',
+      tags: ['Milestone'],
+    });
+    expect(notes[1].text).toBe('First giggle today');
+  });
+
+  it('noteToNoteEntry maps the note body + all tag names, defaulting a missing body to empty', () => {
+    expect(noteToNoteEntry({ id: 9, time: ISO, note: 'hi', tags: [{ name: 'A' }, 'B'] }, 'c1')).toEqual({
+      id: 'note-9',
+      serverId: 9,
+      childId: 'c1',
+      type: 'note',
+      time: TIME,
+      text: 'hi',
+      tags: ['A', 'B'],
+    });
+    expect(noteToNoteEntry({ id: 10, time: ISO, tags: [] }, 'c1').text).toBe('');
+  });
+
+  it('noteToNoteBody strips structural bath tags so a note can never be misread as a bath', () => {
+    const entry: NoteEntry = { id: 'n1', childId: 'c1', type: 'note', time: TIME, text: 'watch her temp', tags: ['bath', 'small', 'big', 'Fussy'] };
+    expect(noteToNoteBody(entry)).toEqual({ child: 'c1', time: ISO, note: 'watch her temp', tags: ['Fussy'] });
+  });
+
+  it('buildBody sends a note to /notes/ with its body, stripping structural tags', async () => {
+    const calls = stubFetch({ id: 1 });
+    const entry: Entry = { id: 'n2', childId: 'c1', type: 'note', time: TIME, text: 'call pediatrician', tags: ['bath', 'Milestone'] };
+    await client().createEntry(entry);
+    expect(calls[0].url).toContain('/notes/');
+    expect(calls[0].body).toEqual({ child: 'c1', time: ISO, note: 'call pediatrician', tags: ['Milestone'] });
+  });
+
+  it('a bath still serializes as a bath on the shared endpoint (regression)', async () => {
+    const calls = stubFetch({ id: 1 });
+    const bath: BathEntry = { id: 'b9', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: [] };
+    await client().createEntry(bath);
+    expect(calls[0].url).toContain('/notes/');
+    expect(calls[0].body.tags).toEqual(['bath', 'big']);
+  });
+
+  it('round-trips a note through create -> server echo -> listChildNotes (lands in notes, not baths)', async () => {
+    const entry: Entry = { id: 'n3', childId: 'c1', type: 'note', time: TIME, text: 'evening fuss', tags: ['Fussy'] };
+    const create = stubFetch({ id: 55 });
+    await client().createEntry(entry);
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 55, ...create[0].body }] });
+    const { baths, notes } = await client().listChildNotes('c1');
+    expect(baths).toHaveLength(0);
+    expect(notes[0]).toMatchObject({ type: 'note', time: TIME, text: 'evening fuss', tags: ['Fussy'], serverId: 55 });
   });
 });
