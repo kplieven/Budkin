@@ -1195,6 +1195,36 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(e.tags).toContain('left');
   });
 
+  it('carries a note typed while editing a running timer through saveTimerDetails → reopen → stopTimer', () => {
+    useAppStore.setState({ timers: [feedingTimer('t1')] });
+    s().openTimerEdit('t1');
+    s().setTE({ notes: '  spit up a little  ' });
+    s().saveTimerDetails();
+    // persisted on the still-running timer (trimmed), not lost
+    expect(s().timers[0].notes).toBe('spit up a little');
+    // reopening the editor shows it again
+    s().openTimerEdit('t1');
+    expect(s().te.notes).toBe('spit up a little');
+    // and it survives the final stop into the entry
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
+    expect(e.notes).toBe('spit up a little');
+  });
+
+  it('carries a note through a sleep timer stop (buildSleepEntry path)', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    s().setTE({ notes: 'down easy' });
+    s().saveTimerDetails();
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.type).toBe('sleep');
+    expect(e.notes).toBe('down easy');
+  });
+
   it('a timer with no saved metadata still stops with the existing default behavior (regression guard)', () => {
     useAppStore.setState({ timers: [feedingTimer('t2')] });
     s().stopTimer('t2');
