@@ -786,6 +786,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ profileLoading: true, profileError: false });
     try {
       const profile = await loadProfileFromServer(conn);
+      // If the session changed while /api/profile/ was in flight (switch server,
+      // disconnect, session-expiry), drop this stale result rather than
+      // repopulating another account's profile. Mirrors the loadTags guard.
+      if (get().connection !== conn) return;
       set({ profile, profileLoaded: true, profileLoading: false });
     } catch (e) {
       // /api/profile/ can 500 on some instances (e.g. a user without a Settings
