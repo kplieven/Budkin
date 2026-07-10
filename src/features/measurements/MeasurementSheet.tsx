@@ -9,7 +9,7 @@ import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_META } from '@/lib/measurements';
-import { fmtValue, toMetric, unitLabel } from '@/lib/units';
+import { fmtValue, resolveMetricInput, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -61,13 +61,15 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const stepDay = (delta: number) => setDateMs((d) => Math.min(today, d + delta * ONE_DAY));
 
   const onSave = () => {
-    const v = parseFloat(value.replace(',', '.'));
-    if (Number.isNaN(v)) {
+    // Persist canonical metric regardless of the display system the user typed
+    // in. An unchanged edit keeps the exact stored value (no rounded-display
+    // drift); a blank/invalid value cancels. See resolveMetricInput.
+    const metric = resolveMetricInput(kind, value, unitSystem, editing?.value);
+    if (metric == null) {
       close();
       return;
     }
-    // Persist canonical metric regardless of the display system the user typed in.
-    saveMeasurement(toMetric(kind, v, unitSystem), dateMs, notes.trim() || undefined);
+    saveMeasurement(metric, dateMs, notes.trim() || undefined);
   };
 
   return (

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { fmtValue, toDisplay, toMetric, unitLabel, type UnitKind, type UnitSystem } from '@/lib/units';
+import { fmtValue, resolveMetricInput, toDisplay, toMetric, unitLabel, type UnitKind, type UnitSystem } from '@/lib/units';
 
 describe('unitLabel', () => {
   it('metric labels', () => {
@@ -108,6 +108,34 @@ describe('fmtValue', () => {
   it('leaves BMI untouched in both systems (dimensionless)', () => {
     expect(fmtValue('bmi', 15.4, 'metric')).toBe('15.4');
     expect(fmtValue('bmi', 15.4, 'imperial')).toBe('15.4');
+  });
+});
+
+describe('resolveMetricInput (no rounded-display drift on a no-op edit)', () => {
+  it('keeps the exact original metric value when an imperial edit is unchanged', () => {
+    // 5.2 kg shows as "11.5" lb; re-saving without changing it must stay 5.2,
+    // not toMetric("11.5") = 5.21631.
+    expect(resolveMetricInput('weight', '11.5', 'imperial', 5.2)).toBe(5.2);
+    expect(resolveMetricInput('height', '22.8', 'imperial', 58)).toBe(58);
+    expect(resolveMetricInput('temperature', '99', 'imperial', 37.2)).toBe(37.2);
+  });
+
+  it('converts a genuinely changed imperial value back to metric', () => {
+    expect(resolveMetricInput('weight', '12', 'imperial', 5.2)).toBeCloseTo(12 / 2.2046226, 6);
+  });
+
+  it('converts for a new entry (no original) and passes metric through', () => {
+    expect(resolveMetricInput('weight', '10', 'imperial')).toBeCloseTo(10 / 2.2046226, 6);
+    expect(resolveMetricInput('weight', '6', 'metric', 5.2)).toBe(6);
+  });
+
+  it('tolerates surrounding whitespace on an unchanged edit', () => {
+    expect(resolveMetricInput('weight', '  11.5  ', 'imperial', 5.2)).toBe(5.2);
+  });
+
+  it('returns null for blank / non-numeric input', () => {
+    expect(resolveMetricInput('weight', '', 'imperial', 5.2)).toBeNull();
+    expect(resolveMetricInput('weight', 'abc', 'metric')).toBeNull();
   });
 });
 
