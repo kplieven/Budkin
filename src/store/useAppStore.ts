@@ -822,6 +822,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.nap = tm.nap ?? (hr >= 7 && hr < 19);
     }
     if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
+    if (tm.notes != null) te.notes = tm.notes;
     set({ sheet: { type }, te, editingId: null, fromTimerId: timerId });
   },
   closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
@@ -1184,7 +1185,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // and can make `start` a DERIVED value (end − duration ≈ now − 30m),
     // unrelated to the real elapsed start — persisting that would silently
     // corrupt the running timer. In that case keep tm.start (details still save).
-    const patch: Partial<Timer> = { tags: te.tags };
+    const patch: Partial<Timer> = { tags: te.tags, notes: te.notes?.trim() || undefined };
     if (te.ongoing) patch.start = teStart(te, s.now) ?? tm.start;
     if (tm.saveAs === 'feeding') {
       patch.feedType = te.feedType;
@@ -1229,7 +1230,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // clamped into [start, now]; otherwise end at now.
     const resolvedEnd = endMs != null ? Math.min(now, Math.max(tm.start, endMs)) : now;
     const savedTags = tm.tags ?? [];
-    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags };
+    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags, notes: tm.notes };
     let entry: Entry;
     if (saveAs === 'feeding') {
       const feedType = tm.feedType ?? 'breast';

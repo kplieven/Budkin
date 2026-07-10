@@ -33,5 +33,6 @@ export function buildSleepEntry(timer: Timer, now: number, childId: string): Sle
     start: timer.start,
     end: now,
     nap: timer.nap ?? (hr >= 7 && hr < 19),
+    notes: timer.notes,
   };
 }

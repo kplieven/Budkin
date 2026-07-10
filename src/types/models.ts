@@ -146,6 +146,7 @@ export interface Timer {
   amount?: number;
   nap?: boolean;
   milestone?: string;
+  notes?: string;
   tags?: string[];
 }
 
