@@ -276,6 +276,7 @@ beforeEach(() => {
     fromTimerId: null,
     measurementSheet: null,
     editingMeasurementId: null,
+    milestoneSheet: null,
     showChildSwitcher: false,
     childSheet: false,
     editingChildId: null,
@@ -1102,6 +1103,32 @@ describe('measurements', () => {
     await flush();
     expect(h.measDeleted).toHaveLength(0); // no direct server call while offline
     expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }]);
+  });
+});
+
+describe('milestone sheet', () => {
+  it('openMilestone opens the sheet in log mode for a catalog key', () => {
+    s().openMilestone('lifts-head');
+    expect(s().milestoneSheet).toEqual({ mode: 'log', key: 'lifts-head' });
+  });
+
+  it('openEditMilestone opens the sheet in edit mode for a logged milestone entry', () => {
+    useAppStore.setState({
+      entries: [{ id: 'm1', childId: 'c1', type: 'milestone', key: 'lifts-head', time: NOW, text: 'Lifts head', tags: [] }],
+    });
+    s().openEditMilestone('m1');
+    expect(s().milestoneSheet).toEqual({ mode: 'edit', id: 'm1' });
+  });
+
+  it('openEditMilestone ignores a missing or non-milestone entry', () => {
+    s().openEditMilestone('nope');
+    expect(s().milestoneSheet).toBeNull();
+  });
+
+  it('closeMilestoneSheet clears the sheet', () => {
+    s().openMilestone('lifts-head');
+    s().closeMilestoneSheet();
+    expect(s().milestoneSheet).toBeNull();
   });
 });
 

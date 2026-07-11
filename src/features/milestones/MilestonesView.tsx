@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { View } from 'react-native';
 
 import { Txt } from '@/components/Txt';
@@ -7,10 +6,8 @@ import { MILESTONES, aroundNow, groupByCategory, reachedByKey } from '@/lib/mile
 import type { MilestoneDef } from '@/lib/milestones';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-import type { MilestoneEntry } from '@/types/models';
 
 import { MilestoneRow } from './MilestoneRow';
-import { MilestoneSheet, type MilestoneTarget } from './MilestoneSheet';
 
 function SectionLabel({ text }: { text: string }) {
   const t = useTheme();
@@ -27,10 +24,8 @@ export function MilestonesView() {
   const entries = useAppStore((s) => s.entries);
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
-
-  const [target, setTarget] = useState<MilestoneTarget | null>(null);
-  const onLog = (def: MilestoneDef) => setTarget({ mode: 'log', def });
-  const onEdit = (entry: MilestoneEntry) => setTarget({ mode: 'edit', entry });
+  const openMilestone = useAppStore((s) => s.openMilestone);
+  const openEditMilestone = useAppStore((s) => s.openEditMilestone);
 
   const reached = reachedByKey(entries);
   const months = child ? ageMonths(child.birth, now) : null;
@@ -57,33 +52,30 @@ export function MilestonesView() {
         key={def.key}
         def={def}
         reachedAt={hit ? hit.time : null}
-        onPress={() => (hit ? onEdit(hit) : onLog(def))}
+        onPress={() => (hit ? openEditMilestone(hit.id) : openMilestone(def.key))}
       />
     );
   };
 
   return (
-    <>
-      <View style={{ gap: 18 }}>
-        <Txt weight={600} size={14} color={t.dim} style={{ marginHorizontal: 4 }}>
-          {reached.size} of {MILESTONES.length} reached
-        </Txt>
+    <View style={{ gap: 18 }}>
+      <Txt weight={600} size={14} color={t.dim} style={{ marginHorizontal: 4 }}>
+        {reached.size} of {MILESTONES.length} reached
+      </Txt>
 
-        {upcoming.length > 0 ? (
-          <View>
-            <SectionLabel text="Around now" />
-            <View style={{ gap: 9 }}>{upcoming.map(renderRow)}</View>
-          </View>
-        ) : null}
+      {upcoming.length > 0 ? (
+        <View>
+          <SectionLabel text="Around now" />
+          <View style={{ gap: 9 }}>{upcoming.map(renderRow)}</View>
+        </View>
+      ) : null}
 
-        {groups.map((g) => (
-          <View key={g.category}>
-            <SectionLabel text={g.category} />
-            <View style={{ gap: 9 }}>{g.items.map(renderRow)}</View>
-          </View>
-        ))}
-      </View>
-      {target ? <MilestoneSheet target={target} onClose={() => setTarget(null)} /> : null}
-    </>
+      {groups.map((g) => (
+        <View key={g.category}>
+          <SectionLabel text={g.category} />
+          <View style={{ gap: 9 }}>{g.items.map(renderRow)}</View>
+        </View>
+      ))}
+    </View>
   );
 }

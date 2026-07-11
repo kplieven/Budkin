@@ -14,6 +14,7 @@ import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { AdoptSheet } from '@/features/connect/AdoptSheet';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
+import { MilestoneSheet } from '@/features/milestones/MilestoneSheet';
 import { DesktopShell } from '@/shell/DesktopShell';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -106,6 +107,7 @@ function RootLayoutNav() {
             <AdoptSheet />
             <LogSheet />
             <MeasurementSheet />
+            <MilestoneSheet />
             <Toast />
           </View>
           <StatusBar style={t.dark ? 'light' : 'dark'} />
