@@ -12,13 +12,16 @@ import { TrendChart } from './TrendChart';
 
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-export function TrendCard({ label, color, unit, value, delta, good, caption, norm, birth, points, yTicks, fmtY, width, todaySoFar = false }: {
+export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNote, caption, norm, birth, points, yTicks, fmtY, width, todaySoFar = false }: {
   label: string; color: string; unit: string; value: string;
-  delta?: string; good?: boolean; caption?: string; todaySoFar?: boolean;
+  delta?: string; deltaGood?: boolean; deltaNote?: string; caption?: string; todaySoFar?: boolean;
   norm: Norm; birth: number; points: TrendPoint[];
   yTicks: number[]; fmtY: (v: number) => string; width: number;
 }) {
   const t = useTheme();
+  // Delta pill color is sign-driven: green when the trend improved, red when it
+  // regressed. The theme has no danger/negative token, so fall back to a warm red.
+  const deltaColor = deltaGood ? '#3E9E6E' : '#C7583F';
   const [info, setInfo] = useState(false);
   const band = bandForRange(norm, birth, points);
   const ruleOfThumb = norm.kind === 'ruleOfThumb';
@@ -43,15 +46,16 @@ export function TrendCard({ label, color, unit, value, delta, good, caption, nor
           </Pressable>
         ) : null}
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginTop: 8, marginBottom: 6 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 6 }}>
         <Txt weight={800} size={24} tracking={-0.4}>{value}</Txt>
         {unit ? <Txt weight={600} size={13} color={t.dim}>{unit}</Txt> : null}
         {todaySoFar ? <Txt weight={500} size={12.5} color={t.faint}>today so far</Txt> : null}
         {delta ? (
-          <View style={{ backgroundColor: good ? hexA('#3E9E6E', 0.14) : t.chip, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 }}>
-            <Txt weight={700} size={11.5} color={good ? '#3E9E6E' : t.faint}>{delta}</Txt>
+          <View style={{ backgroundColor: hexA(deltaColor, 0.14), borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 }}>
+            <Txt weight={700} size={11.5} color={deltaColor}>{delta}</Txt>
           </View>
         ) : null}
+        {delta && deltaNote ? <Txt weight={500} size={12.5} color={t.faint}>{deltaNote}</Txt> : null}
       </View>
       <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} calendarBands dashGaps />
 

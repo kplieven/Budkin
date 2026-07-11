@@ -85,8 +85,13 @@ export default function Insights() {
   const error = useAppStore((s) => s.insightsError);
   const daysWithSleep = heatRows.filter((r) => r.segments.length > 0).length;
   const enoughForChart = (pts: unknown[]) => pts.length >= 3;
-  // delta for longest stretch: last minus first in range, when there's a span
+  // delta for longest stretch: last minus first in range, when there's a span.
+  // Shown for both gains and losses (>= 0.5h), sign-colored, and labeled with
+  // what it compares against so it reads honestly ("vs 2 wks ago", etc.).
   const stretchDelta = longest.length >= 2 ? longest[longest.length - 1].value - longest[0].value : 0;
+  const stretchDeltaShown = Math.abs(stretchDelta) >= 0.5;
+  const stretchDeltaText = stretchDelta > 0 ? `+${stretchDelta.toFixed(1)}h` : `${stretchDelta.toFixed(1)}h`;
+  const stretchNote = rangeDays === 14 ? 'vs 2 wks ago' : rangeDays === 90 ? 'vs 3 mo ago' : 'vs 1 mo ago';
   const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
     enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
@@ -141,7 +146,8 @@ export default function Insights() {
         <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
           caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
           yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width} todaySoFar={isToday(longest)}
-          delta={stretchDelta >= 0.5 ? `+${stretchDelta.toFixed(1)}h` : undefined} good />
+          delta={stretchDeltaShown ? stretchDeltaText : undefined} deltaGood={stretchDelta > 0}
+          deltaNote={stretchDeltaShown ? stretchNote : undefined} />
       ))}
       {gated(wake, 'wake window', (
         <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
