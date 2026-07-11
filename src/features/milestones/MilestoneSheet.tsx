@@ -11,6 +11,7 @@ import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import type { MilestoneDef } from '@/lib/milestones';
 import type { MilestoneEntry } from '@/types/models';
 
@@ -24,7 +25,33 @@ function midnight(offsetDays: number): number {
 
 export type MilestoneTarget = { mode: 'log'; def: MilestoneDef } | { mode: 'edit'; entry: MilestoneEntry };
 
-export function MilestoneSheet({ target, onClose }: { target: MilestoneTarget; onClose: () => void }) {
+/**
+ * Rendered once at the app root (like LogSheet/MeasurementSheet) so its overlay
+ * anchors to the viewport, not the milestones page. Reads the open descriptor
+ * from the store and resolves it to a concrete target: a catalog def to log, or
+ * an existing entry to edit. Keyed so switching targets re-seeds the editor.
+ */
+export function MilestoneSheet() {
+  const sheet = useAppStore((s) => s.milestoneSheet);
+  const entries = useAppStore((s) => s.entries);
+  const close = useAppStore((s) => s.closeMilestoneSheet);
+
+  if (!sheet) return null;
+  let target: MilestoneTarget | null = null;
+  if (sheet.mode === 'log') {
+    const def = MILESTONE_BY_KEY[sheet.key];
+    if (def) target = { mode: 'log', def };
+  } else {
+    const entry = entries.find((e) => e.id === sheet.id);
+    if (entry && entry.type === 'milestone') target = { mode: 'edit', entry };
+  }
+  if (!target) return null;
+
+  const seedKey = sheet.mode === 'log' ? `log-${sheet.key}` : `edit-${sheet.id}`;
+  return <Inner key={seedKey} target={target} onClose={close} />;
+}
+
+function Inner({ target, onClose }: { target: MilestoneTarget; onClose: () => void }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const color = t.activity.note;

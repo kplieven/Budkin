@@ -124,6 +124,10 @@ interface AppState {
   fromTimerId: string | null;
   measurementSheet: { kind: MeasurementKind } | null;
   editingMeasurementId: string | null;
+  /** Which milestone sheet is open (rendered at the app root like the other
+   *  sheets, so its overlay anchors to the viewport, not the page). `log` names
+   *  a catalog key to mark reached; `edit` names an existing milestone entry. */
+  milestoneSheet: { mode: 'log'; key: string } | { mode: 'edit'; id: string } | null;
 
   // data
   selectedChildId: string;
@@ -222,6 +226,11 @@ interface AppActions {
   logMilestone: (key: string, dateMs: number, note?: string) => void;
   /** Edit a reached milestone's date/note. Remove reuses deleteEntry(id). */
   editMilestone: (id: string, dateMs: number, note?: string) => void;
+  /** Open the milestone sheet to mark a catalog milestone reached. */
+  openMilestone: (key: string) => void;
+  /** Open the milestone sheet to edit an already-reached milestone entry. */
+  openEditMilestone: (id: string) => void;
+  closeMilestoneSheet: () => void;
 
   openMeasurement: (kind: MeasurementKind) => void;
   openEditMeasurement: (id: string) => void;
@@ -391,6 +400,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   fromTimerId: null,
   measurementSheet: null,
   editingMeasurementId: null,
+  milestoneSheet: null,
 
   selectedChildId: '',
   children: [],
@@ -1387,6 +1397,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
     }
   },
+  openMilestone: (key) => set({ milestoneSheet: { mode: 'log', key } }),
+  openEditMilestone: (id) => {
+    const e = get().entries.find((x) => x.id === id);
+    if (!e || e.type !== 'milestone') return;
+    set({ milestoneSheet: { mode: 'edit', id } });
+  },
+  closeMilestoneSheet: () => set({ milestoneSheet: null }),
   openMeasurement: (kind) => set({ measurementSheet: { kind }, editingMeasurementId: null }),
   openEditMeasurement: (id) => {
     const m = get().measurements.find((x) => x.id === id);
