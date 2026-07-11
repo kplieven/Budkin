@@ -133,7 +133,7 @@ export default function Settings() {
           </Txt>
           <Toggle on={themeMode === 'dark'} />
         </Pressable>
-        <View style={[row, { borderBottomWidth: 1, borderBottomColor: t.line }]}>
+        <View style={[row, { borderBottomWidth: __DEV__ ? 1 : 0, borderBottomColor: t.line }]}>
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Units
           </Txt>
@@ -152,18 +152,20 @@ export default function Settings() {
             ))}
           </View>
         </View>
-        <Pressable
-          onPress={toggleOffline}
-          accessibilityRole="switch"
-          accessibilityLabel="Simulate offline"
-          accessibilityState={{ checked: simulateOffline }}
-          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
-        >
-          <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
-            Simulate offline
-          </Txt>
-          <Toggle on={simulateOffline} />
-        </Pressable>
+        {__DEV__ && (
+          <Pressable
+            onPress={toggleOffline}
+            accessibilityRole="switch"
+            accessibilityLabel="Simulate offline"
+            accessibilityState={{ checked: simulateOffline }}
+            style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+          >
+            <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
+              Simulate offline
+            </Txt>
+            <Toggle on={simulateOffline} />
+          </Pressable>
+        )}
       </View>
 
       {showProfileGroup && (
