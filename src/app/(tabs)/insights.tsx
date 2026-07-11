@@ -63,6 +63,9 @@ export default function Insights() {
   // timezones).
   const nowH = useAppStore((s) => Math.floor(s.now / 3600000) * 3600000);
   const entries = useAppStore((s) => s.insightsEntries);
+  // Start of a currently-running sleep timer (epoch ms), else null. Drives the
+  // live breathing bar on the heatmap's Today row.
+  const runningSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'sleep')?.start ?? null);
   const [width, setWidth] = useState(0);
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28), [entries, nowH]);
 
@@ -129,7 +132,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks, midnight in the middle</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.

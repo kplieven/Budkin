@@ -1,5 +1,6 @@
-import { Fragment } from 'react';
+import { Fragment, useEffect } from 'react';
 import { View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import { hexA } from '@/lib/color';
@@ -10,8 +11,16 @@ import { DAY, noonWindowStart, type HeatRow } from './compute';
 const HOUR_TICKS: [string, number][] = [['12:00', 0], ['18:00', 6], ['00:00', 12], ['06:00', 18], ['12:00', 24]];
 const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
 
-export function SleepHeatmap({ rows, width, now }: { rows: HeatRow[]; width: number; now: number }) {
+export function SleepHeatmap({ rows, width, now, runningSince }: { rows: HeatRow[]; width: number; now: number; runningSince?: number | null }) {
   const t = useTheme();
+  // Breathing pulse for the live "asleep now" bar. Declared before the early
+  // return below so the hook order stays stable across renders (matches
+  // PulsingDot's 1 ↔ 0.45 / 800ms loop). Only the bar's RENDER is conditional.
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(withTiming(0.45, { duration: 800 }), -1, true);
+  }, [pulse]);
+  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;
@@ -27,6 +36,16 @@ export function SleepHeatmap({ rows, width, now }: { rows: HeatRow[]; width: num
   // of the Today row hasn't happened yet, so it's dimmed as "yet to come".
   const todayFrac = Math.min(1, Math.max(0, (now - noonWindowStart(now)) / DAY));
   const future = hexA('#000000', t.dark ? 0.32 : 0.08);
+
+  // Live in-progress sleep: a distinct-accent bar on the Today row spanning the
+  // running timer's start up to now. A pre-noon start clamps to the row's left
+  // edge so it never spills onto the previous row. Length grows in the hourly
+  // steps of `now`; the breathing opacity supplies the "live" feel.
+  const win = noonWindowStart(now);
+  const todayIdx = rows.findIndex((r) => r.offsetFromToday === 0);
+  const liveX0 = Math.min(1, Math.max(0, (Math.max(win, runningSince ?? win) - win) / DAY));
+  const liveX1 = todayFrac;
+  const showLive = runningSince != null && runningSince < now && todayIdx >= 0 && liveX1 > liveX0;
 
   return (
     <View>
@@ -60,6 +79,22 @@ export function SleepHeatmap({ rows, width, now }: { rows: HeatRow[]; width: num
           </SvgText>
         ))}
       </Svg>
+      {showLive ? (
+        <Animated.View
+          style={[
+            {
+              position: 'absolute',
+              left: gx + liveX0 * gw,
+              top: top + todayIdx * pitch,
+              width: (liveX1 - liveX0) * gw,
+              height: rowH,
+              borderRadius: 1.6,
+              backgroundColor: t.primary,
+            },
+            pulseStyle,
+          ]}
+        />
+      ) : null}
     </View>
   );
 }
