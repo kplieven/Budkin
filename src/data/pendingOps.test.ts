@@ -80,4 +80,14 @@ describe('pendingOps persistence', () => {
     await savePendingOps(ops);
     expect(await loadPendingOps()).toEqual(ops);
   });
+
+  it('round-trips timer update and delete ops', async () => {
+    const timer = { id: 't1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: 0, serverId: 5 } as const;
+    await addPendingOp({ op: 'update', entity: 'timer', payload: timer });
+    await addPendingOp({ op: 'delete', entity: 'timer', serverId: 9 });
+    expect(await loadPendingOps()).toEqual([
+      { op: 'update', entity: 'timer', payload: timer },
+      { op: 'delete', entity: 'timer', serverId: 9 },
+    ]);
+  });
 });
