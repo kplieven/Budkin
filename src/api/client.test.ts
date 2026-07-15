@@ -699,3 +699,77 @@ describe('listChildNotes three-way partition', () => {
     expect(baths).toHaveLength(0);
   });
 });
+
+describe('timers', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('lists timers, converting start to ms', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 4, child: 2, name: 'Sleep · v1 · nap', start: '2026-07-16T10:00:00Z' }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://bb.test', 'tok');
+
+    const timers = await client.listTimers();
+
+    expect(timers).toEqual([
+      { id: 4, child: 2, name: 'Sleep · v1 · nap', start: Date.parse('2026-07-16T10:00:00Z') },
+    ]);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://bb.test/api/timers/?limit=100');
+  });
+
+  it('coerces a missing child/name defensively', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 5, start: '2026-07-16T10:00:00Z' }] }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://bb.test', 'tok');
+    const [t] = await client.listTimers();
+    expect(t).toMatchObject({ id: 5, child: null, name: '' });
+  });
+
+  it('creates a timer with child, ISO start, and name', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 11 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://bb.test', 'tok');
+
+    const id = await client.createTimer(2, Date.parse('2026-07-16T10:00:00Z'), 'Feeding · v1');
+
+    expect(id).toBe(11);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://bb.test/api/timers/');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({ child: 2, start: '2026-07-16T10:00:00.000Z', name: 'Feeding · v1' });
+  });
+
+  it('PATCHes name + start on update', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}, 200));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://bb.test', 'tok');
+
+    await client.updateTimer(11, 'Sleep · v1 · nap', Date.parse('2026-07-16T10:00:00Z'));
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://bb.test/api/timers/11/');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body)).toEqual({ name: 'Sleep · v1 · nap', start: '2026-07-16T10:00:00.000Z' });
+  });
+
+  it('deletes a timer', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(undefined, 204));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://bb.test', 'tok');
+
+    await client.deleteTimer(11);
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://bb.test/api/timers/11/');
+    expect(init.method).toBe('DELETE');
+  });
+});

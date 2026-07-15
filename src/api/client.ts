@@ -50,6 +50,14 @@ interface Paginated<T> {
   results: T[];
 }
 
+/** A running timer as returned by `/api/timers/` (start converted to epoch ms). */
+export interface ServerTimer {
+  id: number;
+  child: number | null;
+  name: string;
+  start: number;
+}
+
 const toISO = (ms: number) => new Date(ms).toISOString();
 const fromISO = (s: string) => new Date(s).getTime();
 
@@ -696,5 +704,40 @@ export class BabybuddyClient {
 
   async deleteMeasurement(kind: MeasurementKind, serverId: number): Promise<void> {
     await this.request(`/${MEAS_ENDPOINT[kind]}/${serverId}/`, { method: 'DELETE' });
+  }
+
+  // ---- running timers (/api/timers/) ----
+
+  /** List the connected user's running timers. */
+  async listTimers(limit = 100): Promise<ServerTimer[]> {
+    const data = await this.request<Paginated<any>>(`/timers/?limit=${limit}`);
+    return data.results.map((t) => ({
+      id: t.id,
+      child: t.child ?? null,
+      name: t.name ?? '',
+      start: fromISO(t.start),
+    }));
+  }
+
+  /** Create a timer for a child; returns its new server id. */
+  async createTimer(childServerId: number, startMs: number, name: string): Promise<number | undefined> {
+    const res = await this.request<{ id?: number }>('/timers/', {
+      method: 'POST',
+      body: JSON.stringify({ child: childServerId, start: toISO(startMs), name }),
+    });
+    return res?.id;
+  }
+
+  /** Update a timer's encoded name and start. */
+  async updateTimer(id: number, name: string, startMs: number): Promise<void> {
+    await this.request(`/timers/${id}/`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name, start: toISO(startMs) }),
+    });
+  }
+
+  /** Delete a timer on the server. */
+  async deleteTimer(id: number): Promise<void> {
+    await this.request(`/timers/${id}/`, { method: 'DELETE' });
   }
 }
