@@ -182,6 +182,10 @@ export function entryTimestamp(e: Entry): number {
 
 export interface Timer {
   id: string;
+  /** server numeric id; present once the timer is mirrored to a server */
+  serverId?: number;
+  /** local child id this timer belongs to (defaults to the selected child) */
+  childId?: string;
   /** the activity this timer was started as */
   activity: ActivityType;
   name: string;
