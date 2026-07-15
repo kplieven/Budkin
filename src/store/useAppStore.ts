@@ -1721,6 +1721,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         name: ACTIVITY_LABEL[type],
         start: teStart(te, now) as number,
         saveAs: type,
+        childId,
       };
       set({
         timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
@@ -1804,6 +1805,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       name: ACTIVITY_LABEL.feeding,
       start: Date.now(),
       saveAs: 'feeding',
+      childId: s.selectedChildId,
     };
     set({ timers: [...s.timers, timer] });
     get().showToast('Timer started');
@@ -1818,7 +1820,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // clamped into [start, now]; otherwise end at now.
     const resolvedEnd = endMs != null ? Math.min(now, Math.max(tm.start, endMs)) : now;
     const savedTags = tm.tags ?? [];
-    const base = { id: 'e' + now, childId: s.selectedChildId, tags: savedTags, notes: tm.notes };
+    const childId = tm.childId ?? s.selectedChildId;
+    const base = { id: 'e' + now, childId, tags: savedTags, notes: tm.notes };
     let entry: Entry;
     if (saveAs === 'feeding') {
       const feedType = tm.feedType ?? 'breast';
@@ -1834,7 +1837,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {
-      entry = buildSleepEntry(tm, resolvedEnd, s.selectedChildId);
+      entry = buildSleepEntry(tm, resolvedEnd, childId);
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);

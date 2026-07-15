@@ -645,6 +645,29 @@ describe('stopTimer', () => {
   });
 });
 
+describe('timer childId attribution', () => {
+  it('stamps childId on a quick-started timer and commits the stop to that child', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [
+        { id: 'c1', first: 'A', last: '', birth: 0, color: '#fff' },
+        { id: 'c2', first: 'B', last: '', birth: 0, color: '#fff' },
+      ],
+      selectedChildId: 'c1',
+      timers: [],
+      entries: [],
+    });
+    s().startQuickTimer();
+    const timer = s().timers[0];
+    expect(timer.childId).toBe('c1');
+
+    // switch child, then stop: the entry must go to the timer's child
+    useAppStore.setState({ selectedChildId: 'c2' });
+    s().stopTimer(timer.id);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+});
+
 describe('timer persistence across restarts', () => {
   const savedTimer = (id: string): Timer => ({ id, activity: 'sleep', name: 'Sleep', start: NOW - 5 * M, saveAs: 'sleep' });
 
