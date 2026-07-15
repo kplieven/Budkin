@@ -42,6 +42,9 @@ const h = vi.hoisted(() => ({
   childDeleted: [] as unknown[],
   childPushChange: [] as unknown[],
   childUpdateChange: [] as unknown[],
+  timerPushed: [] as unknown[],
+  timerUpdated: [] as unknown[],
+  timerDeleted: [] as unknown[],
   pendingOps: [] as unknown[],
   adoptTarget: null as string | null,
   pushFails: false,
@@ -162,6 +165,16 @@ vi.mock('@/data/repository', () => ({
   deleteChildFromServer: vi.fn(async (_c: unknown, id: unknown) => {
     h.childDeleted.push(id);
   }),
+  pushTimerToServer: vi.fn(async (_c: unknown, timer: unknown, childServerId: unknown) => {
+    h.timerPushed.push({ timer, childServerId });
+    return 555;
+  }),
+  updateTimerOnServer: vi.fn(async (_c: unknown, timer: unknown) => {
+    h.timerUpdated.push(timer);
+  }),
+  deleteTimerFromServer: vi.fn(async (_c: unknown, serverId: unknown) => {
+    h.timerDeleted.push(serverId);
+  }),
   loadInsightsHistory: vi.fn(async () => []),
   loadProfileFromServer: vi.fn(async () => {
     if (h.profileFails) throw new Error('500');
@@ -239,6 +252,9 @@ beforeEach(() => {
   h.childDeleted = [];
   h.childPushChange = [];
   h.childUpdateChange = [];
+  h.timerPushed = [];
+  h.timerUpdated = [];
+  h.timerDeleted = [];
   h.pendingOps = [];
   h.adoptTarget = null;
   h.pushFails = false;
@@ -665,6 +681,116 @@ describe('timer childId attribution', () => {
     useAppStore.setState({ selectedChildId: 'c2' });
     s().stopTimer(timer.id);
     expect(s().entries[0].childId).toBe('c1');
+  });
+});
+
+describe('timer server sync', () => {
+  const server = { mode: 'server', serverUrl: 'http://x', token: 't' } as const;
+  const syncedChild = { id: 'c1', serverId: 2, first: 'A', last: '', birth: 0, color: '#fff' };
+  const localChild = { id: 'c1', first: 'A', last: '', birth: 0, color: '#fff' };
+  const syncedTimer = (over: Partial<Timer> = {}): Timer => ({
+    id: 't1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 10 * M, serverId: 77, childId: 'c1', ...over,
+  });
+
+  it('POSTs a new timer and stamps its serverId when online', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
+    s().startQuickTimer();
+    const id = s().timers[0].id;
+    await flush();
+    expect(h.timerPushed).toHaveLength(1);
+    expect(s().timers.find((t) => t.id === id)?.serverId).toBe(555);
+  });
+
+  it('does not POST a timer while the child is unsynced', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [localChild], selectedChildId: 'c1', timers: [] });
+    s().startQuickTimer();
+    await flush();
+    expect(h.timerPushed).toHaveLength(0);
+    expect(s().timers[0].serverId).toBeUndefined();
+  });
+
+  it('deletes the orphan when a timer is stopped before its create resolves', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
+    s().startQuickTimer();
+    const id = s().timers[0].id;
+    s().stopTimer(id); // stop before the POST resolves — serverId not stamped yet
+    await flush();
+    expect(h.timerDeleted).toContain(555);
+  });
+
+  it('PATCHes a synced timer when edited online', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [syncedTimer()] });
+    s().adjustTimerStart('t1', -5);
+    await flush();
+    expect(h.timerUpdated).toHaveLength(1);
+    expect((h.timerUpdated[0] as Timer).serverId).toBe(77);
+  });
+
+  it('queues a timer update op when edited offline', async () => {
+    useAppStore.setState({ connection: server, offline: true, children: [syncedChild], selectedChildId: 'c1', timers: [syncedTimer()] });
+    s().adjustTimerStart('t1', -5);
+    await flush();
+    expect(h.pendingOps).toContainEqual(expect.objectContaining({ op: 'update', entity: 'timer' }));
+    expect(h.timerUpdated).toHaveLength(0);
+  });
+
+  it('DELETEs the server timer when a synced timer is stopped online', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [syncedTimer()], entries: [] });
+    s().stopTimer('t1');
+    await flush();
+    expect(h.timerDeleted).toContain(77);
+  });
+
+  it('queues a timer delete op when a synced timer is stopped offline', async () => {
+    useAppStore.setState({ connection: server, offline: true, children: [syncedChild], selectedChildId: 'c1', timers: [syncedTimer()], entries: [] });
+    s().stopTimer('t1');
+    await flush();
+    expect(h.pendingOps).toContainEqual(expect.objectContaining({ op: 'delete', entity: 'timer', serverId: 77 }));
+    expect(h.timerDeleted).toHaveLength(0);
+  });
+
+  it('DELETEs the server timer on discard', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [syncedTimer()] });
+    s().discardTimer('t1');
+    await flush();
+    expect(h.timerDeleted).toContain(77);
+  });
+
+  it('reconciles server timers on refresh: adds new, drops locally-synced-but-gone, keeps unsynced', async () => {
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1',
+      timers: [syncedTimer({ id: 't5', serverId: 5 }), { id: 't-local', activity: 'feeding', saveAs: 'feeding', name: 'Feeding', start: NOW, childId: 'c1' }],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: [{ id: 'tsrv6', serverId: 6, childId: 'c1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
+    });
+    await s().refresh();
+    expect(s().timers.some((t) => t.serverId === 5)).toBe(false);
+    expect(s().timers.some((t) => t.serverId === 6)).toBe(true);
+    expect(s().timers.some((t) => t.id === 't-local')).toBe(true);
+  });
+
+  it('replays queued timer ops on reconnect (flushPendingOps)', async () => {
+    useAppStore.setState({ connection: server, offline: false });
+    h.pendingOps = [
+      { op: 'update', entity: 'timer', payload: syncedTimer({ serverId: 5 }) },
+      { op: 'delete', entity: 'timer', serverId: 9 },
+    ];
+    await s().flushPendingOps();
+    expect(h.timerUpdated).toHaveLength(1);
+    expect(h.timerDeleted).toContain(9);
+  });
+
+  it('flushUnsynced POSTs an offline-created timer once its child is synced', async () => {
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', measurements: [],
+      timers: [{ id: 't-local', activity: 'feeding', saveAs: 'feeding', name: 'Feeding', start: NOW, childId: 'c1' }],
+    });
+    await s().flushUnsynced();
+    expect(h.timerPushed).toHaveLength(1);
+    expect(s().timers[0].serverId).toBe(555);
   });
 });
 

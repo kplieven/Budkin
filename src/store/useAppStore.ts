@@ -5,7 +5,7 @@
  * open-sheet / save / timer logic.
  */
 
-import { create } from 'zustand';
+import { create, type StoreApi } from 'zustand';
 
 import {
   ACTIVITY_SHAPE,
@@ -17,6 +17,7 @@ import {
   deleteChildFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
+  deleteTimerFromServer,
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
@@ -24,11 +25,14 @@ import {
   pushChildToServer,
   pushEntryToServer,
   pushMeasurementToServer,
+  pushTimerToServer,
   serverHasData,
   updateChildOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
+  updateTimerOnServer,
 } from '@/data/repository';
+import { reconcileTimers } from '@/data/serverTimers';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
 import { ApiError, childColor, isHiddenTag } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -361,6 +365,66 @@ function buildUploadDeps(conn: Connection): UploadDeps {
   };
 }
 
+type Get = StoreApi<AppStore>['getState'];
+type Set = StoreApi<AppStore>['setState'];
+
+/** Mirror a freshly-created local timer to the server (create + stamp serverId),
+ *  reusing the offline-first optimistic pattern. No-op unless online + server
+ *  mode and the timer's child is already synced. If the timer was stopped or
+ *  discarded before the POST resolved (serverId never landed locally), delete
+ *  the orphan the POST created so it can't linger on the server. */
+function mirrorTimerCreate(get: Get, set: Set, timerId: string): void {
+  const s = get();
+  const conn = s.connection;
+  if (!conn || conn.mode !== 'server' || s.offline) return;
+  const timer = s.timers.find((t) => t.id === timerId);
+  if (!timer) return;
+  const child = s.children.find((c) => c.id === (timer.childId ?? s.selectedChildId));
+  if (!child || child.serverId == null) return; // child not synced yet — reconnect flush handles it
+  void pushTimerToServer(conn, timer, child.serverId)
+    .then((serverId) => {
+      if (serverId == null) return;
+      if (get().timers.some((t) => t.id === timerId)) {
+        set((st) => ({ timers: st.timers.map((t) => (t.id === timerId ? { ...t, serverId } : t)) }));
+      } else {
+        // Stopped/discarded during the POST: clean up the orphan.
+        void deleteTimerFromServer(conn, serverId).catch(() => {});
+      }
+    })
+    .catch(() => {});
+}
+
+/** Mirror an edit to an already-synced timer: PATCH online, queue offline.
+ *  Unsynced (serverId == null) timers need nothing here; their eventual create
+ *  encodes the current fields. */
+function mirrorTimerEdit(get: Get, timer: Timer): void {
+  const s = get();
+  const conn = s.connection;
+  if (!conn || conn.mode !== 'server' || timer.serverId == null) return;
+  if (s.offline) {
+    void addPendingOp({ op: 'update', entity: 'timer', payload: timer });
+  } else {
+    void updateTimerOnServer(conn, timer).catch(() => {
+      void addPendingOp({ op: 'update', entity: 'timer', payload: timer });
+    });
+  }
+}
+
+/** Mirror a stop/discard: delete the server timer (online) or queue the delete
+ *  (offline). Unsynced timers (serverId == null) have no server record. */
+function mirrorTimerDelete(get: Get, timer: Timer): void {
+  const conn = get().connection;
+  if (!conn || conn.mode !== 'server' || timer.serverId == null) return;
+  if (get().offline) {
+    void addPendingOp({ op: 'delete', entity: 'timer', serverId: timer.serverId });
+  } else {
+    const serverId = timer.serverId;
+    void deleteTimerFromServer(conn, serverId).catch(() => {
+      void addPendingOp({ op: 'delete', entity: 'timer', serverId });
+    });
+  }
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -536,7 +600,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: mergeUnsynced(data.children, e?.children ?? []),
         measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(data.entries, q),
-        timers: savedTimers,
+        timers: reconcileTimers(savedTimers, data.timers),
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -603,7 +667,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: mergedChildren,
         measurements: mergeUnsynced(data.measurements, s.measurements),
         selectedChildId,
-        timers: localTimers,
+        timers: reconcileTimers(localTimers, data.timers),
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -684,6 +748,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: st.children.map((c) => ({ ...c, serverId: undefined })),
         entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
         measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
+        timers: st.timers.map((t) => ({ ...t, serverId: undefined })),
       }));
     }
     await saveAdoptTarget(serverUrl);
@@ -843,6 +908,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
         else if (op.op === 'update' && op.entity === 'entry') await updateEntryOnServer(conn, op.payload);
         else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
+        else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
+        else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
       } catch {
         remaining.push(op);
       }
@@ -866,38 +933,54 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // offline-created child while CONNECTED is a niche case not handled here
       // either — it stays on the queue path.
       const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
-      if (!hasUnsynced) return;
-      const result = await uploadUnsynced(
-        { children: s.children, entries: [], measurements: s.measurements },
-        buildUploadDeps(conn),
-      );
-      // Count only records that WERE serverId==null in the pre-upload snapshot
-      // `s` and actually came back stamped in `result` (a push that didn't
-      // complete leaves serverId==null and must not be counted).
-      const syncedCount =
-        s.children.filter(
-          (c) => c.serverId == null && result.children.find((r) => r.id === c.id)?.serverId != null,
-        ).length +
-        s.measurements.filter(
-          (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
-        ).length;
-      // Functional merge-by-id (reads the CURRENT state via `st`, not the
-      // pre-await snapshot `s`) that only stamps serverIds, so a create that
-      // landed during the await isn't dropped by a wholesale replace.
-      set((st) => ({
-        children: st.children.map((c) => {
-          const u = result.children.find((r) => r.id === c.id);
-          return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
-        }),
-        measurements: st.measurements.map((m) => {
-          const u = result.measurements.find((r) => r.id === m.id);
-          return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
-        }),
-      }));
-      // Mirrors flushQueue's `Synced N entries`; here the flush legitimately
-      // pushes both children & measurements, so report the true total.
-      if (syncedCount > 0) {
-        get().showToast(`Synced ${syncedCount} ${syncedCount === 1 ? 'item' : 'items'}`);
+      const hasUnsyncedTimer = s.timers.some((t) => t.serverId == null);
+      if (!hasUnsynced && !hasUnsyncedTimer) return;
+      if (hasUnsynced) {
+        const result = await uploadUnsynced(
+          { children: s.children, entries: [], measurements: s.measurements },
+          buildUploadDeps(conn),
+        );
+        // Count only records that WERE serverId==null in the pre-upload snapshot
+        // `s` and actually came back stamped in `result` (a push that didn't
+        // complete leaves serverId==null and must not be counted).
+        const syncedCount =
+          s.children.filter(
+            (c) => c.serverId == null && result.children.find((r) => r.id === c.id)?.serverId != null,
+          ).length +
+          s.measurements.filter(
+            (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
+          ).length;
+        // Functional merge-by-id (reads the CURRENT state via `st`, not the
+        // pre-await snapshot `s`) that only stamps serverIds, so a create that
+        // landed during the await isn't dropped by a wholesale replace.
+        set((st) => ({
+          children: st.children.map((c) => {
+            const u = result.children.find((r) => r.id === c.id);
+            return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
+          }),
+          measurements: st.measurements.map((m) => {
+            const u = result.measurements.find((r) => r.id === m.id);
+            return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
+          }),
+        }));
+        // Mirrors flushQueue's `Synced N entries`; here the flush legitimately
+        // pushes both children & measurements, so report the true total.
+        if (syncedCount > 0) {
+          get().showToast(`Synced ${syncedCount} ${syncedCount === 1 ? 'item' : 'items'}`);
+        }
+      }
+      // Timers created offline (serverId == null): POST each whose child is
+      // synced, then stamp serverId. Read the CURRENT state so a child stamped
+      // just above (this same flush) is visible. Mirrors the merge above.
+      const st2 = get();
+      for (const timer of st2.timers) {
+        if (timer.serverId != null) continue;
+        const child = st2.children.find((c) => c.id === (timer.childId ?? st2.selectedChildId));
+        if (!child || child.serverId == null) continue;
+        const serverId = await pushTimerToServer(conn, timer, child.serverId).catch(() => undefined);
+        if (serverId != null) {
+          set((s3) => ({ timers: s3.timers.map((t) => (t.id === timer.id ? { ...t, serverId } : t)) }));
+        }
       }
     } finally {
       flushUnsyncedInFlight = false;
@@ -1729,6 +1812,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         fromTimerId: null,
       });
       get().showToast('Live timer started');
+      mirrorTimerCreate(get, set, timer.id);
       return;
     }
 
@@ -1755,6 +1839,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
       }
     } else {
+      // Stopping a running timer via "lasted X" drops its source timer above;
+      // delete the server mirror too.
+      if (s.fromTimerId) {
+        const src = s.timers.find((tm) => tm.id === s.fromTimerId);
+        if (src) mirrorTimerDelete(get, src);
+      }
       get().commitWrite(entry);
       const queued = s.offline && !!s.connection && s.connection.mode === 'server';
       get().showToast(queued ? 'Saved · queued offline' : 'Saved');
@@ -1795,6 +1885,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       fromTimerId: null,
     });
     get().showToast('Details saved');
+    const updated = get().timers.find((t) => t.id === timerId);
+    if (updated) mirrorTimerEdit(get, updated);
   },
 
   startQuickTimer: () => {
@@ -1809,6 +1901,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     };
     set({ timers: [...s.timers, timer] });
     get().showToast('Timer started');
+    mirrorTimerCreate(get, set, timer.id);
   },
   stopTimer: (id, endMs) => {
     const s = get();
@@ -1841,27 +1934,41 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
+    mirrorTimerDelete(get, tm);
     const queued = s.offline && !!s.connection && s.connection.mode === 'server';
     // Only call out the resolved end when the caller asked for a back-dated
     // stop — ending "now" needs no confirmation of what time it is.
     const backdated = endMs != null ? ` · ended ${fmtClock(resolvedEnd)}` : '';
     get().showToast(queued ? `Saved · queued offline${backdated}` : `Saved as ${ACTIVITY_LABEL[saveAs].toLowerCase()}${backdated}`);
   },
-  discardTimer: (id) => set((s) => ({ timers: s.timers.filter((t) => t.id !== id) })),
-  setTimerSaveAs: (id, saveAs) =>
+  discardTimer: (id) => {
+    const tm = get().timers.find((t) => t.id === id);
+    set((s) => ({ timers: s.timers.filter((t) => t.id !== id) }));
+    if (tm) mirrorTimerDelete(get, tm);
+  },
+  setTimerSaveAs: (id, saveAs) => {
     set((s) => ({
       timers: s.timers.map((t) => (t.id === id ? { ...t, saveAs, name: ACTIVITY_LABEL[saveAs] } : t)),
-    })),
-  adjustTimerStart: (id, deltaMin) =>
+    }));
+    const updated = get().timers.find((t) => t.id === id);
+    if (updated) mirrorTimerEdit(get, updated);
+  },
+  adjustTimerStart: (id, deltaMin) => {
     set((s) => ({
       timers: s.timers.map((t) =>
         t.id === id ? { ...t, start: Math.min(Date.now(), t.start + deltaMin * 60000) } : t,
       ),
-    })),
-  setTimerStart: (id, ms) =>
+    }));
+    const updated = get().timers.find((t) => t.id === id);
+    if (updated) mirrorTimerEdit(get, updated);
+  },
+  setTimerStart: (id, ms) => {
     set((s) => ({
       timers: s.timers.map((t) => (t.id === id ? { ...t, start: Math.min(Date.now(), ms) } : t)),
-    })),
+    }));
+    const updated = get().timers.find((t) => t.id === id);
+    if (updated) mirrorTimerEdit(get, updated);
+  },
 
   showToast: (msg, action) => {
     set({ toast: msg, toastAction: action ?? null });
