@@ -2,7 +2,16 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { entryTimestamp } from '@/types/models';
 
-import { loadInsightsHistory, loadProfileFromServer, serverHasData } from './repository';
+import {
+  deleteTimerFromServer,
+  loadFromServer,
+  loadInsightsHistory,
+  loadProfileFromServer,
+  pushTimerToServer,
+  serverHasData,
+  updateTimerOnServer,
+} from './repository';
+import type { Timer } from '@/types/models';
 
 const DAY = 86400000;
 
@@ -12,8 +21,32 @@ const listFeedings = vi.fn();
 const listChanges = vi.fn();
 const getProfile = vi.fn();
 const listChildren = vi.fn();
+const listPumping = vi.fn(async () => []);
+const listTummy = vi.fn(async () => []);
+const listTemperature = vi.fn(async () => []);
+const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
+const listMeasurements = vi.fn(async () => []);
+const listTimers = vi.fn(async () => []);
+const createTimer = vi.fn(async () => 11);
+const updateTimer = vi.fn(async () => undefined);
+const deleteTimer = vi.fn(async () => undefined);
 vi.mock('@/api/client', () => ({
-  BabybuddyClient: vi.fn().mockImplementation(() => ({ listSleep, listFeedings, listChanges, getProfile, listChildren })),
+  BabybuddyClient: vi.fn().mockImplementation(() => ({
+    listSleep,
+    listFeedings,
+    listChanges,
+    getProfile,
+    listChildren,
+    listPumping,
+    listTummy,
+    listTemperature,
+    listChildNotes,
+    listMeasurements,
+    listTimers,
+    createTimer,
+    updateTimer,
+    deleteTimer,
+  })),
   normalizeServerUrl: (s: string) => s,
 }));
 
@@ -83,5 +116,77 @@ describe('serverHasData', () => {
     const out = await serverHasData({ mode: 'local' });
     expect(out).toBe(false);
     expect(listChildren).not.toHaveBeenCalled();
+  });
+});
+
+describe('timers', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const feedingTimer: Timer = {
+    id: 't1',
+    activity: 'feeding',
+    name: 'Feeding',
+    start: 1000,
+    saveAs: 'feeding',
+    feedType: 'formula',
+    method: 'bottle',
+    amount: 90,
+  };
+
+  it('loadFromServer reconstructs timers and maps the child FK to a local id', async () => {
+    listChildren.mockReset().mockResolvedValueOnce([{ id: '2', serverId: 2, first: 'A', last: '', birth: 0, color: '#fff' }]);
+    listFeedings.mockResolvedValue([]);
+    listSleep.mockResolvedValue([]);
+    listChanges.mockResolvedValue([]);
+    listTimers.mockReset().mockResolvedValueOnce([{ id: 4, child: 2, name: 'Sleep · v1 · nap', start: 1000 }]);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.timers).toEqual([
+      expect.objectContaining({ serverId: 4, childId: '2', saveAs: 'sleep', nap: true, start: 1000 }),
+    ]);
+  });
+
+  it('loadFromServer skips a timer whose child is not among the local children', async () => {
+    listChildren.mockReset().mockResolvedValueOnce([{ id: '2', serverId: 2, first: 'A', last: '', birth: 0, color: '#fff' }]);
+    listTimers.mockReset().mockResolvedValueOnce([{ id: 4, child: 99, name: 'Sleep · v1', start: 1000 }]);
+    const result = await loadFromServer(conn);
+    expect(result.timers).toEqual([]);
+  });
+
+  it('loadFromServer degrades to no timers when listTimers throws', async () => {
+    listChildren.mockReset().mockResolvedValueOnce([{ id: '2', serverId: 2, first: 'A', last: '', birth: 0, color: '#fff' }]);
+    listTimers.mockReset().mockRejectedValueOnce(new Error('boom'));
+    const result = await loadFromServer(conn);
+    expect(result.timers).toEqual([]);
+  });
+
+  it('pushTimerToServer creates a timer with the encoded name and returns its id', async () => {
+    createTimer.mockClear().mockResolvedValueOnce(11);
+    const id = await pushTimerToServer(conn, feedingTimer, 2);
+    expect(id).toBe(11);
+    expect(createTimer).toHaveBeenCalledWith(2, 1000, 'Feeding · v1 · ft:formula · m:bottle · amt:90');
+  });
+
+  it('pushTimerToServer is a no-op in local mode', async () => {
+    createTimer.mockClear();
+    const id = await pushTimerToServer({ mode: 'local' }, feedingTimer, 2);
+    expect(id).toBeUndefined();
+    expect(createTimer).not.toHaveBeenCalled();
+  });
+
+  it('updateTimerOnServer PATCHes only when the timer has a serverId', async () => {
+    updateTimer.mockClear();
+    await updateTimerOnServer(conn, feedingTimer); // no serverId
+    expect(updateTimer).not.toHaveBeenCalled();
+    await updateTimerOnServer(conn, { ...feedingTimer, serverId: 7 });
+    expect(updateTimer).toHaveBeenCalledWith(7, 'Feeding · v1 · ft:formula · m:bottle · amt:90', 1000);
+  });
+
+  it('deleteTimerFromServer deletes by server id (no-op in local mode)', async () => {
+    deleteTimer.mockClear();
+    await deleteTimerFromServer({ mode: 'local' }, 7);
+    expect(deleteTimer).not.toHaveBeenCalled();
+    await deleteTimerFromServer(conn, 7);
+    expect(deleteTimer).toHaveBeenCalledWith(7);
   });
 });

@@ -5,6 +5,7 @@
 
 import { BabybuddyClient } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
+import { encodeTimerName, serverTimerToTimer } from '@/data/serverTimers';
 import {
   entryTimestamp,
   type ActivityType,
@@ -87,7 +88,24 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
     measurements = lists.flat();
   }
 
-  return { children, entries, timers: [], selectedChildId, lastFeed, measurements };
+  // Running timers mirrored on the server (same-account cross device). Map each
+  // timer's child FK back to a local child id; skip timers for a child we don't
+  // have loaded, and degrade to none if the endpoint is unavailable.
+  let timers: Timer[] = [];
+  try {
+    const raw = await client.listTimers();
+    const childByServerId = new Map<number, string>();
+    for (const c of children) if (c.serverId != null) childByServerId.set(c.serverId, c.id);
+    timers = raw.flatMap((t) => {
+      if (t.child == null) return [];
+      const childId = childByServerId.get(t.child);
+      return childId ? [serverTimerToTimer(t, childId)] : [];
+    });
+  } catch {
+    timers = [];
+  }
+
+  return { children, entries, timers, selectedChildId, lastFeed, measurements };
 }
 
 /**
@@ -231,6 +249,32 @@ export async function deleteEntryFromServer(
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteEntry(type, serverId);
+}
+
+/** Create a running timer on the server; returns its new server id. Requires the
+ *  child's server id (skip when the child is not synced yet). */
+export async function pushTimerToServer(
+  conn: Connection,
+  timer: Timer,
+  childServerId: number,
+): Promise<number | undefined> {
+  if (conn.mode !== 'server') return undefined;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.createTimer(childServerId, timer.start, encodeTimerName(timer));
+}
+
+/** Update a running timer's encoded name + start on the server (needs serverId). */
+export async function updateTimerOnServer(conn: Connection, timer: Timer): Promise<void> {
+  if (conn.mode !== 'server' || timer.serverId == null) return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.updateTimer(timer.serverId, encodeTimerName(timer), timer.start);
+}
+
+/** Delete a running timer on the server (no-op in local mode). */
+export async function deleteTimerFromServer(conn: Connection, serverId: number): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.deleteTimer(serverId);
 }
 
 /** True if the server already has at least one child (i.e. it is NOT a fresh,
