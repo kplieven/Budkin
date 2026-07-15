@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
@@ -7,6 +8,7 @@ import { Icon } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
+import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtClock, fmtDur, fmtElapsedClock } from '@/lib/format';
@@ -28,6 +30,19 @@ export default function Timers() {
   const adjustTimerStart = useAppStore((s) => s.adjustTimerStart);
   const setTimerStart = useAppStore((s) => s.setTimerStart);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  const refresh = useAppStore((s) => s.refresh);
+
+  // Pull-to-refresh, mirroring Home: native uses the platform RefreshControl;
+  // touch-capable web gets the custom gesture; a refresh() also pulls + reconciles
+  // server timers, so a timer started on another device shows up here.
+  const canPullToRefresh = Platform.OS !== 'web';
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    refresh().finally(() => setRefreshing(false));
+  }, [refresh]);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const webPull = useWebPullToRefresh(scrollRef, refresh);
   // timer id whose exact-start editor is expanded
   const [exactFor, setExactFor] = useState<string | null>(null);
   // timer id whose ephemeral "Ended earlier…" stop editor is expanded — never
@@ -339,14 +354,60 @@ export default function Timers() {
   if (desktop) return <DesktopPage maxWidth={760}>{body}</DesktopPage>;
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
-    >
-      <Txt weight={800} size={27} tracking={-0.6} style={{ paddingHorizontal: 2, paddingTop: 4, paddingBottom: 18 }}>
-        Timers
-      </Txt>
-      {body}
-    </ScrollView>
+    <View style={{ flex: 1, backgroundColor: t.bg }}>
+      {webPull.enabled && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            { position: 'absolute', top: insets.top - 6, left: 0, right: 0, alignItems: 'center', zIndex: 25 },
+            webPull.style,
+          ]}
+        >
+          <View
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 99,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.line,
+              boxShadow: t.shadow,
+            }}
+          >
+            {webPull.refreshing ? (
+              <ActivityIndicator color={t.dim} />
+            ) : (
+              <Animated.View style={webPull.glyphStyle}>
+                <Icon name="chevron-down" color={t.dim} size={22} />
+              </Animated.View>
+            )}
+          </View>
+        </Animated.View>
+      )}
+
+      <ScrollView
+        ref={scrollRef}
+        style={{ flex: 1, backgroundColor: t.bg }}
+        refreshControl={
+          canPullToRefresh ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={t.dim}
+              colors={['#E2B554']}
+              progressViewOffset={insets.top}
+            />
+          ) : undefined
+        }
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+      >
+        <Txt weight={800} size={27} tracking={-0.6} style={{ paddingHorizontal: 2, paddingTop: 4, paddingBottom: 18 }}>
+          Timers
+        </Txt>
+        {body}
+      </ScrollView>
+    </View>
   );
 }
