@@ -99,6 +99,7 @@ describe('anchors', () => {
 describe('endAnchorVisible', () => {
   it('is visible when the anchor is after the start and not in the future', () => {
     expect(endAnchorVisible(NOW - 30 * M, NOW - 60 * M, NOW)).toBe(true);
+    expect(endAnchorVisible(NOW, NOW - 60 * M, NOW)).toBe(true);
   });
   it('is hidden when the anchor is at or before the start', () => {
     expect(endAnchorVisible(NOW - 60 * M, NOW - 60 * M, NOW)).toBe(false);
