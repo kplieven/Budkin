@@ -53,6 +53,7 @@ const h = vi.hoisted(() => ({
   tags: [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }] as unknown,
   tagsFails: false,
   prefs: {} as Record<string, unknown>,
+  milestonePrompts: {} as Record<string, string[]>,
 }));
 
 // Hoisted so the repository mock factory (also hoisted) can reference it.
@@ -120,6 +121,13 @@ vi.mock('@/data/entityStore', () => ({
 vi.mock('@/data/prefs', () => ({
   loadPrefs: vi.fn(async () => h.prefs),
   savePrefs: vi.fn(async () => {}),
+}));
+
+vi.mock('@/data/milestonePrompts', () => ({
+  loadMilestonePrompts: vi.fn(async () => h.milestonePrompts),
+  saveMilestonePrompts: vi.fn(async (m: Record<string, string[]>) => {
+    h.milestonePrompts = m;
+  }),
 }));
 
 vi.mock('@/data/repository', () => ({
@@ -263,6 +271,7 @@ beforeEach(() => {
   h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
   h.tagsFails = false;
   h.prefs = {};
+  h.milestonePrompts = {};
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
@@ -293,6 +302,7 @@ beforeEach(() => {
     measurementSheet: null,
     editingMeasurementId: null,
     milestoneSheet: null,
+    answeredMilestonePrompts: {},
     showChildSwitcher: false,
     childSheet: false,
     editingChildId: null,
@@ -3232,5 +3242,29 @@ describe('milestone store actions', () => {
     useAppStore.getState().editMilestone('e-x', 2_000_000, undefined);
     const e = useAppStore.getState().entries.find((x) => x.id === 'e-x');
     expect(e).toMatchObject({ time: 2_000_000, note: undefined });
+  });
+});
+
+describe('answerMilestonePrompt', () => {
+  it('appends per selected child and is idempotent', () => {
+    useAppStore.setState({ selectedChildId: 'c1', answeredMilestonePrompts: {} });
+    s().answerMilestonePrompt('waves-bye');
+    expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye']);
+    s().answerMilestonePrompt('waves-bye'); // one prompt per milestone: no duplicate
+    expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye']);
+    s().answerMilestonePrompt('first-word');
+    expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye', 'first-word']);
+  });
+
+  it('does not touch another child\'s answered set', () => {
+    useAppStore.setState({ selectedChildId: 'c1', answeredMilestonePrompts: { c2: ['crawls'] } });
+    s().answerMilestonePrompt('waves-bye');
+    expect(s().answeredMilestonePrompts).toEqual({ c2: ['crawls'], c1: ['waves-bye'] });
+  });
+
+  it('no-ops when no child is selected', () => {
+    useAppStore.setState({ selectedChildId: '', answeredMilestonePrompts: {} });
+    s().answerMilestonePrompt('waves-bye');
+    expect(s().answeredMilestonePrompts).toEqual({});
   });
 });
