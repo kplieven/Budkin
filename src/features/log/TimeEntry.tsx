@@ -6,7 +6,8 @@
  * quantity and reveals its single panel (kept chips + smart anchors + the
  * precise editor); the other quantities' controls stay hidden. Three parallel
  * chip rows became one panel. The derived (computed) quantity is dimmed.
- * INTERVAL keeps the last two of Start/End/Lasted; POINT (diaper) is a single
+ * INTERVAL keeps the last two of Start/End/Lasted; POINT (diaper and the other
+ * single-moment activities) is a single
  * "When" panel. Focusing a pill only reveals its panel, it does not pin: pinning
  * happens on a real chip/anchor/nudge/type interaction via the store setters.
  */
@@ -322,21 +323,21 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               <Chip
                 label="When last feed ended"
                 color={color}
-                onPress={() => setTE({ agoMin: lastFeed, absTime: undefined })}
+                onPress={() => setTE({ agoMin: lastFeed })}
               />
             )}
             {lastWake != null && (
               <Chip
                 label="When they woke"
                 color={color}
-                onPress={() => setTE({ agoMin: lastWake, absTime: undefined })}
+                onPress={() => setTE({ agoMin: lastWake })}
               />
             )}
             {lastDiaper != null && (
               <Chip
                 label="When last diaper changed"
                 color={color}
-                onPress={() => setTE({ agoMin: lastDiaper, absTime: undefined })}
+                onPress={() => setTE({ agoMin: lastDiaper })}
               />
             )}
           </View>
