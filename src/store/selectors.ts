@@ -166,3 +166,9 @@ export function lastDiaperMinAgo(entries: Entry[], now: number): number | null {
   const d = lastDiaper(entries);
   return d ? Math.round((now - d.time) / M) : null;
 }
+
+/** Whether an "ended when the next activity started" anchor at `tMs` can form a
+ *  valid interval: it must land after the current start and no later than now. */
+export function endAnchorVisible(tMs: number, startMs: number, now: number): boolean {
+  return tMs > startMs && tMs <= now;
+}
