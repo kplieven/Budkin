@@ -26,7 +26,7 @@ const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
 const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
 const listMeasurements = vi.fn(async () => []);
-const listTimers = vi.fn(async () => []);
+const listTimers = vi.fn(async () => [] as any[]);
 const createTimer = vi.fn(async () => 11);
 const updateTimer = vi.fn(async () => undefined);
 const deleteTimer = vi.fn(async () => undefined);
