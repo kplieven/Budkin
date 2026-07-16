@@ -1,12 +1,14 @@
 /**
- * The reusable Time-Entry component — the app's signature feature.
+ * The reusable Time-Entry component, the app's signature feature.
  *
- * INTERVAL: three quantities (Ended / Lasted / Started), but only the last two
- * the user touched stay active; the third is derived. The chips are the fast
- * path; every resolved value in the readout is tappable and expands an inline
- * precise editor (exact clock time / exact minutes) that pins that quantity.
- * POINT (diaper): a single time via "When" chips + smart anchors + the same
- * precise editor.
+ * One focused panel at a time. The readout pills (Start -> End, and Lasted) are
+ * the always-visible summary AND the selector: tapping a pill focuses that
+ * quantity and reveals its single panel (kept chips + smart anchors + the
+ * precise editor); the other quantities' controls stay hidden. Three parallel
+ * chip rows became one panel. The derived (computed) quantity is dimmed.
+ * INTERVAL keeps the last two of Start/End/Lasted; POINT (diaper) is a single
+ * "When" panel. Focusing a pill only reveals its panel, it does not pin: pinning
+ * happens on a real chip/anchor/nudge/type interaction via the store setters.
  */
 
 import { useState } from 'react';
@@ -20,9 +22,12 @@ import { Txt } from '@/components/Txt';
 import { dayGroupLabel, fmtAgoShort, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
 import {
   derivedField,
+  endAnchorVisible,
   isActive,
   lastDiaperMinAgo,
   lastFeedEndMinAgo,
+  lastFeedStartMinAgo,
+  lastSleepStartMinAgo,
   lastWakeMinAgo,
   teDurationMin,
   teEnd,
@@ -32,38 +37,14 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType } from '@/types/models';
 
-function SubLabel({ children }: { children: string }) {
-  const t = useTheme();
-  return (
-    <Txt weight={700} size={12} color={t.faint} tracking={0.5} style={{ marginTop: 2, marginBottom: 8, textTransform: 'uppercase' }}>
-      {children}
-    </Txt>
-  );
-}
+const MIN = 60000;
 
-const ENDED_OPTS: [number, string][] = [
-  [0, 'Now'],
-  [15, '15m ago'],
-  [30, '30m ago'],
-  [60, '1h ago'],
-];
-const AGO_OPTS: [number, string][] = [
-  [0, 'Now'],
-  [5, '5m ago'],
-  [15, '15m ago'],
-  [30, '30m ago'],
-  [60, '1h ago'],
-  [120, '2h ago'],
-];
-// Quick "started X ago" offsets (minutes), mirroring the Ended/When chips.
-const STARTED_OPTS = [5, 10, 15, 30, 45];
-
-type EditField = 'start' | 'end' | 'lasted' | 'when' | null;
+type EditField = 'start' | 'end' | 'lasted' | 'when';
 
 /**
  * A tappable resolved value rendered as an inset pill (matches the chip
- * vocabulary). Fills with the activity color while its editor is open; the
- * derived quantity is dimmed.
+ * vocabulary). Fills with the activity color while focused; a derived quantity
+ * is dimmed.
  */
 function ValuePill({
   label,
@@ -113,15 +94,15 @@ function ValuePill({
   );
 }
 
-export function TimeEntry({ type, color }: { type: ActivityType; color: string }) {
+export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const t = useTheme();
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
   // Editing a running timer (opened via openTimerEdit): a running timer has no
-  // end/duration, so the Ended/Lasted controls don't apply — only Start + the
-  // detail fields do. Ending stays on the Timers tab (Stop). Gating strictly on
-  // fromTimerId leaves normal new-entry sheets (incl. "Still ongoing") untouched.
+  // end/duration, so Ended does not apply. Only Start + Lasted (which stops and
+  // logs it on save) are focusable. Gating on fromTimerId leaves normal
+  // new-entry sheets untouched.
   const timerEdit = useAppStore((s) => s.fromTimerId != null);
   const setTE = useAppStore((s) => s.setTE);
   const setEnded = useAppStore((s) => s.setEnded);
@@ -130,13 +111,14 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const setLasted = useAppStore((s) => s.setLasted);
   const setTimerLasted = useAppStore((s) => s.setTimerLasted);
   const setStartedAt = useAppStore((s) => s.setStartedAt);
-  const setStartedAgo = useAppStore((s) => s.setStartedAgo);
 
-  const [editing, setEditing] = useState<EditField>(null);
+  const isInterval = te.shape === 'interval';
+  const [editing, setEditing] = useState<EditField>(
+    !isInterval ? 'when' : timerEdit ? 'start' : 'end',
+  );
 
   const start = teStart(te, now);
   const end = teEnd(te, now);
-  const isInterval = te.shape === 'interval';
   const duration = teDurationMin(te, now);
   const derived = isInterval ? derivedField(te.order) : null;
 
@@ -146,54 +128,62 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
   const lastFeed = lastFeedEndMinAgo(entries, now);
   const lastWake = lastWakeMinAgo(entries, now);
   const lastDiaper = lastDiaperMinAgo(entries, now);
-  const lastedOpts = type === 'sleep' ? [20, 45, 90, 120] : [10, 20, 30, 45];
+  const feedStart = lastFeedStartMinAgo(entries, now);
+  const sleepStart = lastSleepStartMinAgo(entries, now);
 
   const endActive = isActive(te.order, 'end');
-  const lastedActive = isActive(te.order, 'lasted');
   const startActive = isActive(te.order, 'start');
 
-  // Tapping a readout value pins it at its resolved value and toggles its editor.
-  const tap = (f: Exclude<EditField, null>) => {
-    if (editing === f) {
-      setEditing(null);
-      return;
-    }
-    if (f === 'start') setStartedAt(start as number);
-    else if (f === 'end') setEndedAbs(end);
-    else if (f === 'lasted') setLasted(Math.max(1, duration));
-    else setTE({ absTime: end });
-    setEditing(f);
+  // Focus only reveals a panel; the store setters do the pinning on interaction.
+  const focus = (f: EditField) => setEditing(f);
+
+  // Turning on "Still ongoing" makes End live ("now") and Lasted "running",
+  // neither editable, so move focus to Start (the only editable quantity).
+  const goOngoing = () => {
+    setOngoing();
+    setEditing('start');
   };
 
-  // While editing, chips can hand a quantity back to "derived" (e.g. tapping a
-  // Lasted chip while the start editor is open) — the editor keeps pinning it,
-  // which is exactly what the accordion promises. Only `ongoing` invalidates
-  // the end/lasted editors.
-  const activeEditor = te.ongoing && (editing === 'end' || editing === 'lasted') ? null : editing;
+  // Ended anchors: "this ended when the next thing started". Keep only those
+  // that land after the current start (and not in the future).
+  const endAnchors = (
+    isInterval
+      ? [
+          feedStart != null ? { min: feedStart, label: 'When last feed started' } : null,
+          sleepStart != null ? { min: sleepStart, label: 'When last sleep started' } : null,
+          lastDiaper != null ? { min: lastDiaper, label: 'When last diaper changed' } : null,
+        ]
+      : []
+  ).filter(
+    (a): a is { min: number; label: string } =>
+      a != null && endAnchorVisible(now - a.min * MIN, start as number, now),
+  );
 
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 16 }}>
-      {/* readout — each resolved value is a tappable pill for precise entry */}
+      {/* readout: pills are the summary AND the selector */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 13 }}>
         <Icon name="clock" color={color} size={18} />
         <View style={{ flex: 1, gap: 5 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
             {isInterval ? (
               <>
-                <ValuePill big label={fmtClock(start as number)} color={color} active={activeEditor === 'start'} dimmed={derived === 'start'} onPress={() => tap('start')} />
+                <ValuePill big label={fmtClock(start as number)} color={color} active={editing === 'start'} dimmed={derived === 'start'} onPress={() => focus('start')} />
                 <Txt weight={700} size={16} color={t.dim}>
                   →
                 </Txt>
-                {te.ongoing ? (
+                {timerEdit ? (
                   <Txt weight={800} size={17} tracking={-0.3} color={t.dim}>
-                    now
+                    {te.ongoing ? 'now' : fmtClock(end)}
                   </Txt>
+                ) : te.ongoing ? (
+                  <ValuePill big label="now" color={color} active={editing === 'end'} onPress={() => focus('end')} />
                 ) : (
-                  <ValuePill big label={fmtClock(end)} color={color} active={activeEditor === 'end'} dimmed={derived === 'end'} onPress={() => tap('end')} />
+                  <ValuePill big label={fmtClock(end)} color={color} active={editing === 'end'} dimmed={derived === 'end'} onPress={() => focus('end')} />
                 )}
               </>
             ) : (
-              <ValuePill big label={fmtClock(end)} color={color} active={activeEditor === 'when'} onPress={() => tap('when')} />
+              <ValuePill big label={fmtClock(end)} color={color} active={editing === 'when'} onPress={() => focus('when')} />
             )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -207,7 +197,14 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
                 <Txt weight={500} size={12.5} color={t.dim}>
                   lasted
                 </Txt>
-                <ValuePill label={fmtDur(duration)} color={color} active={activeEditor === 'lasted'} dimmed={derived === 'lasted'} onPress={() => tap('lasted')} />
+                <ValuePill label={fmtDur(duration)} color={color} active={editing === 'lasted'} dimmed={derived === 'lasted'} onPress={() => focus('lasted')} />
+              </>
+            ) : isInterval && te.ongoing && timerEdit ? (
+              <>
+                <Txt weight={500} size={12.5} color={t.dim}>
+                  running ·
+                </Txt>
+                <ValuePill label={fmtDur(duration)} color={color} active={editing === 'lasted'} onPress={() => focus('lasted')} />
               </>
             ) : (
               <Txt weight={500} size={12.5} color={t.dim}>
@@ -218,109 +215,63 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
         </View>
       </View>
 
-      {/* precise editor (accordion) */}
-      {activeEditor === 'start' && (
-        <TimeAdjuster
-          mode="clock"
-          value={start as number}
-          now={now}
-          color={color}
-          onChange={(ms) => setStartedAt(te.ongoing ? ms : Math.min(ms, end))}
-        />
-      )}
-      {activeEditor === 'end' && (
-        <TimeAdjuster
-          mode="clock"
-          value={end}
-          now={now}
-          color={color}
-          onChange={(ms) => setEndedAbs(Math.max(ms, start as number))}
-        />
-      )}
-      {activeEditor === 'lasted' && (
-        <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
-      )}
-      {activeEditor === 'when' && (
-        <TimeAdjuster mode="clock" value={end} now={now} color={color} onChange={(ms) => setTE({ absTime: ms })} />
-      )}
-
-      {isInterval ? (
-        <>
-          {!timerEdit && (
-            <>
-              <SubLabel>Ended</SubLabel>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {ENDED_OPTS.map(([m, label]) => (
-                  <Chip
-                    key={m}
-                    label={label}
-                    color={color}
-                    selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === m}
-                    onPress={() => setEnded(m)}
-                  />
-                ))}
-                <Chip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={setOngoing} />
-              </View>
-
-              <SubLabel>Lasted</SubLabel>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                {lastedOpts.map((m) => (
-                  <Chip
-                    key={m}
-                    label={fmtDur(m)}
-                    color={color}
-                    selected={!te.ongoing && lastedActive && te.durationMin === m}
-                    onPress={() => setLasted(m)}
-                  />
-                ))}
-              </View>
-            </>
+      {/* one focused panel */}
+      {isInterval && !timerEdit && editing === 'end' && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Chip
+              label="Now"
+              color={color}
+              selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === 0}
+              onPress={() => setEnded(0)}
+            />
+            <Chip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={goOngoing} />
+            {endAnchors.map((a) => (
+              <Chip
+                key={a.label}
+                label={`${a.label} (${fmtAgoShort(a.min)})`}
+                color={color}
+                selected={!te.ongoing && endActive && te.endAbs === now - a.min * MIN}
+                onPress={() => setEndedAbs(now - a.min * MIN)}
+              />
+            ))}
+          </View>
+          {!te.ongoing && (
+            <TimeAdjuster
+              mode="clock"
+              value={end}
+              now={now}
+              color={color}
+              showRelative
+              onChange={(ms) => setEndedAbs(Math.max(ms, start as number))}
+            />
           )}
+        </View>
+      )}
 
-          {timerEdit && (
-            <>
-              <SubLabel>Lasted</SubLabel>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-                {lastedOpts.map((m) => (
-                  <Chip
-                    key={m}
-                    label={fmtDur(m)}
-                    color={color}
-                    selected={!te.ongoing && lastedActive && te.durationMin === m}
-                    onPress={() => setTimerLasted(m)}
-                  />
-                ))}
-                <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
-              </View>
-              <Txt weight={500} size={12} color={t.dim} style={{ marginBottom: 12 }}>
-                {te.ongoing ? 'Pick a length to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
-              </Txt>
-            </>
-          )}
-
-          <SubLabel>Started</SubLabel>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
+      {isInterval && editing === 'start' && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Chip
               label="Now"
               color={color}
               selected={startActive && te.startAnchor === 'now'}
               onPress={() => setStartedAt(now, 'now')}
             />
-            {STARTED_OPTS.map((m) => (
-              <Chip
-                key={m}
-                label={`${m}m ago`}
-                color={color}
-                selected={startActive && te.startAbs == null && te.startAgoMin === m}
-                onPress={() => setStartedAgo(m)}
-              />
-            ))}
             {lastFeed != null && (
               <Chip
                 label={`When last feed ended (${fmtAgoShort(lastFeed)})`}
                 color={color}
                 selected={startActive && te.startAnchor === 'lastfeed'}
-                onPress={() => setStartedAt(now - lastFeed * 60000, 'lastfeed')}
+                onPress={() => setStartedAt(now - lastFeed * MIN, 'lastfeed')}
+              />
+            )}
+            {lastWake != null && (
+              <Chip
+                label={`When they woke (${fmtAgoShort(lastWake)})`}
+                color={color}
+                selected={startActive && te.startAnchor === 'wake'}
+                onPress={() => setStartedAt(now - lastWake * MIN, 'wake')}
               />
             )}
             {lastDiaper != null && (
@@ -328,47 +279,73 @@ export function TimeEntry({ type, color }: { type: ActivityType; color: string }
                 label={`When last diaper changed (${fmtAgoShort(lastDiaper)})`}
                 color={color}
                 selected={startActive && te.startAnchor === 'diaper'}
-                onPress={() => setStartedAt(now - lastDiaper * 60000, 'diaper')}
-              />
-            )}
-            {type === 'sleep' && lastWake != null && (
-              <Chip
-                label={`When they woke (${fmtAgoShort(lastWake)})`}
-                color={color}
-                selected={startActive && te.startAnchor === 'wake'}
-                onPress={() => setStartedAt(now - lastWake * 60000, 'wake')}
+                onPress={() => setStartedAt(now - lastDiaper * MIN, 'diaper')}
               />
             )}
           </View>
-        </>
-      ) : (
-        <>
-          <SubLabel>When</SubLabel>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-            {AGO_OPTS.map(([m, label]) => (
-              <Chip
-                key={m}
-                label={label}
-                color={color}
-                selected={te.absTime == null && te.agoMin === m}
-                onPress={() => setTE({ agoMin: m })}
-              />
-            ))}
+          <TimeAdjuster
+            mode="clock"
+            value={start as number}
+            now={now}
+            color={color}
+            showRelative
+            onChange={(ms) => setStartedAt(te.ongoing ? ms : Math.min(ms, end))}
+          />
+        </View>
+      )}
+
+      {isInterval && !timerEdit && editing === 'lasted' && (
+        <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
+      )}
+
+      {isInterval && timerEdit && editing === 'lasted' && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
           </View>
-          {(lastFeed != null || lastWake != null) && (
-            <>
-              <SubLabel>Smart anchors</SubLabel>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 6 }}>
-                {lastFeed != null && (
-                  <Chip label="When last feed ended" color={color} onPress={() => setTE({ agoMin: lastFeed, absTime: undefined })} />
-                )}
-                {lastWake != null && (
-                  <Chip label="When they woke" color={color} onPress={() => setTE({ agoMin: lastWake, absTime: undefined })} />
-                )}
-              </View>
-            </>
-          )}
-        </>
+          <Txt weight={500} size={12} color={t.dim}>
+            {te.ongoing ? 'Pick a length to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
+          </Txt>
+          <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setTimerLasted} />
+        </View>
+      )}
+
+      {!isInterval && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Chip
+              label="Now"
+              color={color}
+              selected={te.absTime == null && te.agoMin === 0}
+              onPress={() => setTE({ agoMin: 0 })}
+            />
+            {lastFeed != null && (
+              <Chip
+                label="When last feed ended"
+                color={color}
+                selected={te.absTime == null && te.agoMin === lastFeed}
+                onPress={() => setTE({ agoMin: lastFeed, absTime: undefined })}
+              />
+            )}
+            {lastWake != null && (
+              <Chip
+                label="When they woke"
+                color={color}
+                selected={te.absTime == null && te.agoMin === lastWake}
+                onPress={() => setTE({ agoMin: lastWake, absTime: undefined })}
+              />
+            )}
+            {lastDiaper != null && (
+              <Chip
+                label="When last diaper changed"
+                color={color}
+                selected={te.absTime == null && te.agoMin === lastDiaper}
+                onPress={() => setTE({ agoMin: lastDiaper, absTime: undefined })}
+              />
+            )}
+          </View>
+          <TimeAdjuster mode="clock" value={end} now={now} color={color} showRelative onChange={(ms) => setTE({ absTime: ms })} />
+        </View>
       )}
     </View>
   );
