@@ -13,7 +13,7 @@ import { Pressable, TextInput, View } from 'react-native';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { dayGroupLabel, fmtClock, fmtDur } from '@/lib/format';
+import { dayGroupLabel, fmtAgo, fmtClock, fmtDur } from '@/lib/format';
 import { parseClockInput, parseDurationInput, resolveClock } from '@/lib/timeParse';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
@@ -29,9 +29,11 @@ interface TimeAdjusterProps {
   /** activity accent color */
   color: string;
   onChange: (v: number) => void;
+  /** clock mode only: show a live "45m ago" caption under the input */
+  showRelative?: boolean;
 }
 
-export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjusterProps) {
+export function TimeAdjuster({ mode, value, now, color, onChange, showRelative = false }: TimeAdjusterProps) {
   const t = useTheme();
   const [text, setText] = useState<string | null>(null); // null = not editing
 
@@ -99,6 +101,11 @@ export function TimeAdjuster({ mode, value, now, color, onChange }: TimeAdjuster
           color: t.text,
         }}
       />
+      {showRelative && mode === 'clock' && (
+        <Txt weight={600} size={12.5} color={t.dim} style={{ textAlign: 'center', marginTop: -2 }}>
+          {fmtAgo(value, now)}
+        </Txt>
+      )}
 
       <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
         {STEPS.map((d) => (
