@@ -509,7 +509,7 @@ export function LogSheet() {
         )}
 
         {/* time entry */}
-        <TimeEntry type={type} color={color} />
+        <TimeEntry key={type} type={type} color={color} />
 
         {/* notes — the secondary per-entry annotation. Shown for the 5 real
             activities; NOT for bath (structural note body) and NOT for a general
