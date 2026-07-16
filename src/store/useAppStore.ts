@@ -46,6 +46,7 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
+import { loadMilestonePrompts, saveMilestonePrompts } from '@/data/milestonePrompts';
 import {
   addPendingOp,
   clearPendingOps,
@@ -135,6 +136,10 @@ interface AppState {
 
   // data
   selectedChildId: string;
+  /** Milestone catch-up prompts the user has answered, per child id. One prompt
+   *  per milestone: any answer (Yes, Not yet, dismiss) adds the key here so the
+   *  nudge never re-asks. Persisted via src/data/milestonePrompts. */
+  answeredMilestonePrompts: Record<string, string[]>;
   children: Child[];
   entries: Entry[];
   timers: Timer[];
@@ -235,6 +240,8 @@ interface AppActions {
   /** Open the milestone sheet to edit an already-reached milestone entry. */
   openEditMilestone: (id: string) => void;
   closeMilestoneSheet: () => void;
+  /** Retire a milestone catch-up prompt for the selected child (idempotent). */
+  answerMilestonePrompt: (key: string) => void;
 
   openMeasurement: (kind: MeasurementKind) => void;
   openEditMeasurement: (id: string) => void;
@@ -465,6 +472,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   measurementSheet: null,
   editingMeasurementId: null,
   milestoneSheet: null,
+  answeredMilestonePrompts: {},
 
   selectedChildId: '',
   children: [],
@@ -544,6 +552,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    // Answered milestone prompts are independent of connection state, so load
+    // them once here (merges into state like the prefs above).
+    set({ answeredMilestonePrompts: await loadMilestonePrompts() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -1487,6 +1498,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ milestoneSheet: { mode: 'edit', id } });
   },
   closeMilestoneSheet: () => set({ milestoneSheet: null }),
+  answerMilestonePrompt: (key) => {
+    const s = get();
+    const childId = s.selectedChildId;
+    if (!childId) return;
+    const cur = s.answeredMilestonePrompts[childId] ?? [];
+    if (cur.includes(key)) return; // one prompt per milestone: already answered
+    const next = { ...s.answeredMilestonePrompts, [childId]: [...cur, key] };
+    set({ answeredMilestonePrompts: next });
+    void saveMilestonePrompts(next);
+  },
   openMeasurement: (kind) => set({ measurementSheet: { kind }, editingMeasurementId: null }),
   openEditMeasurement: (id) => {
     const m = get().measurements.find((x) => x.id === id);
