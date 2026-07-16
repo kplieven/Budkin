@@ -83,6 +83,30 @@ export function aroundNow(ageMonths: number | null, reached: Map<string, Milesto
   );
 }
 
+/** Reached-milestone map scoped to one child. In local mode `entries` holds
+ *  every child's history, so filter by childId first (server mode already loads
+ *  only the selected child, so the filter is a harmless no-op there). Empty when
+ *  childId is undefined. */
+export function reachedForChild(entries: Entry[], childId: string | undefined): Map<string, MilestoneEntry> {
+  if (!childId) return new Map();
+  return reachedByKey(entries.filter((e) => e.childId === childId));
+}
+
+/** Not-yet-reached, not-yet-answered milestones whose typical window has fully
+ *  passed (age strictly greater than maxMonths), sorted longest-overdue first
+ *  (ascending maxMonths). Empty when age is unknown. Hands off cleanly from
+ *  aroundNow, which covers minMonths..maxMonths inclusive. */
+export function overdueUnlogged(
+  ageMonths: number | null,
+  reached: Map<string, MilestoneEntry>,
+  answered: readonly string[],
+): MilestoneDef[] {
+  if (ageMonths == null) return [];
+  return MILESTONES.filter(
+    (m) => ageMonths > m.maxMonths && !reached.has(m.key) && !answered.includes(m.key),
+  ).sort((a, b) => a.maxMonths - b.maxMonths);
+}
+
 /** Group defs by category in MILESTONE_CATEGORIES order, omitting empties. */
 export function groupByCategory(defs: MilestoneDef[]): { category: MilestoneCategory; items: MilestoneDef[] }[] {
   return MILESTONE_CATEGORIES.map((category) => ({
