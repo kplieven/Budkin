@@ -17,6 +17,25 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
+/** Tiny per-timer sync indicator: a check when the timer's server mirror exists,
+ *  a clock (amber) while it is still pending a push. Only rendered in server mode. */
+function SyncBadge({ synced }: { synced: boolean }) {
+  const t = useTheme();
+  const color = synced ? t.dim : t.primary;
+  return (
+    <View
+      accessibilityRole="text"
+      accessibilityLabel={synced ? 'Synced to server' : 'Pending sync to server'}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}
+    >
+      <Icon name={synced ? 'check' : 'clock'} color={color} size={12} />
+      <Txt weight={600} size={11.5} color={color}>
+        {synced ? 'Synced' : 'Pending sync'}
+      </Txt>
+    </View>
+  );
+}
+
 export default function Timers() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -31,6 +50,9 @@ export default function Timers() {
   const setTimerStart = useAppStore((s) => s.setTimerStart);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
   const refresh = useAppStore((s) => s.refresh);
+  // Only meaningful when connected to a server: a timer's serverId tells us
+  // whether its mirror has reached Baby Buddy yet. Hidden in local mode.
+  const isServer = useAppStore((s) => s.connection?.mode === 'server');
 
   // Pull-to-refresh, mirroring Home: native uses the platform RefreshControl;
   // touch-capable web gets the custom gesture; a refresh() also pulls + reconciles
@@ -96,6 +118,7 @@ export default function Timers() {
                   <Txt weight={500} size={12.5} color={t.dim}>
                     started {fmtAgo(tm.start, now)}
                   </Txt>
+                  {isServer && <SyncBadge synced={tm.serverId != null} />}
                 </View>
                 <PulsingDot color={color} />
               </View>
