@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -85,6 +85,10 @@ describe('anchors', () => {
   });
   it('lastWakeMinAgo', () => {
     expect(lastWakeMinAgo(entries, NOW)).toBe(120);
+  });
+  it('lastSleepStartMinAgo counts from the sleep start, not the wake', () => {
+    expect(lastSleepStartMinAgo(entries, NOW)).toBe(240);
+    expect(lastSleepStartMinAgo([], NOW)).toBeNull();
   });
   it('lastDiaperMinAgo picks the most recent change', () => {
     expect(lastDiaperMinAgo(entries, NOW)).toBe(45);
