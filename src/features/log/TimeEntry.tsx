@@ -231,7 +231,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
                 key={a.label}
                 label={`${a.label} (${fmtAgoShort(a.min)})`}
                 color={color}
-                selected={!te.ongoing && endActive && te.endAbs === now - a.min * MIN}
                 onPress={() => setEndedAbs(now - a.min * MIN)}
               />
             ))}
@@ -323,7 +322,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               <Chip
                 label="When last feed ended"
                 color={color}
-                selected={te.absTime == null && te.agoMin === lastFeed}
                 onPress={() => setTE({ agoMin: lastFeed, absTime: undefined })}
               />
             )}
@@ -331,7 +329,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               <Chip
                 label="When they woke"
                 color={color}
-                selected={te.absTime == null && te.agoMin === lastWake}
                 onPress={() => setTE({ agoMin: lastWake, absTime: undefined })}
               />
             )}
@@ -339,7 +336,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               <Chip
                 label="When last diaper changed"
                 color={color}
-                selected={te.absTime == null && te.agoMin === lastDiaper}
                 onPress={() => setTE({ agoMin: lastDiaper, absTime: undefined })}
               />
             )}
