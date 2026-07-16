@@ -104,8 +104,8 @@ dependencies.
 - File: `src/lib/milestones.ts` (new export alongside `aroundNow`).
 - Purpose: compute the eligible, ordered list from plain inputs.
 - Interface:
-  `overdueUnlogged(ageMonths: number | null, reached: Map<string, MilestoneEntry>, dismissed: Set<string> | string[]): MilestoneDef[]`
-  Returns unreached, undismissed defs where `ageMonths > maxMonths`, sorted by
+  `overdueUnlogged(ageMonths: number | null, reached: Map<string, MilestoneEntry>, answered: Set<string> | string[]): MilestoneDef[]`
+  Returns unreached, unanswered defs where `ageMonths > maxMonths`, sorted by
   `maxMonths` ascending. Empty when `ageMonths` is null.
 - Dependencies: the `MILESTONES` catalog and `MilestoneDef` type only. No store,
   no React. Pure and unit-testable in isolation.
@@ -126,10 +126,10 @@ dependencies.
 ### 3. Store slice
 
 - File: `src/store/useAppStore.ts`.
-- State: `dismissedMilestonePrompts: Record<string, string[]>` (keyed by
+- State: `answeredMilestonePrompts: Record<string, string[]>` (keyed by
   childId), hydrated on init from `loadMilestonePrompts()` alongside the existing
   prefs/timers hydration.
-- Action: `dismissMilestonePrompt(key: string)` appends `key` to the selected
+- Action: `answerMilestonePrompt(key: string)` appends `key` to the selected
   child's list (idempotent, no duplicates), updates state, and persists via
   `saveMilestonePrompts`. Used by all three card actions; "Yes, reached" calls it
   in addition to `openMilestone(key)`.
@@ -145,12 +145,12 @@ dependencies.
 - Purpose: render the single top-of-eligible card and wire the three actions.
 - Reads (raw selectors, deriving in render to avoid returning fresh refs from a
   selector, per the zustand v5 rule this codebase follows): `entries`, `now`,
-  selected `child`, `dismissedMilestonePrompts`, plus the `openMilestone` and
-  `dismissMilestonePrompt` actions.
+  selected `child`, `answeredMilestonePrompts`, plus the `openMilestone` and
+  `answerMilestonePrompt` actions.
 - Derives: child-scoped `reached` via `reachedByKey`, `ageMonths(child.birth,
   now)`, then `overdueUnlogged(...)`. Renders nothing when the list is empty.
-- Actions: Yes -> `dismissMilestonePrompt(key)` then `openMilestone(key)`; Not
-  yet / x -> `dismissMilestonePrompt(key)`.
+- Actions: Yes -> `answerMilestonePrompt(key)` then `openMilestone(key)`; Not
+  yet / x -> `answerMilestonePrompt(key)`.
 - Dependencies: the selector, the store, theme, shared `Txt` / button primitives
   already used across the app.
 
@@ -163,10 +163,10 @@ dependencies.
 
 ## Data flow
 
-1. Store hydrates `dismissedMilestonePrompts` from AsyncStorage on init.
+1. Store hydrates `answeredMilestonePrompts` from AsyncStorage on init.
 2. `MilestoneNudge` derives the eligible list each render from age, child-scoped
-   reached map, and the dismissed set.
-3. A card action calls `dismissMilestonePrompt(key)` (and, for Yes,
+   reached map, and the answered set.
+3. A card action calls `answerMilestonePrompt(key)` (and, for Yes,
    `openMilestone(key)`), which updates state and persists.
 4. The re-render recomputes the eligible list; the answered milestone is gone,
    the next (if any) takes its place.
@@ -187,10 +187,10 @@ dependencies.
 ## Testing
 
 - `src/lib/milestones.test.ts`: `overdueUnlogged` cases: age null -> empty; a
-  milestone strictly past `maxMonths` and unlogged and undismissed -> included; a
+  milestone strictly past `maxMonths` and unlogged and unanswered -> included; a
   milestone at exactly `maxMonths` (still in window) -> excluded; a logged one ->
-  excluded; a dismissed one -> excluded; ordering by `maxMonths` ascending.
-- `src/store/useAppStore.test.ts`: `dismissMilestonePrompt` appends per selected
+  excluded; an answered one -> excluded; ordering by `maxMonths` ascending.
+- `src/store/useAppStore.test.ts`: `answerMilestonePrompt` appends per selected
   child and is idempotent; persistence is invoked; reached-detection is scoped to
   the selected child (a milestone logged for child A does not count for child B).
 - Keep to the existing test style and helpers in those files.
