@@ -133,6 +133,14 @@ export function lastWakeMinAgo(entries: Entry[], now: number): number | null {
   return s ? Math.round((now - (s.end as number)) / M) : null;
 }
 
+/** Minutes since the most recent completed sleep *started*, or null. */
+export function lastSleepStartMinAgo(entries: Entry[], now: number): number | null {
+  const s = entries
+    .filter((e): e is Extract<Entry, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
+    .sort((a, b) => b.start - a.start)[0];
+  return s ? Math.round((now - s.start) / M) : null;
+}
+
 /**
  * The wash due next, from the user's rhythm: a "small wash" most days, a "big
  * wash" every few days. Rule: if the three most recent washes are all small,
