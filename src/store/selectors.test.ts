@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { endAnchorVisible, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import type { Entry } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -93,6 +93,19 @@ describe('anchors', () => {
   it('lastDiaperMinAgo picks the most recent change', () => {
     expect(lastDiaperMinAgo(entries, NOW)).toBe(45);
     expect(lastDiaperMinAgo([], NOW)).toBeNull();
+  });
+});
+
+describe('endAnchorVisible', () => {
+  it('is visible when the anchor is after the start and not in the future', () => {
+    expect(endAnchorVisible(NOW - 30 * M, NOW - 60 * M, NOW)).toBe(true);
+  });
+  it('is hidden when the anchor is at or before the start', () => {
+    expect(endAnchorVisible(NOW - 60 * M, NOW - 60 * M, NOW)).toBe(false);
+    expect(endAnchorVisible(NOW - 90 * M, NOW - 60 * M, NOW)).toBe(false);
+  });
+  it('is hidden when the anchor is in the future', () => {
+    expect(endAnchorVisible(NOW + 5 * M, NOW - 60 * M, NOW)).toBe(false);
   });
 });
 
