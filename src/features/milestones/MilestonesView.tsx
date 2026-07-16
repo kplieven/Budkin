@@ -2,7 +2,7 @@ import { View } from 'react-native';
 
 import { Txt } from '@/components/Txt';
 import { ageMonths } from '@/lib/format';
-import { MILESTONES, aroundNow, groupByCategory, reachedByKey } from '@/lib/milestones';
+import { MILESTONES, aroundNow, groupByCategory, reachedForChild } from '@/lib/milestones';
 import type { MilestoneDef } from '@/lib/milestones';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -27,7 +27,9 @@ export function MilestonesView() {
   const openMilestone = useAppStore((s) => s.openMilestone);
   const openEditMilestone = useAppStore((s) => s.openEditMilestone);
 
-  const reached = reachedByKey(entries);
+  // Scope to the selected child so one child's logged milestones do not count as
+  // reached for another (in local mode `entries` holds every child's history).
+  const reached = reachedForChild(entries, child?.id);
   const months = child ? ageMonths(child.birth, now) : null;
   const upcoming = aroundNow(months, reached);
   const groups = groupByCategory(MILESTONES);
