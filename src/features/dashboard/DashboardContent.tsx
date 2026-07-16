@@ -7,6 +7,7 @@ import { PulsingDot } from '@/components/PulsingDot';
 import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
@@ -125,6 +126,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
 
   return (
     <>
+      <MilestoneNudge />
       {/* status strip */}
       <View style={{ flexDirection: 'row', gap: 9, marginBottom: 8 }}>
         {status.map((st) => (
