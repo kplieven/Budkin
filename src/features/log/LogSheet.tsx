@@ -14,6 +14,7 @@ import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
 import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { fmtClock } from '@/lib/format';
 import { fmtValue, toMetric, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
@@ -212,7 +213,9 @@ export function LogSheet() {
     : fromTimerId
       ? te.ongoing
         ? 'Save details'
-        : 'Stop & save'
+        : te.endAbs != null
+          ? `Stop & save · ended ${fmtClock(te.endAbs)}`
+          : 'Stop & save'
       : te.ongoing && te.shape === 'interval'
         ? 'Start live timer'
         : `Save ${label.toLowerCase()}`;
