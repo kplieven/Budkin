@@ -116,7 +116,7 @@ function QuickSetStrip({ children }: { children: ReactNode }) {
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ flexDirection: 'row', gap: 8, paddingRight: 4 }}
+        contentContainerStyle={{ gap: 8, paddingRight: 4 }}
       >
         {children}
       </ScrollView>
