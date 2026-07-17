@@ -2123,6 +2123,36 @@ describe('edit a running timer', () => {
     expect(s().timers).toHaveLength(1);
     expect(s().fromTimerId).toBeNull();
   });
+
+  it('editing the end to an earlier time then saving stops the timer and logs an entry at that end', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    s().setEndedAbs(NOW - 5 * M); // pin an earlier end; flips ongoing:false
+    s().save();
+    expect(s().timers).toHaveLength(0); // source timer consumed
+    expect(s().entries).toHaveLength(1);
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.start).toBe(NOW - 40 * M); // original timer start preserved
+    expect(e.end).toBe(NOW - 5 * M); // logged at the pinned end
+    expect(s().fromTimerId).toBeNull();
+  });
+
+  it('editing the end then tapping Still running keeps the timer live and creates no entry', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    s().setEndedAbs(NOW - 5 * M);
+    s().setOngoing(); // "Still running" — back to live
+    s().save();
+    expect(s().timers).toHaveLength(1); // still running (saveTimerDetails path)
+    expect(s().entries).toHaveLength(0); // no entry created
+    expect(s().timers[0].start).toBe(NOW - 40 * M);
+    expect(s().sheet).toBeNull();
+    expect(s().fromTimerId).toBeNull();
+  });
 });
 
 describe('saveTimerDetails: persisting edits to a running timer', () => {
