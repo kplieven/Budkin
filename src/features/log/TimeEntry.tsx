@@ -12,15 +12,15 @@
  * happens on a real chip/anchor/nudge/type interaction via the store setters.
  */
 
-import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useState, type ComponentProps, type ReactNode } from 'react';
+import { Pressable, ScrollView, View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
-import { dayGroupLabel, fmtAgoShort, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
+import { ANCHOR_LABEL, anchorLabel, dayGroupLabel, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
 import {
   derivedField,
   endAnchorVisible,
@@ -95,6 +95,35 @@ function ValuePill({
   );
 }
 
+/** A Chip preset to the compact sizing used inside the Quick set strip. */
+function StripChip(props: ComponentProps<typeof Chip>) {
+  return <Chip padV={8} padH={12} fontSize={13} radius={11} {...props} />;
+}
+
+/**
+ * The smart anchors as a single-line, horizontally-scrollable strip beneath the
+ * exact editor. One line tall regardless of anchor count; when the chips
+ * overflow, the trailing chip peeks at the right edge as the "swipe for more"
+ * cue. A dim "Quick set" label keeps the shortcuts discoverable below the clock.
+ */
+function QuickSetStrip({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <Txt weight={600} size={11.5} color={t.dim} tracking={0.2}>
+        Quick set
+      </Txt>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ flexDirection: 'row', gap: 8, paddingRight: 4 }}
+      >
+        {children}
+      </ScrollView>
+    </View>
+  );
+}
+
 export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const t = useTheme();
   const te = useAppStore((s) => s.te);
@@ -150,13 +179,13 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const endAnchors = (
     isInterval
       ? [
-          feedStart != null ? { min: feedStart, label: 'When last feed started' } : null,
-          sleepStart != null ? { min: sleepStart, label: 'When last sleep started' } : null,
-          lastDiaper != null ? { min: lastDiaper, label: 'When last diaper changed' } : null,
+          feedStart != null ? { min: feedStart, label: ANCHOR_LABEL.feedStarted } : null,
+          sleepStart != null ? { min: sleepStart, label: ANCHOR_LABEL.sleepStarted } : null,
+          lastDiaper != null ? { min: lastDiaper, label: ANCHOR_LABEL.diaper } : null,
         ]
       : []
   ).filter(
-    (a): a is { min: number; label: string } =>
+    (a): a is NonNullable<typeof a> =>
       a != null && endAnchorVisible(now - a.min * MIN, start as number, now),
   );
 
@@ -215,23 +244,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
       {/* one focused panel */}
       {isInterval && !timerEdit && editing === 'end' && (
         <View style={{ gap: 10, marginBottom: 4 }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip
-              label="Now"
-              color={color}
-              selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === 0}
-              onPress={() => setEnded(0)}
-            />
-            <Chip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={goOngoing} />
-            {endAnchors.map((a) => (
-              <Chip
-                key={a.label}
-                label={`${a.label} (${fmtAgoShort(a.min)})`}
-                color={color}
-                onPress={() => setEndedAbs(now - a.min * MIN)}
-              />
-            ))}
-          </View>
           {!te.ongoing && (
             <TimeAdjuster
               mode="clock"
@@ -242,31 +254,28 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               onChange={(ms) => setEndedAbs(Math.max(ms, start as number))}
             />
           )}
-        </View>
-      )}
-
-      {isInterval && timerEdit && editing === 'end' && (
-        <View style={{ gap: 10, marginBottom: 4 }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip
+          <QuickSetStrip>
+            <StripChip
               label="Now"
               color={color}
               selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === 0}
               onPress={() => setEnded(0)}
             />
-            <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
+            <StripChip label="Still ongoing" color={color} selected={!!te.ongoing} onPress={goOngoing} />
             {endAnchors.map((a) => (
-              <Chip
+              <StripChip
                 key={a.label}
-                label={`${a.label} (${fmtAgoShort(a.min)})`}
+                label={anchorLabel(a.label, a.min)}
                 color={color}
                 onPress={() => setEndedAbs(now - a.min * MIN)}
               />
             ))}
-          </View>
-          <Txt weight={500} size={12} color={t.dim}>
-            {te.ongoing ? 'Set an end to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
-          </Txt>
+          </QuickSetStrip>
+        </View>
+      )}
+
+      {isInterval && timerEdit && editing === 'end' && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
           <TimeAdjuster
             mode="clock"
             value={end}
@@ -275,43 +284,31 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
             showRelative
             onChange={(ms) => setEndedAbs(Math.min(now, Math.max(start as number, ms)))}
           />
+          <Txt weight={500} size={12} color={t.dim}>
+            {te.ongoing ? 'Set an end to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
+          </Txt>
+          <QuickSetStrip>
+            <StripChip
+              label="Now"
+              color={color}
+              selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === 0}
+              onPress={() => setEnded(0)}
+            />
+            <StripChip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
+            {endAnchors.map((a) => (
+              <StripChip
+                key={a.label}
+                label={anchorLabel(a.label, a.min)}
+                color={color}
+                onPress={() => setEndedAbs(now - a.min * MIN)}
+              />
+            ))}
+          </QuickSetStrip>
         </View>
       )}
 
       {isInterval && editing === 'start' && (
         <View style={{ gap: 10, marginBottom: 4 }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip
-              label="Now"
-              color={color}
-              selected={startActive && te.startAnchor === 'now'}
-              onPress={() => setStartedAt(now, 'now')}
-            />
-            {lastFeed != null && (
-              <Chip
-                label={`When last feed ended (${fmtAgoShort(lastFeed)})`}
-                color={color}
-                selected={startActive && te.startAnchor === 'lastfeed'}
-                onPress={() => setStartedAt(now - lastFeed * MIN, 'lastfeed')}
-              />
-            )}
-            {lastWake != null && (
-              <Chip
-                label={`When they woke (${fmtAgoShort(lastWake)})`}
-                color={color}
-                selected={startActive && te.startAnchor === 'wake'}
-                onPress={() => setStartedAt(now - lastWake * MIN, 'wake')}
-              />
-            )}
-            {lastDiaper != null && (
-              <Chip
-                label={`When last diaper changed (${fmtAgoShort(lastDiaper)})`}
-                color={color}
-                selected={startActive && te.startAnchor === 'diaper'}
-                onPress={() => setStartedAt(now - lastDiaper * MIN, 'diaper')}
-              />
-            )}
-          </View>
           <TimeAdjuster
             mode="clock"
             value={start as number}
@@ -320,6 +317,38 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
             showRelative
             onChange={(ms) => setStartedAt(te.ongoing ? ms : Math.min(ms, end))}
           />
+          <QuickSetStrip>
+            <StripChip
+              label="Now"
+              color={color}
+              selected={startActive && te.startAnchor === 'now'}
+              onPress={() => setStartedAt(now, 'now')}
+            />
+            {lastFeed != null && (
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.feedEnded, lastFeed)}
+                color={color}
+                selected={startActive && te.startAnchor === 'lastfeed'}
+                onPress={() => setStartedAt(now - lastFeed * MIN, 'lastfeed')}
+              />
+            )}
+            {lastWake != null && (
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.woke, lastWake)}
+                color={color}
+                selected={startActive && te.startAnchor === 'wake'}
+                onPress={() => setStartedAt(now - lastWake * MIN, 'wake')}
+              />
+            )}
+            {lastDiaper != null && (
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.diaper, lastDiaper)}
+                color={color}
+                selected={startActive && te.startAnchor === 'diaper'}
+                onPress={() => setStartedAt(now - lastDiaper * MIN, 'diaper')}
+              />
+            )}
+          </QuickSetStrip>
         </View>
       )}
 
@@ -341,36 +370,24 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
 
       {!isInterval && (
         <View style={{ gap: 10, marginBottom: 4 }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            <Chip
+          <TimeAdjuster mode="clock" value={end} now={now} color={color} showRelative onChange={(ms) => setTE({ absTime: ms })} />
+          <QuickSetStrip>
+            <StripChip
               label="Now"
               color={color}
               selected={te.absTime == null && te.agoMin === 0}
               onPress={() => setTE({ agoMin: 0 })}
             />
             {lastFeed != null && (
-              <Chip
-                label="When last feed ended"
-                color={color}
-                onPress={() => setTE({ agoMin: lastFeed })}
-              />
+              <StripChip label={ANCHOR_LABEL.feedEnded} color={color} onPress={() => setTE({ agoMin: lastFeed })} />
             )}
             {lastWake != null && (
-              <Chip
-                label="When they woke"
-                color={color}
-                onPress={() => setTE({ agoMin: lastWake })}
-              />
+              <StripChip label={ANCHOR_LABEL.woke} color={color} onPress={() => setTE({ agoMin: lastWake })} />
             )}
             {lastDiaper != null && (
-              <Chip
-                label="When last diaper changed"
-                color={color}
-                onPress={() => setTE({ agoMin: lastDiaper })}
-              />
+              <StripChip label={ANCHOR_LABEL.diaper} color={color} onPress={() => setTE({ agoMin: lastDiaper })} />
             )}
-          </View>
-          <TimeAdjuster mode="clock" value={end} now={now} color={color} showRelative onChange={(ms) => setTE({ absTime: ms })} />
+          </QuickSetStrip>
         </View>
       )}
     </View>
