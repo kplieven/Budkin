@@ -2088,6 +2088,22 @@ describe('edit a running timer', () => {
     expect(s().sheet).toBeNull();
     expect(s().fromTimerId).toBeNull();
   });
+
+  it('tapping Now on the end then saving stops the timer and logs an entry ending at now', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    s().setEnded(0); // "Now" chip: end at now, clears endAbs, flips ongoing:false
+    s().save();
+    expect(s().timers).toHaveLength(0); // timer consumed
+    expect(s().entries).toHaveLength(1);
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.start).toBe(NOW - 40 * M); // original timer start preserved
+    expect(e.end).toBe(NOW); // ended at now (store now === NOW in tests)
+    expect(s().te.endAbs).toBeUndefined(); // Now clears the absolute pin
+    expect(s().fromTimerId).toBeNull();
+  });
 });
 
 describe('saveTimerDetails: persisting edits to a running timer', () => {
