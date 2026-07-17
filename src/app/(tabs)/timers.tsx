@@ -11,7 +11,7 @@ import { Txt } from '@/components/Txt';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
-import { fmtAgo, fmtClock, fmtDur, fmtElapsedClock } from '@/lib/format';
+import { fmtAgo, fmtElapsedClock } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -67,11 +67,6 @@ export default function Timers() {
   const webPull = useWebPullToRefresh(scrollRef, refresh);
   // timer id whose exact-start editor is expanded
   const [exactFor, setExactFor] = useState<string | null>(null);
-  // timer id whose ephemeral "Ended earlier…" stop editor is expanded — never
-  // persisted; collapsing (or stopping) discards it without touching the timer.
-  const [endEditFor, setEndEditFor] = useState<string | null>(null);
-  // candidate end (ms) picked in that editor, only meaningful while it's open
-  const [endCandidate, setEndCandidate] = useState(0);
 
   const body = (
     <>
@@ -222,94 +217,6 @@ export default function Timers() {
                   </Txt>
                 </Pressable>
               </View>
-
-              <Pressable
-                onPress={() => {
-                  if (endEditFor === tm.id) {
-                    setEndEditFor(null);
-                  } else {
-                    setEndEditFor(tm.id);
-                    setEndCandidate(Math.max(tm.start, now - 5 * 60000));
-                  }
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`Stop ${tm.name} timer with an earlier end time`}
-                accessibilityState={{ expanded: endEditFor === tm.id }}
-                style={(s) => [
-                  {
-                    alignSelf: 'center',
-                    marginTop: 10,
-                    paddingHorizontal: 12,
-                    paddingVertical: 7,
-                    borderRadius: 11,
-                    backgroundColor: endEditFor === tm.id ? hexA(color, 0.16) : t.chip,
-                    borderWidth: 1.5,
-                    borderColor: endEditFor === tm.id ? color : t.line,
-                    cursor: 'pointer',
-                  },
-                  endEditFor !== tm.id && isHovered(s) && { borderColor: t.line2 },
-                ]}
-              >
-                <Txt unselectable weight={700} size={13} color={endEditFor === tm.id ? color : t.text}>
-                  Ended earlier…
-                </Txt>
-              </Pressable>
-
-              {endEditFor === tm.id && (
-                <View style={{ marginTop: 6 }}>
-                  <View style={{ flexDirection: 'row', gap: 7, justifyContent: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-                    {([
-                      ['−5m', 5],
-                      ['−15m', 15],
-                      ['−30m', 30],
-                    ] as const).map(([lbl, agoMin]) => (
-                      <Pressable
-                        key={lbl}
-                        onPress={() => setEndCandidate(Math.max(tm.start, now - agoMin * 60000))}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Ended ${agoMin} minutes ago`}
-                        style={(s) => [
-                          { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
-                          isHovered(s) && { borderColor: t.line2 },
-                        ]}
-                      >
-                        <Txt unselectable weight={700} size={13}>
-                          {lbl}
-                        </Txt>
-                      </Pressable>
-                    ))}
-                  </View>
-
-                  <TimeAdjuster
-                    mode="clock"
-                    value={endCandidate}
-                    now={now}
-                    color={color}
-                    onChange={(ms) => setEndCandidate(Math.min(now, Math.max(tm.start, ms)))}
-                  />
-
-                  <Txt weight={600} size={13} color={t.dim} style={{ textAlign: 'center', marginBottom: 12 }}>
-                    {fmtClock(tm.start)} → {fmtClock(endCandidate)} · {fmtDur((endCandidate - tm.start) / 60000)}
-                  </Txt>
-
-                  <Pressable
-                    onPress={() => {
-                      stopTimer(tm.id, endCandidate);
-                      setEndEditFor(null);
-                    }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Save ${tm.name} timer, ended ${fmtClock(endCandidate)}`}
-                    style={(s) => [
-                      { height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
-                      isHovered(s) && { boxShadow: t.shadow },
-                    ]}
-                  >
-                    <Txt unselectable weight={800} size={14.5} color={t.onActivity}>
-                      Save · ended {fmtClock(endCandidate)}
-                    </Txt>
-                  </Pressable>
-                </View>
-              )}
 
               <View style={{ flexDirection: 'row', gap: 7, marginTop: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {TIMER_SAVE_OPTIONS.map((o) => {
