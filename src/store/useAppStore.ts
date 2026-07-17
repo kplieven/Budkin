@@ -66,7 +66,6 @@ import {
   type SavedServer,
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
-import { fmtClock } from '@/lib/format';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import type { UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
@@ -272,9 +271,8 @@ interface AppActions {
   save: () => void;
 
   startQuickTimer: () => void;
-  /** Stop a running timer and log it. `endMs`, if given (from the ephemeral
-   * "Ended earlier…" editor), is clamped into `[start, now]`; omitted = now. */
-  stopTimer: (id: string, endMs?: number) => void;
+  /** Stop a running timer at now and log it. */
+  stopTimer: (id: string) => void;
   adjustTimerStart: (id: string, deltaMin: number) => void;
   setTimerStart: (id: string, ms: number) => void;
   discardTimer: (id: string) => void;
@@ -1924,15 +1922,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast('Timer started');
     mirrorTimerCreate(get, set, timer.id);
   },
-  stopTimer: (id, endMs) => {
+  stopTimer: (id) => {
     const s = get();
     const tm = s.timers.find((t) => t.id === id);
     if (!tm) return;
     const saveAs = tm.saveAs;
     const now = Date.now();
-    // An explicit past end (from the ephemeral "Ended earlier…" editor) is
-    // clamped into [start, now]; otherwise end at now.
-    const resolvedEnd = endMs != null ? Math.min(now, Math.max(tm.start, endMs)) : now;
+    const resolvedEnd = now;
     const savedTags = tm.tags ?? [];
     const childId = tm.childId ?? s.selectedChildId;
     const base = { id: 'e' + now, childId, tags: savedTags, notes: tm.notes };
@@ -1957,10 +1953,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().commitWrite(entry);
     mirrorTimerDelete(get, tm);
     const queued = s.offline && !!s.connection && s.connection.mode === 'server';
-    // Only call out the resolved end when the caller asked for a back-dated
-    // stop — ending "now" needs no confirmation of what time it is.
-    const backdated = endMs != null ? ` · ended ${fmtClock(resolvedEnd)}` : '';
-    get().showToast(queued ? `Saved · queued offline${backdated}` : `Saved as ${ACTIVITY_LABEL[saveAs].toLowerCase()}${backdated}`);
+    get().showToast(queued ? 'Saved · queued offline' : `Saved as ${ACTIVITY_LABEL[saveAs].toLowerCase()}`);
   },
   discardTimer: (id) => {
     const tm = get().timers.find((t) => t.id === id);

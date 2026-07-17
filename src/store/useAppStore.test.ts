@@ -23,7 +23,6 @@ import {
 } from '@/data/entityStore';
 import { clearPendingOps } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
-import { fmtClock } from '@/lib/format';
 import type { Child, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
@@ -1958,70 +1957,6 @@ describe('setTimerStart', () => {
     expect(s().timers[0].start).toBe(NOW - 37 * M);
     s().setTimerStart('t1', Date.now() + 60 * M); // future → clamped
     expect(s().timers[0].start).toBeLessThanOrEqual(Date.now());
-  });
-});
-
-describe('stopTimer(id, endMs?) — ephemeral "Ended earlier…" stop flow', () => {
-  const runningTimer = (id: string, startAgoMin: number): Timer => ({
-    id,
-    activity: 'sleep',
-    name: 'Sleep',
-    start: NOW - startAgoMin * M,
-    saveAs: 'sleep',
-  });
-
-  it('without endMs still ends at now (regression)', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
-    const before = Date.now();
-    s().stopTimer('t1');
-    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
-    expect(e.end).toBeGreaterThanOrEqual(before);
-    expect(e.end).toBeLessThanOrEqual(Date.now());
-  });
-
-  it('with endMs logs a sleep entry ending at that time instead of now', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
-    s().stopTimer('t1', NOW - 5 * M);
-    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
-    expect(e.start).toBe(NOW - 30 * M);
-    expect(e.end).toBe(NOW - 5 * M);
-  });
-
-  it('with endMs honors the given end for a non-sleep timer too', () => {
-    useAppStore.setState({
-      timers: [{ id: 't2', activity: 'feeding', name: 'Feeding', start: NOW - 30 * M, saveAs: 'feeding' }],
-    });
-    s().stopTimer('t2', NOW - 8 * M);
-    const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
-    expect(e.start).toBe(NOW - 30 * M);
-    expect(e.end).toBe(NOW - 8 * M);
-  });
-
-  it('clamps endMs in the future down to now', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
-    s().stopTimer('t1', Date.now() + 60 * M);
-    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
-    expect(e.end).toBeLessThanOrEqual(Date.now());
-  });
-
-  it('clamps endMs before start up to start (no negative-duration entry)', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 5)] }); // start NOW - 5m
-    s().stopTimer('t1', NOW - 20 * M);
-    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
-    expect(e.end).toBeGreaterThanOrEqual(e.start);
-    expect(e.end).toBe(NOW - 5 * M); // clamped up to start
-  });
-
-  it('mentions the back-dated end in the toast when endMs is supplied', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
-    s().stopTimer('t1', NOW - 5 * M);
-    expect(s().toast).toBe('Saved as sleep · ended ' + fmtClock(NOW - 5 * M));
-  });
-
-  it('omits the back-dated wording when ending at now', () => {
-    useAppStore.setState({ timers: [runningTimer('t1', 30)] });
-    s().stopTimer('t1');
-    expect(s().toast).toBe('Saved as sleep');
   });
 });
 
