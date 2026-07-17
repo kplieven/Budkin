@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   ageMonths,
   ageStr,
+  ANCHOR_LABEL,
+  anchorLabel,
   dayGroupLabel,
   fmtAgo,
   fmtAgoShort,
@@ -87,5 +89,17 @@ describe('ageMonths', () => {
   it('never returns negative for a future birth', () => {
     const birth = Date.parse('2025-01-01T00:00:00Z');
     expect(ageMonths(birth, birth - 10 * DAY)).toBe(0);
+  });
+});
+
+describe('anchorLabel / ANCHOR_LABEL', () => {
+  it('appends a middot + short ago when given minutes', () => {
+    expect(anchorLabel(ANCHOR_LABEL.feedEnded, 120)).toBe('Feed ended · 2h');
+    expect(anchorLabel(ANCHOR_LABEL.woke, 45)).toBe('Woke · 45m');
+    expect(anchorLabel(ANCHOR_LABEL.feedStarted, 78)).toBe('Feed started · 1h18m');
+  });
+  it('returns the base label unchanged when no ago is given', () => {
+    expect(anchorLabel(ANCHOR_LABEL.diaper)).toBe('Diaper');
+    expect(anchorLabel(ANCHOR_LABEL.woke)).toBe('Woke');
   });
 });

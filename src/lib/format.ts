@@ -44,6 +44,28 @@ export function fmtAgoShort(min: number): string {
   return `${Math.floor(min / 1440)}d`;
 }
 
+/**
+ * Base copy for the Quick set anchor chips, shared across the time panels so the
+ * wording stays identical everywhere (e.g. "Diaper" reads the same in the start,
+ * end, and point-event panels).
+ */
+export const ANCHOR_LABEL = {
+  feedEnded: 'Feed ended',
+  woke: 'Woke',
+  diaper: 'Diaper',
+  feedStarted: 'Feed started',
+  sleepStarted: 'Sleep started',
+} as const;
+
+/**
+ * Compose a compact Quick set chip label. With an "ago" value it appends the
+ * short duration after a middot: anchorLabel('Feed ended', 120) -> "Feed ended · 2h".
+ * Without one it returns the base unchanged: anchorLabel('Woke') -> "Woke".
+ */
+export function anchorLabel(base: string, agoMin?: number): string {
+  return agoMin == null ? base : `${base} · ${fmtAgoShort(agoMin)}`;
+}
+
 /** "12 days old" / "8 weeks old" / "3 months old" */
 export function ageStr(birth: number, now: number): string {
   const days = Math.floor((now - birth) / 86400000);
