@@ -100,10 +100,10 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
-  // Editing a running timer (opened via openTimerEdit): a running timer has no
-  // end/duration, so Ended does not apply. Only Start + Lasted (which stops and
-  // logs it on save) are focusable. Gating on fromTimerId leaves normal
-  // new-entry sheets untouched.
+  // Editing a running timer (opened via openTimerEdit): Start, End and Lasted are
+  // all focusable. Editing End or Lasted to a fixed value flips ongoing false so
+  // save() stops the timer and logs it; leaving it ongoing saves details only.
+  // Gating on fromTimerId leaves normal new-entry sheets untouched.
   const timerEdit = useAppStore((s) => s.fromTimerId != null);
   const setTE = useAppStore((s) => s.setTE);
   const setEnded = useAppStore((s) => s.setEnded);
@@ -173,11 +173,7 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
                 <Txt weight={700} size={16} color={t.dim}>
                   →
                 </Txt>
-                {timerEdit ? (
-                  <Txt weight={800} size={17} tracking={-0.3} color={t.dim}>
-                    {te.ongoing ? 'now' : fmtClock(end)}
-                  </Txt>
-                ) : te.ongoing ? (
+                {te.ongoing ? (
                   <ValuePill big label="now" color={color} active={editing === 'end'} onPress={() => focus('end')} />
                 ) : (
                   <ValuePill big label={fmtClock(end)} color={color} active={editing === 'end'} dimmed={derived === 'end'} onPress={() => focus('end')} />
@@ -246,6 +242,39 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               onChange={(ms) => setEndedAbs(Math.max(ms, start as number))}
             />
           )}
+        </View>
+      )}
+
+      {isInterval && timerEdit && editing === 'end' && (
+        <View style={{ gap: 10, marginBottom: 4 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Chip
+              label="Now"
+              color={color}
+              selected={!te.ongoing && endActive && te.endAbs == null && te.endAgoMin === 0}
+              onPress={() => setEnded(0)}
+            />
+            <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
+            {endAnchors.map((a) => (
+              <Chip
+                key={a.label}
+                label={`${a.label} (${fmtAgoShort(a.min)})`}
+                color={color}
+                onPress={() => setEndedAbs(now - a.min * MIN)}
+              />
+            ))}
+          </View>
+          <Txt weight={500} size={12} color={t.dim}>
+            {te.ongoing ? 'Set an end to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
+          </Txt>
+          <TimeAdjuster
+            mode="clock"
+            value={end}
+            now={now}
+            color={color}
+            showRelative
+            onChange={(ms) => setEndedAbs(Math.min(now, Math.max(start as number, ms)))}
+          />
         </View>
       )}
 
