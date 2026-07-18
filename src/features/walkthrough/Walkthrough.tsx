@@ -68,7 +68,9 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             scrollEventThrottle={16}
-            onMomentumScrollEnd={(e) => setIndex(Math.round(e.nativeEvent.contentOffset.x / width))}
+            onMomentumScrollEnd={(e) =>
+              setIndex(Math.max(0, Math.min(WALKTHROUGH_SLIDES.length - 1, Math.round(e.nativeEvent.contentOffset.x / width))))
+            }
           >
             {WALKTHROUGH_SLIDES.map((slide) => (
               // Horizontal ScrollView children stretch to the viewport height on
