@@ -3249,3 +3249,28 @@ describe('answerMilestonePrompt', () => {
     expect(s().answeredMilestonePrompts).toEqual({});
   });
 });
+
+describe('walkthrough persistence', () => {
+  it('completeTutorial sets tutorialSeen and persists via savePrefs', () => {
+    useAppStore.setState({ tutorialSeen: false });
+    s().completeTutorial();
+    expect(s().tutorialSeen).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ tutorialSeen: true });
+  });
+
+  it('hydrate applies a persisted tutorialSeen', async () => {
+    h.prefs = { tutorialSeen: true };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ tutorialSeen: false });
+    await s().hydrate();
+    expect(s().tutorialSeen).toBe(true);
+  });
+
+  it('hydrate leaves tutorialSeen false when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ tutorialSeen: false });
+    await s().hydrate();
+    expect(s().tutorialSeen).toBe(false);
+  });
+});
