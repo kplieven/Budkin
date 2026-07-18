@@ -93,11 +93,11 @@ describe('ageMonths', () => {
 });
 
 describe('anchorLabel / ANCHOR_LABEL', () => {
-  it('appends a middot + short ago when given minutes', () => {
-    expect(anchorLabel(ANCHOR_LABEL.feedEnded, 120)).toBe('Feed ended · 2h');
-    expect(anchorLabel(ANCHOR_LABEL.woke, 45)).toBe('Woke · 45m');
-    expect(anchorLabel(ANCHOR_LABEL.feedStarted, 78)).toBe('Feed started · 1h18m');
-    expect(anchorLabel(ANCHOR_LABEL.diaper, 0)).toBe('Diaper · 0m');
+  it('appends the short ago in parentheses when given minutes', () => {
+    expect(anchorLabel(ANCHOR_LABEL.feedEnded, 120)).toBe('Feed ended (2h)');
+    expect(anchorLabel(ANCHOR_LABEL.woke, 45)).toBe('Woke (45m)');
+    expect(anchorLabel(ANCHOR_LABEL.feedStarted, 78)).toBe('Feed started (1h18m)');
+    expect(anchorLabel(ANCHOR_LABEL.diaper, 0)).toBe('Diaper (0m)');
   });
   it('returns the base label unchanged when no ago is given', () => {
     expect(anchorLabel(ANCHOR_LABEL.diaper)).toBe('Diaper');

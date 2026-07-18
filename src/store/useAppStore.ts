@@ -258,7 +258,9 @@ interface AppActions {
    *  (HIDDEN_TAGS) names, and no-ops on a tag already selected. */
   createTag: (name: string) => void;
   setEnded: (agoMin: number) => void;
-  setEndedAbs: (ms: number) => void;
+  /** Pin the end to an absolute ms. An `anchor` marks which "Ended" chip drove it
+   * (for highlighting); omitting it (a manual/precise edit) clears that mark. */
+  setEndedAbs: (ms: number, anchor?: TimeEntryState['endAnchor']) => void;
   setOngoing: () => void;
   setLasted: (min: number) => void;
   /** Timer-edit "lasted X": pin the duration off the fixed start (end becomes
@@ -1579,6 +1581,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => {
       const next = { ...s.te, ...patch };
       if ('agoMin' in patch) next.absTime = undefined; // point: a relative pick drops the edit anchor
+      // A manual time pick (precise editor, "Now") deselects the "When" anchor,
+      // unless the patch itself is that anchor selection.
+      if (('agoMin' in patch || 'absTime' in patch) && !('pointAnchor' in patch)) {
+        next.pointAnchor = undefined;
+      }
       return { te: next };
     }),
   adjustAmount: (delta) =>
@@ -1603,7 +1610,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setEnded: (agoMin) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'end');
-      const next = { ...s.te, endAgoMin: agoMin, endAbs: undefined, ongoing: false };
+      const next = { ...s.te, endAgoMin: agoMin, endAbs: undefined, endAnchor: undefined, ongoing: false };
       if (ov) {
         next.startAbs = ov.frozen; // freeze the un-nudged start so lasted no longer drives it
         next.startAgoMin = undefined;
@@ -1613,10 +1620,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return { te: next };
     }),
-  setEndedAbs: (ms) =>
+  setEndedAbs: (ms, anchor) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'end');
-      const next = { ...s.te, endAbs: ms, endAgoMin: undefined, ongoing: false };
+      const next = { ...s.te, endAbs: ms, endAgoMin: undefined, endAnchor: anchor, ongoing: false };
       if (ov) {
         next.startAbs = ov.frozen; // freeze the un-nudged start so lasted no longer drives it
         next.startAgoMin = undefined;

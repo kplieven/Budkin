@@ -179,9 +179,9 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const endAnchors = (
     isInterval
       ? [
-          feedStart != null ? { min: feedStart, label: ANCHOR_LABEL.feedStarted } : null,
-          sleepStart != null ? { min: sleepStart, label: ANCHOR_LABEL.sleepStarted } : null,
-          lastDiaper != null ? { min: lastDiaper, label: ANCHOR_LABEL.diaper } : null,
+          feedStart != null ? { key: 'feedstart' as const, min: feedStart, label: ANCHOR_LABEL.feedStarted } : null,
+          sleepStart != null ? { key: 'sleepstart' as const, min: sleepStart, label: ANCHOR_LABEL.sleepStarted } : null,
+          lastDiaper != null ? { key: 'diaper' as const, min: lastDiaper, label: ANCHOR_LABEL.diaper } : null,
         ]
       : []
   ).filter(
@@ -267,7 +267,8 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
                 key={a.label}
                 label={anchorLabel(a.label, a.min)}
                 color={color}
-                onPress={() => setEndedAbs(now - a.min * MIN)}
+                selected={!te.ongoing && endActive && te.endAnchor === a.key}
+                onPress={() => setEndedAbs(now - a.min * MIN, a.key)}
               />
             ))}
           </QuickSetStrip>
@@ -300,7 +301,8 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
                 key={a.label}
                 label={anchorLabel(a.label, a.min)}
                 color={color}
-                onPress={() => setEndedAbs(now - a.min * MIN)}
+                selected={!te.ongoing && endActive && te.endAnchor === a.key}
+                onPress={() => setEndedAbs(now - a.min * MIN, a.key)}
               />
             ))}
           </QuickSetStrip>
@@ -379,13 +381,28 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               onPress={() => setTE({ agoMin: 0 })}
             />
             {lastFeed != null && (
-              <StripChip label={ANCHOR_LABEL.feedEnded} color={color} onPress={() => setTE({ agoMin: lastFeed })} />
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.feedEnded, lastFeed)}
+                color={color}
+                selected={te.pointAnchor === 'lastfeed'}
+                onPress={() => setTE({ absTime: now - lastFeed * MIN, pointAnchor: 'lastfeed' })}
+              />
             )}
             {lastWake != null && (
-              <StripChip label={ANCHOR_LABEL.woke} color={color} onPress={() => setTE({ agoMin: lastWake })} />
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.woke, lastWake)}
+                color={color}
+                selected={te.pointAnchor === 'wake'}
+                onPress={() => setTE({ absTime: now - lastWake * MIN, pointAnchor: 'wake' })}
+              />
             )}
             {lastDiaper != null && (
-              <StripChip label={ANCHOR_LABEL.diaper} color={color} onPress={() => setTE({ agoMin: lastDiaper })} />
+              <StripChip
+                label={anchorLabel(ANCHOR_LABEL.diaper, lastDiaper)}
+                color={color}
+                selected={te.pointAnchor === 'diaper'}
+                onPress={() => setTE({ absTime: now - lastDiaper * MIN, pointAnchor: 'diaper' })}
+              />
             )}
           </QuickSetStrip>
         </View>

@@ -27,6 +27,8 @@ export interface TimeEntryState {
   endAgoMin?: number;
   /** absolute end (ms), set when editing or via the precise editor */
   endAbs?: number;
+  /** which "Ended" anchor set the end (for highlighting); cleared by a manual edit */
+  endAnchor?: 'feedstart' | 'sleepstart' | 'diaper';
   /** end not set yet (in progress) — saved as a running timer */
   ongoing?: boolean;
   /** absolute start (ms), pinned via an anchor / edit / going-ongoing */
@@ -42,6 +44,8 @@ export interface TimeEntryState {
   // ---- point ----
   agoMin?: number;
   absTime?: number;
+  /** which "When" anchor set the timestamp (for highlighting); cleared by a manual edit */
+  pointAnchor?: 'lastfeed' | 'wake' | 'diaper';
 
   // ---- activity fields ----
   feedType?: FeedType;
