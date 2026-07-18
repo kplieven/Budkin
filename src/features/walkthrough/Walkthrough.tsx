@@ -20,9 +20,11 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
-  // Measured pager width (<= maxWidth). Slides are sized to this so paging snaps
-  // cleanly on both phone and a constrained desktop column.
-  const [width, setWidth] = useState(0);
+  // Measured pager box (width <= maxWidth, plus height). Slides are sized to this
+  // so paging snaps cleanly on phone and a constrained desktop column, and the
+  // explicit height lets each slide center its content vertically (a horizontal
+  // paging ScrollView does not reliably stretch its children to full height on web).
+  const [size, setSize] = useState({ w: 0, h: 0 });
   const scrollRef = useRef<ScrollView | null>(null);
 
   const last = index >= WALKTHROUGH_SLIDES.length - 1;
@@ -30,7 +32,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   const goTo = (i: number) => {
     const clamped = Math.max(0, Math.min(WALKTHROUGH_SLIDES.length - 1, i));
     setIndex(clamped);
-    scrollRef.current?.scrollTo({ x: clamped * width, animated: true });
+    scrollRef.current?.scrollTo({ x: clamped * size.w, animated: true });
   };
 
   const next = () => {
@@ -59,9 +61,9 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
       {/* pager: centered, max-width column so it is not full-bleed on desktop */}
       <View
         style={{ flex: 1, alignSelf: 'center', width: '100%', maxWidth: 460 }}
-        onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+        onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
       >
-        {width > 0 && (
+        {size.w > 0 && (
           <ScrollView
             ref={scrollRef}
             horizontal
@@ -69,13 +71,13 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             showsHorizontalScrollIndicator={false}
             scrollEventThrottle={16}
             onMomentumScrollEnd={(e) =>
-              setIndex(Math.max(0, Math.min(WALKTHROUGH_SLIDES.length - 1, Math.round(e.nativeEvent.contentOffset.x / width))))
+              setIndex(Math.max(0, Math.min(WALKTHROUGH_SLIDES.length - 1, Math.round(e.nativeEvent.contentOffset.x / size.w))))
             }
           >
             {WALKTHROUGH_SLIDES.map((slide) => (
-              // Horizontal ScrollView children stretch to the viewport height on
-              // the cross axis, so justifyContent centers the slide vertically.
-              <View key={slide.headline} style={{ width, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center' }}>
+              // Each slide is sized to the measured pager box (width + height) so
+              // its content centers vertically and paging snaps to full pages.
+              <View key={slide.headline} style={{ width: size.w, height: size.h, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center' }}>
                 <View
                   style={{
                     width: 96,
