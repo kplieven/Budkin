@@ -16,6 +16,13 @@ const NODE_TOP = 15; // vertical offset of the node/capsule from the entry top
 const DOT = 12;      // point-event marker diameter
 const CAP_W = 8;     // duration-capsule width
 const CONTENT_H = 30; // content row height (== icon chip), used to center it on the marker
+// The row's color wash bleeds edge-to-edge; ROW_PAD insets the content back off
+// the screen edges (History drops its container's horizontal padding to let the
+// wash reach them, and its day labels/header re-add a matching inset). ROW_GAP is
+// the breathing room between rows — the spine connector is extended by ROW_GAP so
+// the timeline stays continuous across the gap.
+const ROW_PAD = 18;
+const ROW_GAP = 8;
 
 // Duration -> capsule height, proportional but CAPPED: a marker saturates at
 // CAP_MIN so a long night sleep reads as "long" without ballooning the row (and
@@ -66,8 +73,14 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
 
   const durMin = isPoint ? 0 : ((endTs ?? now) - start) / 60000;
   const bh = isPoint ? DOT : barHeight(durMin);
-  const nodeBottom = NODE_TOP + bh;
-  const minHeight = Math.max(58, nodeBottom + 16);
+  const minHeight = Math.max(58, NODE_TOP + bh + 16);
+  // Point events are a single dot with no start/end labels bracketing it, so
+  // center the marker cluster (clock, dot, content) in the row — otherwise the
+  // full-height color wash leaves a lopsided gap below the content. Duration
+  // capsules stay anchored at NODE_TOP so their start/end clock labels sit at
+  // the capsule's head and foot.
+  const nodeTop = isPoint ? (minHeight - bh) / 2 : NODE_TOP;
+  const nodeBottom = nodeTop + bh;
   const detail = detailFor(entry);
 
   return (
@@ -75,13 +88,27 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`Edit ${ACTIVITY_LABEL[entry.type]}`}
-      style={(s) => [{ flexDirection: 'row', minHeight, cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
+      style={(s) => [
+        // A faint full-bleed wash in the entry's own activity color, spanning the
+        // whole row (width and height). Kept very light so the timeline spine and
+        // text stay legible over it in both themes. ROW_PAD holds the content off
+        // the edges the wash bleeds to; ROW_GAP spaces the rows apart.
+        {
+          flexDirection: 'row',
+          minHeight,
+          cursor: 'pointer',
+          backgroundColor: hexA(color, 0.07),
+          paddingHorizontal: ROW_PAD,
+          marginBottom: isLast ? 0 : ROW_GAP,
+        },
+        isHovered(s) && { opacity: 0.85 },
+      ]}
     >
       {/* clock column: newest-first, so the end sits at the capsule head and the
           start at its foot. Point events show their single time at the head. */}
       <View style={{ width: TIME_W, paddingRight: 8 }}>
         {isPoint ? (
-          <View style={{ position: 'absolute', right: 8, top: NODE_TOP, height: DOT, justifyContent: 'center' }}>
+          <View style={{ position: 'absolute', right: 8, top: nodeTop, height: DOT, justifyContent: 'center' }}>
             <Txt weight={600} size={13.5} style={{ fontVariant: ['tabular-nums'], textAlign: 'right' }}>
               {fmtClock(start)}
             </Txt>
@@ -103,21 +130,21 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
       {/* spine + marker */}
       <View style={{ width: RAIL_W }}>
         {!isFirst ? (
-          <View style={{ position: 'absolute', top: 0, height: NODE_TOP, left: RAIL_W / 2 - 1, width: 2, backgroundColor: t.line }} />
+          <View style={{ position: 'absolute', top: 0, height: nodeTop, left: RAIL_W / 2 - 1, width: 2, backgroundColor: t.line }} />
         ) : null}
         {!isLast ? (
-          <View style={{ position: 'absolute', top: nodeBottom, bottom: 0, left: RAIL_W / 2 - 1, width: 2, backgroundColor: t.line }} />
+          <View style={{ position: 'absolute', top: nodeBottom, bottom: -ROW_GAP, left: RAIL_W / 2 - 1, width: 2, backgroundColor: t.line }} />
         ) : null}
         {isPoint ? (
-          <View style={{ position: 'absolute', top: NODE_TOP, left: RAIL_W / 2 - DOT / 2, width: DOT, height: DOT, borderRadius: DOT / 2, backgroundColor: color, borderWidth: 2.5, borderColor: t.bg }} />
+          <View style={{ position: 'absolute', top: nodeTop, left: RAIL_W / 2 - DOT / 2, width: DOT, height: DOT, borderRadius: DOT / 2, backgroundColor: color, borderWidth: 2.5, borderColor: t.bg }} />
         ) : (
-          <View style={{ position: 'absolute', top: NODE_TOP, left: RAIL_W / 2 - CAP_W / 2, width: CAP_W, height: bh, borderRadius: CAP_W / 2, backgroundColor: ongoing ? hexA(color, 0.45) : color }} />
+          <View style={{ position: 'absolute', top: nodeTop, left: RAIL_W / 2 - CAP_W / 2, width: CAP_W, height: bh, borderRadius: CAP_W / 2, backgroundColor: ongoing ? hexA(color, 0.45) : color }} />
         )}
       </View>
 
       {/* content: icon + label │ detail on ONE line, vertically centered on the
-          marker (its center is NODE_TOP + bh/2 for both dot and capsule). */}
-      <View style={{ flex: 1, paddingLeft: 4, paddingTop: NODE_TOP + bh / 2 - CONTENT_H / 2, paddingBottom: 14 }}>
+          marker (its center is nodeTop + bh/2 for both dot and capsule). */}
+      <View style={{ flex: 1, paddingLeft: 4, paddingTop: nodeTop + bh / 2 - CONTENT_H / 2, paddingBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <View style={{ width: CONTENT_H, height: CONTENT_H, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={entry.type as IconName} color={color} size={17} />
