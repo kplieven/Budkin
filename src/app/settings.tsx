@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
+import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -248,6 +249,22 @@ export default function Settings() {
             </Txt>
           </Pressable>
         )}
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Help
+      </Txt>
+      <View style={group}>
+        <Pressable
+          onPress={() => router.push({ pathname: '/welcome', params: { replay: '1' } })}
+          accessibilityRole="button"
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
+            Show the walkthrough
+          </Txt>
+          <Icon name="chevron-right" color={t.faint} size={18} />
+        </Pressable>
       </View>
     </>
   );
