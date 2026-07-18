@@ -31,7 +31,7 @@
 - Produces:
   - `Prefs.tutorialSeen?: boolean`
   - store state `tutorialSeen: boolean` (default `false`)
-  - store action `completeTutorial: () => void` — sets `tutorialSeen: true` and calls `savePrefs({ tutorialSeen: true })`.
+  - store action `completeTutorial: () => void`, which sets `tutorialSeen: true` and calls `savePrefs({ tutorialSeen: true })`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -152,7 +152,7 @@ git commit -m "feat(walkthrough): persist tutorialSeen + completeTutorial action
 - Consumes: `IconName` from `@/components/Icon`.
 - Produces:
   - `interface WalkthroughSlide { icon: IconName; headline: string; body: string }`
-  - `const WALKTHROUGH_SLIDES: WalkthroughSlide[]` — the five slides, headlines unique (used as React keys downstream).
+  - `const WALKTHROUGH_SLIDES: WalkthroughSlide[]`: the five slides, headlines unique (used as React keys downstream).
 
 - [ ] **Step 1: Create the slide data file**
 
@@ -218,7 +218,7 @@ git commit -m "feat(walkthrough): five-slide intro deck data"
 
 **Interfaces:**
 - Consumes: `WALKTHROUGH_SLIDES` (Task 2); `useTheme`, `Txt`, `Icon`, `isHovered`, `hexA`, `shadowStyle`.
-- Produces: `export function Walkthrough({ onDone }: { onDone: () => void })` — renders the paged carousel; calls `onDone()` when Skip is tapped or Get started (last slide) is pressed.
+- Produces: `export function Walkthrough({ onDone }: { onDone: () => void })`, which renders the paged carousel and calls `onDone()` when Skip is tapped or Get started (last slide) is pressed.
 
 - [ ] **Step 1: Create the component**
 
