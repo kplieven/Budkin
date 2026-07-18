@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -20,7 +20,7 @@ import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
 import { useAppStore, visibleTags } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-import type { DiaperColor, FeedMethod, FeedType } from '@/types/models';
+import type { DiaperColor, FeedMethod, FeedType, Tag } from '@/types/models';
 
 const FEED_TYPES: [FeedType, string][] = [
   ['breast', 'Breast milk'],
@@ -43,26 +43,87 @@ const COLORS: [DiaperColor, string][] = [
   ['yellow', SOLID_COLORS.yellow],
 ];
 /**
- * Free-form tag creator: type a brand-new tag name and submit to add it as a
- * selected tag. No server call — Baby Buddy auto-creates the tag when the entry
- * is POSTed with the new name (createTag rejects blank / structural names). The
- * text state clears on submit; the component unmounts with the sheet, so it
- * re-seeds empty on every open.
+ * Dashed "+ New tag" pill that sits at the end of the tag chip row. Tapping it
+ * reveals TagInputRow below the chips. Styled lighter than a real Chip (dashed
+ * border, faint text) so it never reads as a selectable / selected tag; its
+ * dimensions mirror the tag chips (padH 13 / padV 8 / radius 13) so it lines up
+ * in the wrap row.
  */
-function TagCreator({ color, onCreate }: { color: string; onCreate: (name: string) => void }) {
+function AddTagPill({ onPress }: { onPress: () => void }) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Add a new tag"
+      style={(s) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 13,
+          paddingVertical: 8,
+          borderRadius: 13,
+          borderWidth: 1.5,
+          borderStyle: 'dashed',
+          borderColor: t.line2,
+          cursor: 'pointer',
+        },
+        isHovered(s) && { borderColor: t.faint },
+      ]}
+    >
+      <Txt unselectable weight={700} size={13.5} color={t.faint}>
+        + New tag
+      </Txt>
+    </Pressable>
+  );
+}
+
+/**
+ * Free-form tag input, revealed by AddTagPill. Type a brand-new tag name and
+ * submit to add it as a selected tag. No server call — Baby Buddy auto-creates
+ * the tag when the entry is POSTed (createTag rejects blank / structural names).
+ * Enter or "Add" commits and keeps the row open for fast multi-add; blurring
+ * while empty (or Escape on web) collapses back to the pill via onDismiss. Local
+ * text state re-seeds empty on every reveal since the row unmounts on collapse.
+ *
+ * blurOnSubmit={false} is load-bearing, not a nicety: without it react-native-web
+ * blurs the input on Enter, which (with an empty field post-submit) would trip
+ * the blur-when-empty collapse and defeat multi-add. It still fires
+ * onSubmitEditing for this single-line input, so tags commit on Enter.
+ */
+function TagInputRow({
+  color,
+  onCreate,
+  onDismiss,
+}: {
+  color: string;
+  onCreate: (name: string) => void;
+  onDismiss: () => void;
+}) {
   const t = useTheme();
   const [text, setText] = useState('');
+  const ref = useRef<TextInput>(null);
   const submit = () => {
     if (!text.trim()) return;
     onCreate(text);
     setText('');
+    ref.current?.focus();
   };
   return (
     <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
       <TextInput
+        ref={ref}
+        autoFocus
         value={text}
         onChangeText={setText}
         onSubmitEditing={submit}
+        onBlur={() => {
+          if (!text.trim()) onDismiss();
+        }}
+        onKeyPress={(e) => {
+          if (e.nativeEvent.key === 'Escape') onDismiss();
+        }}
+        blurOnSubmit={false}
         placeholder="New tag…"
         placeholderTextColor={t.faint}
         returnKeyType="done"
@@ -102,6 +163,51 @@ function TagCreator({ color, onCreate }: { color: string; onCreate: (name: strin
         </Txt>
       </Pressable>
     </View>
+  );
+}
+
+/**
+ * The "Tags" field: selectable chips for the server list ∪ the entry's own tags
+ * (minus structural ones), plus an AddTagPill that expands into TagInputRow for
+ * creating a brand-new tag. The editing flag lives here so the pill (in the chip
+ * row) and the input (below it) can sit in different rows; it unmounts with the
+ * sheet, so the field always re-opens collapsed.
+ */
+function TagField({
+  color,
+  tags,
+  selected,
+  onToggle,
+  onCreate,
+}: {
+  color: string;
+  tags: Tag[];
+  selected: string[];
+  onToggle: (name: string) => void;
+  onCreate: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  return (
+    <>
+      <FieldLabel>Tags</FieldLabel>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+        {visibleTags(tags, selected).map((tag) => (
+          <Chip
+            key={tag.name}
+            label={tag.name}
+            color={color}
+            swatch={tag.color}
+            selected={selected.includes(tag.name)}
+            onPress={() => onToggle(tag.name)}
+            padH={13}
+            padV={8}
+            fontSize={13.5}
+          />
+        ))}
+        {!editing && <AddTagPill onPress={() => setEditing(true)} />}
+      </View>
+      {editing && <TagInputRow color={color} onCreate={onCreate} onDismiss={() => setEditing(false)} />}
+    </>
   );
 }
 
@@ -548,23 +654,7 @@ export function LogSheet() {
         {/* tags — the server list ∪ the entry's own tags, minus the structural
             ones (bath/small/big, breastfeeding left/right). Server colors render
             via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
-        <FieldLabel>Tags</FieldLabel>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-          {visibleTags(tags, te.tags).map((tag) => (
-            <Chip
-              key={tag.name}
-              label={tag.name}
-              color={color}
-              swatch={tag.color}
-              selected={te.tags.includes(tag.name)}
-              onPress={() => toggleTag(tag.name)}
-              padH={13}
-              padV={8}
-              fontSize={13.5}
-            />
-          ))}
-        </View>
-        <TagCreator color={color} onCreate={createTag} />
+        <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
       </ScrollView>
 
       {/* save bar */}
