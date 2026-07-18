@@ -80,14 +80,15 @@ function RootLayoutNav() {
 
   // On large screens, wrap the whole navigator in the sidebar shell so it
   // persists across every route — including Settings, which lives outside the
-  // (tabs) group. Hidden on onboarding (a full-screen, pre-app route). Phone is
-  // untouched (useDesktopShell is false at phone widths), as is the Stack itself,
-  // so the cold-start deep-link nav structure is unchanged.
-  const showShell = desktop && segments[0] !== 'onboarding';
+  // (tabs) group. Hidden on onboarding and welcome (full-screen, pre-app routes).
+  // Phone is untouched (useDesktopShell is false at phone widths), as is the
+  // Stack itself, so the cold-start deep-link nav structure is unchanged.
+  const showShell = desktop && segments[0] !== 'onboarding' && segments[0] !== 'welcome';
   const stack = (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="onboarding" />
+      <Stack.Screen name="welcome" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="metric/[kind]" />

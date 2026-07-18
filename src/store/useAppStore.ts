@@ -104,6 +104,8 @@ interface AppState {
   /** Budkin-local metric/imperial display lens (default 'metric'). Stored
    *  values stay canonical metric; this only relabels + converts on display. */
   unitSystem: UnitSystem;
+  /** true once the first-run walkthrough carousel has been dismissed. */
+  tutorialSeen: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -180,6 +182,8 @@ export type AdoptResult =
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
+  /** Mark the first-run walkthrough as seen (persisted). */
+  completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
   setOffline: (v: boolean) => void;
@@ -456,6 +460,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   themeMode: 'dark',
   unitSystem: 'metric',
+  tutorialSeen: false,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -505,6 +510,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ themeMode: next });
     void savePrefs({ themeMode: next });
   },
+  completeTutorial: () => {
+    set({ tutorialSeen: true });
+    void savePrefs({ tutorialSeen: true });
+  },
   setUnitSystem: (system) => {
     set({ unitSystem: system });
     void savePrefs({ unitSystem: system });
@@ -552,6 +561,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    if (prefs.tutorialSeen) set({ tutorialSeen: true });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });

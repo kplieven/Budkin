@@ -18,6 +18,8 @@ export interface Prefs {
   themeMode: ThemeMode;
   /** Budkin-local metric/imperial display lens (default 'metric'). */
   unitSystem: UnitSystem;
+  /** true once the first-run walkthrough carousel has been dismissed. */
+  tutorialSeen: boolean;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */

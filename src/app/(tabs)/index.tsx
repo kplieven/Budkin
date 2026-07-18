@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -35,6 +35,7 @@ export default function Home() {
   const { width } = useWindowDimensions();
   const now = useAppStore((s) => s.now);
   const offline = useAppStore((s) => s.offline);
+  const tutorialSeen = useAppStore((s) => s.tutorialSeen);
   const pending = useAppStore(selectPendingCount);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
@@ -59,6 +60,13 @@ export default function Home() {
   }, [refresh]);
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
+
+  // First-run gate. On web this Home route is what actually serves `/` (it
+  // shadows app/index.tsx, which also resolves to `/`), so the walkthrough
+  // redirect must live here too or a fresh web visitor never lands on it. A
+  // no-op on native, where app/index.tsx redirects before Home ever mounts.
+  // Placed after every hook above so the rules of hooks hold on both branches.
+  if (!tutorialSeen) return <Redirect href="/welcome" />;
 
   // Desktop: the sidebar (child card) and top bar (title, offline pill) own the
   // chrome, so the main region scrolls just the dashboard body.
