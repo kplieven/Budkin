@@ -59,7 +59,7 @@ export default function History() {
     ) : (
       groups.map((g) => (
         <View key={g.label} style={{ marginBottom: 14 }}>
-          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 6, textTransform: 'uppercase' }}>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 22, marginBottom: 6, textTransform: 'uppercase' }}>
             {g.label}
           </Txt>
           {/* A continuous timeline spine per day. Tap a row to open the
@@ -130,9 +130,9 @@ export default function History() {
             />
           ) : undefined
         }
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 24 }}
       >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 }}>
           <Txt weight={800} size={27} tracking={-0.6}>
             History
           </Txt>
