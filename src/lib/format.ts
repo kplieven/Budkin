@@ -59,11 +59,11 @@ export const ANCHOR_LABEL = {
 
 /**
  * Compose a compact Quick set chip label. With an "ago" value it appends the
- * short duration after a middot: anchorLabel('Feed ended', 120) -> "Feed ended · 2h".
+ * short duration in parentheses: anchorLabel('Feed ended', 120) -> "Feed ended (2h)".
  * Without one it returns the base unchanged: anchorLabel('Woke') -> "Woke".
  */
 export function anchorLabel(base: string, agoMin?: number): string {
-  return agoMin == null ? base : `${base} · ${fmtAgoShort(agoMin)}`;
+  return agoMin == null ? base : `${base} (${fmtAgoShort(agoMin)})`;
 }
 
 /** "12 days old" / "8 weeks old" / "3 months old" */
