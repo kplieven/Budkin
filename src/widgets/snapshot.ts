@@ -7,7 +7,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { lastDiaper, nextStartSide } from '@/store/selectors';
+import { entriesForChild, lastDiaper, nextStartSide } from '@/store/selectors';
 import type { Connection } from '@/data/repository';
 import type { Child, Entry, Timer } from '@/types/models';
 
@@ -59,20 +59,25 @@ export function buildWidgetSnapshot(s: {
   connection: Connection | null;
 }): WidgetSnapshot {
   const child = s.children.find((c) => c.id === s.selectedChildId);
-  const lastFeeding = s.entries
+  // `entries` holds every child's records, so scope to the selected child before
+  // deriving any stat. Without this the widget shows a sibling's last feed and
+  // diaper, which is wrong for any switched-to child and nonsense for an
+  // expecting one (it owns no activity at all).
+  const entries = entriesForChild(s.entries, s.selectedChildId);
+  const lastFeeding = entries
     .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
     .sort((a, b) => b.start - a.start)[0];
   const todayStr = new Date().toDateString();
-  const sleepTodayMin = s.entries
+  const sleepTodayMin = entries
     .filter((e): e is Extract<Entry, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .filter((e) => new Date(e.end as number).toDateString() === todayStr)
     .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
-  const diaper = lastDiaper(s.entries);
+  const diaper = lastDiaper(entries);
   const runningSleep = s.timers.find((t) => t.activity === 'sleep');
-  const feedsToday = s.entries.filter(
+  const feedsToday = entries.filter(
     (e) => e.type === 'feeding' && new Date(e.end ?? e.start).toDateString() === todayStr,
   ).length;
-  const diapersToday = s.entries.filter(
+  const diapersToday = entries.filter(
     (e) => e.type === 'diaper' && new Date(e.time).toDateString() === todayStr,
   ).length;
 
@@ -81,7 +86,7 @@ export function buildWidgetSnapshot(s: {
     birth: child?.birth ?? null,
     expected: !!child?.expected,
     lastFeedStart: lastFeeding?.start ?? null,
-    nextSide: nextStartSide(s.entries),
+    nextSide: nextStartSide(entries),
     lastDiaper: diaper?.time ?? null,
     lastDiaperSolid: diaper?.solid ?? false,
     sleepStart: runningSleep?.start ?? null,

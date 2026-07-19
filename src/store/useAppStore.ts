@@ -791,8 +791,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       return;
     }
     set({ connection: conn, queueCount: q.length });
+    // Read the durable entity store BEFORE fetching, so the persisted selection
+    // can steer which child the fetch is for. Reused by both branches below, so
+    // neither path reads it twice.
+    const saved = await loadEntities();
     try {
-      const data = await loadFromServer(conn);
+      // Fetch the child the user actually had selected, not whichever child the
+      // server happens to list first. `loadFromServer` speaks server ids, so
+      // bridge from the local id space with `childServerIdFor`; a child that
+      // was never pushed (an expecting one has no `serverId`) yields null and
+      // the fetch falls back to the server's first child, as before.
+      const preferredChildServerId = childServerIdFor(saved?.children ?? [], saved?.selectedChildId ?? '');
+      const data = await loadFromServer(conn, preferredChildServerId);
       // Queued (not-yet-flushed) entries aren't in `data.entries` yet, so merge
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
@@ -804,7 +814,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // created offline have no flush yet (Phase 3), so read the durable copy
       // and merge it back in. See `mergeUnsynced`. Entries are deliberately
       // excluded from this merge (see `mergeUnsynced`'s doc comment).
-      const e = await loadEntities();
+      const e = saved;
       const localEntries = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
       const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
       // Incoming entries/measurements/timers carry the SERVER's child id
@@ -881,7 +891,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // used to) doesn't just fail to restore an expecting child, it
         // ERASES one the moment the user re-adds it, since `saveChild` then
         // persists a `children` array built from an empty in-memory list.
-        const e = await loadEntities();
+        const e = saved;
         const stored = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
         const storedIds = new Set(stored.map((entry) => entry.id));
         const queueOnly = q.filter((entry) => !storedIds.has(entry.id));
@@ -921,7 +931,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // until connectivity returns. Mirrors cold `hydrate`.
     const localTimers = await loadTimers();
     try {
-      const data = await loadFromServer(conn);
+      // Fetch the currently selected child, not the server's first (see
+      // `hydrate` above). Null for a child that was never pushed, which keeps
+      // the old children[0] fallback.
+      const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
       // Children are reconciled by `serverId`, not merged: a child already
       // known to the server keeps its local id (entries/measurements
       // reference it), and a child created offline (serverId == null) is kept
