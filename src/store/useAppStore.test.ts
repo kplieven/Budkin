@@ -829,6 +829,41 @@ describe('timer server sync', () => {
     expect(s().timers.some((t) => t.id === 't-local')).toBe(true);
   });
 
+  it('refresh remaps a server-loaded timer\'s childId from the server id to the local child id', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      // `loadFromServer` has no local state to translate with, so the timer's
+      // child FK arrives as the SERVER id (mirrors repository.ts's
+      // `childByServerId` construction), not the local id 'c1'.
+      timers: [{ id: 'tsrv9', serverId: 9, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
+    });
+
+    await s().refresh();
+
+    const timer = s().timers.find((t) => t.serverId === 9);
+    expect(timer?.childId).toBe('c1'); // remapped from the server id to the local id
+  });
+
+  it('stopping a server-loaded timer writes an entry under the LOCAL child id, not the server id', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: [{ id: 'tsrv10', serverId: 10, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 10 * M }],
+    });
+    await s().refresh();
+    const timer = s().timers.find((t) => t.serverId === 10);
+
+    s().stopTimer(timer!.id);
+
+    // If the childId had been left as the server id, this entry would
+    // reference a child that does not exist locally: the exact orphaning
+    // this branch's remapping exists to prevent, arriving via a timer.
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
   it('replays queued timer ops on reconnect (flushPendingOps)', async () => {
     useAppStore.setState({ connection: server, offline: false });
     h.pendingOps = [

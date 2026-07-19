@@ -401,13 +401,17 @@ export function reconcileChildren(serverChildren: Child[], localChildren: Child[
  *  using its output: that is the only place the authoritative local id for a
  *  previously-local, since-synced child is known. A record whose child can't
  *  be resolved (e.g. deleted server-side mid-request) keeps its existing
- *  `childId` rather than being dropped or reassigned to the wrong owner. */
-export function remapChildIds<T extends { childId: string }>(records: T[], children: Child[]): T[] {
+ *  `childId` rather than being dropped or reassigned to the wrong owner.
+ *  `childId` is typed optional here (not just `string`) so this same helper
+ *  covers `Timer`, whose `childId` can be genuinely absent (defaults to the
+ *  selected child); entries and measurements always carry one. */
+export function remapChildIds<T extends { childId?: string }>(records: T[], children: Child[]): T[] {
   const localIdByServerId = new Map<string, string>();
   for (const c of children) {
     if (c.serverId != null) localIdByServerId.set(String(c.serverId), c.id);
   }
   return records.map((r) => {
+    if (r.childId == null) return r;
     const localId = localIdByServerId.get(r.childId);
     return localId ? { ...r, childId: localId } : r;
   });
@@ -661,7 +665,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ connection: conn, queueCount: q.length });
     try {
       const data = await loadFromServer(conn);
-      // `data.timers` is always [] (the server has none); the on-device copy wins.
       // Queued (not-yet-flushed) entries aren't in `data.entries` yet, so merge
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
@@ -675,12 +678,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // excluded from this merge (see `mergeUnsynced`'s doc comment).
       const e = await loadEntities();
       const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
-      // Incoming entries/measurements carry the SERVER's child id (loadFromServer
-      // has no local state to translate with); rewrite it to the local id now
-      // that reconciliation has produced the authoritative mapping. See
-      // `remapChildIds`. Timers are already local ids — see `serverTimerToTimer`.
+      // Incoming entries/measurements/timers carry the SERVER's child id
+      // (loadFromServer has no local state to translate with, since a running
+      // timer's `child` FK is mapped through the same server-shaped list — see
+      // `loadFromServer`'s own `childByServerId`); rewrite it to the local id
+      // now that reconciliation has produced the authoritative mapping. See
+      // `remapChildIds`.
       const remappedEntries = remapChildIds(data.entries, reconciledChildren);
       const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the persisted local selection if it's still visible after
       // reconciliation (mirrors refresh's fallback below); otherwise fall back
       // to the server's selection. Without this a cold start right after
@@ -697,7 +703,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: reconciledChildren,
         measurements: mergeUnsynced(remappedMeasurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(remappedEntries, q),
-        timers: reconcileTimers(savedTimers, data.timers),
+        timers: reconcileTimers(savedTimers, remappedTimers),
         selectedChildId,
       });
       void get().flushQueue();
@@ -753,11 +759,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // deliberately excluded from this merge (see `mergeUnsynced`'s doc
       // comment); `...data` below is entries' only source, unchanged.
       const reconciledChildren = reconcileChildren(data.children, s.children);
-      // Incoming entries/measurements carry the SERVER's child id; rewrite it to
-      // the local id now that reconciliation has produced the authoritative
-      // mapping. See `remapChildIds` (mirrors `hydrate` above).
+      // Incoming entries/measurements/timers carry the SERVER's child id;
+      // rewrite it to the local id now that reconciliation has produced the
+      // authoritative mapping. See `remapChildIds` (mirrors `hydrate` above).
       const remappedEntries = remapChildIds(data.entries, reconciledChildren);
       const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the user's current child if it's still visible — checked against
       // the RECONCILED list (not just the server's), so a local child kept
       // visible by reconcileChildren above doesn't get silently deselected;
@@ -774,7 +781,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         entries: remappedEntries,
         measurements: mergeUnsynced(remappedMeasurements, s.measurements),
         selectedChildId,
-        timers: reconcileTimers(localTimers, data.timers),
+        timers: reconcileTimers(localTimers, remappedTimers),
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -924,11 +931,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // `reconcileChildren`.
     const currentSelectedChildId = get().selectedChildId;
     const reconciledChildren = reconcileChildren(data.children, get().children);
-    // Incoming entries/measurements carry the SERVER's child id; rewrite it to
-    // the local id now that reconciliation has produced the authoritative
-    // mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
+    // Incoming entries/measurements/timers carry the SERVER's child id;
+    // rewrite it to the local id now that reconciliation has produced the
+    // authoritative mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
     const remappedEntries = remapChildIds(data.entries, reconciledChildren);
     const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+    const remappedTimers = remapChildIds(data.timers, reconciledChildren);
     const selectedChildId = reconciledChildren.some((c) => c.id === currentSelectedChildId)
       ? currentSelectedChildId
       : data.selectedChildId;
@@ -937,6 +945,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: reconciledChildren,
       entries: remappedEntries,
       measurements: remappedMeasurements,
+      timers: remappedTimers,
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
