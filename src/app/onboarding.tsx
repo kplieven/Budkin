@@ -13,6 +13,8 @@ import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
 import type { SavedServer } from '@/data/servers';
 import { useTheme } from '@/theme/useTheme';
+import { nextAfterConnect } from '@/features/setup/routing';
+import { useFinishSetup } from '@/features/setup/useFinishSetup';
 
 export default function Onboarding() {
   const t = useTheme();
@@ -24,14 +26,21 @@ export default function Onboarding() {
   const connecting = useAppStore((s) => s.connecting);
   const connectError = useAppStore((s) => s.connectError);
   const connect = useAppStore((s) => s.connect);
-  const enterLocal = useAppStore((s) => s.enterLocal);
   const savedServers = useAppStore((s) => s.savedServers);
   const forgetServer = useAppStore((s) => s.forgetServer);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  const children = useAppStore((s) => s.children);
+  const finish = useFinishSetup();
 
+  // A fresh Baby Buddy install has no children on it, so connecting is not the
+  // end of setup: continue into the add-baby step instead of dropping the user
+  // on an empty Home. `children` is the raw store array, not a derived one, so
+  // this selector is reference-stable.
   useEffect(() => {
-    if (connected) router.replace('/(tabs)');
-  }, [connected]);
+    if (!connected) return;
+    if (nextAfterConnect(children.length) === '/setup/baby') router.push('/setup/baby');
+    else finish();
+  }, [connected, children.length, finish]);
 
   // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
   // fields ready to fix) and reuses the normal connect action.
@@ -60,6 +69,20 @@ export default function Onboarding() {
       contentContainerStyle={{ paddingTop: insets.top + 24, paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }}
       keyboardShouldPersistTaps="handled"
     >
+      {router.canGoBack() && (
+        <Pressable
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={10}
+          style={(s) => [
+            { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginLeft: -8, marginBottom: 8, cursor: 'pointer' },
+            isHovered(s) && { backgroundColor: t.chip },
+          ]}
+        >
+          <Icon name="chevron-left" color={t.text} size={22} />
+        </Pressable>
+      )}
       <View
         style={[
           {
@@ -246,17 +269,6 @@ export default function Onboarding() {
           Learn how to host one
         </Txt>
       </Txt>
-
-      <Pressable
-        onPress={enterLocal}
-        accessibilityRole="button"
-        style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
-      >
-        <Txt unselectable weight={600} size={13.5} color={t.dim}>
-          No server?{' '}
-          <Txt unselectable weight={700} size={13.5} color={t.primary}>Start now — connect later →</Txt>
-        </Txt>
-      </Pressable>
     </ScrollView>
   );
 }
