@@ -214,34 +214,38 @@ export async function deleteMeasurementFromServer(
 }
 
 /** Push a newly created child (with an optional photo); returns the new server
- *  id and stored picture URL. */
+ *  id, its slug and the stored picture URL. The slug is what the child
+ *  endpoints are keyed by (see `BabybuddyClient.childKey`). */
 export async function pushChildToServer(
   conn: Connection,
   child: Child,
   change: PhotoChange = { kind: 'none' },
-): Promise<{ id?: number; picture?: string | null } | undefined> {
+): Promise<{ id?: number; slug?: string; picture?: string | null } | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.createChild(child, change.kind === 'set' ? change.photo : undefined);
 }
 
-/** Update a child (name/birth and photo change); returns the stored picture URL. */
+/** Update a child (name/birth and photo change); returns the stored picture URL
+ *  and the child's current slug, which a rename moves. */
 export async function updateChildOnServer(
   conn: Connection,
   child: Child,
   change: PhotoChange = { kind: 'none' },
-): Promise<string | null | undefined> {
+): Promise<{ picture: string | null; slug?: string } | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.updateChild(child, change);
 }
 
-/** Delete a child on the server (no-op in local mode). Baby Buddy cascades the
- *  child's history server-side, so this single call is enough. */
-export async function deleteChildFromServer(conn: Connection, id: number): Promise<void> {
+/** Delete a child on the server (no-op in local mode). Takes the whole child,
+ *  not just an id: Baby Buddy keys the child endpoints by SLUG (see
+ *  `BabybuddyClient.childKey`). Baby Buddy cascades the child's history
+ *  server-side, so this single call is enough. */
+export async function deleteChildFromServer(conn: Connection, child: Child): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.deleteChild(id);
+  await client.deleteChild(child);
 }
 
 /** Push a created entry to the server; returns its new server id (or undefined). */

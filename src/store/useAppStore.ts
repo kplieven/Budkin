@@ -229,8 +229,11 @@ interface AppActions {
    *  transition, shared by Home's confirm sheet and the child sheet's toggle. */
   confirmBirth: (id: string, birth: number) => void;
   /** Delete a child (cascades all their history server-side; NOT undoable). See
-   *  the implementation for the selection re-point + in-memory purge rules. */
-  deleteChild: (id: string) => void;
+   *  the implementation for the selection re-point + in-memory purge rules.
+   *  Async because the server DELETE is awaited: it has no replay path, so a
+   *  failure has to restore the child rather than being swallowed. Callers may
+   *  fire and forget. */
+  deleteChild: (id: string) => Promise<void>;
 
   openAdopt: () => void;
   closeAdopt: () => void;
@@ -1284,8 +1287,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const remaining: PendingOp[] = [];
     for (const op of ops) {
       try {
-        if (op.op === 'update' && op.entity === 'child') await updateChildOnServer(conn, op.payload);
-        else if (op.op === 'update' && op.entity === 'measurement') {
+        if (op.op === 'update' && op.entity === 'child') {
+          const res = await updateChildOnServer(conn, op.payload);
+          // A replayed rename moves the slug server-side, and the child
+          // endpoints are keyed by it, so re-stamp it here the same way
+          // saveChild's online edit does. Otherwise the next delete goes out
+          // with a stale slug, 404s, and the child comes back.
+          const slug = res?.slug;
+          if (slug) {
+            set((st) => ({
+              children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
+            }));
+          }
+        } else if (op.op === 'update' && op.entity === 'measurement') {
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           // Child not on the server (edge case: the entity was synced but the
           // child later lost its server id). Nothing sensible to send; fall
@@ -1505,11 +1519,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const conn = s.connection;
       if (conn && conn.mode === 'server' && !s.offline) {
         void updateChildOnServer(conn, child, change)
-          .then((url) => {
-            // Swap the ephemeral local file URI for the durable server URL.
-            if (change.kind === 'none' || url === undefined) return;
+          .then((res) => {
+            if (!res) return;
             set((st) => ({
-              children: st.children.map((c) => (c.id === child.id ? { ...c, picture: url } : c)),
+              children: st.children.map((c) => {
+                if (c.id !== child.id) return c;
+                // Re-stamp the slug. Baby Buddy DERIVES it from the name, so a
+                // rename moves it, and the child endpoints are keyed by it (see
+                // `BabybuddyClient.childKey`). Holding the old one would 404 the
+                // next rename or delete, and a 404'd delete is exactly how a
+                // deleted child used to come back.
+                const slug = res.slug ?? c.slug;
+                // Swap the ephemeral local file URI for the durable server URL.
+                return change.kind === 'none' ? { ...c, slug } : { ...c, slug, picture: res.picture };
+              }),
             }));
           })
           .catch(() => {});
@@ -1553,13 +1576,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
-          // Stamp the server id and adopt the server's picture URL. The local
-          // `id` is deliberately NOT rewritten: entries and measurements
+          // Stamp the server id, the slug and the server's picture URL. The
+          // local `id` is deliberately NOT rewritten: entries and measurements
           // reference it, and changing it would orphan them. Reconciliation
-          // matches this child by `serverId` from here on.
+          // matches this child by `serverId` from here on. The slug is what the
+          // child endpoints are keyed by (see `BabybuddyClient.childKey`), so
+          // capturing it here is what lets this child be renamed or deleted
+          // before the next refresh has filled it in.
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === localId ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
+              c.id === localId
+                ? { ...c, serverId: res.id, slug: res.slug ?? c.slug, picture: res.picture ?? c.picture }
+                : c,
             ),
           }));
         })
@@ -1595,13 +1623,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void pushChildToServer(conn, bornChild)
         .then((res) => {
           if (!res || res.id == null) return;
-          // Stamp the server id and adopt the server's picture URL. The local
-          // `id` is deliberately NOT rewritten: entries and measurements
-          // reference it, and changing it would orphan them. Reconciliation
-          // matches this child by `serverId` from here on.
+          // Stamp the server id, the slug and the server's picture URL, exactly
+          // as saveChild's create push does (see the note there on why the local
+          // `id` is left alone and why the slug matters).
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === id ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
+              c.id === id
+                ? { ...c, serverId: res.id, slug: res.slug ?? c.slug, picture: res.picture ?? c.picture }
+                : c,
             ),
           }));
         })
@@ -1609,7 +1638,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  deleteChild: (id) => {
+  deleteChild: async (id) => {
     const s = get();
     const child = s.children.find((c) => c.id === id);
     if (!child) return;
@@ -1625,6 +1654,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const doServerDelete = serverBacked && !!conn && conn.mode === 'server' && !s.offline;
 
     const nextChildren = s.children.filter((c) => c.id !== id);
+    // Kept for the restore below, captured before the purge.
+    const priorIndex = s.children.findIndex((c) => c.id === id);
+    const purgedEntries = s.entries.filter((e) => e.childId === id);
+    const purgedMeasurements = s.measurements.filter((m) => m.childId === id);
     // Purge the deleted child's entries/measurements. In local mode every
     // child's data lives in state, so this drops the orphans — and, via the
     // persistence subscription, from the durable entity store (saveEntries /
@@ -1652,9 +1685,54 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set(patch);
     if (doServerDelete) {
-      void deleteChildFromServer(conn, child.serverId as number).catch(() => {});
+      try {
+        // AWAITED, unlike the fire-and-forget pushes elsewhere. A delete is not
+        // recoverable by a later flush: there is no `child` PendingOp variant to
+        // replay it, so if this fails the removal has to be undone here and now.
+        // Awaiting is also what keeps the refetch below from racing the DELETE,
+        // which `reconcileChildren` would otherwise read as "still on the
+        // server" and re-add the child.
+        await deleteChildFromServer(conn, child);
+      } catch {
+        // Put the child back and say so. The old code swallowed this and showed
+        // an unconditional success toast, so a failed delete looked like a
+        // successful one until the next refresh resurrected the child.
+        //
+        // Merged into CURRENT state rather than snapping back to the pre-delete
+        // snapshot: a write may have landed during the round trip and must not
+        // be discarded by the undo.
+        set((st) => {
+          if (st.children.some((c) => c.id === id)) return {}; // already back
+          const children = [...st.children];
+          children.splice(Math.min(priorIndex, children.length), 0, child);
+          const entryIds = new Set(st.entries.map((e) => e.id));
+          const measurementIds = new Set(st.measurements.map((m) => m.id));
+          return {
+            children,
+            entries: [...purgedEntries.filter((e) => !entryIds.has(e.id)), ...st.entries],
+            measurements: [...purgedMeasurements.filter((m) => !measurementIds.has(m.id)), ...st.measurements],
+            // Only reclaim the selection if nothing else has claimed it since
+            // (the user may have switched children while this was in flight).
+            selectedChildId:
+              patch.selectedChildId !== undefined && st.selectedChildId === patch.selectedChildId
+                ? id
+                : st.selectedChildId,
+          };
+        });
+        get().showToast(`Could not delete ${child.first}`);
+        return;
+      }
     }
     get().showToast(`${child.first} deleted`);
+    // The re-point above assigns `selectedChildId` directly rather than going
+    // through `selectChild`, so it does not inherit selectChild's refetch. In
+    // server mode `entries`/`measurements` only ever hold the ONE child the last
+    // fetch asked for, so without this the surviving child's History, Growth and
+    // status strip would sit empty until the user happened to pull to refresh.
+    // Local mode already has every child's records in memory.
+    //
+    // Deliberately after the awaited DELETE above, never before it.
+    if (patch.selectedChildId && get().connection?.mode === 'server') void get().refresh();
   },
 
   // ---- insights (lazy deep-history load) ----

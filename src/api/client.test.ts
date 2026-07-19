@@ -98,17 +98,96 @@ describe('updateChild', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('PATCHes /children/<serverId>/ using serverId, regardless of the local id shape', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ picture: null }));
+  it('PATCHes /children/<slug>/, since Baby Buddy keys children by slug not id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ picture: null, slug: 'mira-doe' }));
     vi.stubGlobal('fetch', fetchMock);
     const client = new BabybuddyClient('https://example.com', 'tok');
-    const child: Child = { ...CHILD, id: 'local-abc', serverId: 42 };
+    const child: Child = { ...CHILD, id: 'local-abc', serverId: 42, slug: 'mira-doe' };
 
     await client.updateChild(child);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url] = fetchMock.mock.calls[0];
-    expect(url).toBe('https://example.com/api/children/42/');
+    expect(url).toBe('https://example.com/api/children/mira-doe/');
+  });
+
+  // Baby Buddy DERIVES the slug from the child's name, so a rename changes it
+  // (verified against a live server: PATCHing first_name Gregory -> Gregor
+  // moved the slug gregory-hill -> gregor-hill). A cached slug therefore goes
+  // stale the moment a rename lands, and the next request keyed by it 404s:
+  // the same silent failure this whole describe exists to prevent. The fresh
+  // slug comes back in the PATCH response, so hand it to the caller to store.
+  it('returns the fresh slug from the PATCH response so a rename cannot stale it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ picture: null, slug: 'mirabel-doe' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, first: 'Mirabel', serverId: 42, slug: 'mira-doe' };
+
+    const res = await client.updateChild(child);
+
+    expect(res?.slug).toBe('mirabel-doe');
+  });
+
+  // uploadUnsynced (src/data/sync.ts) only learns the new numeric id when it
+  // pushes a child, and a child persisted by a build from before slugs were
+  // captured has none either. Look the slug up rather than sending a numeric
+  // id that would 404.
+  it('resolves the slug via listChildren when the child carries none', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [{ id: 42, first_name: 'Mira', birth_date: '2025-01-15', slug: 'mira-doe' }],
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ picture: null, slug: 'mira-doe' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, serverId: 42 };
+
+    await client.updateChild(child);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toContain('/children/?limit=100');
+    expect(fetchMock.mock.calls[1][0]).toBe('https://example.com/api/children/mira-doe/');
+  });
+
+  it('falls back to the numeric id when the lookup cannot find a slug, rather than throwing', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ picture: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, serverId: 42 };
+
+    await expect(client.updateChild(child)).resolves.toBeDefined();
+    expect(fetchMock.mock.calls[1][0]).toBe('https://example.com/api/children/42/');
+  });
+});
+
+describe('createChild', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Verified against a live Baby Buddy: the POST response carries the slug for
+  // both the JSON and the multipart (photo) body. Capturing it here is what
+  // lets a child created this session be updated or deleted before the next
+  // refresh has had a chance to fill the slug in.
+  it('captures the slug from the create response alongside the id', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ id: 9, slug: 'mira-doe', picture: null }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+
+    const res = await client.createChild(CHILD);
+
+    expect(res).toEqual({ id: 9, slug: 'mira-doe', picture: null });
   });
 });
 
@@ -562,9 +641,11 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
   });
 });
 
-// Deleting a child on the server: a single DELETE /children/{id}/ — Baby Buddy
-// cascades the child's feedings/sleep/changes/etc. server-side, so no per-entry
-// cleanup calls are needed. Mirrors deleteEntry/deleteMeasurement.
+// Deleting a child on the server: a single DELETE /children/{slug}/. Baby
+// Buddy cascades the child's feedings/sleep/changes/etc. server-side, so no
+// per-entry cleanup calls are needed. Unlike deleteEntry/deleteMeasurement this
+// is keyed by SLUG: Baby Buddy's ChildViewSet sets lookup_field = "slug" (only
+// TagViewSet does the same), so a numeric id 404s here.
 describe('deleteChild', () => {
   function stubFetch(response: unknown) {
     const calls: { url: string; method?: string }[] = [];
@@ -578,12 +659,45 @@ describe('deleteChild', () => {
   afterEach(() => vi.unstubAllGlobals());
   const client = () => new BabybuddyClient('https://x', 't');
 
-  it('issues a DELETE to /children/{id}/', async () => {
+  it('issues a DELETE to /children/{slug}/', async () => {
     const calls = stubFetch(undefined);
-    await client().deleteChild(5);
+    await client().deleteChild({ ...CHILD, serverId: 5, slug: 'mira-doe' });
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toContain('/children/5/');
+    expect(calls[0].url).toContain('/children/mira-doe/');
+    expect(calls[0].url).not.toContain('/children/5/');
     expect(calls[0].method).toBe('DELETE');
+  });
+
+  it('looks the slug up by serverId when the child carries none', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [{ id: 5, first_name: 'Mira', birth_date: '2025-01-15', slug: 'mira-doe' }],
+        }),
+        text: async () => '',
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+
+    await client().deleteChild({ ...CHILD, serverId: 5 });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0].url).toContain('/children/?limit=100');
+    expect(calls[1].url).toContain('/children/mira-doe/');
+    expect(calls[1].method).toBe('DELETE');
+  });
+
+  it('skips the network call for a child that was never pushed', async () => {
+    const calls = stubFetch(undefined);
+    await client().deleteChild(CHILD);
+    expect(calls).toHaveLength(0);
   });
 });
 
