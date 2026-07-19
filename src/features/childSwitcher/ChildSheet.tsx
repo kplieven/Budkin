@@ -8,7 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
-import { clampBirth } from '@/lib/birthDate';
+import { clampBirth, clampDueDate } from '@/lib/birthDate';
 import { hexA } from '@/lib/color';
 import { pickChildPhoto } from '@/lib/photo';
 import { fontFamily } from '@/theme/fonts';
@@ -78,6 +78,7 @@ function Inner({ editingId }: { editingId: string | null }) {
   const close = useAppStore((s) => s.closeChildSheet);
   const connection = useAppStore((s) => s.connection);
   const offline = useAppStore((s) => s.offline);
+  const confirmBirth = useAppStore((s) => s.confirmBirth);
 
   const editing: Child | null = editingId ? (children.find((c) => c.id === editingId) ?? null) : null;
   const editingDate = editing ? new Date(editing.birth) : new Date();
@@ -89,11 +90,23 @@ function Inner({ editingId }: { editingId: string | null }) {
   const [day, setDay] = useState(String(editingDate.getDate()));
   const [photo, setPhoto] = useState<string | null>(editing?.picture ?? null);
   const [photoChange, setPhotoChange] = useState<PhotoChange>({ kind: 'none' });
+  const [expecting, setExpecting] = useState(!!editing?.expected);
   const [picking, setPicking] = useState(false);
   const [confirmName, setConfirmName] = useState('');
 
   const canSave = first.trim().length > 0;
   const previewChild = { first: first.trim() || editing?.first || '?', color: editing?.color ?? t.primary };
+
+  // Shown when creating, and when editing a child who is still expected (so the
+  // born direction stays available as a birth confirmation). Never shown for an
+  // already-born child: that flip is meaningless and would not persist anyway,
+  // since saveChild's edit branch does not carry `expected`.
+  const canSetStatus = !editing || !!editing.expected;
+
+  // An already-born child cannot be edited into an expected one (the toggle is
+  // hidden for it), so `expecting` is only ever true here when creating or
+  // when the child was already expected.
+  const stillExpecting = canSetStatus && expecting;
 
   // Delete is gated behind typing the child's first name (front-loaded
   // confirmation — the cascade is NOT undoable, so there's no undo toast).
@@ -134,8 +147,21 @@ function Inner({ editingId }: { editingId: string | null }) {
 
   const onSave = () => {
     if (!canSave) return;
-    const birth = clampBirth(year, month, day);
-    saveChild({ first: first.trim(), last: last.trim(), birth, photo: photoChange });
+    const date = stillExpecting ? clampDueDate(year, month, day) : clampBirth(year, month, day);
+    // Flipping an existing expected child to Born IS a birth confirmation, so it
+    // goes through the same store transition Home's confirm sheet uses rather
+    // than a second implementation of it. saveChild runs first so any name or
+    // photo edits made in the same session are not lost, and it closes the
+    // sheet; confirmBirth then reads fresh state and flips the flag.
+    if (editing?.expected && !expecting) {
+      saveChild({ first: first.trim(), last: last.trim(), birth: date, photo: photoChange });
+      confirmBirth(editing.id, date);
+      return;
+    }
+    // `expected` only takes effect when creating. saveChild's edit branch spreads
+    // the existing child and ignores it, which is safe here because the toggle is
+    // hidden for a born child, so an edit can only ever re-assert what is already set.
+    saveChild({ first: first.trim(), last: last.trim(), birth: date, expected: stillExpecting, photo: photoChange });
   };
 
   const inputStyle = {
@@ -213,8 +239,46 @@ function Inner({ editingId }: { editingId: string | null }) {
           style={inputStyle}
         />
 
+        {canSetStatus && (
+          <>
+            <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+              Status
+            </Txt>
+            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+              {([
+                ['Born', false],
+                ['Expecting', true],
+              ] as const).map(([label, value]) => (
+                <Pressable
+                  key={label}
+                  onPress={() => setExpecting(value)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: expecting === value }}
+                  style={(s) => [
+                    {
+                      flex: 1,
+                      height: 44,
+                      borderRadius: 13,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1.5,
+                      borderColor: expecting === value ? t.primary : t.line,
+                      backgroundColor: expecting === value ? hexA(t.primary, t.dark ? 0.16 : 0.1) : t.surface,
+                      cursor: 'pointer',
+                    },
+                    isHovered(s) && expecting !== value && { borderColor: t.line2 },
+                  ]}
+                >
+                  <Txt unselectable weight={700} size={14} color={expecting === value ? t.primary : t.text}>
+                    {label}
+                  </Txt>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
-          Birth date
+          {stillExpecting ? 'Due date' : 'Birth date'}
         </Txt>
         <View style={{ flexDirection: 'row', gap: 10, marginBottom: 8 }}>
           <View style={{ flex: 1.3 }}>
@@ -261,7 +325,9 @@ function Inner({ editingId }: { editingId: string | null }) {
           </View>
         </View>
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 8 }}>
-          Can&apos;t be in the future — out-of-range values are clamped when you save.
+          {stillExpecting
+            ? 'Can be up to about ten months ahead, out-of-range values are clamped when you save.'
+            : "Can't be in the future: out-of-range values are clamped when you save."}
         </Txt>
 
         {editing ? (

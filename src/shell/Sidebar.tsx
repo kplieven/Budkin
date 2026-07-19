@@ -5,7 +5,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { ageStr } from '@/lib/format';
+import { ageOrDueLabel } from '@/lib/format';
 import { hexA } from '@/lib/color';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -136,7 +136,7 @@ export function Sidebar() {
             {child ? `${child.first} ${child.last}` : 'No child'}
           </Txt>
           <Txt weight={500} size={12} color={t.dim} numberOfLines={1}>
-            {child ? ageStr(child.birth, now) : ''}
+            {child ? ageOrDueLabel(child.birth, !!child.expected, now) : ''}
           </Txt>
         </View>
         <Icon name="chevron-down" color={t.dim} size={18} />

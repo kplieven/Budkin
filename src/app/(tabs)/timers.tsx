@@ -53,6 +53,7 @@ export default function Timers() {
   // Only meaningful when connected to a server: a timer's serverId tells us
   // whether its mirror has reached Baby Buddy yet. Hidden in local mode.
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
+  const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
 
   // Pull-to-refresh, mirroring Home: native uses the platform RefreshControl;
   // touch-capable web gets the custom gesture; a refresh() also pulls + reconciles
@@ -68,6 +69,11 @@ export default function Timers() {
   // timer id whose exact-start editor is expanded
   const [exactFor, setExactFor] = useState<string | null>(null);
 
+  // `timers` is a global flat list with no per-child filter, so a running
+  // timer belonging to a born sibling must stay visible and stoppable even
+  // while the selected child is still expected. Only the affordance that
+  // CREATES a new timer for the selected child is guarded below; the list
+  // itself always renders.
   const body = (
     <>
       {timers.length === 0 && (
@@ -252,32 +258,40 @@ export default function Timers() {
         })}
       </View>
 
-      <Pressable
-        onPress={startQuickTimer}
-        accessibilityRole="button"
-        style={(s) => [
-          {
-            marginTop: 16,
-            height: 54,
-            borderRadius: 16,
-            borderWidth: 1.5,
-            borderStyle: 'dashed',
-            borderColor: hexA(t.primary, 0.5),
-            backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            cursor: 'pointer',
-          },
-          isHovered(s) && { borderColor: hexA(t.primary, 0.8) },
-        ]}
-      >
-        <Icon name="plus" color={t.primary} size={20} />
-        <Txt unselectable weight={700} size={15.5} color={t.primary}>
-          New timer
-        </Txt>
-      </Pressable>
+      {child?.expected ? (
+        <View style={{ marginTop: 16, alignItems: 'center', paddingVertical: 14 }}>
+          <Txt weight={600} size={13.5} color={t.dim} style={{ textAlign: 'center' }}>
+            New timer available once {child.first} arrives.
+          </Txt>
+        </View>
+      ) : (
+        <Pressable
+          onPress={startQuickTimer}
+          accessibilityRole="button"
+          style={(s) => [
+            {
+              marginTop: 16,
+              height: 54,
+              borderRadius: 16,
+              borderWidth: 1.5,
+              borderStyle: 'dashed',
+              borderColor: hexA(t.primary, 0.5),
+              backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              cursor: 'pointer',
+            },
+            isHovered(s) && { borderColor: hexA(t.primary, 0.8) },
+          ]}
+        >
+          <Icon name="plus" color={t.primary} size={20} />
+          <Txt unselectable weight={700} size={15.5} color={t.primary}>
+            New timer
+          </Txt>
+        </Pressable>
+      )}
     </>
   );
 

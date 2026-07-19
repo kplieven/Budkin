@@ -81,6 +81,19 @@ export function ageMonths(birth: number, now: number): number {
   return Math.max(0, Math.floor((now - birth) / 86400000 / 30.4));
 }
 
+/** Age for a born child, a countdown for an expected one. Takes primitives
+ *  rather than a Child so the Android widget, which cannot import store types,
+ *  shares exactly this logic. Never counts up past the due date: a parent
+ *  staring at their home screen does not need "8 days overdue". */
+export function ageOrDueLabel(birth: number, expected: boolean, now: number): string {
+  if (!expected) return ageStr(birth, now);
+  const days = Math.ceil((birth - now) / 86400000);
+  if (days <= 0) return 'Due any day now';
+  if (days === 1) return 'Due tomorrow';
+  if (days <= 14) return `Due in ${days} days`;
+  return `Due in ${Math.round(days / 7)} weeks`;
+}
+
 /** Point-event sub-label: "Today, 12m ago" / "Yesterday" */
 export function relDayLabel(ms: number, now: number): string {
   const d = new Date(ms);

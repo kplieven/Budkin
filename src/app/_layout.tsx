@@ -12,6 +12,7 @@ import { Toast } from '@/components/Toast';
 import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { AdoptSheet } from '@/features/connect/AdoptSheet';
+import { ConfirmBirthSheet } from '@/features/dashboard/ConfirmBirthSheet';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
 import { MilestoneSheet } from '@/features/milestones/MilestoneSheet';
@@ -106,6 +107,7 @@ function RootLayoutNav() {
             {/* overlays rendered above the navigator and tab bar */}
             <ChildSwitcher />
             <ChildSheet />
+            <ConfirmBirthSheet />
             <AdoptSheet />
             <LogSheet />
             <MeasurementSheet />
