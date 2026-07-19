@@ -250,6 +250,8 @@ Note: the tree does not typecheck at this commit. That is intentional and is res
 
 **Files:**
 - Modify: `src/data/repository.ts` (`pushEntryToServer` ~line 227, `pushMeasurementToServer` ~line 170, and the update functions for both)
+- Modify: `src/api/client.test.ts` (12 direct calls to the Task 2 client methods)
+- Modify: `scripts/itest.ts` (7 direct calls; a manual integration script run against a real server)
 
 **Interfaces:**
 - Consumes: the Task 2 client methods.
@@ -279,20 +281,35 @@ export async function pushEntryToServer(
 
 Apply the same shape to the other three, leaving their existing guards and return types untouched.
 
-- [ ] **Step 2: Typecheck**
+- [ ] **Step 2: Fix the two direct-call files Task 2 surfaced**
+
+The required parameter found call sites outside the repository layer, which is exactly what it is for. Both call the client directly and both must pass a real server id.
+
+`src/api/client.test.ts` has 12 calls. These are unit tests against the client, so the child server id is just test data: pass a literal such as `1` (or whatever numeric child id that file already uses in its fixtures, if it has one, in which case reuse that for consistency). Read the file first and follow its existing conventions.
+
+**Important for these tests:** several will assert on the request body sent to the server. Any assertion that expects `child` to equal a local id string is now asserting the bug and must be updated to expect the numeric server id you pass. Do not delete such a test; change its expectation. If any test's whole purpose was to prove `child` came from `entry.childId`, say so in your report rather than quietly dropping it.
+
+`scripts/itest.ts` is a manual integration script run against a real Baby Buddy server with `BB_CHILD=<numeric id>` in the environment. It has 7 calls. It already reads that child id; pass it to each call. Read the file's top-of-file comment for how it obtains the id and reuse that value rather than introducing a new one.
+
+- [ ] **Step 3: Typecheck**
 
 Run: `npx tsc --noEmit`
 
-Expected: **errors again, still correct.** `src/data/repository.ts` itself is now consistent, and the remaining errors have moved up to `src/store/useAppStore.ts`, which Task 4 owns. Confirm in your report that every remaining error is a missing-argument error at one of these four functions, in the store or its tests, and nothing else.
+Expected: **errors again, still correct.** `src/data/repository.ts`, `src/api/client.test.ts` and `scripts/itest.ts` are now consistent, and the remaining errors have moved up to `src/store/useAppStore.ts` and its test file, which Task 4 owns. Confirm in your report that every remaining error is a missing-argument error at one of these four repository functions, and nothing else.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Run the client tests**
+
+Run: `npx vitest run src/api/client.test.ts`
+Expected: PASS. Those 6 failures Task 2 left behind were signature mismatches, and Step 2 resolves them. If any still fail on an ASSERTION rather than a signature, that is a real behaviour question: report it rather than forcing the assertion to match.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/data/repository.ts
+git add src/data/repository.ts src/api/client.test.ts scripts/itest.ts
 git commit -m "feat(ids): repository push and update take an explicit childServerId"
 ```
 
-The tree still does not typecheck. Task 4 closes it.
+The tree still does not typecheck project-wide. Task 4 closes it.
 
 ---
 
