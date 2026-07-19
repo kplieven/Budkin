@@ -13,6 +13,7 @@ import { hexA } from '@/lib/color';
 import { fmtAgo, fmtClock } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { entryTimestamp, type NoteEntry } from '@/types/models';
@@ -84,7 +85,12 @@ export default function Notes() {
   // filtering *inside* the selector returns a fresh array every call, which
   // makes zustand v5's useSyncExternalStore see a perpetually-changed snapshot
   // and loop forever ("Maximum update depth exceeded"). Mirrors History.
-  const notes = useAppStore((s) => s.entries).filter((e): e is NoteEntry => e.type === 'note');
+  const entries = useAppStore((s) => s.entries);
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
+  // Scoped to the selected child: `entries` holds every child's records, so
+  // without this the previous child's notes stay on screen after a switch.
+  // Notes are the one kind an expecting child can genuinely own.
+  const notes = entriesForChild(entries, selectedChildId).filter((e): e is NoteEntry => e.type === 'note');
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);

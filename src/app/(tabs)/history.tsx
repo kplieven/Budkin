@@ -12,6 +12,7 @@ import { groupByDay } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -20,6 +21,9 @@ export default function History() {
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
   const entries = useAppStore((s) => s.entries);
+  // Primitive selector, so no new reference per render (zustand v5); the
+  // child-scoping filter itself runs in the render body below.
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
@@ -38,9 +42,14 @@ export default function History() {
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
-  // General notes live in the shared `entries` array (for queue/undo/sync reuse)
-  // but have their OWN dedicated tab — exclude them from the activity timeline.
-  const activityEntries = entries.filter((e) => e.type !== 'note' && e.type !== 'milestone');
+  // `entries` holds every child's records, so scope to the selected child first:
+  // otherwise switching child (or selecting an expecting one, which owns no
+  // activity at all) shows the previous child's timeline. General notes live in
+  // the same shared array (for queue/undo/sync reuse) but have their OWN
+  // dedicated tab, so they're excluded from the activity timeline too.
+  const activityEntries = entriesForChild(entries, selectedChildId).filter(
+    (e) => e.type !== 'note' && e.type !== 'milestone',
+  );
   const groups = groupByDay(activityEntries, now);
 
   const body =

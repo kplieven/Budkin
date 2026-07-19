@@ -98,6 +98,66 @@ describe('loadProfileFromServer', () => {
   });
 });
 
+describe('loadFromServer child selection', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const serverChildren = [
+    { id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' },
+    { id: '9', serverId: 9, first: 'Theo', last: '', birth: 0, color: '#fff' },
+  ];
+
+  const resetLists = () => {
+    listFeedings.mockReset().mockResolvedValue([]);
+    listSleep.mockReset().mockResolvedValue([]);
+    listChanges.mockReset().mockResolvedValue([]);
+    listTimers.mockReset().mockResolvedValue([]);
+  };
+
+  it('fetches the preferred child rather than the first one', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+
+    const result = await loadFromServer(conn, 9);
+
+    expect(result.selectedChildId).toBe('9');
+    expect(listFeedings).toHaveBeenCalledWith('9');
+    expect(listSleep).toHaveBeenCalledWith('9');
+    expect(listChanges).toHaveBeenCalledWith('9');
+  });
+
+  it('falls back to the first child when no preferred id is given', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+
+    const result = await loadFromServer(conn);
+
+    expect(result.selectedChildId).toBe('7');
+    expect(listFeedings).toHaveBeenCalledWith('7');
+  });
+
+  it('falls back to the first child when the preferred id is not on the server', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+
+    // 42 was deleted server-side, or belongs to an expecting child never pushed.
+    const result = await loadFromServer(conn, 42);
+
+    expect(result.selectedChildId).toBe('7');
+    expect(listFeedings).toHaveBeenCalledWith('7');
+  });
+
+  it('fetches measurements for the preferred child too', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+    listMeasurements.mockClear();
+
+    await loadFromServer(conn, 9);
+
+    for (const kind of ['weight', 'height', 'head', 'bmi']) {
+      expect(listMeasurements).toHaveBeenCalledWith(kind, '9');
+    }
+  });
+});
+
 describe('serverHasData', () => {
   it('returns true when the server already has at least one child', async () => {
     listChildren.mockReset().mockResolvedValueOnce([{ id: '1', first: 'Ada', last: 'Lovelace', birth: 0, color: '#fff' }]);

@@ -34,8 +34,20 @@ export interface LoadResult {
   measurements: Measurement[];
 }
 
-/** Validate the connection and load children + recent entries from the server. */
-export async function loadFromServer(conn: Connection): Promise<LoadResult> {
+/** Validate the connection and load children + recent entries from the server.
+ *
+ *  `preferredChildServerId` is the SERVER id (`Child.serverId`) of the child the
+ *  app currently has selected locally, so a multi-child account loads the
+ *  child the user is actually looking at instead of always the server's first.
+ *  Callers bridge from the local id space with `childServerIdFor`. It is honoured
+ *  only when that child is still on the server: an id that was deleted
+ *  server-side, or a locally-created child never pushed (an expecting child has
+ *  no `serverId` at all, so callers pass nothing), falls back to `children[0]`
+ *  exactly as before. */
+export async function loadFromServer(
+  conn: Connection,
+  preferredChildServerId?: number | null,
+): Promise<LoadResult> {
   // Dead default: this is only ever called with a real server connection, but
   // the union needs a guard here to narrow `conn` for the `serverUrl`/`token`
   // access below.
@@ -55,7 +67,11 @@ export async function loadFromServer(conn: Connection): Promise<LoadResult> {
   // as the gate: it can return 500 on some instances (e.g. a user without a
   // settings row), which would wrongly reject a valid token.
   const children = await client.listChildren();
-  const selectedChildId = children[0]?.id ?? '';
+  const preferred =
+    preferredChildServerId != null
+      ? children.find((c) => c.serverId === preferredChildServerId)?.id
+      : undefined;
+  const selectedChildId = preferred ?? children[0]?.id ?? '';
 
   let entries: Entry[] = [];
   if (selectedChildId) {
@@ -198,34 +214,38 @@ export async function deleteMeasurementFromServer(
 }
 
 /** Push a newly created child (with an optional photo); returns the new server
- *  id and stored picture URL. */
+ *  id, its slug and the stored picture URL. The slug is what the child
+ *  endpoints are keyed by (see `BabybuddyClient.childKey`). */
 export async function pushChildToServer(
   conn: Connection,
   child: Child,
   change: PhotoChange = { kind: 'none' },
-): Promise<{ id?: number; picture?: string | null } | undefined> {
+): Promise<{ id?: number; slug?: string; picture?: string | null } | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.createChild(child, change.kind === 'set' ? change.photo : undefined);
 }
 
-/** Update a child (name/birth and photo change); returns the stored picture URL. */
+/** Update a child (name/birth and photo change); returns the stored picture URL
+ *  and the child's current slug, which a rename moves. */
 export async function updateChildOnServer(
   conn: Connection,
   child: Child,
   change: PhotoChange = { kind: 'none' },
-): Promise<string | null | undefined> {
+): Promise<{ picture: string | null; slug?: string } | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   return client.updateChild(child, change);
 }
 
-/** Delete a child on the server (no-op in local mode). Baby Buddy cascades the
- *  child's history server-side, so this single call is enough. */
-export async function deleteChildFromServer(conn: Connection, id: number): Promise<void> {
+/** Delete a child on the server (no-op in local mode). Takes the whole child,
+ *  not just an id: Baby Buddy keys the child endpoints by SLUG (see
+ *  `BabybuddyClient.childKey`). Baby Buddy cascades the child's history
+ *  server-side, so this single call is enough. */
+export async function deleteChildFromServer(conn: Connection, child: Child): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.deleteChild(id);
+  await client.deleteChild(child);
 }
 
 /** Push a created entry to the server; returns its new server id (or undefined). */

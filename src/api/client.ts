@@ -425,33 +425,83 @@ export class BabybuddyClient {
     }));
   }
 
+  /** Resolve the path segment that addresses a single child.
+   *
+   *  Baby Buddy keys the CHILD endpoints by SLUG, not by numeric id: its
+   *  `ChildViewSet` sets `lookup_field = "slug"`, and only `TagViewSet` does the
+   *  same. Every other resource is keyed by id, which is why the entry, timer
+   *  and measurement calls below address `{serverId}` and are right as they
+   *  stand. Addressing a child by its numeric id 404s, which is what silently
+   *  broke both delete and rename.
+   *
+   *  The slug is DERIVED from the child's name, so it moves whenever the child
+   *  is renamed and a cached copy can go stale. `updateChild` re-stamps it from
+   *  the PATCH response for exactly that reason. When a child has no slug at all
+   *  (`uploadUnsynced` only learns the new numeric id when it pushes one, and a
+   *  child persisted before slugs were captured has none either), look it up by
+   *  `serverId`.
+   *
+   *  Undefined means "do not send the request": either the child was never
+   *  pushed, or the lookup positively established it is no longer on the server
+   *  (another device deleted it). The caller treats that as a no-op rather than
+   *  a failure, since the desired end state already holds. A child that IS
+   *  present but has no slug falls back to the numeric id, which is the one case
+   *  where a 404 is still possible and worth surfacing.
+   *
+   *  Propagates rather than swallows: `listChildren` raises `ApiError` on a 5xx
+   *  or a timeout, which is a genuine "could not reach the server" the callers
+   *  are set up to report. */
+  private async childKey(child: Child): Promise<string | number | undefined> {
+    if (child.slug) return child.slug;
+    if (child.serverId == null) return undefined;
+    const match = (await this.listChildren()).find((c) => c.serverId === child.serverId);
+    if (!match) return undefined; // confirmed gone server-side
+    return match.slug ?? child.serverId;
+  }
+
   /** Create a child on the server; uploads a picture when provided. Returns the
-   *  new server id and the stored picture URL. */
-  async createChild(child: Child, photo?: PickedPhoto): Promise<{ id?: number; picture?: string | null }> {
+   *  new server id, its slug and the stored picture URL. The slug matters: it is
+   *  how the child is addressed from here on (see `childKey`), and without
+   *  capturing it a child created this session could not be renamed or deleted
+   *  until the next refresh filled it in. */
+  async createChild(
+    child: Child,
+    photo?: PickedPhoto,
+  ): Promise<{ id?: number; slug?: string; picture?: string | null }> {
     const init: RequestInit = photo
       ? { method: 'POST', body: await buildChildForm(child, photo) }
       : { method: 'POST', body: JSON.stringify(childBody(child)) };
-    const res = await this.request<{ id?: number; picture?: string | null }>('/children/', init);
-    return { id: res?.id, picture: res?.picture ?? null };
+    const res = await this.request<{ id?: number; slug?: string; picture?: string | null }>('/children/', init);
+    return { id: res?.id, slug: res?.slug, picture: res?.picture ?? null };
   }
 
-  /** Update a child (requires a numeric id). Applies the photo change and returns
-   *  the stored picture URL (null when cleared/absent, undefined when skipped). */
-  async updateChild(child: Child, change: PhotoChange = { kind: 'none' }): Promise<string | null | undefined> {
-    const id = child.serverId;
-    if (id == null) return undefined;
+  /** Update a child (requires a server-backed child). Applies the photo change
+   *  and returns the stored picture URL (null when cleared/absent) plus the
+   *  child's CURRENT slug, which a rename will have moved. Undefined when
+   *  skipped, i.e. the child was never pushed. */
+  async updateChild(
+    child: Child,
+    change: PhotoChange = { kind: 'none' },
+  ): Promise<{ picture: string | null; slug?: string } | undefined> {
+    if (child.serverId == null) return undefined;
+    const key = await this.childKey(child);
+    if (key == null) return undefined;
     const init: RequestInit =
       change.kind === 'set'
         ? { method: 'PATCH', body: await buildChildForm(child, change.photo) }
         : { method: 'PATCH', body: JSON.stringify(childBody(child, change.kind === 'remove')) };
-    const res = await this.request<{ picture?: string | null }>(`/children/${id}/`, init);
-    return res?.picture ?? null;
+    const res = await this.request<{ picture?: string | null; slug?: string }>(`/children/${key}/`, init);
+    return { picture: res?.picture ?? null, slug: res?.slug };
   }
 
-  /** Delete a child on the server (requires a numeric id). Baby Buddy cascades
-   *  the child's feedings/sleep/changes/etc., so no per-entry cleanup is needed. */
-  async deleteChild(id: number): Promise<void> {
-    await this.request(`/children/${id}/`, { method: 'DELETE' });
+  /** Delete a child on the server, addressed by slug (see `childKey`). Baby
+   *  Buddy cascades the child's feedings/sleep/changes/etc., so no per-entry
+   *  cleanup is needed. A never-pushed child has nothing to delete. */
+  async deleteChild(child: Child): Promise<void> {
+    if (child.serverId == null) return;
+    const key = await this.childKey(child);
+    if (key == null) return;
+    await this.request(`/children/${key}/`, { method: 'DELETE' });
   }
 
   async listFeedings(childId: string, limit = 50, offset = 0): Promise<FeedingEntry[]> {
