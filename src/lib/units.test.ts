@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fmtValue,
   resolveMetricInput,
+  snapVolume,
   stepVolume,
   toDisplay,
   toMetric,
@@ -230,6 +231,83 @@ describe('stepVolume (stepper works in display units, stores canonical ml)', () 
   it('stores canonical ml, never the imperial display number', () => {
     // 3.5 fl oz is persisted and synced as 103.50725 ml.
     expect(stepVolume(90, 1, 'imperial')).toBeCloseTo(103.50725, 6);
+  });
+});
+
+describe('snapVolume (align an amount onto the nearest step-grid point)', () => {
+  it('metric rounds to the nearest 10 ml, in whichever direction is closer', () => {
+    expect(snapVolume(90, 'metric')).toBe(90); // already on the grid
+    expect(snapVolume(94, 'metric')).toBe(90);
+    expect(snapVolume(96, 'metric')).toBe(100);
+    expect(snapVolume(95, 'metric')).toBe(100); // the 5 ml midpoint rounds up
+    expect(snapVolume(4, 'metric')).toBe(0);
+  });
+
+  it('breaks every tie upward, in both systems', () => {
+    // Metric midpoints are exact, so these only pin the direction.
+    for (const ml of [5, 15, 25, 95, 105]) {
+      expect(snapVolume(ml, 'metric')).toBe(ml + 5);
+    }
+
+    // Imperial is the interesting half: a quarter-ounce midpoint stored as ml
+    // does not always convert back to exactly .25/.75, so the rule needs float
+    // slack to hold. 5.75 and 9.75 fl oz land a hair LOW on the round-trip and
+    // would round DOWN without it, unlike the other 38 midpoints.
+    for (let k = 0; k < 40; k++) {
+      const mid = 0.25 + k * 0.5; // 0.25, 0.75, 1.25, ... between half-oz marks
+      const snapped = toDisplay('volume', snapVolume(toMetric('volume', mid, 'imperial'), 'imperial'), 'imperial');
+      expect(snapped).toBeCloseTo(mid + 0.25, 9); // always the mark ABOVE
+    }
+
+    // The two that used to go the other way, called out explicitly.
+    for (const mid of [5.75, 9.75]) {
+      const snapped = toDisplay('volume', snapVolume(toMetric('volume', mid, 'imperial'), 'imperial'), 'imperial');
+      expect(snapped).toBeCloseTo(mid + 0.25, 9);
+    }
+  });
+
+  it('imperial rounds to the nearest half fl oz and stores canonical ml', () => {
+    // 90 ml is 3.0433 fl oz, closer to 3.0 than to 3.5.
+    expect(snapVolume(90, 'imperial')).toBe(88.7205);
+    expect(toDisplay('volume', snapVolume(90, 'imperial'), 'imperial')).toBeCloseTo(3, 9);
+    // 100 ml is 3.3814 fl oz, closer to 3.5.
+    expect(toDisplay('volume', snapVolume(100, 'imperial'), 'imperial')).toBeCloseTo(3.5, 9);
+  });
+
+  it('is a no-op on a value that already sits on the grid', () => {
+    const onGrid = toMetric('volume', 3.5, 'imperial');
+    expect(snapVolume(onGrid, 'imperial')).toBeCloseTo(onGrid, 9);
+    // Snapping twice never drifts further.
+    expect(snapVolume(snapVolume(90, 'imperial'), 'imperial')).toBe(snapVolume(90, 'imperial'));
+  });
+
+  it('never goes negative and leaves zero alone', () => {
+    expect(snapVolume(0, 'metric')).toBe(0);
+    expect(snapVolume(0, 'imperial')).toBe(0);
+    expect(snapVolume(2, 'imperial')).toBe(0); // 0.07 fl oz snaps down to 0
+  });
+
+  it('lands on a point that stepVolume itself would produce', () => {
+    // The two share one grid: stepping away from a snapped value and back
+    // returns to exactly that value.
+    for (const ml of [15, 30, 45, 60, 75, 90, 250, 295]) {
+      for (const system of ['metric', 'imperial'] as const) {
+        const snapped = snapVolume(ml, system);
+        expect(stepVolume(stepVolume(snapped, 1, system), -1, system)).toBeCloseTo(snapped, 9);
+      }
+    }
+  });
+
+  it('leaves no dead press: after snapping, every step changes the rendered string', () => {
+    // The stepper renders imperial with toFixed(1). Before snapping, 90 ml shows
+    // "3.0" and a minus press also lands on "3.0", so the press looks swallowed.
+    const render = (ml: number) => toDisplay('volume', ml, 'imperial').toFixed(1);
+    for (let ml = 5; ml <= 300; ml += 5) {
+      const snapped = snapVolume(ml, 'imperial');
+      const shown = render(snapped);
+      if (snapped > 0) expect(render(stepVolume(snapped, -1, 'imperial'))).not.toBe(shown);
+      expect(render(stepVolume(snapped, 1, 'imperial'))).not.toBe(shown);
+    }
   });
 });
 

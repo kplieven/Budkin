@@ -11,6 +11,7 @@ import {
   ACTIVITY_SHAPE,
   ACTIVITY_LABEL,
   DEFAULT_DURATION_MIN,
+  feedAmountIsVolume,
 } from '@/lib/activities';
 import {
   type Connection,
@@ -67,7 +68,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
-import { stepVolume, type UnitSystem } from '@/lib/units';
+import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
@@ -629,6 +630,39 @@ function mirrorTimerDelete(get: Get, timer: Timer): void {
   }
 }
 
+/**
+ * Does this draft's `amount` hold a VOLUME the stepper edits?
+ *
+ * Pumping is always millilitres. A feeding's `amount` is dual-purpose, so it
+ * defers to the one predicate the log sheet and the history line already share:
+ * a breast feed records a dimensionless 1-to-10 intake score, which must never
+ * be treated as a measurement. No other activity shows the stepper (a diaper's
+ * solid amount is its own scale), so nothing else qualifies.
+ */
+function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
+  if (type === 'pumping') return true;
+  if (type === 'feeding') return feedAmountIsVolume(te.feedType, te.method);
+  return false;
+}
+
+/**
+ * Snap a draft's volume amount onto the active unit system's step grid.
+ *
+ * The stepper shows imperial to one decimal, so a stored value that sits just
+ * off a grid point renders identically to the grid point below it: 90 ml shows
+ * as "3.0" fl oz, and the minus press that moves it to exactly 3.0 also shows
+ * "3.0". The press looks dead. Aligning the draft the moment a sheet opens (and
+ * again if the unit system flips while it is open) makes the shown number and
+ * the stored number agree, so every press moves the display.
+ *
+ * Only the in-memory draft is touched. Persisted entries keep their canonical
+ * millilitres until the user actually saves an edit.
+ */
+function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSystem): TimeEntryState {
+  if (te.amount == null || !draftAmountIsVolume(type, te)) return te;
+  return { ...te, amount: snapVolume(te.amount, system) };
+}
+
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 // The most recently deleted entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
@@ -709,13 +743,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void savePrefs({ tutorialSeen: true });
   },
   setUnitSystem: (system) => {
-    set({ unitSystem: system });
+    // Flipping the lens under an open log sheet re-aligns its draft amount onto
+    // the new system's grid, so the stepper keeps showing exactly what it holds.
+    set((s) => ({
+      unitSystem: system,
+      te: s.sheet ? snapDraftAmount(s.sheet.type, s.te, system) : s.te,
+    }));
     void savePrefs({ unitSystem: system });
   },
   toggleUnitSystem: () => {
-    const next: UnitSystem = get().unitSystem === 'metric' ? 'imperial' : 'metric';
-    set({ unitSystem: next });
-    void savePrefs({ unitSystem: next });
+    get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
   },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
@@ -1909,7 +1946,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Blank body — the multiline note input opens empty.
       te.noteText = '';
     }
-    set({ sheet: { type }, te, editingId: null, fromTimerId: null });
+    set({
+      sheet: { type },
+      te: snapDraftAmount(type, te, get().unitSystem),
+      editingId: null,
+      fromTimerId: null,
+    });
   },
   openEdit: (entryId) => {
     const s = get();
@@ -1982,7 +2024,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (entry.type === 'sleep') te.nap = entry.nap;
       if (entry.type === 'tummy') te.milestone = entry.milestone;
     }
-    set({ sheet: { type: entry.type }, te, editingId: entryId, fromTimerId: null });
+    set({
+      sheet: { type: entry.type },
+      te: snapDraftAmount(entry.type, te, s.unitSystem),
+      editingId: entryId,
+      fromTimerId: null,
+    });
   },
   openTimerEdit: (timerId) => {
     const s = get();
@@ -2019,7 +2066,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
     if (tm.notes != null) te.notes = tm.notes;
-    set({ sheet: { type }, te, editingId: null, fromTimerId: timerId });
+    set({
+      sheet: { type },
+      te: snapDraftAmount(type, te, s.unitSystem),
+      editingId: null,
+      fromTimerId: timerId,
+    });
   },
   closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
   deleteEntry: (id) => {
