@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -21,8 +22,13 @@ export default function Welcome() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const enterLocal = useAppStore((s) => s.enterLocal);
+  const [entering, setEntering] = useState(false);
 
+  // Guarded against a double tap: enterLocal does async storage work before the
+  // navigation, and firing twice would push the baby step onto the stack twice.
   const goLocal = async () => {
+    if (entering) return;
+    setEntering(true);
     await enterLocal();
     router.push('/setup/baby');
   };
@@ -76,6 +82,7 @@ export default function Welcome() {
         label="Just use this device"
         variant="secondary"
         onPress={goLocal}
+        disabled={entering}
         style={{ marginTop: 12 }}
       />
     </ScrollView>
