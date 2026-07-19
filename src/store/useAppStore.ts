@@ -1288,7 +1288,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     for (const op of ops) {
       try {
         if (op.op === 'update' && op.entity === 'child') {
-          const res = await updateChildOnServer(conn, op.payload);
+          // Address the child by the slug state holds RIGHT NOW, not the one
+          // frozen into the payload at enqueue time. Op payloads are snapshots
+          // and `addPendingOp` appends without dedup, so two offline renames of
+          // the same child queue two ops both carrying the ORIGINAL slug.
+          // Replaying the first moves the slug server-side, which staled the
+          // second before it was ever sent: it would 404, go back on the queue,
+          // and 404 again on every later flush, so the rename would never land
+          // and the op log would never drain. Read from `get()`, not the `s`
+          // snapshot above, so the re-stamp below is visible to the next op.
+          const live = get().children.find((c) => c.id === op.payload.id);
+          const payload = live?.slug ? { ...op.payload, slug: live.slug } : op.payload;
+          const res = await updateChildOnServer(conn, payload);
           // A replayed rename moves the slug server-side, and the child
           // endpoints are keyed by it, so re-stamp it here the same way
           // saveChild's online edit does. Otherwise the next delete goes out
@@ -1654,10 +1665,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const doServerDelete = serverBacked && !!conn && conn.mode === 'server' && !s.offline;
 
     const nextChildren = s.children.filter((c) => c.id !== id);
-    // Kept for the restore below, captured before the purge.
+    // Kept for the restore below, captured before the purge. `purgedTimers` are
+    // the running timers the re-point clears: a server-backed one would come
+    // back on the next refresh, but one started offline (serverId == null) lives
+    // nowhere else and would be lost for good.
     const priorIndex = s.children.findIndex((c) => c.id === id);
     const purgedEntries = s.entries.filter((e) => e.childId === id);
     const purgedMeasurements = s.measurements.filter((m) => m.childId === id);
+    const purgedTimers = s.timers;
     // Purge the deleted child's entries/measurements. In local mode every
     // child's data lives in state, so this drops the orphans — and, via the
     // persistence subscription, from the durable entity store (saveEntries /
@@ -1702,15 +1717,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // snapshot: a write may have landed during the round trip and must not
         // be discarded by the undo.
         set((st) => {
-          if (st.children.some((c) => c.id === id)) return {}; // already back
+          // Already back? Matched on `serverId` as well as the local id, not
+          // just the latter: a refresh landing mid-flight puts the child back
+          // through `reconcileChildren`, which re-adds a child it cannot match
+          // locally under the SERVER-derived id (`String(serverId)`), not the
+          // local one. Looking only for the local id would miss it and splice a
+          // second copy in beside it, leaving two entries sharing one serverId.
+          const alreadyBack = st.children.some(
+            (c) => c.id === id || (child.serverId != null && c.serverId === child.serverId),
+          );
+          if (alreadyBack) return {};
           const children = [...st.children];
           children.splice(Math.min(priorIndex, children.length), 0, child);
           const entryIds = new Set(st.entries.map((e) => e.id));
           const measurementIds = new Set(st.measurements.map((m) => m.id));
+          const timerIds = new Set(st.timers.map((t) => t.id));
           return {
             children,
             entries: [...purgedEntries.filter((e) => !entryIds.has(e.id)), ...st.entries],
             measurements: [...purgedMeasurements.filter((m) => !measurementIds.has(m.id)), ...st.measurements],
+            timers: [...purgedTimers.filter((t) => !timerIds.has(t.id)), ...st.timers],
             // Only reclaim the selection if nothing else has claimed it since
             // (the user may have switched children while this was in flight).
             selectedChildId:
@@ -1731,8 +1757,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // status strip would sit empty until the user happened to pull to refresh.
     // Local mode already has every child's records in memory.
     //
-    // Deliberately after the awaited DELETE above, never before it.
-    if (patch.selectedChildId && get().connection?.mode === 'server') void get().refresh();
+    // Deliberately after the awaited DELETE above, never before it. (A refresh
+    // that was ALREADY in flight when this ran is a separate, pre-existing race:
+    // it can still re-add the child, and `refreshInFlight` then no-ops this
+    // refetch. Out of scope here.)
+    //
+    // Gated on `offline` as well as the mode: `refresh` only bails on the
+    // `simulateOffline` override, so an ungated call would fire a doomed fetch
+    // while offline, and, once the offline-delete UI block is relaxed, would
+    // turn a possible later resurrection into an immediate certain one.
+    const st = get();
+    if (patch.selectedChildId && st.connection?.mode === 'server' && !st.offline) void st.refresh();
   },
 
   // ---- insights (lazy deep-history load) ----
