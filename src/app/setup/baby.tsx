@@ -125,7 +125,7 @@ export default function SetupBaby() {
             Has your baby arrived?
           </Txt>
           <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, lineHeight: 22 }}>
-            Budkin tracks feeds, naps, nappies and growth from day one.
+            Budkin tracks feeds, naps, diapers and growth from day one.
           </Txt>
 
           <View style={{ flex: 1, minHeight: 24 }} />
