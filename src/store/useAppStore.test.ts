@@ -9,7 +9,7 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -56,6 +56,11 @@ const h = vi.hoisted(() => ({
   pendingOps: [] as unknown[],
   adoptTarget: null as string | null,
   pushFails: false,
+  childDeleteFails: false,
+  /** serverId -> the slug the fake server currently holds for that child. Seed
+   *  it to opt a test into slug-accurate PATCH behaviour (see
+   *  `updateChildOnServer` below); empty means the old permissive mock. */
+  childSlugOnServer: {} as Record<string, string>,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
   tags: [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }] as unknown,
@@ -66,6 +71,7 @@ const h = vi.hoisted(() => ({
 
 // Hoisted so the repository mock factory (also hoisted) can reference it.
 const SERVER_PIC = vi.hoisted(() => 'https://srv.example/media/child/xyz.jpg');
+const SERVER_SLUG = vi.hoisted(() => 'nova-o');
 
 vi.mock('@/data/storage', () => ({
   saveConnection: vi.fn(async () => {}),
@@ -171,15 +177,31 @@ vi.mock('@/data/repository', () => ({
   pushChildToServer: vi.fn(async (_c: unknown, child: unknown, change: any) => {
     h.childPushed.push(child);
     h.childPushChange.push(change);
-    return { id: 777, picture: change?.kind === 'set' ? SERVER_PIC : null };
+    return { id: 777, slug: SERVER_SLUG, picture: change?.kind === 'set' ? SERVER_PIC : null };
   }),
-  updateChildOnServer: vi.fn(async (_c: unknown, child: unknown, change: any) => {
+  updateChildOnServer: vi.fn(async (_c: unknown, child: any, change: any) => {
     h.childUpdated.push(child);
     h.childUpdateChange.push(change);
-    return change?.kind === 'set' ? SERVER_PIC : null;
+    const nextSlug = String(child?.first ?? '').toLowerCase() + '-slug';
+    // Opt-in faithful slug behaviour, keyed by serverId. Inert unless a test
+    // seeds `childSlugOnServer`, so it changes nothing for the rest of the file.
+    // Baby Buddy addresses children BY slug, so a PATCH carrying a stale one
+    // 404s rather than falling back to matching on id, and a rename MOVES the
+    // slug, which is what makes the next stale request fail.
+    const key = String(child?.serverId);
+    const currentSlug = h.childSlugOnServer[key];
+    if (currentSlug !== undefined) {
+      if (child?.slug && child.slug !== currentSlug) throw new Error('404');
+      h.childSlugOnServer[key] = nextSlug;
+    }
+    // The real PATCH response carries the CURRENT slug.
+    return { picture: change?.kind === 'set' ? SERVER_PIC : null, slug: nextSlug };
   }),
-  deleteChildFromServer: vi.fn(async (_c: unknown, id: unknown) => {
-    h.childDeleted.push(id);
+  // Takes the whole child now, not a numeric id: the server DELETE is keyed by
+  // slug (see BabybuddyClient.childKey), which only the child carries.
+  deleteChildFromServer: vi.fn(async (_c: unknown, child: unknown) => {
+    if (h.childDeleteFails) throw new Error('net');
+    h.childDeleted.push(child);
   }),
   pushTimerToServer: vi.fn(async (_c: unknown, timer: unknown, childServerId: unknown) => {
     h.timerPushed.push({ timer, childServerId });
@@ -284,6 +306,8 @@ beforeEach(() => {
   h.pendingOps = [];
   h.adoptTarget = null;
   h.pushFails = false;
+  h.childDeleteFails = false;
+  h.childSlugOnServer = {};
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
   h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
@@ -667,6 +691,40 @@ describe('flushPendingOps', () => {
     await s().flushPendingOps();
     expect(h.childUpdated).toEqual([child]);
     expect(h.pendingOps).toHaveLength(0);
+  });
+
+  // Op payloads are SNAPSHOTS taken at enqueue time and addPendingOp appends
+  // without dedup, so two offline renames of the same child queue two ops that
+  // BOTH carry the original slug. Replaying op1 moves the slug server-side,
+  // which makes op2's snapshot stale before it is ever sent. Trusting the
+  // payload there loses the second rename permanently: it 404s, goes back on
+  // the queue, and 404s again on every later flush, so the op log never drains.
+  it('replays a second queued rename against the LIVE slug, not its stale snapshot', async () => {
+    h.childSlugOnServer = { '501': 'mira-o' };
+    const staleSnapshot = { ...child, slug: 'mira-o' };
+    h.pendingOps = [
+      { op: 'update', entity: 'child', payload: { ...staleSnapshot, first: 'Mirabel' } },
+      { op: 'update', entity: 'child', payload: { ...staleSnapshot, first: 'Mirage' } },
+    ];
+    useAppStore.setState({ children: [{ ...child, slug: 'mira-o' }] });
+
+    await s().flushPendingOps();
+
+    // Both renames landed, so the queue drains and the last one is the winner.
+    expect(h.pendingOps).toHaveLength(0);
+    expect(h.childUpdated).toHaveLength(2);
+    expect((h.childUpdated[1] as Child).slug).toBe('mirabel-slug');
+    expect(s().children[0].slug).toBe('mirage-slug');
+  });
+
+  it('re-stamps the slug a replayed rename moved, so a later delete is not keyed by a stale one', async () => {
+    // An offline rename replays here on reconnect. Baby Buddy derives the slug
+    // from the name, so the replay MOVES it server-side; keeping the old one
+    // locally would 404 the next delete, which is how a deleted child came back.
+    // Same re-stamp saveChild's online edit does.
+    h.pendingOps = [{ op: 'update', entity: 'child', payload: { ...child, first: 'Mirabel' } }];
+    await s().flushPendingOps();
+    expect(s().children[0].slug).toBe('mirabel-slug');
   });
 
   it('replays an update/measurement op to updateMeasurementOnServer and clears it on success', async () => {
@@ -1630,12 +1688,17 @@ describe('children', () => {
     // serverId is stamped instead (like entries/measurements) so server-child
     // ops (update / delete / sync) recognise it before the next refresh.
     expect(s().children[1].serverId).toBe(777);
+    // The slug is stamped from the same create response. Baby Buddy keys the
+    // child endpoints by slug, so without this a child created this session
+    // could not be renamed or deleted until the next refresh filled it in.
+    expect(s().children[1].slug).toBe(SERVER_SLUG);
   });
 
   it('a child created online can immediately be deleted on the server (no resurrection)', async () => {
-    // Regression: saveChild must stamp serverId on create, else deleteChild
-    // (which gates the server DELETE on serverId != null) would only remove the
-    // child locally and it would reappear on the next refresh.
+    // Regression: saveChild must stamp serverId AND slug on create, else
+    // deleteChild would only remove the child locally (serverId gate) or address
+    // it by an id Baby Buddy 404s on (slug lookup), and either way it would
+    // reappear on the next refresh.
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
     await flush();
@@ -1643,9 +1706,26 @@ describe('children', () => {
     expect(created.serverId).toBe(777);
 
     h.childDeleted = [];
-    s().deleteChild(created.id);
-    expect(h.childDeleted).toEqual([777]); // server DELETE fired with the stamped serverId
+    void s().deleteChild(created.id);
+    // The whole child goes to the server delete, carrying the slug it is keyed by.
+    expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 777, slug: SERVER_SLUG })]);
     expect(s().children.find((c) => c.id === created.id)).toBeUndefined();
+  });
+
+  it('renaming a child re-stamps the slug, which Baby Buddy moves with the name', async () => {
+    // The slug is derived from the name server-side, so a rename changes it
+    // (confirmed against a live server). Holding the OLD slug would 404 the
+    // next rename or delete, resurrecting the child: the reported bug, one
+    // rename removed.
+    useAppStore.setState({
+      children: [{ id: 'c1', serverId: 5, first: 'Mira', last: 'D', birth: NOW, color: '#fff', slug: 'mira-d' }],
+      selectedChildId: 'c1',
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mirabel', last: 'D', birth: NOW });
+    await flush();
+
+    expect(s().children[0].slug).toBe('mirabel-slug');
   });
 
   it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {
@@ -1820,6 +1900,21 @@ describe('deleteChild', () => {
     expect(h.childDeleted).toHaveLength(0);
   });
 
+  /** Point the shared `loadFromServer` mock at a server view that still holds
+   *  `survivors`. The default mock reports an EMPTY server, which
+   *  `reconcileChildren` correctly reads as "every child was deleted
+   *  server-side" and drops, which is not the situation these tests are about. Needed
+   *  now that a successful delete refetches (see the re-point tests below). */
+  const serverViewOf = (...survivors: ReturnType<typeof serverChild>[]) =>
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: survivors.map((c) => ({ ...c, id: String(c.serverId) })),
+      entries: [],
+      timers: [],
+      selectedChildId: String(survivors[0]?.serverId ?? ''),
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    } as any);
+
   it('server-backed selected child while online: server delete + purge + re-point', async () => {
     useAppStore.setState({
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
@@ -1831,7 +1926,8 @@ describe('deleteChild', () => {
       insightsEntries: [{ id: 'x' } as any],
       insightsError: true,
     });
-    s().deleteChild('5');
+    serverViewOf(serverChild('6', 'Nova'));
+    void s().deleteChild('5');
     expect(s().children.map((c) => c.id)).toEqual(['6']);
     expect(s().selectedChildId).toBe('6'); // re-pointed to the surviving child
     expect(s().entries).toHaveLength(0); // deleted child's entries purged
@@ -1843,16 +1939,19 @@ describe('deleteChild', () => {
     expect(s().childSheet).toBe(false);
     expect(s().showChildSwitcher).toBe(false);
     await flush();
-    expect(h.childDeleted).toEqual([5]); // numeric id passed to the server delete
+    // The whole child is handed to the server delete: it is keyed by slug, and
+    // only the child carries that.
+    expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 5, slug: 'mira' })]);
+    expect(s().toast).toBe('Mira deleted');
   });
 
   it('deleting the last remaining child leaves selectedChildId empty', async () => {
     useAppStore.setState({ children: [serverChild('5', 'Mira')], selectedChildId: '5' });
-    s().deleteChild('5');
+    void s().deleteChild('5');
     expect(s().children).toHaveLength(0);
     expect(s().selectedChildId).toBe('');
     await flush();
-    expect(h.childDeleted).toEqual([5]);
+    expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 5 })]);
   });
 
   it('deleting a non-selected child leaves selection + loaded data intact', async () => {
@@ -1862,13 +1961,13 @@ describe('deleteChild', () => {
       entries: [feeding('feeding-1', '5')],
       timers: [timer],
     });
-    s().deleteChild('6');
+    void s().deleteChild('6');
     expect(s().children.map((c) => c.id)).toEqual(['5']);
     expect(s().selectedChildId).toBe('5'); // unchanged
     expect(s().entries).toHaveLength(1); // selected child's data untouched
     expect(s().timers).toHaveLength(1); // timers not cleared
     await flush();
-    expect(h.childDeleted).toEqual([6]);
+    expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 6 })]);
   });
 
   it('local mode: deletes in memory only, no server call', async () => {
@@ -1877,7 +1976,7 @@ describe('deleteChild', () => {
       children: [serverChild('5', 'Mira')],
       selectedChildId: '5',
     });
-    s().deleteChild('5');
+    void s().deleteChild('5');
     expect(s().children).toHaveLength(0);
     await flush();
     expect(h.childDeleted).toHaveLength(0);
@@ -1889,10 +1988,166 @@ describe('deleteChild', () => {
       children: [serverChild('5', 'Mira')],
       selectedChildId: '5',
     });
-    s().deleteChild('5');
+    void s().deleteChild('5');
     expect(s().children).toHaveLength(0);
     await flush();
     expect(h.childDeleted).toHaveLength(0);
+  });
+
+  // refresh() only bails on the simulateOffline override, not the real offline
+  // flag, so an ungated refetch here would fire a doomed fetch while offline.
+  // Today's server-backed offline delete is UI-blocked, but a local-only child
+  // deleted offline reaches this line, and relaxing that UI block is a named
+  // follow-up: without the gate, a delete that merely MIGHT be resurrected
+  // later becomes one that is resurrected immediately.
+  it('deleting while offline never fires the post-delete refetch', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({
+      offline: true,
+      children: [
+        { id: 'local1', first: 'Mira', last: '', birth: NOW, color: '#fff' }, // never pushed
+        serverChild('6', 'Nova'),
+      ],
+      selectedChildId: 'local1',
+    });
+
+    void s().deleteChild('local1');
+    await flush();
+
+    expect(s().selectedChildId).toBe('6'); // still re-points
+    expect(loadFromServer).not.toHaveBeenCalled();
+  });
+
+  // The reported symptom: the child vanished, a success toast appeared, and the
+  // child came back on the next refresh. The DELETE had 404'd all along and the
+  // error was swallowed by a fire-and-forget `.catch(() => {})`.
+  it('a failed server delete restores the child instead of claiming success', async () => {
+    h.childDeleteFails = true;
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+      measurements: [{ id: 'weight-1', serverId: 2, childId: '5', kind: 'weight', value: 5, date: NOW }],
+    });
+
+    await s().deleteChild('5');
+
+    expect(s().children.map((c) => c.id)).toEqual(['5', '6']); // back, in its old slot
+    expect(s().selectedChildId).toBe('5'); // selection restored too
+    expect(s().entries.map((e) => e.id)).toEqual(['feeding-1']);
+    expect(s().measurements).toHaveLength(1);
+    expect(s().toast).not.toBe('Mira deleted'); // never claims a delete that did not happen
+    expect(s().toast).toBe('Could not delete Mira');
+  });
+
+  it('a failed server delete keeps entries written during the round trip', async () => {
+    // The restore merges rather than snapping state back wholesale, so a write
+    // that landed while the DELETE was in flight is not lost.
+    h.childDeleteFails = true;
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+      entries: [feeding('feeding-1', '5')],
+    });
+
+    const pending = s().deleteChild('5');
+    useAppStore.setState({ entries: [...s().entries, feeding('feeding-mid', '6')] });
+    await pending;
+
+    expect(s().entries.map((e) => e.id).sort()).toEqual(['feeding-1', 'feeding-mid']);
+  });
+
+  // Item 1 scoped every history surface to the selected child and put the
+  // refetch inside selectChild. deleteChild re-points the selection WITHOUT
+  // going through selectChild, so without this the surviving child's History,
+  // Growth and dashboard strip would sit empty until something else refreshed.
+  it('re-pointing after a delete loads the surviving child, and only after the DELETE lands', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+    });
+    serverViewOf(serverChild('6', 'Nova'));
+
+    void s().deleteChild('5');
+    // Ordering: nothing may be fetched while the DELETE is in flight, or
+    // reconcileChildren would re-add the child being deleted.
+    expect(loadFromServer).not.toHaveBeenCalled();
+
+    await flush();
+    expect(loadFromServer).toHaveBeenCalledTimes(1);
+    // Fetched for the SURVIVING child's server id, not the deleted one's.
+    expect(vi.mocked(loadFromServer).mock.calls[0][1]).toBe(6);
+    expect(s().children.map((c) => c.id)).toEqual(['6']);
+  });
+
+  it('deleting a non-selected child does not refetch: the selection did not move', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+    });
+
+    void s().deleteChild('6');
+    await flush();
+
+    expect(loadFromServer).not.toHaveBeenCalled();
+  });
+
+  // reconcileChildren re-adds a child it cannot match locally under the
+  // SERVER-derived id (String(serverId)), not the local one. So a refresh that
+  // completes while the DELETE is in flight puts the child back as '5', and a
+  // rollback guard that only looks for the local id 'c1' would splice a SECOND
+  // copy in beside it: same serverId, two ids, and every later rename or delete
+  // acts on whichever one the UI happens to hand over.
+  it('a failed server delete does not duplicate a child a mid-flight refresh already restored', async () => {
+    h.childDeleteFails = true;
+    useAppStore.setState({
+      children: [{ ...serverChild('5', 'Mira'), id: 'c1' }, serverChild('6', 'Nova')],
+      selectedChildId: 'c1',
+    });
+
+    const pending = s().deleteChild('c1');
+    // A refresh lands mid-flight and reconciles the still-present server child
+    // back in under its server-derived id.
+    useAppStore.setState({ children: [serverChild('5', 'Mira'), ...s().children] });
+    await pending;
+
+    expect(s().children.filter((c) => c.serverId === 5)).toHaveLength(1);
+    expect(s().children.map((c) => c.serverId).sort()).toEqual([5, 6]);
+  });
+
+  // deleteChild wipes the running timers when the deleted child was selected,
+  // and the persistence subscription writes that empty array straight to the
+  // device. A server-backed timer would come back on the next refresh, but one
+  // started offline (serverId == null) exists nowhere else and is gone for good.
+  it('a failed server delete restores the running timers it cleared', async () => {
+    h.childDeleteFails = true;
+    const localTimer: Timer = { id: 't-local', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [localTimer],
+    });
+
+    await s().deleteChild('5');
+
+    expect(s().timers).toEqual([localTimer]);
+  });
+
+  it('a failed server delete does not refetch, so the restore is not clobbered', async () => {
+    h.childDeleteFails = true;
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+    });
+
+    await s().deleteChild('5');
+    await flush();
+
+    expect(loadFromServer).not.toHaveBeenCalled();
+    expect(s().children.map((c) => c.id)).toEqual(['5', '6']);
   });
 });
 
@@ -2366,6 +2621,237 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     expect(s().children.map((c) => c.id)).toEqual(['localM']); // local id preserved
     expect(s().selectedChildId).toBe('localM');
     expectSelectionNamesARealChild();
+  });
+});
+
+describe('history is scoped to the selected child', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const expecting: Child = { id: 'localBean', first: 'Bean', last: '', birth: NOW + 60 * 86400000, color: '#ddd', expected: true };
+  /** A record owned by Mira, the server's FIRST child, as it arrives from
+   *  loadFromServer: `childId` is still in SERVER id space at that point. */
+  const miraFeed: Entry = { id: 'f1', childId: '1', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+  const serverChildren = [
+    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
+    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
+  ];
+
+  it('refresh asks the server for the SELECTED child, not the server\'s first', async () => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    // The SERVER id of the locally selected child, bridged from local id space.
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    expect(s().selectedChildId).toBe('localTheo');
+    expectSelectionNamesARealChild();
+  });
+
+  it('hydrate asks the server for the persisted local selection', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira, theo],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localTheo',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('hydrate passes no preferred child when the selection has never been pushed', async () => {
+    // An expecting child has no serverId, so there is nothing the server could
+    // match. loadFromServer must fall back to its own children[0], as before.
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira, expecting],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localBean',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBeNull();
+  });
+
+  it("refresh with an expecting child selected does not surface a sibling's entries", async () => {
+    // The reported bug: for an expected child, the history shown was the
+    // previous child's. An expecting child has no serverId, so loadFromServer
+    // still falls back to the server's first child (Mira) and her records DO
+    // land in the flat `entries` array. What must not happen is those records
+    // being shown under the expecting child, which is what every history
+    // surface reads via `entriesForChild`.
+    useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localBean', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [miraFeed],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(s().selectedChildId).toBe('localBean');
+    // The store still holds the sibling's record, remapped into local id space.
+    expect(s().entries.find((e) => e.id === 'f1')?.childId).toBe('localMira');
+    // But nothing is shown for the expecting child.
+    expect(entriesForChild(s().entries, s().selectedChildId)).toEqual([]);
+    // ...while the sibling's own history is intact.
+    expect(entriesForChild(s().entries, 'localMira').map((e) => e.id)).toEqual(['f1']);
+  });
+
+  it("switching to a sibling never shows the other child's records", async () => {
+    // The same bug with no expecting child involved: the demo seed owns all
+    // entries under c1, so selecting c2 used to render c1's history verbatim.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [miraFeed],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(entriesForChild(s().entries, 'localTheo')).toEqual([]);
+  });
+});
+
+describe('switching child refetches that child\'s records (server mode)', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const expecting: Child = { id: 'localBean', first: 'Bean', last: '', birth: NOW + 60 * 86400000, color: '#ddd', expected: true };
+  const serverChildren = [
+    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
+    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
+  ];
+  const theoFeed: Entry = { id: 'tf1', childId: '2', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+
+  it("fetches the newly selected child, so its history is not left empty", async () => {
+    // In server mode `entries` only ever holds the ONE child the last fetch
+    // asked for. Scoping the display by child (the history-scope fix) is
+    // therefore only half the story: without a refetch, switching to a
+    // sibling shows "Nothing logged yet" until the user pulls to refresh.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [theoFeed],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // Asked the server for Theo, not Mira.
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    // And his records are now what the History surfaces will render.
+    expect(entriesForChild(s().entries, 'localTheo').map((e) => e.id)).toEqual(['tf1']);
+  });
+
+  it('does not hit the server in local mode', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+    });
+    vi.mocked(loadFromServer).mockClear();
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // Local mode already holds every child's records in memory, so there is
+    // nothing to fetch and no server to fetch it from.
+    expect(vi.mocked(loadFromServer)).not.toHaveBeenCalled();
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('still selects the child when the refetch fails', async () => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // The switch is a local UI action: it must land regardless of the network.
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('passes no preferred child when switching to an expecting one', async () => {
+    // An expecting child has no serverId, so there is nothing to ask for and
+    // loadFromServer falls back to the server's first child. The display
+    // filter is what keeps the sibling's records off the expecting screen.
+    useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    s().selectChild('localBean');
+    await flush();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBeNull();
+  });
+
+  it('keeps resetting the insights cache (pre-existing behaviour)', async () => {
+    useAppStore.setState({
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+      insightsLoaded: true,
+      insightsEntries: [theoFeed],
+      insightsError: true,
+    });
+    vi.mocked(loadFromServer).mockClear();
+
+    s().selectChild('localTheo');
+    await flush();
+
+    expect(s().insightsLoaded).toBe(false);
+    expect(s().insightsEntries).toEqual([]);
+    expect(s().insightsError).toBe(false);
   });
 });
 
@@ -3038,6 +3524,22 @@ describe('insights slice', () => {
       () => new Promise<Entry[]>((r) => { resolveC1 = r; }),
     );
     const inFlight = useAppStore.getState().loadInsights(); // c1 fetch starts
+    // selectChild also refetches the child's records now (see 'switching child
+    // refetches...'), so give that fetch a server view matching this test's own
+    // fixture. The shared default mock reports an EMPTY server, which
+    // reconcileChildren correctly reads as "both children deleted server-side"
+    // and drops them, which is not the situation under test here.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [
+        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+      ],
+      entries: [],
+      timers: [],
+      selectedChildId: '502',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
     useAppStore.getState().selectChild('c2'); // switch lands mid-flight
     resolveC1([{ id: 'a1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any]);
     await inFlight;
@@ -4161,8 +4663,10 @@ describe('expecting children', () => {
     expect(useAppStore.getState().selectedChildId).toBe(localId);
     // serverId is stamped instead (like saveChild's create push) so
     // server-child ops (update / delete / sync) recognise it before the next
-    // refresh.
+    // refresh. The slug comes from the same response, and is what the child
+    // endpoints are actually keyed by.
     expect(kid.serverId).toBe(777);
+    expect(kid.slug).toBe(SERVER_SLUG);
   });
 
   it('confirmBirth in local mode does not attempt a push and keeps the local id', async () => {

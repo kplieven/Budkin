@@ -24,6 +24,7 @@ import { ANCHOR_LABEL, anchorLabel, dayGroupLabel, fmtClock, fmtDur, relDayLabel
 import {
   derivedField,
   endAnchorVisible,
+  entriesForChild,
   isActive,
   lastDiaperMinAgo,
   lastFeedEndMinAgo,
@@ -129,6 +130,8 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
+  // Primitive selector, so no new reference per render (zustand v5).
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
   // Editing a running timer (opened via openTimerEdit): Start, End and Lasted are
   // all focusable. Editing End or Lasted to a fixed value flips ongoing false so
   // save() stops the timer and logs it; leaving it ongoing saves details only.
@@ -155,11 +158,17 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const endIsToday = new Date(end).toDateString() === new Date(now).toDateString();
   const resultSub = isInterval ? `running · ${fmtDur(duration)} so far` : relDayLabel(end, now);
 
-  const lastFeed = lastFeedEndMinAgo(entries, now);
-  const lastWake = lastWakeMinAgo(entries, now);
-  const lastDiaper = lastDiaperMinAgo(entries, now);
-  const feedStart = lastFeedStartMinAgo(entries, now);
-  const sleepStart = lastSleepStartMinAgo(entries, now);
+  // Scoped to the selected child: `entries` holds every child's records. This
+  // is the one surface where an unscoped read PERSISTS a wrong value rather
+  // than only displaying one, since tapping a suggestion chip or an end anchor
+  // writes that timestamp onto the new entry. Offering a sibling's last feed
+  // as this child's anchor would save it as fact.
+  const childEntries = entriesForChild(entries, selectedChildId);
+  const lastFeed = lastFeedEndMinAgo(childEntries, now);
+  const lastWake = lastWakeMinAgo(childEntries, now);
+  const lastDiaper = lastDiaperMinAgo(childEntries, now);
+  const feedStart = lastFeedStartMinAgo(childEntries, now);
+  const sleepStart = lastSleepStartMinAgo(childEntries, now);
 
   const endActive = isActive(te.order, 'end');
   const startActive = isActive(te.order, 'start');

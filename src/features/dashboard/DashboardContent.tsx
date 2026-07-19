@@ -11,7 +11,7 @@ import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
+import { entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -68,23 +68,27 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       : { width: '47.8%', flexGrow: 1 };
 
   // ---- derived status ----
-  const lastFeedAgo = lastFeedStartMinAgo(entries, now);
-  const lastFeeding = entries
+  // Scoped to the selected child: the store's `entries` holds every child's
+  // records, so an unscoped read shows a sibling's last feed and diaper here.
+  // Safe below the early returns above, since this is a plain call, not a hook.
+  const childEntries = entriesForChild(entries, selectedChild?.id);
+  const lastFeedAgo = lastFeedStartMinAgo(childEntries, now);
+  const lastFeeding = childEntries
     .filter((e): e is Extract<typeof e, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
     .sort((a, b) => b.start - a.start)[0];
   const fedSide = lastFeeding ? METHOD_LABEL[lastFeeding.method] : null;
 
   const runningSleep = timers.find((tm) => tm.activity === 'sleep');
-  const lastSleep = entries
+  const lastSleep = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .sort((a, b) => (b.end as number) - (a.end as number))[0];
 
-  const todaySleepMin = entries
+  const todaySleepMin = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .filter((e) => new Date(e.end as number).toDateString() === new Date(now).toDateString())
     .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
 
-  const dia = lastDiaper(entries);
+  const dia = lastDiaper(childEntries);
   const diaperAgo = dia ? Math.round((now - dia.time) / 60000) : null;
 
   const napStatus = runningSleep
@@ -94,8 +98,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       : 'Tap to log';
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
-  const startSideLabel = nextStartSide(entries) === 'left' ? 'Left' : 'Right';
-  const washHint = nextWashKind(entries) === 'big' ? 'Big wash due today' : 'Small wash due';
+  const startSideLabel = nextStartSide(childEntries) === 'left' ? 'Left' : 'Right';
+  const washHint = nextWashKind(childEntries) === 'big' ? 'Big wash due today' : 'Small wash due';
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,

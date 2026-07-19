@@ -11,6 +11,7 @@ import { seriesFor } from '@/features/measurements/growthChart';
 import { MEAS_KINDS } from '@/lib/measurements';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { measurementsForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -18,8 +19,11 @@ export default function Growth() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
-  const measurements = useAppStore((s) => s.measurements);
+  const allMeasurements = useAppStore((s) => s.measurements);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  // `measurements` holds every child's, so scope to the selected one: charting
+  // a sibling's weights under this child is the same bug History had.
+  const measurements = measurementsForChild(allMeasurements, child?.id);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openMeasurement = useAppStore((s) => s.openMeasurement);
 

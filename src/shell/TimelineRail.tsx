@@ -5,6 +5,7 @@ import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay } from '@/features/activity/groupByDay';
+import { entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -16,11 +17,16 @@ import { useTheme } from '@/theme/useTheme';
 export function TimelineRail() {
   const t = useTheme();
   const entries = useAppStore((s) => s.entries);
+  // Primitive selector, so no new reference per render (zustand v5).
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
   const now = useAppStore((s) => s.now);
   const openEdit = useAppStore((s) => s.openEdit);
 
-  // Notes have their own dedicated tab — keep them out of the recent-activity rail.
-  const activityEntries = entries.filter((e) => e.type !== 'note' && e.type !== 'milestone');
+  // Scoped to the selected child, like History: `entries` holds every child's
+  // records. Notes have their own dedicated tab, so keep them out of the rail.
+  const activityEntries = entriesForChild(entries, selectedChildId).filter(
+    (e) => e.type !== 'note' && e.type !== 'milestone',
+  );
   const groups = groupByDay(activityEntries, now);
 
   return (

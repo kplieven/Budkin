@@ -83,10 +83,12 @@ export function aroundNow(ageMonths: number | null, reached: Map<string, Milesto
   );
 }
 
-/** Reached-milestone map scoped to one child. In local mode `entries` holds
- *  every child's history, so filter by childId first (server mode already loads
- *  only the selected child, so the filter is a harmless no-op there). Empty when
- *  childId is undefined. */
+/** Reached-milestone map scoped to one child. `entries` holds every child's
+ *  history in BOTH modes, so filter by childId first. Server mode now asks for
+ *  the selected child where it can (see `loadFromServer`'s
+ *  `preferredChildServerId`), but still falls back to the server's first child
+ *  when the selection was never pushed, so the filter is always load-bearing,
+ *  never a no-op. Empty when childId is undefined. */
 export function reachedForChild(entries: Entry[], childId: string | undefined): Map<string, MilestoneEntry> {
   if (!childId) return new Map();
   return reachedByKey(entries.filter((e) => e.childId === childId));
