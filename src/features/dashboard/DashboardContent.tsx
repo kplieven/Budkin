@@ -7,6 +7,7 @@ import { PulsingDot } from '@/components/PulsingDot';
 import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
@@ -51,6 +52,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const now = useAppStore((s) => s.now);
   const openSheet = useAppStore((s) => s.openSheet);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  // Primitive selector, so no new reference per render (zustand v5).
+  const hasChild = useAppStore((s) => s.children.length > 0);
+
+  if (!hasChild) return <NoChildCard />;
 
   // Phone tiles stay two-up; desktop tiles auto-fit to as many columns as fit.
   const tileStyle: ViewStyle =
