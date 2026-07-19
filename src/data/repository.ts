@@ -170,16 +170,21 @@ export async function loadTagsFromServer(conn: Connection): Promise<Tag[]> {
 export async function pushMeasurementToServer(
   conn: Connection,
   m: Measurement,
+  childServerId: number,
 ): Promise<number | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  return client.createMeasurement(m);
+  return client.createMeasurement(m, childServerId);
 }
 
-export async function updateMeasurementOnServer(conn: Connection, m: Measurement): Promise<void> {
+export async function updateMeasurementOnServer(
+  conn: Connection,
+  m: Measurement,
+  childServerId: number,
+): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.updateMeasurement(m);
+  await client.updateMeasurement(m, childServerId);
 }
 
 export async function deleteMeasurementFromServer(
@@ -227,17 +232,22 @@ export async function deleteChildFromServer(conn: Connection, id: number): Promi
 export async function pushEntryToServer(
   conn: Connection,
   entry: Entry,
+  childServerId: number,
 ): Promise<number | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  return client.createEntry(entry);
+  return client.createEntry(entry, childServerId);
 }
 
 /** Update an existing entry on the server (no-op in demo mode). */
-export async function updateEntryOnServer(conn: Connection, entry: Entry): Promise<void> {
+export async function updateEntryOnServer(
+  conn: Connection,
+  entry: Entry,
+  childServerId: number,
+): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.updateEntry(entry);
+  await client.updateEntry(entry, childServerId);
 }
 
 /** Delete an entry on the server (no-op in demo mode). */
