@@ -160,34 +160,43 @@ export default function SetupBaby() {
             <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
               BIRTHDAY
             </Txt>
+            {/* Each field is wrapped so the flex sizing sits on a View. A TextInput
+                left as a direct flex item keeps min-width: auto on web, which pins it
+                to its intrinsic width and overflows the row. */}
             <View style={{ flexDirection: 'row', gap: 10 }}>
-              <TextInput
-                value={day}
-                onChangeText={setDay}
-                placeholder="DD"
-                placeholderTextColor={t.faint}
-                keyboardType="number-pad"
-                maxLength={2}
-                style={[input, { flex: 1, minWidth: 0, textAlign: 'center' }]}
-              />
-              <TextInput
-                value={month}
-                onChangeText={setMonth}
-                placeholder="MM"
-                placeholderTextColor={t.faint}
-                keyboardType="number-pad"
-                maxLength={2}
-                style={[input, { flex: 1, minWidth: 0, textAlign: 'center' }]}
-              />
-              <TextInput
-                value={year}
-                onChangeText={setYear}
-                placeholder="YYYY"
-                placeholderTextColor={t.faint}
-                keyboardType="number-pad"
-                maxLength={4}
-                style={[input, { flex: 1.4, minWidth: 0, textAlign: 'center' }]}
-              />
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <TextInput
+                  value={day}
+                  onChangeText={setDay}
+                  placeholder="DD"
+                  placeholderTextColor={t.faint}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  style={[input, { width: '100%', textAlign: 'center' }]}
+                />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <TextInput
+                  value={month}
+                  onChangeText={setMonth}
+                  placeholder="MM"
+                  placeholderTextColor={t.faint}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  style={[input, { width: '100%', textAlign: 'center' }]}
+                />
+              </View>
+              <View style={{ flex: 1.4, minWidth: 0 }}>
+                <TextInput
+                  value={year}
+                  onChangeText={setYear}
+                  placeholder="YYYY"
+                  placeholderTextColor={t.faint}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  style={[input, { width: '100%', textAlign: 'center' }]}
+                />
+              </View>
             </View>
           </View>
 
