@@ -23,6 +23,7 @@ export default function Welcome() {
   const insets = useSafeAreaInsets();
   const enterLocal = useAppStore((s) => s.enterLocal);
   const tutorialSeen = useAppStore((s) => s.tutorialSeen);
+  const connected = useAppStore((s) => s.connected);
   const [entering, setEntering] = useState(false);
 
   // Guarded against a double tap: enterLocal does async storage work before the
@@ -34,9 +35,10 @@ export default function Welcome() {
     router.push('/setup/baby');
   };
 
-  // Already through setup: never show the wizard's first step again. Home is
-  // gated the same way (src/app/(tabs)/index.tsx), so the two stay in step.
-  if (tutorialSeen) return <Redirect href="/(tabs)" />;
+  // Already through setup: never show the wizard's first step again. Mirrors the
+  // entry gate in src/app/index.tsx, so a disconnected user who lands here by
+  // URL gets the connect form rather than a Home with no data behind it.
+  if (tutorialSeen) return <Redirect href={connected ? '/(tabs)' : '/onboarding'} />;
 
   return (
     <ScrollView
