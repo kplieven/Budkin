@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, mergeUnsynced, useAppStore, visibleTags } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, reconcileChildren, remapChildIds, useAppStore, visibleTags } from '@/store/useAppStore';
 import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -244,6 +244,16 @@ const NOW = 1_700_000_000_000;
 const M = 60000;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+// The shared `beforeEach` below seeds child 'c1' with NO serverId on purpose:
+// most of this file exercises the offline-first / not-yet-synced paths (the
+// `@/data/sync` mock comment above explains why), and some tests (e.g.
+// `deleteChild`'s "local-only child" case) assert specifically on that
+// unsynced default. A real server-mode child is always either loaded from the
+// server or pushed to it, so it always carries a serverId; tests whose
+// subject is ordinary synced-child push/update behaviour opt into this
+// constant rather than mutating the shared default.
+const SYNCED_C1: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
 beforeEach(() => {
   h.q = [];
   h.timers = [];
@@ -322,6 +332,18 @@ beforeEach(() => {
 
 const s = () => useAppStore.getState();
 
+/** Branch-level invariant: whenever a state-producing path (hydrate/refresh/
+ *  adopt) leaves `children` non-empty, `selectedChildId` must name one of
+ *  them. Regression coverage for a server-space id (`loadFromServer`'s
+ *  `selectedChildId`, see repository.ts) being used as a local-space
+ *  fallback instead of being resolved through `resolveSelectedChildId`. */
+function expectSelectionNamesARealChild(): void {
+  const { children, selectedChildId } = useAppStore.getState();
+  if (children.length > 0) {
+    expect(children.some((c) => c.id === selectedChildId)).toBe(true);
+  }
+}
+
 describe('openSheet defaults', () => {
   it('feeding: interval, alternates breast side, 18m default', () => {
     s().openSheet('feeding');
@@ -377,6 +399,7 @@ describe('bath tracking', () => {
     expect(s().te.wash).toBe('small');
   });
   it('save builds a point bath entry and pushes it (to the notes endpoint)', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('bath');
     s().setWash('big');
     s().save();
@@ -402,6 +425,7 @@ describe('temperature tracking', () => {
   });
 
   it('save builds a point temperature entry (value + trimmed notes) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('temperature');
     s().setTE({ temperature: 38.2, notes: '  slight fever  ' });
     s().save();
@@ -449,6 +473,7 @@ describe('general notes', () => {
   });
 
   it('save builds a point note entry (trimmed body) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('note');
     s().setTE({ noteText: '  remember the follow-up  ' });
     s().save();
@@ -515,6 +540,7 @@ describe('general notes', () => {
 
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('feeding');
     s().setLasted(20);
     s().save();
@@ -560,10 +586,33 @@ describe('save', () => {
     expect(s().queueCount).toBe(1);
     expect(h.pushed).toHaveLength(0);
   });
+
+  it('an entry whose child has no serverId is queued, not pushed', async () => {
+    useAppStore.setState({
+      children: [{ id: 'localA', first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#E8A87C' }],
+      entries: [],
+      selectedChildId: 'localA',
+      offline: false,
+    });
+
+    // Log an entry through the same action the other `save` tests above use.
+    s().openSheet('note');
+    s().setTE({ noteText: 'hi' });
+    s().save();
+    await flush();
+
+    // The child was never pushed (no serverId), so there is nothing sensible
+    // to push the entry to yet: it goes to the reconnect queue instead, the
+    // same way an offline save does.
+    expect(h.pushed).toHaveLength(0);
+    expect(h.q).toHaveLength(1);
+    expect(s().queueCount).toBe(1);
+  });
 });
 
 describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     await s().flushQueue();
     expect(h.pushed).toHaveLength(1);
@@ -595,6 +644,14 @@ describe('flushPendingOps', () => {
     amount: null,
     tags: [],
   };
+
+  // Ordinary server-mode replay behaviour: the measurement/entry payloads
+  // reference childId 'c1', so replaying their update ops needs 'c1' synced
+  // (the shared `beforeEach` default is deliberately unsynced elsewhere in
+  // this file). `child` above already carries the serverId this block needs.
+  beforeEach(() => {
+    useAppStore.setState({ children: [child] });
+  });
 
   it('replays an update/child op to updateChildOnServer and clears it on success', async () => {
     h.pendingOps = [{ op: 'update', entity: 'child', payload: child }];
@@ -661,7 +718,10 @@ describe('flushPendingOps', () => {
 
 describe('stopTimer', () => {
   it('converts a timer into an entry', async () => {
-    useAppStore.setState({ timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }] });
+    useAppStore.setState({
+      children: [SYNCED_C1], // ordinary server-mode push needs a synced child
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }],
+    });
     s().stopTimer('t1');
     expect(s().timers).toHaveLength(0);
     expect(s().entries[0].type).toBe('sleep');
@@ -779,6 +839,41 @@ describe('timer server sync', () => {
     expect(s().timers.some((t) => t.serverId === 5)).toBe(false);
     expect(s().timers.some((t) => t.serverId === 6)).toBe(true);
     expect(s().timers.some((t) => t.id === 't-local')).toBe(true);
+  });
+
+  it('refresh remaps a server-loaded timer\'s childId from the server id to the local child id', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      // `loadFromServer` has no local state to translate with, so the timer's
+      // child FK arrives as the SERVER id (mirrors repository.ts's
+      // `childByServerId` construction), not the local id 'c1'.
+      timers: [{ id: 'tsrv9', serverId: 9, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
+    });
+
+    await s().refresh();
+
+    const timer = s().timers.find((t) => t.serverId === 9);
+    expect(timer?.childId).toBe('c1'); // remapped from the server id to the local id
+  });
+
+  it('stopping a server-loaded timer writes an entry under the LOCAL child id, not the server id', async () => {
+    useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: [{ id: 'tsrv10', serverId: 10, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 10 * M }],
+    });
+    await s().refresh();
+    const timer = s().timers.find((t) => t.serverId === 10);
+
+    s().stopTimer(timer!.id);
+
+    // If the childId had been left as the server id, this entry would
+    // reference a child that does not exist locally: the exact orphaning
+    // this branch's remapping exists to prevent, arriving via a timer.
+    expect(s().entries[0].childId).toBe('c1');
   });
 
   it('replays queued timer ops on reconnect (flushPendingOps)', async () => {
@@ -913,7 +1008,10 @@ describe('queued entries survive killing the app', () => {
     color: null,
     tags: [],
   });
-  const mira = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+  // A child returned by `loadFromServer` was, by definition, loaded from the
+  // server, so it always carries a serverId (a serverId-less child here would
+  // be a fixture bug, not a real state the app can be in).
+  const mira = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
 
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
     h.q = [queuedEntry('e1')];
@@ -1005,6 +1103,33 @@ describe('offline-created children/measurements survive a cold hydrate (server m
     expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
   });
 
+  it('keeps selectedChildId pointing at a local-only child when the server reload omits it', async () => {
+    // Regression: hydrate used to take `data.selectedChildId` unconditionally,
+    // so a cold start right after selecting an offline-only child would
+    // silently deselect it back to whatever the server preferred.
+    const localChild: Child = { id: 'localY', first: 'Persisted', last: 'Local', birth: NOW, color: '#abc' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [localChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localY',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
+    expect(s().selectedChildId).toBe('localY');
+    expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
+  });
+
   it('recovers a persisted serverId==null measurement from loadEntities when the server reload omits it', async () => {
     const localMeasurement: Measurement = { id: 'localN', childId: 'c1', kind: 'height', value: 60, date: NOW };
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
@@ -1092,6 +1217,14 @@ describe('edit / delete entry', () => {
         { id: 'feeding-1', serverId: 1, childId: 'c1', type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
       ],
     });
+
+  // Ordinary server-mode edit/delete behaviour needs 'c1' synced: updating an
+  // entry (and re-creating one via undoDelete) is gated on the owning
+  // child's serverId, unlike deleting/offline-editing which key off the
+  // entry's own serverId and so don't care.
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
 
   it('openEdit anchors absolute time; save updates in place + pushes update', async () => {
     seedFeeding();
@@ -1211,6 +1344,13 @@ describe('edit / delete entry', () => {
 });
 
 describe('measurements', () => {
+  // Ordinary server-mode measurement create/update needs 'c1' synced; the
+  // offline tests below key off the measurement's own serverId instead, so
+  // they don't care either way.
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
+
   it('saveMeasurement creates and pushes', async () => {
     s().openMeasurement('weight');
     s().saveMeasurement(5.5, NOW);
@@ -1291,7 +1431,7 @@ describe('milestone sheet', () => {
 });
 
 describe('children', () => {
-  it('saveChild creates, auto-selects, and pushes; patches id + selectedChildId to the server id', async () => {
+  it('saveChild creates, auto-selects, and pushes; keeps the local id and stamps serverId instead of rewriting it', async () => {
     s().openAddChild();
     expect(s().childSheet).toBe(true);
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW - 30 * 86400000 });
@@ -1307,13 +1447,16 @@ describe('children', () => {
     expect(s().editingChildId).toBeNull();
     expect(s().showChildSwitcher).toBe(false);
 
+    const localId = created.id;
     await flush();
     expect(h.childPushed).toHaveLength(1);
-    // the local id is patched to the server id, and selection follows it
-    expect(s().children[1].id).toBe('777');
-    expect(s().selectedChildId).toBe('777');
-    // serverId is stamped too (like entries/measurements) so server-child ops
-    // (update / delete / sync) recognise it before the next refresh.
+    // the local id is NOT rewritten to the server id, and selection keeps
+    // following it: entries/measurements reference this id, and rewriting it
+    // would orphan them (the bug this whole design exists to prevent).
+    expect(s().children[1].id).toBe(localId);
+    expect(s().selectedChildId).toBe(localId);
+    // serverId is stamped instead (like entries/measurements) so server-child
+    // ops (update / delete / sync) recognise it before the next refresh.
     expect(s().children[1].serverId).toBe(777);
   });
 
@@ -1729,6 +1872,17 @@ describe('refresh / reconnect', () => {
   it('flushes queued writes after reconnecting', async () => {
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ offline: true, queueCount: 1 });
+    // refresh() replaces `children` wholesale with the server's list (merged
+    // with any still-unsynced locals), so the synced child the queued flush
+    // needs has to come back from loadFromServer, not from local setState.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [SYNCED_C1],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
     await s().refresh();
     await flush();
     expect(h.pushed).toHaveLength(1);
@@ -1828,6 +1982,218 @@ describe('refresh / reconnect', () => {
     });
     await s().refresh();
     expect(s().measurements.map((m) => m.id)).toEqual(['localM']);
+  });
+
+  it('an entry created before its child was pushed still resolves to that child after a refresh', async () => {
+    // Server mode, online. Create a child locally, log an entry against it,
+    // let the child push (stamping serverId without rewriting id), then
+    // refresh with a stubbed loadFromServer that echoes the pushed child back
+    // (matched by serverId) plus the entry that referenced its local id. The
+    // entry must still point at a child that exists. This is the regression
+    // test for the whole orphaning class the id-rewrite bug caused.
+    useAppStore.setState({ children: [], entries: [], selectedChildId: '' });
+
+    s().saveChild({ first: 'Ada', last: '', birth: NOW - 30 * 86400000 });
+    const localId = s().children[0].id;
+
+    // Let the push settle so serverId is stamped.
+    await flush();
+
+    const pushedChild = s().children.find((c) => c.id === localId);
+    expect(pushedChild?.id).toBe(localId); // id must NOT have been rewritten
+    expect(pushedChild?.serverId).toBe(777);
+
+    // An entry logged against the local id, the way commitWrite always writes it.
+    useAppStore.setState((st) => ({
+      entries: [...st.entries, { id: 'e1', childId: localId, type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
+    }));
+
+    // A real server load never knows the local id: it writes the SERVER child
+    // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
+    // `selectedChildId` below.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
+      timers: [],
+      selectedChildId: '777',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+
+    const entry = s().entries.find((e) => e.id === 'e1');
+    const owner = s().children.find((c) => c.id === entry?.childId);
+    expect(owner).toBeDefined(); // the entry is not orphaned
+    expect(owner?.id).toBe(localId);
+    expect(entry?.childId).toBe(localId); // the server id was remapped to the local id
+  });
+
+  // Coverage gap: entries (above) and timers each have an integration-level
+  // test proving `refresh` wires remapChildIds's REMAPPED collection into
+  // its `set()`, not `data.measurements`/`data.entries`/`data.timers`
+  // verbatim. Measurements previously only had a direct unit test of the
+  // `remapChildIds` helper (below): that exercises the helper in isolation
+  // and would not catch a copy-paste slip in `refresh`'s (or `hydrate`'s /
+  // `adopt`'s) own measurements block, e.g. wiring `data.measurements`
+  // straight into `set()` instead of `remappedMeasurements`.
+  it('a measurement created before its child was pushed still resolves to that child after a refresh', async () => {
+    useAppStore.setState({ children: [], measurements: [], selectedChildId: '' });
+
+    s().saveChild({ first: 'Ada', last: '', birth: NOW - 30 * 86400000 });
+    const localId = s().children[0].id;
+
+    // Let the push settle so serverId is stamped.
+    await flush();
+
+    const pushedChild = s().children.find((c) => c.id === localId);
+    expect(pushedChild?.id).toBe(localId); // id must NOT have been rewritten
+    expect(pushedChild?.serverId).toBe(777);
+
+    // A real server load never knows the local id: it writes the SERVER
+    // child id verbatim (see `listMeasurements` in src/api/client.ts), same
+    // as the entries/timers case above.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '777',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [{ id: 'm1', childId: '777', kind: 'weight', value: 6.1, date: NOW }],
+    });
+    await s().refresh();
+
+    const measurement = s().measurements.find((m) => m.id === 'm1');
+    const owner = s().children.find((c) => c.id === measurement?.childId);
+    expect(owner).toBeDefined(); // the measurement is not orphaned
+    expect(owner?.id).toBe(localId);
+    expect(measurement?.childId).toBe(localId); // the server id was remapped to the local id
+  });
+
+  it('remapChildIds rewrites a server-sourced childId to the matching local child id, leaving unresolved ones as-is', () => {
+    const children: Child[] = [
+      { id: 'local-abc', serverId: 777, first: 'Ada', last: '', birth: NOW, color: '#fff' },
+    ];
+    const entries = [
+      { id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry,
+      // No child in `children` has serverId 999: it must be left untouched, not dropped.
+      { id: 'e2', childId: '999', type: 'note', time: NOW, text: 'orphan-ish', tags: [] } as Entry,
+    ];
+    const measurements: Measurement[] = [{ id: 'm1', childId: '777', kind: 'weight', value: 4.2, date: NOW }];
+
+    expect(remapChildIds(entries, children).map((e) => e.childId)).toEqual(['local-abc', '999']);
+    expect(remapChildIds(measurements, children).map((m) => m.childId)).toEqual(['local-abc']);
+  });
+
+  it('selectedChildId still points at a real child after a push and a refresh', async () => {
+    useAppStore.setState({ children: [], selectedChildId: '' });
+
+    s().saveChild({ first: 'Ada', last: '', birth: NOW - 30 * 86400000 });
+    const localId = s().children[0].id;
+    expect(s().selectedChildId).toBe(localId);
+
+    await flush();
+
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '777',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+
+    const sel = s().selectedChildId;
+    expect(s().children.some((c) => c.id === sel)).toBe(true);
+    expect(sel).toBe(localId); // selection follows the stable id, not the server id
+  });
+});
+
+describe('selectedChildId fallback resolves in local id space (regression: a server-space id used as a local-space fallback)', () => {
+  it('refresh: a sibling deleted server-side re-points selectedChildId at a REMAINING local child, not a bare server id', async () => {
+    // Repro from the branch review: two children created in Budkin
+    // (childAAA/serverId 1, childBBB/serverId 2). The other parent deletes
+    // childBBB in Baby Buddy's web UI, and Budkin refreshes with childBBB
+    // still selected. `loadFromServer` (repository.ts) sets its own
+    // `selectedChildId` to `children[0]?.id`, which is a SERVER id string:
+    // that must be resolved back into local id space (via
+    // `resolveSelectedChildId`), not compared against local ids directly.
+    const childAAA: Child = { id: 'childAAA', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' };
+    const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
+    useAppStore.setState({ children: [childAAA, childBBB], selectedChildId: 'childBBB' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }], // childBBB gone
+      entries: [],
+      timers: [],
+      selectedChildId: '1', // repository.ts: children[0]?.id, a SERVER id, not a local one
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(s().children.map((c) => c.id)).toEqual(['childAAA']);
+    expect(s().selectedChildId).toBe('childAAA'); // resolved into local id space, not left as '1'
+    expectSelectionNamesARealChild();
+  });
+
+  it('hydrate: a sibling deleted server-side re-points the persisted selection at a REMAINING local child', async () => {
+    const childAAA: Child = { id: 'childAAA', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' };
+    const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [childAAA, childBBB],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'childBBB',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(s().children.map((c) => c.id)).toEqual(['childAAA']);
+    expect(s().selectedChildId).toBe('childAAA');
+    expectSelectionNamesARealChild();
+  });
+
+  it('adopt: a stale selection not carried into the reconciled list falls back to a REAL local child, not a bare server id', async () => {
+    const localChild: Child = { id: 'localM', first: 'M', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [localChild],
+      // A selection naming no local child at all (e.g. left over from a
+      // deleted child) forces adopt's post-upload reconciliation into its
+      // fallback branch.
+      selectedChildId: 'stale-not-a-real-child',
+    });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => ({ ...c, serverId: 501 })),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(s().children.map((c) => c.id)).toEqual(['localM']); // local id preserved
+    expect(s().selectedChildId).toBe('localM');
+    expectSelectionNamesARealChild();
   });
 });
 
@@ -2421,10 +2787,11 @@ describe('insights slice', () => {
     expect(useAppStore.getState().insightsError).toBe(false);
   });
 
-  it('loadInsights in non-demo mode fetches deep history from the server', async () => {
+  it('loadInsights in non-demo mode fetches deep history from the server, keyed by the child\'s SERVER id', async () => {
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
+      children: [SYNCED_C1], // serverId 501: loadInsights must request the SERVER id
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
@@ -2433,7 +2800,7 @@ describe('insights slice', () => {
     await useAppStore.getState().loadInsights();
     expect(loadInsightsHistory).toHaveBeenCalledWith(
       { mode: 'server', serverUrl: 'x', token: 'y' },
-      'c1',
+      '501', // the child's SERVER id, not its local id 'c1'
       expect.any(Number),
     );
     const s = useAppStore.getState();
@@ -2441,11 +2808,55 @@ describe('insights slice', () => {
     expect(s.insightsLoaded).toBe(true);
   });
 
+  // Regression: a Budkin-local id (e.g. 'child' + Date.now(), see saveChild)
+  // must never reach the server. `/api/sleep/?child=...` and its siblings
+  // (repository.ts's `loadInsightsHistory`) need the numeric server id.
+  it('loadInsights requests the SERVER id, not Budkin\'s local id, for a locally-created (already-synced) child', async () => {
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'child1752999999999',
+      children: [{ id: 'child1752999999999', serverId: 9, first: 'Ada', last: '', birth: NOW, color: '#fff' }],
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    vi.mocked(loadInsightsHistory).mockResolvedValueOnce([]);
+    await useAppStore.getState().loadInsights();
+    expect(loadInsightsHistory).toHaveBeenCalledWith(
+      { mode: 'server', serverUrl: 'x', token: 'y' },
+      '9',
+      expect.any(Number),
+    );
+  });
+
+  // Regression companion: a child that has never been pushed has no server
+  // id at all. Before the fix this still hit the API with the local id,
+  // which `pageAll`'s per-page `.catch(() => [])` silently swallowed,
+  // leaving Insights permanently empty with no error surfaced. Skipping the
+  // fetch is the correct outcome here, not an error.
+  it('loadInsights skips the fetch (no error) for a child that has never been pushed to the server', async () => {
+    vi.mocked(loadInsightsHistory).mockClear();
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }], // no serverId
+      insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
+    });
+    await useAppStore.getState().loadInsights();
+    expect(loadInsightsHistory).not.toHaveBeenCalled();
+    const s = useAppStore.getState();
+    expect(s.insightsEntries).toEqual([]);
+    expect(s.insightsLoaded).toBe(true);
+    expect(s.insightsError).toBe(false);
+  });
+
   it('discards an in-flight fetch when the child switches mid-load and reloads for the new child', async () => {
     vi.mocked(loadInsightsHistory).mockClear();
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
+      children: [
+        { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: 'c2', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+      ],
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     // First call: a manually-controlled deferred so we can switch children
@@ -2463,9 +2874,9 @@ describe('insights slice', () => {
     const st = useAppStore.getState();
     // c1's stale entries must NOT be stored under c2...
     expect(st.insightsEntries.map((e) => e.id)).not.toContain('a1');
-    // ...and a fresh load for c2 must have been kicked off.
+    // ...and a fresh load for c2 must have been kicked off, keyed by c2's SERVER id.
     expect(loadInsightsHistory).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(loadInsightsHistory).mock.calls[1][1]).toBe('c2');
+    expect(vi.mocked(loadInsightsHistory).mock.calls[1][1]).toBe('502');
     expect(st.insightsEntries).toEqual([]); // c2's (empty) result
     expect(st.insightsLoaded).toBe(true);
     expect(st.insightsLoading).toBe(false);
@@ -2475,6 +2886,7 @@ describe('insights slice', () => {
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
+      children: [SYNCED_C1],
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     vi.mocked(loadInsightsHistory).mockRejectedValueOnce(new Error('network'));
@@ -2851,6 +3263,30 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // Full success clears the persisted adopt target (Finding 2) — a later
     // adopt against a different server has nothing stale to reset.
     expect(clearAdoptTarget).toHaveBeenCalled();
+  });
+
+  it('a local child\'s id survives a successful adopt, and selectedChildId still points at a real child', async () => {
+    const localChild: Child = { id: 'localF', first: 'Fay', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild], selectedChildId: 'localF' });
+    // The post-success reload: the server now knows this child (serverId 501,
+    // matching the describe block's default `uploadUnsynced` stamp), returned
+    // under its own server-derived id/fields.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW, color: '#eee' }],
+      entries: [], timers: [], selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    // Reconciliation keeps the LOCAL id (entries/measurements reference it);
+    // the server's numeric id is not substituted in.
+    expect(s().children.map((c) => c.id)).toEqual(['localF']);
+    expect(s().children[0].serverId).toBe(501);
+    // selectedChildId still points at a child that exists in the resulting list.
+    expect(s().selectedChildId).toBe('localF');
+    expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
   });
 
   it('on success, upserts the adopted server into savedServers (so it appears in the reconnect list)', async () => {
@@ -3272,5 +3708,76 @@ describe('walkthrough persistence', () => {
     useAppStore.setState({ tutorialSeen: false });
     await s().hydrate();
     expect(s().tutorialSeen).toBe(false);
+  });
+});
+
+describe('reconcileChildren', () => {
+  const kid = (over: Partial<Child> = {}): Child => ({
+    id: 'x',
+    first: 'Ada',
+    last: '',
+    birth: Date.parse('2026-01-01'),
+    color: '#E8A87C',
+    ...over,
+  });
+
+  it('keeps the LOCAL id when a server child matches by serverId', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Ada' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada' })];
+    const out = reconcileChildren(server, local);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('child1752');
+    expect(out[0].serverId).toBe(501);
+  });
+
+  it('takes the server copy of every other field on a match', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg' })];
+    const out = reconcileChildren(server, local);
+    expect(out[0].first).toBe('Adaline');
+    expect(out[0].picture).toBe('https://s/a.jpg');
+  });
+
+  it('adds a server child the app has never seen, keeping its server-derived id', () => {
+    const out = reconcileChildren([kid({ id: '502', serverId: 502 })], []);
+    expect(out.map((c) => c.id)).toEqual(['502']);
+  });
+
+  it('keeps a local child that has never been pushed', () => {
+    const local = [kid({ id: 'child999' })]; // no serverId
+    const out = reconcileChildren([kid({ id: '501', serverId: 501 })], local);
+    expect(out.map((c) => c.id)).toEqual(['child999', '501']);
+  });
+
+  it('never duplicates a child that is both local-with-serverId and on the server', () => {
+    const server = [kid({ id: '501', serverId: 501 })];
+    const local = [kid({ id: 'child1752', serverId: 501 })];
+    expect(reconcileChildren(server, local)).toHaveLength(1);
+  });
+
+  it('prepends local-only children and preserves the server order', () => {
+    const server = [kid({ id: '501', serverId: 501 }), kid({ id: '502', serverId: 502 })];
+    const local = [kid({ id: 'localA' }), kid({ id: 'localB' })];
+    expect(reconcileChildren(server, local).map((c) => c.id)).toEqual(['localA', 'localB', '501', '502']);
+  });
+
+  it('drops a local child whose serverId is no longer on the server', () => {
+    // Deleted from Baby Buddy elsewhere. The server is authoritative for
+    // children it knows about, which is today's behaviour and must not change.
+    const out = reconcileChildren([], [kid({ id: 'child1752', serverId: 501 })]);
+    expect(out).toEqual([]);
+  });
+
+  it('returns an empty list when both sides are empty', () => {
+    expect(reconcileChildren([], [])).toEqual([]);
+  });
+
+  it('drops a never-pushed local child whose id collides with a server child id', () => {
+    const server = [kid({ id: 'c1', serverId: 501 })];
+    const local = [kid({ id: 'c1' })]; // no serverId, id happens to collide
+    const out = reconcileChildren(server, local);
+    expect(out.map((c) => c.id)).toEqual(['c1']);
+    const ids = out.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });
