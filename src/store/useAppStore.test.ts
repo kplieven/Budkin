@@ -244,6 +244,16 @@ const NOW = 1_700_000_000_000;
 const M = 60000;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+// The shared `beforeEach` below seeds child 'c1' with NO serverId on purpose:
+// most of this file exercises the offline-first / not-yet-synced paths (the
+// `@/data/sync` mock comment above explains why), and some tests (e.g.
+// `deleteChild`'s "local-only child" case) assert specifically on that
+// unsynced default. A real server-mode child is always either loaded from the
+// server or pushed to it, so it always carries a serverId; tests whose
+// subject is ordinary synced-child push/update behaviour opt into this
+// constant rather than mutating the shared default.
+const SYNCED_C1: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
 beforeEach(() => {
   h.q = [];
   h.timers = [];
@@ -377,6 +387,7 @@ describe('bath tracking', () => {
     expect(s().te.wash).toBe('small');
   });
   it('save builds a point bath entry and pushes it (to the notes endpoint)', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('bath');
     s().setWash('big');
     s().save();
@@ -402,6 +413,7 @@ describe('temperature tracking', () => {
   });
 
   it('save builds a point temperature entry (value + trimmed notes) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('temperature');
     s().setTE({ temperature: 38.2, notes: '  slight fever  ' });
     s().save();
@@ -449,6 +461,7 @@ describe('general notes', () => {
   });
 
   it('save builds a point note entry (trimmed body) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('note');
     s().setTE({ noteText: '  remember the follow-up  ' });
     s().save();
@@ -515,6 +528,7 @@ describe('general notes', () => {
 
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('feeding');
     s().setLasted(20);
     s().save();
@@ -564,6 +578,7 @@ describe('save', () => {
 
 describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     await s().flushQueue();
     expect(h.pushed).toHaveLength(1);
@@ -595,6 +610,14 @@ describe('flushPendingOps', () => {
     amount: null,
     tags: [],
   };
+
+  // Ordinary server-mode replay behaviour: the measurement/entry payloads
+  // reference childId 'c1', so replaying their update ops needs 'c1' synced
+  // (the shared `beforeEach` default is deliberately unsynced elsewhere in
+  // this file). `child` above already carries the serverId this block needs.
+  beforeEach(() => {
+    useAppStore.setState({ children: [child] });
+  });
 
   it('replays an update/child op to updateChildOnServer and clears it on success', async () => {
     h.pendingOps = [{ op: 'update', entity: 'child', payload: child }];
@@ -661,7 +684,10 @@ describe('flushPendingOps', () => {
 
 describe('stopTimer', () => {
   it('converts a timer into an entry', async () => {
-    useAppStore.setState({ timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }] });
+    useAppStore.setState({
+      children: [SYNCED_C1], // ordinary server-mode push needs a synced child
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }],
+    });
     s().stopTimer('t1');
     expect(s().timers).toHaveLength(0);
     expect(s().entries[0].type).toBe('sleep');
@@ -913,7 +939,10 @@ describe('queued entries survive killing the app', () => {
     color: null,
     tags: [],
   });
-  const mira = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+  // A child returned by `loadFromServer` was, by definition, loaded from the
+  // server, so it always carries a serverId (a serverId-less child here would
+  // be a fixture bug, not a real state the app can be in).
+  const mira = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
 
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
     h.q = [queuedEntry('e1')];
@@ -1093,6 +1122,14 @@ describe('edit / delete entry', () => {
       ],
     });
 
+  // Ordinary server-mode edit/delete behaviour needs 'c1' synced: updating an
+  // entry (and re-creating one via undoDelete) is gated on the owning
+  // child's serverId, unlike deleting/offline-editing which key off the
+  // entry's own serverId and so don't care.
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
+
   it('openEdit anchors absolute time; save updates in place + pushes update', async () => {
     seedFeeding();
     s().openEdit('feeding-1');
@@ -1211,6 +1248,13 @@ describe('edit / delete entry', () => {
 });
 
 describe('measurements', () => {
+  // Ordinary server-mode measurement create/update needs 'c1' synced; the
+  // offline tests below key off the measurement's own serverId instead, so
+  // they don't care either way.
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
+
   it('saveMeasurement creates and pushes', async () => {
     s().openMeasurement('weight');
     s().saveMeasurement(5.5, NOW);
@@ -1729,6 +1773,17 @@ describe('refresh / reconnect', () => {
   it('flushes queued writes after reconnecting', async () => {
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ offline: true, queueCount: 1 });
+    // refresh() replaces `children` wholesale with the server's list (merged
+    // with any still-unsynced locals), so the synced child the queued flush
+    // needs has to come back from loadFromServer, not from local setState.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [SYNCED_C1],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
     await s().refresh();
     await flush();
     expect(h.pushed).toHaveLength(1);
