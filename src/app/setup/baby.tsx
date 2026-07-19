@@ -168,7 +168,7 @@ export default function SetupBaby() {
                 placeholderTextColor={t.faint}
                 keyboardType="number-pad"
                 maxLength={2}
-                style={[input, { flex: 1, textAlign: 'center' }]}
+                style={[input, { flex: 1, minWidth: 0, textAlign: 'center' }]}
               />
               <TextInput
                 value={month}
@@ -177,7 +177,7 @@ export default function SetupBaby() {
                 placeholderTextColor={t.faint}
                 keyboardType="number-pad"
                 maxLength={2}
-                style={[input, { flex: 1, textAlign: 'center' }]}
+                style={[input, { flex: 1, minWidth: 0, textAlign: 'center' }]}
               />
               <TextInput
                 value={year}
@@ -186,7 +186,7 @@ export default function SetupBaby() {
                 placeholderTextColor={t.faint}
                 keyboardType="number-pad"
                 maxLength={4}
-                style={[input, { flex: 1.4, textAlign: 'center' }]}
+                style={[input, { flex: 1.4, minWidth: 0, textAlign: 'center' }]}
               />
             </View>
           </View>
