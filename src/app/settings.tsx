@@ -239,6 +239,7 @@ export default function Settings() {
           <Pressable
             onPress={() => {
               disconnect();
+              if (router.canDismiss()) router.dismissAll();
               router.replace('/onboarding');
             }}
             accessibilityRole="button"

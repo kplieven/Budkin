@@ -83,7 +83,8 @@ function RootLayoutNav() {
   // (tabs) group. Hidden on onboarding and welcome (full-screen, pre-app routes).
   // Phone is untouched (useDesktopShell is false at phone widths), as is the
   // Stack itself, so the cold-start deep-link nav structure is unchanged.
-  const showShell = desktop && segments[0] !== 'onboarding' && segments[0] !== 'welcome';
+  const showShell =
+    desktop && segments[0] !== 'onboarding' && segments[0] !== 'welcome' && segments[0] !== 'setup';
   const stack = (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: t.bg } }}>
       <Stack.Screen name="index" />

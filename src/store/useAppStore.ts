@@ -104,7 +104,7 @@ interface AppState {
   /** Budkin-local metric/imperial display lens (default 'metric'). Stored
    *  values stay canonical metric; this only relabels + converts on display. */
   unitSystem: UnitSystem;
-  /** true once the first-run walkthrough carousel has been dismissed. */
+  /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
@@ -182,7 +182,7 @@ export type AdoptResult =
 interface AppActions {
   tick: (now: number) => void;
   toggleTheme: () => void;
-  /** Mark the first-run walkthrough as seen (persisted). */
+  /** Mark first-run setup as complete (persisted). */
   completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
