@@ -643,16 +643,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
       // includes them, naturally dropping the local copy.
-      // Children/measurements created offline (serverId == null) have no flush
-      // yet (Phase 3), so read the durable copy and merge it back in the same
-      // way — see `mergeUnsynced`. Entries are deliberately excluded from this
-      // merge (see `mergeUnsynced`'s doc comment).
+      // Children are reconciled by `serverId`, not merged: a child created
+      // offline (serverId == null) is kept under its local id, and a child
+      // already known to the server keeps its local id too, since entries and
+      // measurements reference it. See `reconcileChildren`. Measurements
+      // created offline have no flush yet (Phase 3), so read the durable copy
+      // and merge it back in. See `mergeUnsynced`. Entries are deliberately
+      // excluded from this merge (see `mergeUnsynced`'s doc comment).
       const e = await loadEntities();
       set({
         connected: true,
         hydrating: false,
         ...data,
-        children: mergeUnsynced(data.children, e?.children ?? []),
+        children: reconcileChildren(data.children, e?.children ?? []),
         measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(data.entries, q),
         timers: reconcileTimers(savedTimers, data.timers),
@@ -701,17 +704,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const localTimers = await loadTimers();
     try {
       const data = await loadFromServer(conn);
-      // Children/measurements created offline (serverId == null) have no flush
-      // yet (Phase 3): merge the in-memory unsynced ones back in so a wholesale
-      // reload doesn't drop them from view. Entries are deliberately excluded
-      // from this merge (see `mergeUnsynced`'s doc comment) — `...data` below
-      // is entries' only source, unchanged.
-      const mergedChildren = mergeUnsynced(data.children, s.children);
+      // Children are reconciled by `serverId`, not merged: a child already
+      // known to the server keeps its local id (entries/measurements
+      // reference it), and a child created offline (serverId == null) is kept
+      // under its local id too. See `reconcileChildren`. Measurements created
+      // offline have no flush yet (Phase 3): merge the in-memory unsynced ones
+      // back in so a wholesale reload doesn't drop them from view. Entries are
+      // deliberately excluded from this merge (see `mergeUnsynced`'s doc
+      // comment); `...data` below is entries' only source, unchanged.
+      const reconciledChildren = reconcileChildren(data.children, s.children);
       // Keep the user's current child if it's still visible — checked against
-      // the MERGED list (not just the server's), so an offline-created child
-      // kept visible by mergeUnsynced above doesn't get silently deselected;
+      // the RECONCILED list (not just the server's), so a local child kept
+      // visible by reconcileChildren above doesn't get silently deselected;
       // otherwise fall back to the server's first child (matches cold `hydrate`).
-      const selectedChildId = mergedChildren.some((c) => c.id === s.selectedChildId)
+      const selectedChildId = reconciledChildren.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
         : data.selectedChildId;
       set({
@@ -719,7 +725,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         offline: false,
         networkOnline: true,
         ...data,
-        children: mergedChildren,
+        children: reconciledChildren,
         measurements: mergeUnsynced(data.measurements, s.measurements),
         selectedChildId,
         timers: reconcileTimers(localTimers, data.timers),
@@ -865,8 +871,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void saveConnection(conn);
     void persistServers(savedServers);
     const data = await loadFromServer(conn);
+    // Reconcile rather than taking the server list wholesale: the children
+    // just uploaded above kept their local ids (only `serverId` was stamped),
+    // and entries/measurements still reference those local ids. Taking
+    // `data.children` as-is would swap in server ids and orphan them. See
+    // `reconcileChildren`.
+    const currentSelectedChildId = get().selectedChildId;
+    const reconciledChildren = reconcileChildren(data.children, get().children);
+    const selectedChildId = reconciledChildren.some((c) => c.id === currentSelectedChildId)
+      ? currentSelectedChildId
+      : data.selectedChildId;
     set({
       ...data,
+      children: reconciledChildren,
+      selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
       profileLoaded: false,
@@ -1171,22 +1189,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
-          // Patch the local id -> the real server id so the new child stays
-          // selected across the next refresh()/hydrate(), which replaces
-          // `children` wholesale with server data keyed by real ids. Adopt the
-          // server picture URL in place of the local file URI. Stamp `serverId`
-          // too (like commitWrite/saveMeasurement do for entries/measurements):
-          // server-child ops — updateChild, deleteChild, flushUnsynced's
-          // synced-vs-unsynced check — all key off `serverId`, so leaving it
-          // unset until the next refresh loses edits, skips deletes (the child
-          // resurrects), and re-uploads a duplicate on reconnect.
+          // Stamp the server id and adopt the server's picture URL. The local
+          // `id` is deliberately NOT rewritten: entries and measurements
+          // reference it, and changing it would orphan them. Reconciliation
+          // matches this child by `serverId` from here on.
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === localId
-                ? { ...c, id: String(res.id), serverId: res.id, picture: res.picture ?? c.picture }
-                : c,
+              c.id === localId ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
             ),
-            selectedChildId: st.selectedChildId === localId ? String(res.id) : st.selectedChildId,
           }));
         })
         .catch(() => {});
