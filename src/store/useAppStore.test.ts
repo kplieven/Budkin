@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, mergeUnsynced, reconcileChildren, useAppStore, visibleTags } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, reconcileChildren, remapChildIds, useAppStore, visibleTags } from '@/store/useAppStore';
 import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -1961,9 +1961,12 @@ describe('refresh / reconnect', () => {
       entries: [...st.entries, { id: 'e1', childId: localId, type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
     }));
 
+    // A real server load never knows the local id: it writes the SERVER child
+    // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
+    // `selectedChildId` below.
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
-      entries: [{ id: 'e1', childId: localId, type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
+      entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [],
       selectedChildId: '777',
       lastFeed: { feedType: 'breast', method: 'left' },
@@ -1975,6 +1978,22 @@ describe('refresh / reconnect', () => {
     const owner = s().children.find((c) => c.id === entry?.childId);
     expect(owner).toBeDefined(); // the entry is not orphaned
     expect(owner?.id).toBe(localId);
+    expect(entry?.childId).toBe(localId); // the server id was remapped to the local id
+  });
+
+  it('remapChildIds rewrites a server-sourced childId to the matching local child id, leaving unresolved ones as-is', () => {
+    const children: Child[] = [
+      { id: 'local-abc', serverId: 777, first: 'Ada', last: '', birth: NOW, color: '#fff' },
+    ];
+    const entries = [
+      { id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry,
+      // No child in `children` has serverId 999 — must be left untouched, not dropped.
+      { id: 'e2', childId: '999', type: 'note', time: NOW, text: 'orphan-ish', tags: [] } as Entry,
+    ];
+    const measurements: Measurement[] = [{ id: 'm1', childId: '777', kind: 'weight', value: 4.2, date: NOW }];
+
+    expect(remapChildIds(entries, children).map((e) => e.childId)).toEqual(['local-abc', '999']);
+    expect(remapChildIds(measurements, children).map((m) => m.childId)).toEqual(['local-abc']);
   });
 
   it('selectedChildId still points at a real child after a push and a refresh', async () => {
