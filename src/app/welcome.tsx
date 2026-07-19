@@ -1,5 +1,5 @@
-import { Redirect, router } from 'expo-router';
-import { useState } from 'react';
+import { Redirect, router, useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -34,6 +34,22 @@ export default function Welcome() {
     await enterLocal();
     router.push('/setup/baby');
   };
+
+  // The latch is released on focus, not in a finally after the push. push leaves
+  // Welcome mounted underneath /setup/baby, so coming back (the chevron there,
+  // browser back, or the back gesture) re-focuses this same instance with
+  // `entering` still true and the button stuck disabled forever. Releasing it in
+  // a finally instead would reopen the double-tap window while the push
+  // animates, which is the exact gap the guard exists to close. Focus only
+  // comes back once the user is really on this screen again.
+  //
+  // Keep the dep array empty: adding `entering` would re-run this the moment the
+  // latch is set, while the screen is still focused, undoing the guard.
+  useFocusEffect(
+    useCallback(() => {
+      setEntering(false);
+    }, []),
+  );
 
   // Already through setup: never show the wizard's first step again. Mirrors the
   // entry gate in src/app/index.tsx, so a disconnected user who lands here by
