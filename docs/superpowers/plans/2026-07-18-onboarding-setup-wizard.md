@@ -220,18 +220,19 @@ git commit -m "feat(setup): post-connect routing decision"
 
 ---
 
-### Task 3: The finish-setup hook and the `/tour` route
+### Task 3: Shared setup furniture and the `/tour` route
 
-Every exit from the wizard does the same two things: mark the tutorial seen so Home's gate stops redirecting back into setup, and replace into the app. That goes in one hook used by three screens. The old carousel simultaneously becomes a Settings-only tour, which frees `/welcome` for Task 4 to rewrite.
+Three things the wizard's screens all need. Every exit does the same two things (mark the tutorial seen so Home's gate stops redirecting back into setup, then replace into the app), so that goes in one hook. Both wizard screens use the same pair of buttons, so those become one component rather than a style block copied twice. And the old carousel becomes a Settings-only tour, which frees `/welcome` for Task 4 to rewrite.
 
 **Files:**
 - Create: `src/features/setup/useFinishSetup.ts`
+- Create: `src/features/setup/SetupButton.tsx`
 - Create: `src/app/tour.tsx`
 - Modify: `src/app/settings.tsx:259` and `:264`
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `useFinishSetup(): () => void` from `@/features/setup/useFinishSetup`. Tasks 4 and 5 call it.
+- Produces: `useFinishSetup(): () => void` from `@/features/setup/useFinishSetup`, and `SetupButton` from `@/features/setup/SetupButton` with props `{ label: string; onPress: () => void; variant?: 'primary' | 'secondary'; disabled?: boolean; style?: ViewStyle }`. Tasks 4 and 5 use both.
 
 - [ ] **Step 1: Write the finish hook**
 
@@ -257,7 +258,80 @@ export function useFinishSetup(): () => void {
 }
 ```
 
-- [ ] **Step 2: Create the tour route**
+- [ ] **Step 2: Create the shared setup button**
+
+Both wizard screens need the same filled primary action and the same outlined alternative beneath it. One component keeps the two steps visually locked together.
+
+Create `src/features/setup/SetupButton.tsx`:
+
+```tsx
+import { Pressable, type ViewStyle } from 'react-native';
+
+import { isHovered } from '@/components/hover';
+import { Txt } from '@/components/Txt';
+import { hexA } from '@/lib/color';
+import { shadowStyle } from '@/theme/shadow';
+import { useTheme } from '@/theme/useTheme';
+
+/**
+ * The setup wizard's button. Primary is the filled, shadowed call to action,
+ * secondary the outlined alternative that sits beneath it. Both wizard screens
+ * use this so the steps stay visually identical, and a disabled primary keeps
+ * its shape while dropping the shadow and the pointer cursor.
+ */
+export function SetupButton({
+  label,
+  onPress,
+  variant = 'primary',
+  disabled = false,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+  style?: ViewStyle;
+}) {
+  const t = useTheme();
+  const primary = variant === 'primary';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      style={(s) => [
+        {
+          height: 56,
+          borderRadius: 17,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: primary ? t.primary : t.surface,
+          borderWidth: primary ? 0 : 1.5,
+          borderColor: t.line2,
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? 'auto' : 'pointer',
+        },
+        primary && !disabled && shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
+        !disabled && isHovered(s) && (primary ? { opacity: 0.9 } : { borderColor: t.line }),
+        style,
+      ]}
+    >
+      <Txt
+        unselectable
+        weight={primary ? 800 : 700}
+        size={primary ? 17 : 16}
+        color={primary ? t.onPrimary : t.text}
+      >
+        {label}
+      </Txt>
+    </Pressable>
+  );
+}
+```
+
+- [ ] **Step 3: Create the tour route**
 
 Create `src/app/tour.tsx`:
 
@@ -277,7 +351,7 @@ export default function Tour() {
 }
 ```
 
-- [ ] **Step 3: Point the Settings Help row at the tour**
+- [ ] **Step 4: Point the Settings Help row at the tour**
 
 In `src/app/settings.tsx`, replace the row's `onPress` (currently line 259):
 
@@ -303,16 +377,17 @@ with:
             How Budkin works
 ```
 
-- [ ] **Step 4: Typecheck**
+- [ ] **Step 5: Typecheck**
 
 Run: `npx tsc --noEmit`
-Expected: no errors. `/welcome` still exists at this point (Task 4 rewrites it), so nothing dangles.
 
-- [ ] **Step 5: Commit**
+Expected: **errors on the `/tour` href only**, of the form "Type '"/tour"' is not assignable". This is expected and is not yours to fix. expo-router's typed routes are enumerated in `.expo/types/router.d.ts`, a gitignored build artifact that only regenerates when the dev server runs, and you must not start the dev server. Report the failure in your report file, naming the offending line, and confirm there are no *other* type errors. The controller regenerates the route types and re-runs the check before review.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/features/setup/useFinishSetup.ts src/app/tour.tsx src/app/settings.tsx
-git commit -m "feat(setup): finish-setup hook, move the carousel to a /tour route"
+git add src/features/setup/useFinishSetup.ts src/features/setup/SetupButton.tsx src/app/tour.tsx src/app/settings.tsx
+git commit -m "feat(setup): finish hook, shared setup button, /tour route"
 ```
 
 ---
@@ -334,12 +409,12 @@ Replace the entire contents of `src/app/welcome.tsx` with:
 
 ```tsx
 import { router } from 'expo-router';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import { SetupButton } from '@/features/setup/SetupButton';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
@@ -361,27 +436,6 @@ export default function Welcome() {
     await enterLocal();
     router.push('/setup/baby');
   };
-
-  const primaryButton = {
-    height: 56,
-    borderRadius: 17,
-    backgroundColor: t.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  } as const;
-
-  const secondaryButton = {
-    height: 56,
-    borderRadius: 17,
-    marginTop: 12,
-    backgroundColor: t.surface,
-    borderWidth: 1.5,
-    borderColor: t.line2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  } as const;
 
   return (
     <ScrollView
@@ -427,29 +481,13 @@ export default function Welcome() {
         Without one, Budkin keeps everything on this device and you can connect later.
       </Txt>
 
-      <Pressable
-        onPress={() => router.push('/onboarding')}
-        accessibilityRole="button"
-        style={(s) => [
-          primaryButton,
-          shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
-          isHovered(s) && { opacity: 0.9 },
-        ]}
-      >
-        <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-          Yes, I have a server
-        </Txt>
-      </Pressable>
-
-      <Pressable
+      <SetupButton label="Yes, I have a server" onPress={() => router.push('/onboarding')} />
+      <SetupButton
+        label="Just use this device"
+        variant="secondary"
         onPress={goLocal}
-        accessibilityRole="button"
-        style={(s) => [secondaryButton, isHovered(s) && { borderColor: t.line }]}
-      >
-        <Txt unselectable weight={700} size={16}>
-          Just use this device
-        </Txt>
-      </Pressable>
+        style={{ marginTop: 12 }}
+      />
     </ScrollView>
   );
 }
@@ -458,7 +496,8 @@ export default function Welcome() {
 - [ ] **Step 2: Typecheck**
 
 Run: `npx tsc --noEmit`
-Expected: no errors. `/setup/baby` does not exist yet, so if the typed-routes generation complains about that href, note it and continue: Task 5 creates the route and Task 6 typechecks again. If `npx tsc --noEmit` fails **only** on the `/setup/baby` href, that is expected here.
+
+Expected: **errors on the `/setup/baby` href only**, of the form "Type '"/setup/baby"' is not assignable". Expected and not yours to fix, for the same reason as Task 3: expo-router's typed routes live in `.expo/types/router.d.ts`, a gitignored artifact that only regenerates when the dev server runs, and you must not start the dev server. Report the failure naming the offending line, and confirm there are no *other* type errors. The controller regenerates and re-checks before review.
 
 - [ ] **Step 3: Commit**
 
@@ -495,11 +534,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import { SetupButton } from '@/features/setup/SetupButton';
 import { useFinishSetup } from '@/features/setup/useFinishSetup';
 import { clampBirth } from '@/lib/birthDate';
-import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
-import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -557,27 +595,6 @@ export default function SetupBaby() {
     color: t.text,
   } as const;
 
-  const primaryButton = {
-    height: 56,
-    borderRadius: 17,
-    backgroundColor: t.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  } as const;
-
-  const secondaryButton = {
-    height: 56,
-    borderRadius: 17,
-    marginTop: 12,
-    backgroundColor: t.surface,
-    borderWidth: 1.5,
-    borderColor: t.line2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-  } as const;
-
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: t.bg }}
@@ -612,29 +629,13 @@ export default function SetupBaby() {
             Budkin tracks feeds, naps, nappies and growth from day one.
           </Txt>
 
-          <Pressable
-            onPress={() => setStep('form')}
-            accessibilityRole="button"
-            style={(s) => [
-              primaryButton,
-              shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
-              isHovered(s) && { opacity: 0.9 },
-            ]}
-          >
-            <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-              Yes, they are here
-            </Txt>
-          </Pressable>
-
-          <Pressable
+          <SetupButton label="Yes, they are here" onPress={() => setStep('form')} />
+          <SetupButton
+            label="Not yet"
+            variant="secondary"
             onPress={() => setStep('expecting')}
-            accessibilityRole="button"
-            style={(s) => [secondaryButton, isHovered(s) && { borderColor: t.line }]}
-          >
-            <Txt unselectable weight={700} size={16}>
-              Not yet
-            </Txt>
-          </Pressable>
+            style={{ marginTop: 12 }}
+          />
         </>
       )}
 
@@ -714,22 +715,12 @@ export default function SetupBaby() {
 
           <View style={{ flex: 1, minHeight: 24 }} />
 
-          <Pressable
+          <SetupButton
+            label="Add baby"
             onPress={onAdd}
             disabled={!canSave}
-            accessibilityRole="button"
-            accessibilityState={{ disabled: !canSave }}
-            style={(s) => [
-              primaryButton,
-              { marginTop: 24, opacity: canSave ? 1 : 0.5, cursor: canSave ? 'pointer' : 'auto' },
-              canSave && shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
-              canSave && isHovered(s) && { opacity: 0.9 },
-            ]}
-          >
-            <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-              Add baby
-            </Txt>
-          </Pressable>
+            style={{ marginTop: 24 }}
+          />
 
           <Pressable
             onPress={finish}
@@ -756,20 +747,7 @@ export default function SetupBaby() {
 
           <View style={{ flex: 1, minHeight: 24 }} />
 
-          <Pressable
-            onPress={finish}
-            accessibilityRole="button"
-            style={(s) => [
-              primaryButton,
-              { marginTop: 24 },
-              shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
-              isHovered(s) && { opacity: 0.9 },
-            ]}
-          >
-            <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-              Got it
-            </Txt>
-          </Pressable>
+          <SetupButton label="Got it" onPress={finish} style={{ marginTop: 24 }} />
         </>
       )}
     </ScrollView>
@@ -777,10 +755,14 @@ export default function SetupBaby() {
 }
 ```
 
-- [ ] **Step 2: Typecheck and lint**
+- [ ] **Step 2: Lint, and typecheck with the known caveat**
 
-Run: `npx tsc --noEmit && npm run lint`
-Expected: no errors. The `/setup/baby` href from Task 4 now resolves.
+Run: `npm run lint`
+Expected: clean on the new file.
+
+Run: `npx tsc --noEmit`
+
+Expected: **errors on the `/setup/baby` href only** (raised from `src/app/welcome.tsx`, Task 4). Creating the route file does not fix this by itself: the href union lives in `.expo/types/router.d.ts`, which only regenerates when the dev server runs, and you must not start the dev server. Report the failure and confirm there are no *other* type errors. The controller regenerates and re-checks before review.
 
 - [ ] **Step 3: Commit**
 
