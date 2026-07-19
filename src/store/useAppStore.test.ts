@@ -557,7 +557,7 @@ describe('draft amounts snap to the step grid, so no stepper press looks dead', 
     expect(s().te.amount).toBe(90);
   });
 
-  it('never snaps the intake score of a breast feed, which is dimensionless', () => {
+  it('never snaps the intake level of a breast feed, which is dimensionless', () => {
     useAppStore.setState({
       unitSystem: 'imperial',
       entries: [
@@ -569,17 +569,47 @@ describe('draft amounts snap to the step grid, so no stepper press looks dead', 
           end: NOW - 10 * M,
           feedType: 'breast',
           method: 'left',
-          amount: 7, // a 1-to-10 intake score, NOT millilitres
+          amount: 3, // an intake level ("A lot"), NOT millilitres
           tags: [],
         },
       ],
     });
     s().openEdit('f1');
-    expect(s().te.amount).toBe(7);
+    expect(s().te.amount).toBe(3);
 
     // A unit toggle must not touch it either.
     s().toggleUnitSystem();
-    expect(s().te.amount).toBe(7);
+    expect(s().te.amount).toBe(3);
+  });
+
+  it('never snaps a level picked in an open sheet, on either unit system', () => {
+    // The grid snap rounds to whole ml (metric) or 0.1 fl oz (imperial), so a
+    // level that leaked into the volume branch would come back as 10 ml.
+    for (const system of ['metric', 'imperial'] as const) {
+      useAppStore.setState({ unitSystem: system });
+      s().openSheet('feeding');
+      s().setTE({ feedType: 'breast', method: 'left' });
+      for (const level of [1, 2, 3]) {
+        s().setTE({ amount: level });
+        s().toggleUnitSystem();
+        expect(s().te.amount).toBe(level);
+        s().toggleUnitSystem();
+        expect(s().te.amount).toBe(level);
+      }
+    }
+  });
+
+  it('a level cannot survive a switch to a volume feed and be snapped as one', () => {
+    // The reported hole: pick an intake at the breast, switch the open sheet to
+    // a bottle, toggle units, and the level snapped as if it were millilitres.
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'left', amount: 3 });
+    s().setTE({ feedType: 'formula' }); // crosses into the volume branch
+    expect(s().te.amount).toBeUndefined();
+
+    s().toggleUnitSystem();
+    expect(s().te.amount).toBeUndefined();
   });
 
   it('does snap a bottle feed, whose amount IS a volume', () => {
@@ -3093,14 +3123,66 @@ describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
 });
 
 describe('feeding extras', () => {
-  it('breastfeed "both" records the start side as a tag + 1-10 intake in amount', () => {
+  it('breastfeed "both" records the start side as a tag + the intake level in amount', () => {
     s().openSheet('feeding');
-    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 6 });
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 3 });
     s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
     expect(e.method).toBe('both');
     expect(e.tags).toContain('right');
-    expect(e.amount).toBe(6);
+    // The level stays a plain number locally; only the API layer turns it into
+    // a tag, so the start side is the only tag folded in here.
+    expect(e.amount).toBe(3);
+    expect(e.tags).toEqual(['right']);
+  });
+});
+
+// `amount` means millilitres on one side of `feedAmountIsVolume` and an intake
+// level on the other, so a draft that crosses the line mid-sheet must not carry
+// its old number over: 3 ("A lot") is not 3 ml, and 90 ml is not a level.
+describe('feeding draft: amount clears when the volume/level boundary is crossed', () => {
+  it('drops an intake level when the feed becomes a volume', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'left', amount: 2 });
+    s().setTE({ method: 'bottle' });
+    expect(s().te.amount).toBeUndefined();
+    s().save();
+    expect((s().entries[0] as Extract<Entry, { type: 'feeding' }>).amount).toBeNull();
+  });
+
+  it('drops a volume when the feed becomes an intake level', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'formula', method: 'bottle', amount: 90 });
+    s().setTE({ feedType: 'breast', method: 'left' });
+    expect(s().te.amount).toBeUndefined();
+    s().save();
+    expect((s().entries[0] as Extract<Entry, { type: 'feeding' }>).amount).toBeNull();
+  });
+
+  it('keeps the amount when the change stays on the same side of the line', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'left', amount: 2 });
+    s().setTE({ method: 'both' }); // still at the breast
+    expect(s().te.amount).toBe(2);
+
+    s().setTE({ feedType: 'formula', method: 'bottle', amount: 90 });
+    s().setTE({ feedType: 'fortified' }); // still a bottle volume
+    expect(s().te.amount).toBe(90);
+  });
+
+  it('honours an amount named in the same patch as the crossing', () => {
+    // Setting the whole shape at once (as the timer editor does) states the
+    // amount for where the draft is landing, so it is not second-guessed.
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'left', amount: 2 });
+    s().setTE({ feedType: 'formula', method: 'bottle', amount: 120 });
+    expect(s().te.amount).toBe(120);
+  });
+
+  it('leaves other activities alone', () => {
+    s().openSheet('pumping');
+    s().setTE({ amount: 90, method: 'both' });
+    expect(s().te.amount).toBe(90);
   });
 });
 

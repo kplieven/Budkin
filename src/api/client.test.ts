@@ -494,6 +494,151 @@ describe('per-entry notes', () => {
   });
 });
 
+// A breast feed's `amount` is a subjective intake level, and Baby Buddy reads
+// its `amount` field as a volume it sums into the child's feeding totals. So the
+// level travels as a structural tag with `amount: null`, and comes back off the
+// wire as a level again. Volumes are untouched by any of this.
+describe('breastfeeding intake level <-> tag transport', () => {
+  const ISO = '2026-03-04T18:30:00.000Z';
+
+  function stubFetch(response: unknown) {
+    const calls: { url: string; body: any }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const raw = init?.body;
+      calls.push({ url, body: typeof raw === 'string' ? JSON.parse(raw) : raw });
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  const client = () => new BabybuddyClient('https://x', 't');
+  const page = (row: Record<string, unknown>) => ({ count: 1, next: null, previous: null, results: [row] });
+
+  const atBreast = (amount: number | null, tags: string[] = []): Entry => ({
+    id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount, tags,
+  });
+
+  it('sends the level as a tag and never as an amount', async () => {
+    for (const [level, tag] of [[1, 'intake:little'], [2, 'intake:some'], [3, 'intake:lot']] as const) {
+      const calls = stubFetch({ id: 1 });
+      await client().createEntry(atBreast(level), 1);
+      expect(calls[0].body.amount).toBeNull();
+      expect(calls[0].body.tags).toEqual([tag]);
+    }
+  });
+
+  it('keeps the start-side tag alongside the level, distinctly', async () => {
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry({ ...atBreast(3, ['right', 'cluster']), method: 'both' } as Entry, 1);
+    expect(calls[0].body.tags).toEqual(['right', 'cluster', 'intake:lot']);
+  });
+
+  it('sends no level tag when the feed records no intake', async () => {
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry(atBreast(null, ['cluster']), 1);
+    expect(calls[0].body.amount).toBeNull();
+    expect(calls[0].body.tags).toEqual(['cluster']);
+  });
+
+  it('replaces a stale level tag rather than shipping both', async () => {
+    const calls = stubFetch({});
+    await client().updateEntry({ ...atBreast(1, ['intake:lot', 'cluster']), serverId: 9 } as Entry, 1);
+    expect(calls[0].body.tags).toEqual(['cluster', 'intake:little']);
+  });
+
+  it('leaves a volume feed alone, and strips any level tag it still carries', async () => {
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry({ ...atBreast(90, ['intake:some']), method: 'bottle' } as Entry, 1);
+    expect(calls[0].body.amount).toBe(90);
+    expect(calls[0].body.tags).toEqual([]);
+  });
+
+  it('reads the level back off the tag, and keeps it out of the entry tags', async () => {
+    stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: null, notes: '', tags: ['intake:some', 'cluster'] }));
+    const back = (await client().listFeedings('c1'))[0];
+    expect(back.amount).toBe(2);
+    expect(back.tags).toEqual(['cluster']);
+  });
+
+  it('round-trips every level through buildBody -> server echo -> list mapper', async () => {
+    for (const level of [1, 2, 3]) {
+      const create = stubFetch({ id: 55 });
+      await client().createEntry(atBreast(level), 1);
+      stubFetch(page({ id: 55, ...create[0].body }));
+      expect((await client().listFeedings('c1'))[0].amount).toBe(level);
+    }
+  });
+
+  it('buckets an untagged legacy 1 to 10 score by thirds', async () => {
+    const expected: [number, number][] = [
+      [1, 1], [2, 1], [3, 1],
+      [4, 2], [5, 2], [6, 2], [7, 2],
+      [8, 3], [9, 3], [10, 3],
+    ];
+    for (const [score, level] of expected) {
+      stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: score, notes: '', tags: [] }));
+      expect((await client().listFeedings('c1'))[0].amount).toBe(level);
+    }
+  });
+
+  it('tolerates the arbitrary floats Baby Buddy allows in its amount field', async () => {
+    // BB's `amount` is an unconstrained FloatField and its own UI writes into
+    // it, so a feed at the breast can arrive holding anything at all.
+    const expected: [number, number][] = [[0, 1], [3.5, 2], [7.5, 3], [120.5, 3], [-4, 1]];
+    for (const [raw, level] of expected) {
+      stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: raw, notes: '', tags: [] }));
+      expect((await client().listFeedings('c1'))[0].amount).toBe(level);
+    }
+  });
+
+  it('resolves a legacy score the same way in both directions of travel', async () => {
+    // The asymmetry this pins: a legacy score sitting in local-only history and
+    // pushed UP has to end up as the same level as the identical score pulled
+    // DOWN untagged from the server. If the write bucket and the read bucket
+    // disagree, the same feed means different things on two devices.
+    for (const score of [1, 4, 5, 6, 7, 8, 9, 10]) {
+      const calls = stubFetch({ id: 1 });
+      await client().createEntry(atBreast(score), 1);
+      const pushedTag = calls[0].body.tags[0];
+
+      stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: score, notes: '', tags: [] }));
+      const pulledLevel = (await client().listFeedings('c1'))[0].amount as number;
+
+      expect(pushedTag).toBe(['intake:little', 'intake:some', 'intake:lot'][pulledLevel - 1]);
+    }
+  });
+
+  it('sends a legacy score above 3 up as its by-thirds level, not as the top one', async () => {
+    // Concretely: a local-only 5 is "Some", not "A lot".
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry(atBreast(5), 1);
+    expect(calls[0].body.tags).toEqual(['intake:some']);
+    expect(calls[0].body.amount).toBeNull();
+  });
+
+  it('prefers the tag over a numeric amount when a feed somehow carries both', async () => {
+    stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: 9, notes: '', tags: ['intake:little'] }));
+    expect((await client().listFeedings('c1'))[0].amount).toBe(1);
+  });
+
+  it('leaves an untagged feed with no amount unset', async () => {
+    stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'left breast', amount: null, notes: '', tags: [] }));
+    expect((await client().listFeedings('c1'))[0].amount).toBeNull();
+  });
+
+  it('does not bucket a bottle feed: expressed milk is a real volume', async () => {
+    stubFetch(page({ id: 1, start: ISO, end: ISO, type: 'breast milk', method: 'bottle', amount: 90, notes: '', tags: [] }));
+    expect((await client().listFeedings('c1'))[0].amount).toBe(90);
+  });
+
+  it('hides the level tags from the tag picker', () => {
+    for (const t of ['intake:little', 'intake:some', 'intake:lot']) expect(isHiddenTag(t)).toBe(true);
+  });
+});
+
 // Temperature is a POINT event on Baby Buddy's /api/temperature/ resource:
 // a decimal reading + a single `time` + notes + tags. These exercise buildBody
 // (via createEntry/updateEntry) and the listTemperature mapper.

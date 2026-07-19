@@ -39,21 +39,37 @@ describe('detailFor: feeding amount is dual-purpose', () => {
     expect(detailFor(feed('breast', 'bottle', 90))).toContain('3 fl oz');
   });
 
-  it('leaves a breast feed at the breast as a bare intake score', () => {
-    // `amount` here is the subjective 1 to 10 intake scale, not millilitres.
-    // Converting it would render an intake of 5 as "0.2 fl oz".
+  it('names a breast feed at the breast by its intake level', () => {
+    // `amount` here is the intake level, not millilitres. Formatting it as a
+    // measurement would render a level 2 as "0.1 fl oz".
     for (const method of ['left', 'right', 'both'] as FeedMethod[]) {
       h.unitSystem = 'imperial';
-      const imperial = detailFor(feed('breast', method, 5));
+      const imperial = detailFor(feed('breast', method, 2));
       expect(imperial).not.toContain('fl oz');
       expect(imperial).not.toContain('ml');
-      expect(imperial).not.toContain('0.2');
-      expect(imperial.split(' · ')).toContain('5');
+      expect(imperial.split(' · ')).toContain('Some');
 
-      // and the same score, unchanged, on the metric lens
+      // and the same level, unchanged, on the metric lens
       h.unitSystem = 'metric';
-      expect(detailFor(feed('breast', method, 5))).toBe(imperial);
+      expect(detailFor(feed('breast', method, 2))).toBe(imperial);
     }
+  });
+
+  it('words all three intake levels', () => {
+    h.unitSystem = 'metric';
+    expect(detailFor(feed('breast', 'left', 1)).split(' · ')).toContain('A little');
+    expect(detailFor(feed('breast', 'left', 2)).split(' · ')).toContain('Some');
+    expect(detailFor(feed('breast', 'left', 3)).split(' · ')).toContain('A lot');
+  });
+
+  it('still words an entry left on the old 1 to 10 scale', () => {
+    // Local-only history was never migrated, so a wider score can still show up
+    // here. It must name a level rather than render a bare number or blank, and
+    // a score above 3 (which can only be legacy) reads by thirds.
+    h.unitSystem = 'metric';
+    expect(detailFor(feed('breast', 'left', 5)).split(' · ')).toContain('Some');
+    expect(detailFor(feed('breast', 'left', 7)).split(' · ')).toContain('Some');
+    expect(detailFor(feed('breast', 'left', 10)).split(' · ')).toContain('A lot');
   });
 
   it('omits the amount entirely when there is none', () => {

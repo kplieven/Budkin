@@ -1,4 +1,4 @@
-import { feedAmountIsVolume } from '@/lib/activities';
+import { feedAmountIsVolume, intakeLevelLabel } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
 import { fmtValue, unitLabel } from '@/lib/units';
 import { useAppStore } from '@/store/useAppStore';
@@ -36,10 +36,11 @@ export function detailFor(e: Entry): string {
       return [
         FEED_TYPE_LABEL[e.feedType] ?? '',
         FEED_METHOD_LABEL[e.method] ?? '',
-        // A breast feed's `amount` is a dimensionless 1 to 10 intake score, not
-        // millilitres, so it is shown bare. Converting it would attach a false
-        // unit (an intake of 5 would read as "0.2 fl oz").
-        e.amount ? (feedAmountIsVolume(e.feedType, e.method) ? fmtAmount(e.amount) : String(e.amount)) : '',
+        // A breast feed's `amount` is a dimensionless intake level, not
+        // millilitres, so it is shown as its word ("A little"). Formatting it as
+        // a measurement would attach a false unit (a level 2 would read as
+        // "0.1 fl oz").
+        e.amount ? (feedAmountIsVolume(e.feedType, e.method) ? fmtAmount(e.amount) : intakeLevelLabel(e.amount)) : '',
         e.end ? fmtDur((e.end - e.start) / 60000) : '',
         e.notes ?? '',
       ]

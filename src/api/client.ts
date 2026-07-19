@@ -9,6 +9,7 @@
  * Docs: https://docs.baby-buddy.net/api/
  */
 
+import { INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
 import type {
   ActivityType,
   BathEntry,
@@ -157,15 +158,62 @@ export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'ri
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
 
+// --- breastfeeding intake <-> Baby Buddy tag ---
+// Baby Buddy's `Feeding.amount` is a plain float that it reads as a VOLUME and
+// sums into its feeding-amount statistics, so a subjective intake level must not
+// be written there: a level 3 would land in those totals as 3 ml. The level
+// rides as a structural tag instead and `amount` goes out null.
+//
+// The names are prefixed, like the milestone `mk:` tags, so they can never be
+// mistaken for the bare `left`/`right` start-side markers that a breastfeed also
+// carries, nor collide with a tag the user typed themselves.
+//
+// KNOWN LIMITATION: the scheme is name-based, so a tag named `intake:...` that
+// the user had already created in Baby Buddy before Budkin claimed the prefix is
+// indistinguishable from one of ours. It is dropped on read and not written
+// back, so a later edit removes it from the server. `isHiddenTag` stops Budkin
+// offering to create one, but it cannot un-create an existing one. Preserving it
+// is not free: keeping such a tag through a write is exactly what would let a
+// stale level survive a level change or a switch to a bottle, which is the bug
+// the stripping exists to prevent. Given the prefix and how narrow the window
+// is, the trade favours never shipping a wrong level.
+// Index 0..2 == level 1..3.
+const INTAKE_TAGS = ['intake:little', 'intake:some', 'intake:lot'] as const;
+
+const isIntakeTag = (t: string): boolean => t.startsWith('intake:');
+
+/**
+ * Bucket a legacy 1 to 10 intake score into a level, by thirds: 1-3 is a
+ * little, 4-7 is some, 8-10 is a lot.
+ *
+ * Only ever applied to a number that arrived WITHOUT an intake tag, which means
+ * it predates the level scale (an older Budkin) or was typed into Baby Buddy's
+ * own UI. Baby Buddy's field is an unconstrained float, so any finite value has
+ * to land somewhere.
+ */
+function bucketLegacyIntake(score: number): 1 | 2 | 3 {
+  return score <= 3 ? 1 : score <= 7 ? 2 : 3;
+}
+
+/** The intake level a server feeding carries: its tag if it has one, else its
+ *  legacy numeric score bucketed. `null` when the feed records no intake. */
+function intakeLevelFromServer(tags: string[], amount: number | null): 1 | 2 | 3 | null {
+  const i = INTAKE_TAGS.findIndex((t) => tags.includes(t));
+  if (i >= 0) return (i + 1) as 1 | 2 | 3;
+  if (amount == null || !Number.isFinite(amount)) return null;
+  return bucketLegacyIntake(amount);
+}
+
 // --- milestone <-> Baby Buddy Note (tagged-note) serialization ---
 // Baby Buddy has no milestone resource, so a reached milestone is a Note tagged
 // `milestone` (marker) + `mk:<key>` (which one). Same pattern as baths.
 const isStructuralMilestoneTag = (t: string): boolean => t === 'milestone' || t.startsWith('mk:');
 
-/** True for any tag the picker must never surface or let the user create:
- *  the bath/side structural tags plus the milestone marker and mk:<key> tags. */
+/** True for any tag the picker must never surface or let the user create: the
+ *  bath/side structural tags plus the milestone marker, mk:<key> and intake
+ *  level tags. */
 export function isHiddenTag(name: string): boolean {
-  return HIDDEN_TAGS.has(name) || isStructuralMilestoneTag(name);
+  return HIDDEN_TAGS.has(name) || isStructuralMilestoneTag(name) || isIntakeTag(name);
 }
 
 /**
@@ -508,19 +556,31 @@ export class BabybuddyClient {
     const data = await this.request<Paginated<any>>(
       `/feedings/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
     );
-    return data.results.map((f) => ({
-      id: `feeding-${f.id}`,
-      serverId: f.id,
-      childId,
-      type: 'feeding',
-      start: fromISO(f.start),
-      end: f.end ? fromISO(f.end) : null,
-      feedType: FEED_TYPE_FROM_API[f.type] ?? 'breast',
-      method: FEED_METHOD_FROM_API[f.method] ?? 'left',
-      amount: f.amount != null ? Number(f.amount) : null,
-      notes: f.notes || undefined,
-      tags: (f.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
-    }));
+    return data.results.map((f) => {
+      const feedType = FEED_TYPE_FROM_API[f.type] ?? 'breast';
+      const method = FEED_METHOD_FROM_API[f.method] ?? 'left';
+      const tags = tagNames(f.tags);
+      const amount = f.amount != null ? Number(f.amount) : null;
+      return {
+        id: `feeding-${f.id}`,
+        serverId: f.id,
+        childId,
+        type: 'feeding',
+        start: fromISO(f.start),
+        end: f.end ? fromISO(f.end) : null,
+        feedType,
+        method,
+        // Volumes come back as-is. At the breast the field holds an intake
+        // level, recovered from the tag (or from a legacy score, bucketed).
+        amount: feedAmountIsVolume(feedType, method) ? amount : intakeLevelFromServer(tags, amount),
+        notes: f.notes || undefined,
+        // The intake tag is a wire detail, not one of the entry's own tags:
+        // `amount` is the local truth and `buildBody` re-derives the tag on the
+        // way out. Dropping it here is what keeps a changed level from shipping
+        // alongside the stale one.
+        tags: tags.filter((t) => !isIntakeTag(t)),
+      };
+    });
   }
 
   async listSleep(childId: string, limit = 50, offset = 0): Promise<SleepEntry[]> {
@@ -638,17 +698,24 @@ export class BabybuddyClient {
     const child = childServerId;
     const tags = entry.tags ?? [];
     switch (entry.type) {
-      case 'feeding':
+      case 'feeding': {
+        // At the breast, `amount` is an intake level, and Baby Buddy would read
+        // any number in its `amount` as millilitres and sum it into the child's
+        // feeding totals. So the level goes out as a tag and `amount` as null.
+        const isVolume = feedAmountIsVolume(entry.feedType, entry.method);
+        const level = entry.amount == null ? null : INTAKE_LEVELS.bucket(entry.amount);
+        const own = tags.filter((t) => !isIntakeTag(t));
         return {
           child,
           start: toISO(entry.start),
           end: toISO(entry.end ?? entry.start),
           type: FEED_TYPE_TO_API[entry.feedType],
           method: FEED_METHOD_TO_API[entry.method],
-          amount: entry.amount,
+          amount: isVolume ? entry.amount : null,
           notes: entry.notes ?? '',
-          tags,
+          tags: !isVolume && level != null ? [...own, INTAKE_TAGS[level - 1]] : own,
         };
+      }
       case 'sleep':
         return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), notes: entry.notes ?? '', tags };
       case 'diaper':

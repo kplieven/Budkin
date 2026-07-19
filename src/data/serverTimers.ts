@@ -30,11 +30,18 @@ export interface DecodedTimer {
 }
 
 /**
- * NOTE the `amt:` token is canonical MILLILITRES, always, whatever the device's
- * units preference says. Imperial (fl oz) is a display lens only, and this
- * string is shared state: the timer name is what another device decodes when it
- * picks the timer up. Writing a converted number here would corrupt the amount
- * across devices. Do not change the encoding.
+ * NOTE the `amt:` token is the draft's raw `amount`, never a converted one.
+ * For a pumping timer, and for any feed that measures a volume, that is
+ * canonical MILLILITRES; for a feed taken at the breast it is the intake level
+ * (see `INTAKE_LEVELS`), which has no unit at all. Either way the device's
+ * units preference must not touch it: imperial (fl oz) is a display lens only,
+ * and this string is shared state, since the timer name is what another device
+ * decodes when it picks the timer up. Writing a converted number here would
+ * corrupt the amount across devices. Do not change the encoding.
+ *
+ * The `ft:`/`m:` tokens ride alongside, so a decoder can always tell which of
+ * the two an `amt:` is. That is why the level needs no marker of its own and
+ * the grammar version does not move.
  */
 export function encodeTimerName(t: Timer): string {
   const toks: string[] = [VERSION];
