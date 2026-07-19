@@ -376,7 +376,10 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
  *  `mergeUnsynced` put them. Server children the app has not seen are added
  *  with their server-derived id: they never had a local phase, so that id is
  *  already stable. A local child whose `serverId` is absent from the server list
- *  was deleted server-side and is dropped, matching today's behaviour. */
+ *  was deleted server-side and is dropped, matching today's behaviour. A
+ *  never-pushed local whose `id` collides with a reconciled child's id is
+ *  dropped too, so the result can never contain duplicate ids, matching what
+ *  `mergeUnsynced` guaranteed. */
 export function reconcileChildren(serverChildren: Child[], localChildren: Child[]): Child[] {
   const localByServerId = new Map<number, Child>();
   for (const c of localChildren) {
@@ -386,7 +389,8 @@ export function reconcileChildren(serverChildren: Child[], localChildren: Child[
     const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
     return local ? { ...sc, id: local.id } : sc;
   });
-  const neverPushed = localChildren.filter((c) => c.serverId == null);
+  const reconciledIds = new Set(reconciled.map((c) => c.id));
+  const neverPushed = localChildren.filter((c) => c.serverId == null && !reconciledIds.has(c.id));
   return [...neverPushed, ...reconciled];
 }
 

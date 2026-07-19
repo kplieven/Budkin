@@ -3390,4 +3390,13 @@ describe('reconcileChildren', () => {
   it('returns an empty list when both sides are empty', () => {
     expect(reconcileChildren([], [])).toEqual([]);
   });
+
+  it('drops a never-pushed local child whose id collides with a server child id', () => {
+    const server = [kid({ id: 'c1', serverId: 501 })];
+    const local = [kid({ id: 'c1' })]; // no serverId, id happens to collide
+    const out = reconcileChildren(server, local);
+    expect(out.map((c) => c.id)).toEqual(['c1']);
+    const ids = out.map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
 });
