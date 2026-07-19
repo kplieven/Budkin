@@ -439,14 +439,24 @@ export class BabybuddyClient {
    *  the PATCH response for exactly that reason. When a child has no slug at all
    *  (`uploadUnsynced` only learns the new numeric id when it pushes one, and a
    *  child persisted before slugs were captured has none either), look it up by
-   *  `serverId`. If even that fails, fall back to the numeric id: it will very
-   *  likely 404, but the caller now surfaces that instead of swallowing it,
-   *  which beats throwing from a lookup helper. */
+   *  `serverId`.
+   *
+   *  Undefined means "do not send the request": either the child was never
+   *  pushed, or the lookup positively established it is no longer on the server
+   *  (another device deleted it). The caller treats that as a no-op rather than
+   *  a failure, since the desired end state already holds. A child that IS
+   *  present but has no slug falls back to the numeric id, which is the one case
+   *  where a 404 is still possible and worth surfacing.
+   *
+   *  Propagates rather than swallows: `listChildren` raises `ApiError` on a 5xx
+   *  or a timeout, which is a genuine "could not reach the server" the callers
+   *  are set up to report. */
   private async childKey(child: Child): Promise<string | number | undefined> {
     if (child.slug) return child.slug;
     if (child.serverId == null) return undefined;
     const match = (await this.listChildren()).find((c) => c.serverId === child.serverId);
-    return match?.slug ?? child.serverId;
+    if (!match) return undefined; // confirmed gone server-side
+    return match.slug ?? child.serverId;
   }
 
   /** Create a child on the server; uploads a picture when provided. Returns the

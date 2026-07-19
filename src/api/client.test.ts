@@ -155,10 +155,32 @@ describe('updateChild', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('https://example.com/api/children/mira-doe/');
   });
 
-  it('falls back to the numeric id when the lookup cannot find a slug, rather than throwing', async () => {
+  // An empty lookup is positive evidence the child is GONE (another device
+  // deleted it), not a reason to guess at a URL. Skipping the PATCH keeps the
+  // caller from reporting a failure for a child that no longer exists.
+  it('skips the request when the lookup proves the child is no longer on the server', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const child: Child = { ...CHILD, serverId: 42 };
+
+    await expect(client.updateChild(child)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1); // the lookup only, no PATCH
+  });
+
+  it('falls back to the numeric id when the child is present but carries no slug', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [{ id: 42, first_name: 'Mira', birth_date: '2025-01-15' }],
+        }),
+      )
       .mockResolvedValueOnce(jsonResponse({ picture: null }));
     vi.stubGlobal('fetch', fetchMock);
     const client = new BabybuddyClient('https://example.com', 'tok');
@@ -698,6 +720,28 @@ describe('deleteChild', () => {
     const calls = stubFetch(undefined);
     await client().deleteChild(CHILD);
     expect(calls).toHaveLength(0);
+  });
+
+  // Another device got there first. The desired end state already holds, so
+  // this is a no-op success: issuing a doomed DELETE would make the store
+  // restore a child that no longer exists and claim the delete failed.
+  it('treats a child already gone from the server as deleted, not as a failure', async () => {
+    const calls: { url: string; method?: string }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, method: init?.method });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ count: 0, next: null, previous: null, results: [] }),
+        text: async () => '',
+      } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+
+    await expect(client().deleteChild({ ...CHILD, serverId: 5 })).resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(1); // the lookup only
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
   });
 });
 

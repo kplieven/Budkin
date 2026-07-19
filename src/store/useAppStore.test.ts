@@ -57,6 +57,10 @@ const h = vi.hoisted(() => ({
   adoptTarget: null as string | null,
   pushFails: false,
   childDeleteFails: false,
+  /** serverId -> the slug the fake server currently holds for that child. Seed
+   *  it to opt a test into slug-accurate PATCH behaviour (see
+   *  `updateChildOnServer` below); empty means the old permissive mock. */
+  childSlugOnServer: {} as Record<string, string>,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
   tags: [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }] as unknown,
@@ -178,12 +182,20 @@ vi.mock('@/data/repository', () => ({
   updateChildOnServer: vi.fn(async (_c: unknown, child: any, change: any) => {
     h.childUpdated.push(child);
     h.childUpdateChange.push(change);
-    // Baby Buddy derives the slug from the name, so a rename moves it. Mirror
-    // that here: the real PATCH response carries the CURRENT slug.
-    return {
-      picture: change?.kind === 'set' ? SERVER_PIC : null,
-      slug: String(child?.first ?? '').toLowerCase() + '-slug',
-    };
+    const nextSlug = String(child?.first ?? '').toLowerCase() + '-slug';
+    // Opt-in faithful slug behaviour, keyed by serverId. Inert unless a test
+    // seeds `childSlugOnServer`, so it changes nothing for the rest of the file.
+    // Baby Buddy addresses children BY slug, so a PATCH carrying a stale one
+    // 404s rather than falling back to matching on id, and a rename MOVES the
+    // slug, which is what makes the next stale request fail.
+    const key = String(child?.serverId);
+    const currentSlug = h.childSlugOnServer[key];
+    if (currentSlug !== undefined) {
+      if (child?.slug && child.slug !== currentSlug) throw new Error('404');
+      h.childSlugOnServer[key] = nextSlug;
+    }
+    // The real PATCH response carries the CURRENT slug.
+    return { picture: change?.kind === 'set' ? SERVER_PIC : null, slug: nextSlug };
   }),
   // Takes the whole child now, not a numeric id: the server DELETE is keyed by
   // slug (see BabybuddyClient.childKey), which only the child carries.
@@ -295,6 +307,7 @@ beforeEach(() => {
   h.adoptTarget = null;
   h.pushFails = false;
   h.childDeleteFails = false;
+  h.childSlugOnServer = {};
   h.profile = { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined };
   h.profileFails = false;
   h.tags = [{ name: 'Fussy', color: '#f80' }, { name: 'Sleepy' }];
@@ -678,6 +691,30 @@ describe('flushPendingOps', () => {
     await s().flushPendingOps();
     expect(h.childUpdated).toEqual([child]);
     expect(h.pendingOps).toHaveLength(0);
+  });
+
+  // Op payloads are SNAPSHOTS taken at enqueue time and addPendingOp appends
+  // without dedup, so two offline renames of the same child queue two ops that
+  // BOTH carry the original slug. Replaying op1 moves the slug server-side,
+  // which makes op2's snapshot stale before it is ever sent. Trusting the
+  // payload there loses the second rename permanently: it 404s, goes back on
+  // the queue, and 404s again on every later flush, so the op log never drains.
+  it('replays a second queued rename against the LIVE slug, not its stale snapshot', async () => {
+    h.childSlugOnServer = { '501': 'mira-o' };
+    const staleSnapshot = { ...child, slug: 'mira-o' };
+    h.pendingOps = [
+      { op: 'update', entity: 'child', payload: { ...staleSnapshot, first: 'Mirabel' } },
+      { op: 'update', entity: 'child', payload: { ...staleSnapshot, first: 'Mirage' } },
+    ];
+    useAppStore.setState({ children: [{ ...child, slug: 'mira-o' }] });
+
+    await s().flushPendingOps();
+
+    // Both renames landed, so the queue drains and the last one is the winner.
+    expect(h.pendingOps).toHaveLength(0);
+    expect(h.childUpdated).toHaveLength(2);
+    expect((h.childUpdated[1] as Child).slug).toBe('mirabel-slug');
+    expect(s().children[0].slug).toBe('mirage-slug');
   });
 
   it('re-stamps the slug a replayed rename moved, so a later delete is not keyed by a stale one', async () => {
@@ -1957,6 +1994,30 @@ describe('deleteChild', () => {
     expect(h.childDeleted).toHaveLength(0);
   });
 
+  // refresh() only bails on the simulateOffline override, not the real offline
+  // flag, so an ungated refetch here would fire a doomed fetch while offline.
+  // Today's server-backed offline delete is UI-blocked, but a local-only child
+  // deleted offline reaches this line, and relaxing that UI block is a named
+  // follow-up: without the gate, a delete that merely MIGHT be resurrected
+  // later becomes one that is resurrected immediately.
+  it('deleting while offline never fires the post-delete refetch', async () => {
+    vi.mocked(loadFromServer).mockClear();
+    useAppStore.setState({
+      offline: true,
+      children: [
+        { id: 'local1', first: 'Mira', last: '', birth: NOW, color: '#fff' }, // never pushed
+        serverChild('6', 'Nova'),
+      ],
+      selectedChildId: 'local1',
+    });
+
+    void s().deleteChild('local1');
+    await flush();
+
+    expect(s().selectedChildId).toBe('6'); // still re-points
+    expect(loadFromServer).not.toHaveBeenCalled();
+  });
+
   // The reported symptom: the child vanished, a success toast appeared, and the
   // child came back on the next refresh. The DELETE had 404'd all along and the
   // error was swallowed by a fire-and-forget `.catch(() => {})`.
@@ -2031,6 +2092,47 @@ describe('deleteChild', () => {
     await flush();
 
     expect(loadFromServer).not.toHaveBeenCalled();
+  });
+
+  // reconcileChildren re-adds a child it cannot match locally under the
+  // SERVER-derived id (String(serverId)), not the local one. So a refresh that
+  // completes while the DELETE is in flight puts the child back as '5', and a
+  // rollback guard that only looks for the local id 'c1' would splice a SECOND
+  // copy in beside it: same serverId, two ids, and every later rename or delete
+  // acts on whichever one the UI happens to hand over.
+  it('a failed server delete does not duplicate a child a mid-flight refresh already restored', async () => {
+    h.childDeleteFails = true;
+    useAppStore.setState({
+      children: [{ ...serverChild('5', 'Mira'), id: 'c1' }, serverChild('6', 'Nova')],
+      selectedChildId: 'c1',
+    });
+
+    const pending = s().deleteChild('c1');
+    // A refresh lands mid-flight and reconciles the still-present server child
+    // back in under its server-derived id.
+    useAppStore.setState({ children: [serverChild('5', 'Mira'), ...s().children] });
+    await pending;
+
+    expect(s().children.filter((c) => c.serverId === 5)).toHaveLength(1);
+    expect(s().children.map((c) => c.serverId).sort()).toEqual([5, 6]);
+  });
+
+  // deleteChild wipes the running timers when the deleted child was selected,
+  // and the persistence subscription writes that empty array straight to the
+  // device. A server-backed timer would come back on the next refresh, but one
+  // started offline (serverId == null) exists nowhere else and is gone for good.
+  it('a failed server delete restores the running timers it cleared', async () => {
+    h.childDeleteFails = true;
+    const localTimer: Timer = { id: 't-local', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [localTimer],
+    });
+
+    await s().deleteChild('5');
+
+    expect(s().timers).toEqual([localTimer]);
   });
 
   it('a failed server delete does not refetch, so the restore is not clobbered', async () => {
