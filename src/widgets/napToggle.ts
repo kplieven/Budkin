@@ -65,6 +65,14 @@ export async function toggleNapFromWidget(
     return;
   }
 
+  if (snap.expected) {
+    // The selected child hasn't been born yet: refuse to start or stop a nap
+    // against them. Repaint from the current (untouched) snapshot so the tap
+    // still gets feedback instead of feeling dead.
+    render(snap);
+    return;
+  }
+
   // Debounce duplicate/rapid delivery: repaint the widget from the current
   // snapshot without mutating any timer or logging an entry. Repainting (rather
   // than doing nothing) keeps a swallowed tap from feeling dead.
@@ -89,8 +97,11 @@ export async function toggleNapFromWidget(
     return;
   }
 
-  // Start: append a running sleep timer in place.
-  const timer = startSleepTimer(now);
+  // Start: append a running sleep timer in place, stamped with the currently
+  // selected child so a later stop (possibly from the app after the selected
+  // child has changed) can't misattribute it. `snap.expected` was already
+  // checked above, so `snap.selectedChildId` here is always a born child.
+  const timer = startSleepTimer(now, snap.selectedChildId);
   await saveTimers([...timers, timer]);
   const next: WidgetSnapshot = { ...snap, sleepStart: now };
   await writeWidgetSnapshot(next);
