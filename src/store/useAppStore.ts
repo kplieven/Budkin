@@ -67,7 +67,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
-import type { UnitSystem } from '@/lib/units';
+import { stepVolume, type UnitSystem } from '@/lib/units';
 import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
@@ -263,7 +263,9 @@ interface AppActions {
   saveMeasurement: (value: number, date: number, notes?: string) => void;
   deleteMeasurement: (id: string) => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
-  adjustAmount: (delta: number) => void;
+  /** One press of the amount stepper: +1 or -1 step in the user's display
+   *  units (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
+  adjustAmount: (dir: 1 | -1) => void;
   toggleWet: () => void;
   toggleSolid: () => void;
   /** bath: pick the wash size (small/big) */
@@ -2209,8 +2211,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return { te: next };
     }),
-  adjustAmount: (delta) =>
-    set((s) => ({ te: { ...s.te, amount: Math.max(0, (s.te.amount ?? 0) + delta) } })),
+  adjustAmount: (dir) =>
+    set((s) => ({ te: { ...s.te, amount: stepVolume(s.te.amount ?? 0, dir, s.unitSystem) } })),
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
   setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),

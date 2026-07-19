@@ -12,7 +12,7 @@ import { IconButton } from '@/components/IconButton';
 import { Stepper } from '@/components/Stepper';
 import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
-import { ACTIVITY_LABEL, DURATION_SHORTCUTS } from '@/lib/activities';
+import { ACTIVITY_LABEL, DURATION_SHORTCUTS, feedAmountIsVolume } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
 import { fmtValue, toMetric, unitLabel } from '@/lib/units';
@@ -294,6 +294,7 @@ export function LogSheet() {
   const tags = useAppStore((s) => s.tags);
   const loadTags = useAppStore((s) => s.loadTags);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const setEnded = useAppStore((s) => s.setEnded);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const save = useAppStore((s) => s.save);
@@ -311,8 +312,10 @@ export function LogSheet() {
   const color = t.activity[type];
   const label = ACTIVITY_LABEL[type];
   const shortcut = DURATION_SHORTCUTS[type];
-  const showVolume = type === 'feeding' && (te.feedType !== 'breast' || te.method === 'bottle');
-  const showIntake = type === 'feeding' && te.feedType === 'breast' && te.method !== 'bottle';
+  // Exact complements by construction: a feeding shows the volume stepper or
+  // the intake scale, never both, and never neither.
+  const showVolume = type === 'feeding' && feedAmountIsVolume(te.feedType, te.method);
+  const showIntake = type === 'feeding' && !feedAmountIsVolume(te.feedType, te.method);
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
   const saveLabel = editingId
     ? 'Save changes'
@@ -441,7 +444,12 @@ export function LogSheet() {
               <>
                 <FieldLabel>Amount (optional)</FieldLabel>
                 <View style={{ marginBottom: 16 }}>
-                  <Stepper value={te.amount ?? 0} onMinus={() => adjustAmount(-10)} onPlus={() => adjustAmount(10)} />
+                  <Stepper
+                    value={te.amount ?? 0}
+                    system={unitSystem}
+                    onMinus={() => adjustAmount(-1)}
+                    onPlus={() => adjustAmount(1)}
+                  />
                 </View>
               </>
             )}
@@ -551,7 +559,12 @@ export function LogSheet() {
           <>
             <FieldLabel>Amount</FieldLabel>
             <View style={{ marginBottom: 16 }}>
-              <Stepper value={te.amount ?? 0} onMinus={() => adjustAmount(-10)} onPlus={() => adjustAmount(10)} />
+              <Stepper
+                value={te.amount ?? 0}
+                system={unitSystem}
+                onMinus={() => adjustAmount(-1)}
+                onPlus={() => adjustAmount(1)}
+              />
             </View>
           </>
         )}

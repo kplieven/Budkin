@@ -1,7 +1,23 @@
 /** Static (theme-independent) metadata for the five tracked activities. */
 
-import type { ActivityType } from '@/types/models';
+import type { ActivityType, FeedMethod, FeedType } from '@/types/models';
 import type { TimeEntryShape } from '@/types/timeEntry';
+
+/**
+ * Does a feeding's `amount` hold a VOLUME, or a dimensionless intake score?
+ *
+ * The field is dual-purpose. A bottle or formula feed measures millilitres, so
+ * it gets the ml/fl oz stepper and converts with the units preference. A feed
+ * taken at the breast records a subjective 1 to 10 intake score instead, which
+ * has no unit and must never be converted or labelled.
+ *
+ * Both the log sheet (picking which control to show) and the history detail
+ * line (picking how to format) must agree on this, so they share one predicate
+ * rather than each carrying a copy that could drift.
+ */
+export function feedAmountIsVolume(feedType: FeedType | undefined, method: FeedMethod | undefined): boolean {
+  return feedType !== 'breast' || method === 'bottle';
+}
 
 export const ACTIVITY_LABEL: Record<ActivityType, string> = {
   feeding: 'Feeding',

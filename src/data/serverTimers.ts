@@ -29,6 +29,13 @@ export interface DecodedTimer {
   nap?: boolean;
 }
 
+/**
+ * NOTE the `amt:` token is canonical MILLILITRES, always, whatever the device's
+ * units preference says. Imperial (fl oz) is a display lens only, and this
+ * string is shared state: the timer name is what another device decodes when it
+ * picks the timer up. Writing a converted number here would corrupt the amount
+ * across devices. Do not change the encoding.
+ */
 export function encodeTimerName(t: Timer): string {
   const toks: string[] = [VERSION];
   if (t.saveAs === 'feeding') {
