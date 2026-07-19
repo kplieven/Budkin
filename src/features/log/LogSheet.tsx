@@ -294,6 +294,7 @@ export function LogSheet() {
   const tags = useAppStore((s) => s.tags);
   const loadTags = useAppStore((s) => s.loadTags);
   const adjustAmount = useAppStore((s) => s.adjustAmount);
+  const unitSystem = useAppStore((s) => s.unitSystem);
   const setEnded = useAppStore((s) => s.setEnded);
   const setOngoing = useAppStore((s) => s.setOngoing);
   const save = useAppStore((s) => s.save);
@@ -441,7 +442,12 @@ export function LogSheet() {
               <>
                 <FieldLabel>Amount (optional)</FieldLabel>
                 <View style={{ marginBottom: 16 }}>
-                  <Stepper value={te.amount ?? 0} onMinus={() => adjustAmount(-10)} onPlus={() => adjustAmount(10)} />
+                  <Stepper
+                    value={te.amount ?? 0}
+                    system={unitSystem}
+                    onMinus={() => adjustAmount(-1)}
+                    onPlus={() => adjustAmount(1)}
+                  />
                 </View>
               </>
             )}
@@ -551,7 +557,12 @@ export function LogSheet() {
           <>
             <FieldLabel>Amount</FieldLabel>
             <View style={{ marginBottom: 16 }}>
-              <Stepper value={te.amount ?? 0} onMinus={() => adjustAmount(-10)} onPlus={() => adjustAmount(10)} />
+              <Stepper
+                value={te.amount ?? 0}
+                system={unitSystem}
+                onMinus={() => adjustAmount(-1)}
+                onPlus={() => adjustAmount(1)}
+              />
             </View>
           </>
         )}

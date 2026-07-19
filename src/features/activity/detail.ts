@@ -20,13 +20,20 @@ const FEED_METHOD_LABEL: Record<string, string> = {
 
 /** One-line summary of an entry, by activity type. Shared by the History
  *  timeline and the desktop activity rail. */
+/** `e.amount` is canonical ml; relabel + convert to the user's units lens.
+ *  Read non-reactively from the store, as the temperature case below does. */
+function fmtAmount(amount: number): string {
+  const system = useAppStore.getState().unitSystem;
+  return `${fmtValue('volume', amount, system)} ${unitLabel('volume', system)}`;
+}
+
 export function detailFor(e: Entry): string {
   switch (e.type) {
     case 'feeding':
       return [
         FEED_TYPE_LABEL[e.feedType] ?? '',
         FEED_METHOD_LABEL[e.method] ?? '',
-        e.amount ? `${e.amount}ml` : '',
+        e.amount ? fmtAmount(e.amount) : '',
         e.end ? fmtDur((e.end - e.start) / 60000) : '',
         e.notes ?? '',
       ]
@@ -43,7 +50,7 @@ export function detailFor(e: Entry): string {
       return e.notes ? `${base} · ${e.notes}` : base;
     }
     case 'pumping':
-      return [e.amount ? `${e.amount}ml` : '', e.end ? fmtDur((e.end - e.start) / 60000) : '', e.notes ?? '']
+      return [e.amount ? fmtAmount(e.amount) : '', e.end ? fmtDur((e.end - e.start) / 60000) : '', e.notes ?? '']
         .filter(Boolean)
         .join(' · ');
     case 'tummy':
