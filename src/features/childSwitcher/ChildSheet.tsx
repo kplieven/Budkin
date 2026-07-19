@@ -8,6 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
+import { clampBirth } from '@/lib/birthDate';
 import { hexA } from '@/lib/color';
 import { pickChildPhoto } from '@/lib/photo';
 import { fontFamily } from '@/theme/fonts';
@@ -16,24 +17,6 @@ import { useTheme } from '@/theme/useTheme';
 import type { Child, PhotoChange } from '@/types/models';
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the LogSheet Delete button
-
-function midnight(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-/** Clamp raw Y/M/D text fields to a valid, non-future local date and convert
- *  to epoch ms (local midnight) — no date-picker dependency, just numeric
- *  TextInputs validated on save. */
-function clampBirth(yStr: string, mStr: string, dStr: string): number {
-  const now = new Date();
-  const y = Math.min(now.getFullYear(), Math.max(1900, parseInt(yStr, 10) || now.getFullYear()));
-  const mo = Math.min(12, Math.max(1, parseInt(mStr, 10) || 1));
-  const maxDay = new Date(y, mo, 0).getDate(); // days in month `mo` (1-12)
-  const d = Math.min(maxDay, Math.max(1, parseInt(dStr, 10) || 1));
-  return Math.min(new Date(y, mo - 1, d).getTime(), midnight());
-}
 
 /** A compact icon+label action pill for the photo controls. */
 function PhotoPill({

@@ -239,6 +239,7 @@ export default function Settings() {
           <Pressable
             onPress={() => {
               disconnect();
+              if (router.canDismiss()) router.dismissAll();
               router.replace('/onboarding');
             }}
             accessibilityRole="button"
@@ -256,12 +257,12 @@ export default function Settings() {
       </Txt>
       <View style={group}>
         <Pressable
-          onPress={() => router.push({ pathname: '/welcome', params: { replay: '1' } })}
+          onPress={() => router.push('/tour')}
           accessibilityRole="button"
           style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
           <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
-            Show the walkthrough
+            How Budkin works
           </Txt>
           <Icon name="chevron-right" color={t.faint} size={18} />
         </Pressable>
