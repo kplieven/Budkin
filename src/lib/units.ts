@@ -140,3 +140,29 @@ export function stepVolume(metricMl: number, dir: 1 | -1, system: UnitSystem): n
   const next = dir > 0 ? Math.floor(grid + GRID_EPS) + 1 : Math.ceil(grid - GRID_EPS) - 1;
   return toMetric('volume', Math.max(0, next * step), system);
 }
+
+/**
+ * Round a canonical-ml amount onto the NEAREST point of the display step grid,
+ * in whichever direction is closer. Same grid as `stepVolume` (10 ml metric,
+ * 0.5 fl oz imperial), defined here once so the two cannot drift apart.
+ *
+ * This exists because the stepper's display lens rounds to one decimal, which
+ * can hide a press. Stored 90 ml is 3.043 fl oz and shows as "3.0"; pressing
+ * minus correctly moves it to exactly 3.0 fl oz, which ALSO shows as "3.0", so
+ * the press looks swallowed. Snapping the draft when a sheet opens (and when
+ * the unit system is toggled under an open sheet) makes shown and stored agree,
+ * so every press visibly moves the number. Only the in-memory draft is snapped:
+ * persisted entries stay exactly as they were stored.
+ *
+ * An exact midpoint (5 ml, or a quarter ounce) rounds UP, and it takes the same
+ * `GRID_EPS` slack as `stepVolume` to actually mean it: the ml round-trip lands
+ * a couple of imperial midpoints a hair BELOW their true value (5.75 fl oz is
+ * 170.0476…ml, which converts back to 5.749999999999999), so a bare `Math.round`
+ * would send those two down while the other 38 went up. The nudge makes the tie
+ * rule uniform, and makes the two functions treat float slop identically.
+ */
+export function snapVolume(metricMl: number, system: UnitSystem): number {
+  const step = VOLUME_STEP[system];
+  const grid = toDisplay('volume', metricMl, system) / step;
+  return toMetric('volume', Math.max(0, Math.round(grid + GRID_EPS) * step), system);
+}

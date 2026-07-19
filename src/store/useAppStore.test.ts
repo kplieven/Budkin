@@ -414,6 +414,7 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
   it('metric: a press moves the stored amount by 10 ml', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     s().openSheet('pumping');
+    expect(s().te.amount).toBe(90); // the 90 ml seed already sits on the 10 ml grid
     s().adjustAmount(1);
     expect(s().te.amount).toBe(100);
     s().adjustAmount(-1);
@@ -423,7 +424,11 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
   it('imperial: a press moves by half a fl oz, and stores canonical ml', () => {
     useAppStore.setState({ unitSystem: 'imperial' });
     s().openSheet('pumping');
-    expect(s().te.amount).toBe(90); // the seeded default stays 90 ml either way
+    // The 90 ml seed is 3.0433 fl oz, which is off the half-ounce grid and would
+    // render as "3.0", the same string the first minus press produces. Opening
+    // the sheet snaps the draft to exactly 3.0 fl oz so no press looks dead.
+    expect(s().te.amount).toBe(88.7205);
+    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3, 9);
 
     s().adjustAmount(1);
     expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3.5, 9);
@@ -438,6 +443,175 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
     s().openSheet('pumping');
     for (let i = 0; i < 10; i++) s().adjustAmount(-1);
     expect(s().te.amount).toBe(0);
+  });
+});
+
+describe('draft amounts snap to the step grid, so no stepper press looks dead', () => {
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  // What the Stepper actually paints for a canonical-ml draft amount.
+  const render = (ml: number | undefined, system: 'metric' | 'imperial') => {
+    const shown = toDisplay('volume', ml ?? 0, system);
+    return system === 'imperial' ? shown.toFixed(1) : String(Math.round(shown * 10) / 10);
+  };
+
+  const pumpingEntry = (amount: number): Entry => ({
+    id: 'p1',
+    childId: 'c1',
+    type: 'pumping',
+    start: NOW - 20 * M,
+    end: NOW - 5 * M,
+    amount,
+    method: 'both',
+    tags: [],
+  });
+
+  // Values verified to render identically before and after a minus press when
+  // the draft is left off-grid: each sits just above a half-ounce mark.
+  const DEAD_ON_MINUS = [15, 30, 45, 60, 75, 90];
+  // ...and these sit just below one, so a plus press was the swallowed one.
+  const DEAD_ON_PLUS = [250, 265, 280, 295];
+
+  it.each(DEAD_ON_MINUS)('imperial: minus visibly moves a %i ml draft', (ml) => {
+    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(ml)] });
+    s().openEdit('p1');
+    const before = render(s().te.amount, 'imperial');
+    s().adjustAmount(-1);
+    expect(render(s().te.amount, 'imperial')).not.toBe(before);
+  });
+
+  it.each(DEAD_ON_PLUS)('imperial: plus visibly moves a %i ml draft', (ml) => {
+    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(ml)] });
+    s().openEdit('p1');
+    const before = render(s().te.amount, 'imperial');
+    s().adjustAmount(1);
+    expect(render(s().te.amount, 'imperial')).not.toBe(before);
+  });
+
+  it('metric: the same amounts step visibly too', () => {
+    for (const ml of [...DEAD_ON_MINUS, ...DEAD_ON_PLUS]) {
+      useAppStore.setState({ unitSystem: 'metric', entries: [pumpingEntry(ml)] });
+      s().openEdit('p1');
+      const before = render(s().te.amount, 'metric');
+      s().adjustAmount(1);
+      expect(render(s().te.amount, 'metric')).not.toBe(before);
+    }
+  });
+
+  it('openSheet snaps the pumping seed onto the active grid', () => {
+    useAppStore.setState({ unitSystem: 'imperial' });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(88.7205); // exactly 3.0 fl oz
+
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(90); // already on the 10 ml grid
+  });
+
+  it('openEdit snaps the draft of an existing entry without rewriting the stored entry', () => {
+    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(90)] });
+    s().openEdit('p1');
+    expect(s().te.amount).toBe(88.7205);
+    // The persisted entry keeps its canonical millilitres until a save.
+    const stored = s().entries[0];
+    expect(stored.type === 'pumping' && stored.amount).toBe(90);
+  });
+
+  it('openTimerEdit snaps the draft amount of a running timer', () => {
+    useAppStore.setState({
+      unitSystem: 'imperial',
+      timers: [
+        {
+          id: 't1',
+          childId: 'c1',
+          activity: 'pumping',
+          name: 'Pumping',
+          saveAs: 'pumping',
+          start: NOW - 10 * M,
+          amount: 90,
+          method: 'both',
+        },
+      ],
+    });
+    s().openTimerEdit('t1');
+    expect(s().te.amount).toBe(88.7205);
+  });
+
+  it('toggling the unit system re-snaps the draft of an open sheet', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(90);
+
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('imperial');
+    expect(s().te.amount).toBe(88.7205); // now on the half-ounce grid
+
+    s().toggleUnitSystem();
+    expect(s().unitSystem).toBe('metric');
+    expect(s().te.amount).toBe(90); // 3.0 fl oz is 88.72 ml, nearest 10 ml is 90
+  });
+
+  it('setUnitSystem leaves the draft alone when no sheet is open', () => {
+    useAppStore.setState({ unitSystem: 'metric', sheet: null, te: { shape: 'interval', tags: [], amount: 90 } });
+    s().setUnitSystem('imperial');
+    expect(s().te.amount).toBe(90);
+  });
+
+  it('never snaps the intake score of a breast feed, which is dimensionless', () => {
+    useAppStore.setState({
+      unitSystem: 'imperial',
+      entries: [
+        {
+          id: 'f1',
+          childId: 'c1',
+          type: 'feeding',
+          start: NOW - 30 * M,
+          end: NOW - 10 * M,
+          feedType: 'breast',
+          method: 'left',
+          amount: 7, // a 1-to-10 intake score, NOT millilitres
+          tags: [],
+        },
+      ],
+    });
+    s().openEdit('f1');
+    expect(s().te.amount).toBe(7);
+
+    // A unit toggle must not touch it either.
+    s().toggleUnitSystem();
+    expect(s().te.amount).toBe(7);
+  });
+
+  it('does snap a bottle feed, whose amount IS a volume', () => {
+    useAppStore.setState({
+      unitSystem: 'imperial',
+      entries: [
+        {
+          id: 'f2',
+          childId: 'c1',
+          type: 'feeding',
+          start: NOW - 30 * M,
+          end: NOW - 10 * M,
+          feedType: 'formula',
+          method: 'bottle',
+          amount: 90,
+          tags: [],
+        },
+      ],
+    });
+    s().openEdit('f2');
+    expect(s().te.amount).toBe(88.7205);
+  });
+
+  it('leaves the solid amount of a diaper alone (no stepper, no unit)', () => {
+    useAppStore.setState({
+      unitSystem: 'imperial',
+      entries: [
+        { id: 'd1', childId: 'c1', type: 'diaper', time: NOW - M, wet: false, solid: true, color: 'yellow', amount: 3, tags: [] },
+      ],
+    });
+    s().openEdit('d1');
+    expect(s().te.amount).toBe(3);
   });
 });
 
