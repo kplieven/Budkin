@@ -29,10 +29,22 @@ Worth stating, because it is not arbitrary and the fix has to replace its job.
 new truth. If a locally created child kept its local id, it would either vanish
 at the next refresh or appear twice.
 
-`pushAndRekeyChild` avoids that by rewriting the child's `id` to the server's id
-at push time, so the next refresh lines up. It also re-points `selectedChildId`.
+`saveChild`'s create branch avoids that by rewriting the child's `id` to the
+server's id in the push callback, so the next refresh lines up. It also
+re-points `selectedChildId`. Its own comment states the reason plainly: the
+refresh "replaces `children` wholesale with server data keyed by real ids".
 What it never does is rewrite the `childId` on that child's entries and
 measurements, which is precisely the defect.
+
+(On the paused `expecting-child-state` branch this block was extracted into a
+`pushAndRekeyChild` helper. That branch is not the base for this work, so the
+change here is to the inline block in `saveChild`.)
+
+Worth noting as the model to follow: `uploadUnsynced` in `src/data/sync.ts`
+already gets this right. It pushes `{ ...entry, childId: String(serverChildId) }`,
+a copy with the id remapped for the payload only, and stamps nothing but
+`serverId` onto the stored record. Stored state keeps the local `childId`. That
+is exactly the discipline this spec generalises.
 
 Entry pushes then compound it: `src/api/client.ts:184` sends
 `child: entry.childId` verbatim, which only works because the id was rewritten
