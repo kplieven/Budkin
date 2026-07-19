@@ -1,4 +1,4 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ export default function Welcome() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const enterLocal = useAppStore((s) => s.enterLocal);
+  const tutorialSeen = useAppStore((s) => s.tutorialSeen);
   const [entering, setEntering] = useState(false);
 
   // Guarded against a double tap: enterLocal does async storage work before the
@@ -32,6 +33,10 @@ export default function Welcome() {
     await enterLocal();
     router.push('/setup/baby');
   };
+
+  // Already through setup: never show the wizard's first step again. Home is
+  // gated the same way (src/app/(tabs)/index.tsx), so the two stay in step.
+  if (tutorialSeen) return <Redirect href="/(tabs)" />;
 
   return (
     <ScrollView

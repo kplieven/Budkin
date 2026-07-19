@@ -62,7 +62,7 @@ export default function Home() {
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
   // First-run gate. On web this Home route is what actually serves `/` (it
-  // shadows app/index.tsx, which also resolves to `/`), so the walkthrough
+  // shadows app/index.tsx, which also resolves to `/`), so the first-run setup
   // redirect must live here too or a fresh web visitor never lands on it. A
   // no-op on native, where app/index.tsx redirects before Home ever mounts.
   // Placed after every hook above so the rules of hooks hold on both branches.

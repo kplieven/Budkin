@@ -1,6 +1,6 @@
 import { openBrowserAsync } from 'expo-web-browser';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,23 +28,35 @@ export default function Onboarding() {
   const connect = useAppStore((s) => s.connect);
   const savedServers = useAppStore((s) => s.savedServers);
   const forgetServer = useAppStore((s) => s.forgetServer);
+  const connection = useAppStore((s) => s.connection);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
   const finish = useFinishSetup();
 
-  // A fresh Baby Buddy install has no children on it, so connecting is not the
-  // end of setup: continue into the add-baby step instead of dropping the user
-  // on an empty Home. The child count is read at fire time rather than being an
-  // effect dependency: this screen stays mounted underneath the pushed route, so
-  // depending on it would re-fire the branch every time the count changes later,
-  // including a mid-session delete of the last child.
-  useEffect(() => {
-    if (!connected) return;
-    if (nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby') {
-      router.push('/setup/baby');
-    } else {
+  // Local mode also sets `connected`, so this screen keys off a real SERVER
+  // connection: entering local mode must not make the connect form unreachable.
+  const serverConnected = connected && connection?.mode === 'server';
+  const offeredBabyStep = useRef(false);
+
+  // Re-decided on focus, not just on a dependency change. Coming BACK to this
+  // screen (from the add-baby step) has to be handled too, or a user who
+  // reached it as the stack root would be stranded on a form that can no longer
+  // do anything. A fresh Baby Buddy install has no children on it, so a
+  // successful connect continues into the add-baby step rather than dropping
+  // the user on an empty Home; anything else means setup is done.
+  useFocusEffect(
+    useCallback(() => {
+      if (!serverConnected) return;
+      if (
+        !offeredBabyStep.current &&
+        nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby'
+      ) {
+        offeredBabyStep.current = true;
+        router.push('/setup/baby');
+        return;
+      }
       finish();
-    }
-  }, [connected, finish]);
+    }, [serverConnected, finish]),
+  );
 
   // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
   // fields ready to fix) and reuses the normal connect action.
