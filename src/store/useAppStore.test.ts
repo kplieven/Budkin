@@ -1,6 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, mergeUnsynced, reconcileChildren, remapChildIds, useAppStore, visibleTags } from '@/store/useAppStore';
+import {
+  mergeHeldBackEntries,
+  mergeQueuedEntries,
+  mergeUnsynced,
+  reconcileChildren,
+  remapChildIds,
+  useAppStore,
+  visibleTags,
+} from '@/store/useAppStore';
 import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -20,6 +28,7 @@ import {
   clearEntities,
   loadEntities,
   saveChildren,
+  saveEntries,
 } from '@/data/entityStore';
 import { clearPendingOps } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
@@ -751,6 +760,25 @@ describe('timer childId attribution', () => {
     s().stopTimer(timer.id);
     expect(s().entries[0].childId).toBe('c1');
   });
+
+  it('a timer with no childId (e.g. a pre-fix widget-started nap) is never attributed to an expecting child when stopped', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [
+        { id: 'c1', first: 'A', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
+        { id: 'c2', first: 'B', last: '', birth: NOW + 30 * 86400000, color: '#fff', expected: true },
+      ],
+      selectedChildId: 'c2', // the expecting child is the one currently selected
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }], // no childId
+      entries: [],
+    });
+
+    s().stopTimer('t1');
+
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).not.toBe('c2'); // never the unborn baby
+    expect(s().entries[0].childId).toBe('c1'); // falls back to the born child on file
+  });
 });
 
 describe('timer server sync', () => {
@@ -997,6 +1025,48 @@ describe('mergeUnsynced', () => {
   });
 });
 
+describe('mergeHeldBackEntries', () => {
+  // `heldBack` defaults to false: mirrors an ordinary entry, which never
+  // carries the flag. Tests that need a withheld entry pass `true` explicitly.
+  // This is now a STORED fact (see `commitWrite`), never inferred from the
+  // owning child's `expected` state or a timestamp comparison.
+  const mkEntry = (id: string, childId: string, heldBack = false): Entry => ({
+    id,
+    childId,
+    type: 'note',
+    time: NOW,
+    text: 'note',
+    tags: [],
+    heldBack,
+  });
+  const expecting: Child = { id: 'due1', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
+  const born: Child = { id: 'c1', first: 'Mira', last: '', birth: NOW, color: '#fff' };
+
+  it('prepends a local entry flagged heldBack', () => {
+    const merged = mergeHeldBackEntries([mkEntry('s1', 'c1')], [mkEntry('note1', 'due1', true)], [born, expecting]);
+    expect(merged.map((e) => e.id)).toEqual(['note1', 's1']);
+  });
+
+  it('excludes a local entry NOT flagged heldBack, even against an expecting child (the ordinary queued-entry case stays mergeQueuedEntries\' job)', () => {
+    const merged = mergeHeldBackEntries([mkEntry('s1', 'c1')], [mkEntry('note1', 'due1')], [born, expecting]);
+    expect(merged.map((e) => e.id)).toEqual(['s1']);
+  });
+
+  it('excludes a local held-back entry already present (by id) in the base list, so it is never duplicated', () => {
+    const merged = mergeHeldBackEntries([mkEntry('note1', 'due1', true)], [mkEntry('note1', 'due1', true)], [born, expecting]);
+    expect(merged.map((e) => e.id)).toEqual(['note1']);
+  });
+
+  it('excludes a held-back entry whose owning child is no longer in the given children list (referential-integrity guard against a deleted child)', () => {
+    const merged = mergeHeldBackEntries([mkEntry('s1', 'c1')], [mkEntry('note1', 'due1', true)], [born]);
+    expect(merged.map((e) => e.id)).toEqual(['s1']);
+  });
+
+  it('returns the base list unchanged when nothing is held back', () => {
+    expect(mergeHeldBackEntries([mkEntry('s1', 'c1')], [mkEntry('note1', 'c1')], [born])).toEqual([mkEntry('s1', 'c1')]);
+  });
+});
+
 describe('queued entries survive killing the app', () => {
   const queuedEntry = (id: string): Entry => ({
     id,
@@ -1039,6 +1109,108 @@ describe('queued entries survive killing the app', () => {
     expect(s().offline).toBe(true);
     expect(s().entries).toEqual([queuedEntry('e2')]);
     expect(s().queueCount).toBe(1);
+  });
+
+  it('restores an entity-store-only entry (never queued) when the server is unreachable at launch, without wiping the durable store', async () => {
+    // Regression: the network-unreachable catch branch used to build `entries`
+    // from the write queue alone and never read the entity store at all. Before
+    // expecting children, every local entry in server mode also lived on the
+    // queue, so that was harmless; an expecting child's entries (or any entry
+    // whose owner has since been confirmed born, see isHeldBackEntry) are the
+    // first whose only home is the entity store. Setting `entries` to a
+    // queue-only list gives `entries` a new reference, and the persistence
+    // subscription then writes that (queue-only) list straight over the
+    // durable store, permanently losing anything the queue didn't have.
+    const storedOnly: Entry = { id: 'storedOnly', childId: 'c1', tags: [], type: 'note', time: NOW, text: 'entity-store only' };
+    h.q = []; // nothing on the retry queue: this is NOT the queued-entry case above
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [storedOnly],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    await s().hydrate();
+
+    expect(s().offline).toBe(true);
+    expect(s().entries.find((e) => e.id === 'storedOnly')).toBeDefined();
+    // Still durable: the persistence subscription's write reflects it too,
+    // rather than overwriting the entity store with a copy that dropped it.
+    expect(vi.mocked(saveEntries).mock.calls.at(-1)?.[0]).toContainEqual(storedOnly);
+  });
+
+  it('Finding 3: children and measurements also survive hydrate when the server is unreachable at cold start (not just entries)', async () => {
+    // Regression: the network-unreachable catch branch restored `entries`
+    // from the entity store (fixed above) but restored neither `children`
+    // nor `measurements`, leaving them at whatever they were before hydrate()
+    // ran, empty on a real cold start. Home then renders the no-child card,
+    // and if the parent re-adds the baby, `saveChild` sets `children:
+    // [newChild]`, which the persistence subscription writes straight over
+    // the durable store, erasing the expecting child (and orphaning its
+    // notes) that was sitting right there in `loadEntities()`.
+    const expectingChild: Child = { id: 'localDue', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
+    const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
+    const meas: Measurement = { id: 'measDue', childId: 'localDue', kind: 'weight', value: 3.2, date: NOW };
+    h.q = [];
+    // Simulate a genuine fresh cold start: nothing yet in memory (the shared
+    // beforeEach seeds a non-empty `children` for other tests' convenience).
+    useAppStore.setState({ children: [], entries: [], measurements: [] });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [expectingChild],
+      entries: [note],
+      measurements: [meas],
+      selectedChildId: 'localDue',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    await s().hydrate();
+
+    expect(s().offline).toBe(true);
+    expect(s().children.find((c) => c.id === 'localDue')).toBeDefined();
+    expect(s().measurements.find((m) => m.id === 'measDue')).toBeDefined();
+    // Durable too: the persistence subscription's write must reflect the
+    // restored child, not overwrite the entity store with an empty array.
+    expect(vi.mocked(saveChildren).mock.calls.at(-1)?.[0]).toContainEqual(expectingChild);
+  });
+
+  it('Fix 2: selectedChildId and lastFeed also survive hydrate when the server is unreachable at cold start', async () => {
+    // Regression: the previous fix (Finding 3, above) restored `children`,
+    // `entries` and `measurements` in this branch but not `selectedChildId`
+    // or `lastFeed`. With `children` now non-empty but `selectedChildId`
+    // stuck at '', `DashboardContent`'s `hasChild` reads true while
+    // `selectedChild` is undefined, so `selectedChild?.expected` is false and
+    // it falls through to the activity tiles for an unborn baby, which is the
+    // exact junk-data path hiding the tiles is meant to prevent.
+    const expectingChild: Child = { id: 'localDue', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
+    const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
+    h.q = [];
+    useAppStore.setState({ children: [], entries: [], measurements: [], selectedChildId: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [expectingChild],
+      entries: [note],
+      measurements: [],
+      selectedChildId: 'localDue',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    await s().hydrate();
+
+    expect(s().offline).toBe(true);
+    expect(s().selectedChildId).toBe('localDue');
+    // What DashboardContent actually branches on: with selection restored,
+    // the selected child resolves and is seen as expecting, not undefined
+    // falling through to the activity tiles.
+    const selectedChild = s().children.find((c) => c.id === s().selectedChildId);
+    expect(selectedChild).toBeDefined();
+    expect(selectedChild?.expected).toBe(true);
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
   });
 
   it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
@@ -3417,6 +3589,127 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
     expect(uploaded.children.find((c) => c.id === 'localZ')?.serverId).toBeUndefined();
   });
+
+  it('on full success, an expecting child (deliberately never uploaded) survives the post-success reload instead of being dropped', async () => {
+    const bornChild: Child = { id: 'localBorn', first: 'Amy', last: '', birth: NOW, color: '#fff' };
+    const expectingChild: Child = {
+      id: 'localDue',
+      first: 'Sky',
+      last: '',
+      birth: NOW + 30 * 86400000,
+      color: '#eee',
+      expected: true,
+    };
+    useAppStore.setState({ children: [bornChild, expectingChild], selectedChildId: 'localDue' });
+    // Mirror uploadUnsynced's real contract for this test: an expecting child
+    // is deliberately skipped and never gets a serverId (see src/data/sync.ts),
+    // unlike this block's default mock which stamps every serverId==null record.
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null && !c.expected ? { ...c, serverId: 501 } : c)),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+    // Post-success reload: the server only knows about the born (now-synced)
+    // child. The expecting child was never uploaded, so it's absent here too,
+    // exactly the case that must not wipe it from `children`.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    const stillThere = s().children.find((c) => c.id === 'localDue');
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.expected).toBe(true);
+    expect(stillThere?.birth).toBe(expectingChild.birth);
+    // Selection must not silently jump to the server's first child.
+    expect(s().selectedChildId).toBe('localDue');
+    expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
+  });
+
+  it('on full success, a note entry belonging to the expecting child is not treated as leftover work and survives the reload', async () => {
+    const bornChild: Child = { id: 'localBorn', first: 'Amy', last: '', birth: NOW, color: '#fff' };
+    const expectingChild: Child = {
+      id: 'localDue',
+      first: 'Sky',
+      last: '',
+      birth: NOW + 30 * 86400000,
+      color: '#eee',
+      expected: true,
+    };
+    // `heldBack: true` mirrors what `commitWrite` would have stamped at
+    // write time (the note's owner had no `serverId` and was `expected`).
+    // This is now a stored fact, not something re-derived from `expected` or
+    // a timestamp at merge time.
+    const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
+    useAppStore.setState({ children: [bornChild, expectingChild], entries: [note], selectedChildId: 'localBorn' });
+    // Mirror uploadUnsynced's real contract: the note's parent (the expecting
+    // child) never gets a serverId, so uploadUnsynced skips pushing the note
+    // too (no server child to attach it to) and leaves it serverId==null,
+    // exactly the case Fix 1(a) must exclude from `stillUnsynced`.
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => (c.serverId == null && !c.expected ? { ...c, serverId: 501 } : c)),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+    // Post-success reload: the server only knows about the born child and has
+    // no entries at all (the note was never uploaded).
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    // The held-back note must NOT read as failed/leftover work: this is the
+    // "Connect Baby Buddy" dead end one level down from the children fix.
+    expect(result).toEqual({ status: 'done' });
+    const stillThere = s().entries.find((e) => e.id === 'noteDue');
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.childId).toBe('localDue');
+  });
+
+  it('Fix 3: clears heldBack once a previously-withheld note is actually pushed, even on a partial outcome', async () => {
+    // `localBorn` was expecting when this note was written (commitWrite
+    // stamped heldBack: true then), and has SINCE been confirmed born
+    // (expected: false already), but in local mode nothing ever pushes it,
+    // so the note still carries heldBack: true with no serverId right up
+    // until this adopt(). `localStuck` deliberately fails to push, so the
+    // overall result is `partial` and the set() right after uploadUnsynced
+    // (the one this fix touches) is the FINAL state, not papered over by the
+    // post-success reconciliation reload.
+    const bornChild: Child = { id: 'localBorn', first: 'Amy', last: '', birth: NOW, color: '#fff' };
+    const stuckChild: Child = { id: 'localStuck', first: 'Stuck', last: '', birth: NOW, color: '#eee' };
+    const note: Entry = { id: 'noteWasDue', childId: 'localBorn', tags: [], type: 'note', time: NOW, text: 'now-born note', heldBack: true };
+    useAppStore.setState({ children: [bornChild, stuckChild], entries: [note], selectedChildId: 'localBorn' });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => (c.id === 'localBorn' ? { ...c, serverId: 501 } : c)),
+      entries: state.entries.map((e) => (e.id === 'noteWasDue' ? { ...e, serverId: 601 } : e)),
+      measurements: state.measurements,
+    }));
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'partial' });
+    const pushedNote = s().entries.find((e) => e.id === 'noteWasDue');
+    expect(pushedNote?.serverId).toBe(601);
+    // Self-consistent with the field's own doc comment: heldBack must be
+    // cleared in the same update that stamps a real serverId, mirroring
+    // flushUnsynced. isHeldBackEntry also guards on serverId == null today,
+    // so nothing downstream depends on this yet, but the stored fact itself
+    // must not contradict its own contract.
+    expect(pushedNote?.heldBack).not.toBe(true);
+  });
 });
 
 describe('flushUnsynced (reconnect flush of offline-created children/measurements)', () => {
@@ -3436,8 +3729,10 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     await s().flushUnsynced();
 
     expect(uploadUnsynced).toHaveBeenCalled();
-    // entries: [] passed through untouched — this path never touches entries
-    // (they still flow through queue.ts's flushQueue).
+    // entries: [] here because nothing in `entries` is held-back (see
+    // `isHeldBackEntry`): an ordinary entry still flows through queue.ts's
+    // flushQueue only; a held-back one (see the describe block below) would
+    // appear here instead.
     expect(vi.mocked(uploadUnsynced).mock.calls[0][0].entries).toEqual([]);
     expect(s().children.find((c) => c.id === 'localF')?.serverId).toBe(501);
   });
@@ -3451,6 +3746,28 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     await s().flushUnsynced();
 
     expect(s().measurements.find((m) => m.id === 'localG')?.serverId).toBe(701);
+  });
+
+  it('stamps a held-back entry (logged against an expecting child) once its owner is synced', async () => {
+    // Mirrors saveChild's create push having already stamped the child's
+    // serverId (e.g. via confirmBirth): the entry itself never went through
+    // the write queue (see commitWrite's `expected` guard), so this is its
+    // only path to the server. See `isHeldBackEntry`. `heldBack: true`
+    // mirrors what `commitWrite` stamped at write time (while the owner was
+    // still expected); the flag outlives the child's later confirmBirth.
+    const bornChild: Child = { id: 'localP', serverId: 900, first: 'Nova', last: '', birth: NOW - 60 * M, color: '#fff' };
+    const heldBack: Entry = { id: 'noteP', childId: 'localP', tags: [], type: 'note', time: NOW - 120 * M, text: 'pre-birth note', heldBack: true };
+    useAppStore.setState({ children: [bornChild], entries: [heldBack] });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children,
+      entries: state.entries.map((e) => (e.serverId == null ? { ...e, serverId: 42 } : e)),
+      measurements: state.measurements,
+    }));
+
+    await s().flushUnsynced();
+
+    expect(vi.mocked(uploadUnsynced).mock.calls[0][0].entries).toEqual([heldBack]);
+    expect(s().entries.find((e) => e.id === 'noteP')?.serverId).toBe(42);
   });
 
   it('is a no-op while offline', async () => {
@@ -3708,6 +4025,540 @@ describe('walkthrough persistence', () => {
     useAppStore.setState({ tutorialSeen: false });
     await s().hydrate();
     expect(s().tutorialSeen).toBe(false);
+  });
+});
+
+describe('expecting children', () => {
+  it('creates an expected child carrying the flag, and selects it', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+
+    const kids = useAppStore.getState().children;
+    expect(kids).toHaveLength(1);
+    expect(kids[0].expected).toBe(true);
+    expect(kids[0].serverId).toBeUndefined();
+    expect(useAppStore.getState().selectedChildId).toBe(kids[0].id);
+  });
+
+  it('creates a born child with no expected flag', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Wren', last: '', birth: Date.parse('2026-01-05') });
+    expect(useAppStore.getState().children[0].expected).toBeUndefined();
+  });
+
+  it('confirmBirth clears the flag and sets the real birth date', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    const id = useAppStore.getState().children[0].id;
+
+    const actual = Date.parse('2026-11-24');
+    useAppStore.getState().confirmBirth(id, actual);
+
+    const kid = useAppStore.getState().children[0];
+    expect(kid.expected).toBe(false);
+    expect(kid.birth).toBe(actual);
+  });
+
+  it('leaves the confirmed child sync-eligible', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    const id = useAppStore.getState().children[0].id;
+    useAppStore.getState().confirmBirth(id, Date.parse('2026-11-24'));
+
+    const kid = useAppStore.getState().children[0];
+    expect(kid.serverId).toBeUndefined(); // still unsynced, so the reconnect flush picks it up
+    expect(kid.expected).toBe(false); // and no longer held back
+  });
+
+  it('confirmBirth on an unknown id is a no-op', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    const before = useAppStore.getState().children;
+    useAppStore.getState().confirmBirth('nope', Date.now());
+    expect(useAppStore.getState().children).toEqual(before);
+  });
+
+  it('confirmBirth on an already-born child is a no-op', () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Wren', last: '', birth: Date.parse('2026-01-05') });
+    const before = useAppStore.getState().children;
+    useAppStore.getState().confirmBirth(before[0].id, Date.parse('2026-11-24'));
+    expect(useAppStore.getState().children).toEqual(before);
+  });
+
+  it('server mode: an expected child is not pushed, a born one is', async () => {
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+
+    // The `!fields.expected` clause is the only thing that can block this push:
+    // conn.mode === 'server' and !s.offline are both satisfied.
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    await flush();
+    expect(h.childPushed).toHaveLength(0);
+
+    // Positive control: without `expected`, the same server-mode setup does push.
+    useAppStore.getState().saveChild({ first: 'Wren', last: '', birth: Date.parse('2026-01-05') });
+    await flush();
+    expect(h.childPushed).toHaveLength(1);
+  });
+
+  it('server mode online: a note written against an expecting child is neither pushed nor queued', async () => {
+    // Queueing it would let it flush silently through `flushQueue`, which
+    // never stamps a local serverId on an entry: only `flushUnsynced`'s
+    // held-back push (once confirmBirth gives the child one) does that (see
+    // commitWrite's `expected` guard and `isHeldBackEntry`). So it must stay
+    // off the queue entirely, the same way a local-mode write does.
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    const dueId = useAppStore.getState().children[0].id;
+    useAppStore.setState({ selectedChildId: dueId });
+
+    useAppStore.getState().openSheet('note');
+    useAppStore.getState().setTE({ noteText: 'Scan: 20 weeks, all clear' });
+    useAppStore.getState().save();
+    await flush();
+
+    expect(useAppStore.getState().entries).toHaveLength(1);
+    expect(h.pushed).toHaveLength(0);
+    expect(h.q).toHaveLength(0);
+  });
+
+  it('confirmBirth in server mode online: pushes the newly born child; keeps the local id and stamps serverId instead of rewriting it', async () => {
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    await flush();
+    expect(h.childPushed).toHaveLength(0); // still expected: saveChild's own push is held back
+    const localId = useAppStore.getState().children[0].id;
+    expect(useAppStore.getState().selectedChildId).toBe(localId);
+
+    const actual = Date.parse('2026-11-24');
+    useAppStore.getState().confirmBirth(localId, actual);
+    await flush();
+
+    expect(h.childPushed).toHaveLength(1);
+    // Pushed with the post-birth fields (real birth date, no longer expected),
+    // not the stale due date.
+    expect(h.childPushed[0]).toMatchObject({ expected: false, birth: actual });
+    const kid = useAppStore.getState().children[0];
+    // the local id is NOT rewritten to the server id, and selection keeps
+    // following it: entries/measurements reference this id, and rewriting it
+    // would orphan them (the bug this whole design exists to prevent).
+    expect(kid.id).toBe(localId);
+    expect(useAppStore.getState().selectedChildId).toBe(localId);
+    // serverId is stamped instead (like saveChild's create push) so
+    // server-child ops (update / delete / sync) recognise it before the next
+    // refresh.
+    expect(kid.serverId).toBe(777);
+  });
+
+  it('confirmBirth in local mode does not attempt a push and keeps the local id', async () => {
+    useAppStore.setState({ children: [], selectedChildId: '', connection: { mode: 'local' } });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: Date.parse('2026-12-01'), expected: true });
+    const localId = useAppStore.getState().children[0].id;
+
+    useAppStore.getState().confirmBirth(localId, Date.parse('2026-11-24'));
+    await flush();
+
+    expect(h.childPushed).toHaveLength(0);
+    const kid = useAppStore.getState().children[0];
+    expect(kid.id).toBe(localId);
+    expect(kid.serverId).toBeUndefined();
+    expect(useAppStore.getState().selectedChildId).toBe(localId);
+  });
+});
+
+describe('held-back entries survive refresh/hydrate (regression for the blocking item)', () => {
+  const expectingChild: Child = {
+    id: 'localDue',
+    first: 'Sky',
+    last: '',
+    birth: NOW + 30 * 86400000,
+    color: '#eee',
+    expected: true,
+  };
+  // `heldBack: true` mirrors what `commitWrite` stamps at write time for any
+  // entry logged against a child with no `serverId` (an expecting child, see
+  // `Child.expected`). A stored fact, not something re-derived later from
+  // `expected` or a timestamp comparison.
+  const note: Entry = {
+    id: 'noteDue',
+    childId: 'localDue',
+    tags: [],
+    type: 'note',
+    time: NOW,
+    text: 'Scan: 20 weeks, all clear',
+    heldBack: true,
+  };
+  const bornOnServer = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+
+  it('a note written for an expecting child survives refresh() in server mode', async () => {
+    // The note was written while the child was expecting and is already in
+    // memory (mirrors adopt() having just merged it back in); the server
+    // reload naturally omits both the expecting child and its note, since
+    // neither was ever pushed.
+    useAppStore.setState({
+      children: [...s().children, expectingChild],
+      entries: [note],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [bornOnServer],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    const stillThere = s().entries.find((e) => e.id === 'noteDue');
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.childId).toBe('localDue');
+  });
+
+  it('a note written for an expecting child survives hydrate() in server mode (app restart), when it is in the entity store but not on the queue and not on the server', async () => {
+    // Cold restart: the note lives only in the durable entity store (it was
+    // never queued: commitWrite returns early for local-mode writes, and the
+    // note was written before the child's owner ever adopted a server). The
+    // write queue itself stays empty for this test (h.q defaults to []),
+    // which is what distinguishes this from the ordinary queued-entry case.
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [expectingChild],
+      entries: [note],
+      measurements: [],
+      selectedChildId: 'localDue',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [bornOnServer],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(h.q).toEqual([]); // confirms this is the not-queued case, not mergeQueuedEntries'
+    const stillThere = s().entries.find((e) => e.id === 'noteDue');
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.childId).toBe('localDue');
+  });
+
+  it('a note written for an expecting child survives confirmBirth() then refresh() in server mode (expected clearing must not orphan it from protection)', async () => {
+    // The note is written while the child is still expecting (mirrors the two
+    // tests above): it lives only in memory/entity-store, never on the server
+    // or the queue. confirmBirth then clears `expected` and stamps a
+    // serverId. The note's `heldBack` flag was stamped once, at write time,
+    // and confirmBirth flipping `expected` does not touch it, so the note
+    // stays protected regardless of how the child's birth compares to the
+    // note's own timestamp (see Finding 1: `clampBirth` returns local
+    // midnight, which routinely lands BEFORE a same-day note, not after).
+    useAppStore.setState({
+      children: [...s().children, expectingChild],
+      entries: [note],
+    });
+    const localId = expectingChild.id;
+    // Realistic: `clampBirth` (src/lib/birthDate.ts) can only ever produce
+    // local midnight of some day, never a future timestamp. Local midnight
+    // of "now" is EARLIER than the note's own `time` (NOW), not later.
+    const midnightOfNow = new Date(NOW);
+    midnightOfNow.setHours(0, 0, 0, 0);
+    const actualBirth = midnightOfNow.getTime();
+
+    useAppStore.getState().confirmBirth(localId, actualBirth);
+    await flush(); // let confirmBirth's own push resolve and stamp serverId
+
+    const born = s().children.find((c) => c.id === localId);
+    expect(born?.expected).toBe(false);
+    expect(born?.serverId).toBe(777);
+
+    // The server now knows the child (by the serverId confirmBirth just
+    // stamped) but not yet the note: nothing has pushed it there.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth, color: '#eee' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '777',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    const stillThere = s().entries.find((e) => e.id === 'noteDue');
+    expect(stillThere).toBeDefined();
+    expect(stillThere?.childId).toBe(localId);
+  });
+});
+
+describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
+  it('expecting child, write a note, edit it, then refresh() with server data lacking it: the note survives and still carries heldBack', async () => {
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: NOW + 30 * 86400000, expected: true });
+    const dueId = useAppStore.getState().children[0].id;
+    useAppStore.setState({ selectedChildId: dueId });
+
+    // Write the note (create path, commitWrite stamps heldBack: true here).
+    useAppStore.getState().openSheet('note');
+    useAppStore.getState().setTE({ noteText: 'Scan: 20 weeks, all clear' });
+    useAppStore.getState().save();
+    await flush();
+    const noteId = useAppStore.getState().entries[0].id;
+    expect(useAppStore.getState().entries[0].heldBack).toBe(true);
+
+    // Edit it (fix a typo): this is save()'s EDIT branch, which rebuilds a
+    // brand-new entry object per activity type rather than calling
+    // commitWrite. Before the fix it carried across only `serverId`.
+    useAppStore.getState().openEdit(noteId);
+    useAppStore.getState().setTE({ noteText: 'Scan: 20 weeks, all clear (typo fixed)' });
+    useAppStore.getState().save();
+    await flush();
+
+    const edited = useAppStore.getState().entries.find((e) => e.id === noteId);
+    expect(edited).toBeDefined();
+    expect(edited?.type === 'note' ? edited.text : undefined).toBe('Scan: 20 weeks, all clear (typo fixed)');
+    expect(edited?.heldBack).toBe(true);
+
+    // A refresh with server data that (correctly) has never heard of this
+    // note must not let it fall out of `entries`: `flushUnsynced` no longer
+    // owns it if heldBack was dropped, and the persistence subscription would
+    // write the shortened array straight over durable storage.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [],
+      entries: [],
+      timers: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await useAppStore.getState().refresh();
+
+    const survivor = useAppStore.getState().entries.find((e) => e.id === noteId);
+    expect(survivor).toBeDefined();
+    expect(survivor?.heldBack).toBe(true);
+  });
+});
+
+describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inferred)', () => {
+  it('Finding 1a (ordinary path): a note written earlier the same day survives confirmBirth with a realistic midnight-today birth, then refresh()', async () => {
+    // Reproduces the failure as it actually happens: `clampBirth` (see
+    // src/lib/birthDate.ts) returns LOCAL MIDNIGHT, and `ConfirmBirthSheet`
+    // prefills with today, so a same-day note's own timestamp is routinely
+    // AFTER the birth that later gets recorded for it, not before.
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: NOW + 30 * 86400000, expected: true });
+    const dueId = useAppStore.getState().children[0].id;
+    useAppStore.setState({ selectedChildId: dueId });
+
+    // The 08:30 note, written while the child is still expecting.
+    useAppStore.getState().openSheet('note');
+    useAppStore.getState().setTE({ noteText: 'Kicking a lot today' });
+    useAppStore.getState().save();
+    await flush();
+    expect(useAppStore.getState().entries).toHaveLength(1);
+    const noteId = useAppStore.getState().entries[0].id;
+    expect(useAppStore.getState().entries[0].childId).toBe(dueId);
+
+    // confirmBirth with what `clampBirth` actually produces: local midnight
+    // TODAY, which lands BEFORE the note's own (later, same-day) timestamp.
+    const midnightOfNow = new Date(NOW);
+    midnightOfNow.setHours(0, 0, 0, 0);
+    const actualBirth = midnightOfNow.getTime();
+    useAppStore.getState().confirmBirth(dueId, actualBirth);
+    await flush();
+
+    // Baby Buddy has no record of the note (it was never pushed): a refresh
+    // must not let the server's blank slate silently drop it.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth, color: useAppStore.getState().children[0].color }],
+      entries: [],
+      timers: [],
+      selectedChildId: '777',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await useAppStore.getState().refresh();
+
+    const survivor = useAppStore.getState().entries.find((e) => e.id === noteId);
+    expect(survivor).toBeDefined();
+  });
+
+  it('Finding 1b (overdue pregnancy): a note written after an already-past due date survives refresh() while the child is still expecting', async () => {
+    // `clampDueDate` deliberately lets a past date through (an already
+    // overdue pregnancy keeps its real due date). An overdue pregnancy is
+    // common, not exceptional.
+    useAppStore.setState({
+      children: [],
+      selectedChildId: '',
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+    });
+    const overdueDue = NOW - 10 * 86400000;
+    useAppStore.getState().saveChild({ first: 'Rowan', last: '', birth: overdueDue, expected: true });
+    const dueId = useAppStore.getState().children[0].id;
+    useAppStore.setState({ selectedChildId: dueId });
+
+    useAppStore.getState().openSheet('note');
+    useAppStore.getState().setTE({ noteText: 'Still waiting...' });
+    useAppStore.getState().save();
+    await flush();
+    const noteId = useAppStore.getState().entries[0].id;
+
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [],
+      entries: [],
+      timers: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await useAppStore.getState().refresh();
+
+    const survivor = useAppStore.getState().entries.find((e) => e.id === noteId);
+    expect(survivor).toBeDefined();
+  });
+
+  it("Finding 2: an ordinary QUEUED entry timestamped before its (born, synced) owner's birth is pushed exactly once, not double-pushed by flushUnsynced too", async () => {
+    const bornSynced: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' };
+    const queuedEntry: Entry = {
+      id: 'q1',
+      childId: 'c1',
+      tags: [],
+      type: 'note',
+      time: NOW - 60 * M, // before the recorded birth, the old timestamp-based check's blind spot
+      text: 'early log',
+    };
+    h.q = [queuedEntry]; // an ordinary offline write, sitting on the retry queue
+    useAppStore.setState({ children: [bornSynced], entries: [queuedEntry] });
+    // Simulate uploadUnsynced ALSO pushing whatever entries it's handed, so a
+    // double-push is directly observable via `h.pushed` (which
+    // `pushEntryToServer`, used by `flushQueue`, already tracks). Persistent
+    // (not `Once`): post-fix, `flushUnsynced` never even calls `uploadUnsynced`
+    // here (nothing is held back), so a `mockImplementationOnce` would go
+    // unconsumed and leak into a later, unrelated test.
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => {
+      for (const e of state.entries) {
+        if (e.serverId == null) h.pushed.push(e);
+      }
+      return {
+        children: state.children,
+        entries: state.entries.map((e) => (e.serverId == null ? { ...e, serverId: 42 } : e)),
+        measurements: state.measurements,
+      };
+    });
+
+    await s().flushQueue();
+    await s().flushUnsynced();
+
+    expect(h.pushed.filter((e: any) => e.id === 'q1')).toHaveLength(1);
+    // Restore the file's baseline passthrough default so this test's
+    // side-effecting mock can't affect any test that runs after it.
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children,
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+  });
+});
+
+describe('heldBack migration (entries written before the field existed)', () => {
+  beforeEach(() => {
+    // Explicit, neutral passthrough: this describe's `hydrate()` calls
+    // legitimately trigger `flushUnsynced` -> `uploadUnsynced` (a backfilled
+    // entry makes `hasUnsynced` true), so pin the mock rather than depend on
+    // whatever a previous describe block happened to leave it as.
+    vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
+      children: state.children,
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+  });
+
+  it('backfills heldBack on a legacy flagless entry owned by a still-expecting child, on hydrate, and it survives a later refresh', async () => {
+    const expectingChild: Child = { id: 'localDue', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
+    // No `heldBack` field at all: exactly what an entry persisted by a
+    // pre-fix version of the app looks like on disk.
+    const legacyNote: Entry = { id: 'legacyNote', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'pre-fix note' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [expectingChild],
+      entries: [legacyNote],
+      measurements: [],
+      selectedChildId: 'localDue',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [],
+      entries: [],
+      timers: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    const backfilled = s().entries.find((e) => e.id === 'legacyNote');
+    expect(backfilled?.heldBack).toBe(true);
+
+    // Prove it actually protects the note across a LATER refresh too, not
+    // just the load that backfilled it.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [],
+      entries: [],
+      timers: [],
+      selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    expect(s().entries.find((e) => e.id === 'legacyNote')).toBeDefined();
+  });
+
+  it('does not backfill a flagless entry whose owning child is NOT expecting (an ordinary already-queued-or-pushed entry)', async () => {
+    const born: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' };
+    const ordinary: Entry = { id: 'ord1', childId: 'c1', tags: [], type: 'note', time: NOW, text: 'ordinary' };
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [born],
+      entries: [ordinary],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    await s().hydrate();
+
+    const loaded = s().entries.find((e) => e.id === 'ord1');
+    expect(loaded?.heldBack).toBeFalsy();
   });
 });
 
