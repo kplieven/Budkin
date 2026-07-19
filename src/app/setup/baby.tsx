@@ -39,11 +39,16 @@ export default function SetupBaby() {
   const [year, setYear] = useState(String(today.getFullYear()));
   const [month, setMonth] = useState(String(today.getMonth() + 1));
   const [day, setDay] = useState(String(today.getDate()));
+  const [saving, setSaving] = useState(false);
 
   const canSave = first.trim().length > 0;
 
+  // Guarded against a double tap: saveChild returns before its server push
+  // settles and finish() only schedules the navigation, so a second tap landing
+  // before the screen unmounts would create a second child.
   const onAdd = () => {
-    if (!canSave) return;
+    if (!canSave || saving) return;
+    setSaving(true);
     saveChild({ first: first.trim(), last: last.trim(), birth: clampBirth(year, month, day) });
     finish();
   };
@@ -190,7 +195,7 @@ export default function SetupBaby() {
           <SetupButton
             label="Add baby"
             onPress={onAdd}
-            disabled={!canSave}
+            disabled={!canSave || saving}
             style={{ marginTop: 24 }}
           />
 
