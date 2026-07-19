@@ -1,3 +1,4 @@
+import { feedAmountIsVolume } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
 import { fmtValue, unitLabel } from '@/lib/units';
 import { useAppStore } from '@/store/useAppStore';
@@ -18,22 +19,27 @@ const FEED_METHOD_LABEL: Record<string, string> = {
   self: 'self fed',
 };
 
-/** One-line summary of an entry, by activity type. Shared by the History
- *  timeline and the desktop activity rail. */
-/** `e.amount` is canonical ml; relabel + convert to the user's units lens.
- *  Read non-reactively from the store, as the temperature case below does. */
+/** A feeding volume in canonical ml, relabelled and converted to the user's
+ *  units lens. Read non-reactively from the store, as the temperature case in
+ *  `detailFor` does. Only ever called for amounts that really are volumes: see
+ *  `feedAmountIsVolume`. */
 function fmtAmount(amount: number): string {
   const system = useAppStore.getState().unitSystem;
   return `${fmtValue('volume', amount, system)} ${unitLabel('volume', system)}`;
 }
 
+/** One-line summary of an entry, by activity type. Shared by the History
+ *  timeline and the desktop activity rail. */
 export function detailFor(e: Entry): string {
   switch (e.type) {
     case 'feeding':
       return [
         FEED_TYPE_LABEL[e.feedType] ?? '',
         FEED_METHOD_LABEL[e.method] ?? '',
-        e.amount ? fmtAmount(e.amount) : '',
+        // A breast feed's `amount` is a dimensionless 1 to 10 intake score, not
+        // millilitres, so it is shown bare. Converting it would attach a false
+        // unit (an intake of 5 would read as "0.2 fl oz").
+        e.amount ? (feedAmountIsVolume(e.feedType, e.method) ? fmtAmount(e.amount) : String(e.amount)) : '',
         e.end ? fmtDur((e.end - e.start) / 60000) : '',
         e.notes ?? '',
       ]
