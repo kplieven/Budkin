@@ -46,7 +46,7 @@ export function NoChildCard() {
         No baby yet
       </Txt>
       <Txt weight={500} size={14.5} color={t.dim} style={{ marginTop: 8, textAlign: 'center', lineHeight: 21 }}>
-        Budkin starts tracking feeds, naps, nappies and growth as soon as you add them.
+        Budkin starts tracking feeds, naps, diapers and growth as soon as you add them.
       </Txt>
 
       <Pressable
