@@ -29,18 +29,22 @@ export default function Onboarding() {
   const savedServers = useAppStore((s) => s.savedServers);
   const forgetServer = useAppStore((s) => s.forgetServer);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
-  const children = useAppStore((s) => s.children);
   const finish = useFinishSetup();
 
   // A fresh Baby Buddy install has no children on it, so connecting is not the
   // end of setup: continue into the add-baby step instead of dropping the user
-  // on an empty Home. `children` is the raw store array, not a derived one, so
-  // this selector is reference-stable.
+  // on an empty Home. The child count is read at fire time rather than being an
+  // effect dependency: this screen stays mounted underneath the pushed route, so
+  // depending on it would re-fire the branch every time the count changes later,
+  // including a mid-session delete of the last child.
   useEffect(() => {
     if (!connected) return;
-    if (nextAfterConnect(children.length) === '/setup/baby') router.push('/setup/baby');
-    else finish();
-  }, [connected, children.length, finish]);
+    if (nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby') {
+      router.push('/setup/baby');
+    } else {
+      finish();
+    }
+  }, [connected, finish]);
 
   // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
   // fields ready to fix) and reuses the normal connect action.
