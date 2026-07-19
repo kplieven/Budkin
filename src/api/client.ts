@@ -178,12 +178,12 @@ export function isBathNote(n: any): boolean {
 }
 
 /** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
-export function bathToNoteBody(entry: BathEntry): Record<string, unknown> {
+export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
   return {
-    child: entry.childId,
+    child: childServerId,
     time: toISO(entry.time),
-    note: `Bath — ${entry.wash} wash`,
+    note: `Bath, ${entry.wash} wash`,
     tags: ['bath', entry.wash, ...userTags],
   };
 }
@@ -219,9 +219,9 @@ export function noteToNoteEntry(n: any, childId: string): NoteEntry {
 
 /** Encode a general note as the body for a Baby Buddy Note (create/update). The
  *  structural bath tags are stripped so a note can never be misread as a bath. */
-export function noteToNoteBody(entry: NoteEntry): Record<string, unknown> {
+export function noteToNoteBody(entry: NoteEntry, childServerId: number): Record<string, unknown> {
   return {
-    child: entry.childId,
+    child: childServerId,
     time: toISO(entry.time),
     note: entry.text,
     tags: entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t)),
@@ -235,11 +235,11 @@ export function isMilestoneNote(n: any): boolean {
 
 /** Encode a milestone entry as the body for a Baby Buddy Note (create/update).
  *  Body is `🎉 <title>` with the optional parent note on a second line. */
-export function milestoneToNoteBody(entry: MilestoneEntry): Record<string, unknown> {
+export function milestoneToNoteBody(entry: MilestoneEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !isStructuralMilestoneTag(t));
   const note = entry.note?.trim();
   return {
-    child: entry.childId,
+    child: childServerId,
     time: toISO(entry.time),
     note: note ? `🎉 ${entry.text}\n${note}` : `🎉 ${entry.text}`,
     tags: ['milestone', `mk:${entry.key}`, ...userTags],
@@ -584,8 +584,8 @@ export class BabybuddyClient {
     return { baths, milestones, notes };
   }
 
-  private buildBody(entry: Entry): Record<string, unknown> {
-    const child = entry.childId;
+  private buildBody(entry: Entry, childServerId: number): Record<string, unknown> {
+    const child = childServerId;
     const tags = entry.tags ?? [];
     switch (entry.type) {
       case 'feeding':
@@ -633,29 +633,29 @@ export class BabybuddyClient {
       case 'temperature':
         return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
       case 'bath':
-        return bathToNoteBody(entry);
+        return bathToNoteBody(entry, childServerId);
       case 'note':
-        return noteToNoteBody(entry);
+        return noteToNoteBody(entry, childServerId);
       case 'milestone':
-        return milestoneToNoteBody(entry);
+        return milestoneToNoteBody(entry, childServerId);
     }
   }
 
   /** Create an entry on the server; returns the new server id. */
-  async createEntry(entry: Entry): Promise<number | undefined> {
+  async createEntry(entry: Entry, childServerId: number): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>(`/${ENDPOINT[entry.type]}/`, {
       method: 'POST',
-      body: JSON.stringify(this.buildBody(entry)),
+      body: JSON.stringify(this.buildBody(entry, childServerId)),
     });
     return res?.id;
   }
 
   /** Update an existing entry on the server (requires entry.serverId). */
-  async updateEntry(entry: Entry): Promise<void> {
+  async updateEntry(entry: Entry, childServerId: number): Promise<void> {
     if (entry.serverId == null) return;
     await this.request(`/${ENDPOINT[entry.type]}/${entry.serverId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(this.buildBody(entry)),
+      body: JSON.stringify(this.buildBody(entry, childServerId)),
     });
   }
 
@@ -682,23 +682,23 @@ export class BabybuddyClient {
     }));
   }
 
-  private measBody(m: Measurement): Record<string, unknown> {
-    return { child: m.childId, date: toDateStr(m.date), [MEAS_FIELD[m.kind]]: m.value, notes: m.notes ?? '' };
+  private measBody(m: Measurement, childServerId: number): Record<string, unknown> {
+    return { child: childServerId, date: toDateStr(m.date), [MEAS_FIELD[m.kind]]: m.value, notes: m.notes ?? '' };
   }
 
-  async createMeasurement(m: Measurement): Promise<number | undefined> {
+  async createMeasurement(m: Measurement, childServerId: number): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>(`/${MEAS_ENDPOINT[m.kind]}/`, {
       method: 'POST',
-      body: JSON.stringify(this.measBody(m)),
+      body: JSON.stringify(this.measBody(m, childServerId)),
     });
     return res?.id;
   }
 
-  async updateMeasurement(m: Measurement): Promise<void> {
+  async updateMeasurement(m: Measurement, childServerId: number): Promise<void> {
     if (m.serverId == null) return;
     await this.request(`/${MEAS_ENDPOINT[m.kind]}/${m.serverId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(this.measBody(m)),
+      body: JSON.stringify(this.measBody(m, childServerId)),
     });
   }
 

@@ -71,7 +71,7 @@ describe('uploadUnsynced', () => {
     expect(log).toEqual(['child:c1', 'entry:e1', 'measurement:m1']);
   });
 
-  it('remaps an entry childId to the newly-assigned server child id', async () => {
+  it('passes the newly-assigned server child id alongside the entry (childId stays local)', async () => {
     const state: UploadState = {
       children: [child({ id: 'child1', serverId: undefined })],
       entries: [diaperEntry({ id: 'e1', childId: 'child1' })],
@@ -82,10 +82,10 @@ describe('uploadUnsynced', () => {
 
     await uploadUnsynced(state, deps);
 
-    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: '10' }));
+    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: 'child1' }), 10);
   });
 
-  it('remaps a measurement childId to the newly-assigned server child id', async () => {
+  it('passes the newly-assigned server child id alongside the measurement (childId stays local)', async () => {
     const state: UploadState = {
       children: [child({ id: 'child1', serverId: undefined })],
       entries: [],
@@ -96,7 +96,7 @@ describe('uploadUnsynced', () => {
 
     await uploadUnsynced(state, deps);
 
-    expect(pushMeasurement).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1', childId: '42' }));
+    expect(pushMeasurement).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1', childId: 'child1' }), 42);
   });
 
   it('does not push a child that already has a serverId', async () => {
@@ -212,7 +212,7 @@ describe('uploadUnsynced', () => {
 
     await uploadUnsynced(state, makeDeps({ pushEntry }));
 
-    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: '7' }));
+    expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: '7' }), 7);
   });
 
   it('calls onProgress once per unsynced record, monotonically reaching total', async () => {

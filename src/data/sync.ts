@@ -13,11 +13,13 @@ import type { Child, Entry, Measurement } from '@/types/models';
 export interface UploadDeps {
   /** POST a child, return its new server id (or undefined on failure). */
   pushChild: (child: Child) => Promise<number | undefined>;
-  /** POST an entry (whose childId has ALREADY been remapped to the server child id),
-   *  return its new server id (or undefined). */
-  pushEntry: (entry: Entry) => Promise<number | undefined>;
-  /** POST a measurement (childId already remapped), return its new server id. */
-  pushMeasurement: (m: Measurement) => Promise<number | undefined>;
+  /** POST an entry, given the server id of its owning child, return its new
+   *  server id (or undefined). The entry's own `childId` stays local; the
+   *  server id is passed alongside, never written into the record. */
+  pushEntry: (entry: Entry, childServerId: number) => Promise<number | undefined>;
+  /** POST a measurement, given the server id of its owning child, return its
+   *  new server id. */
+  pushMeasurement: (m: Measurement, childServerId: number) => Promise<number | undefined>;
 }
 
 export interface UploadState {
@@ -26,9 +28,13 @@ export interface UploadState {
   measurements: Measurement[];
 }
 
-async function tryPush<T>(push: (v: T) => Promise<number | undefined>, value: T): Promise<number | undefined> {
+async function tryPush<T, A extends unknown[]>(
+  push: (value: T, ...args: A) => Promise<number | undefined>,
+  value: T,
+  ...args: A
+): Promise<number | undefined> {
   try {
-    return await push(value);
+    return await push(value, ...args);
   } catch {
     return undefined;
   }
@@ -86,7 +92,7 @@ export async function uploadUnsynced(
       onProgress?.(done, total);
       continue;
     }
-    const id = await tryPush(deps.pushEntry, { ...entry, childId: String(serverChildId) });
+    const id = await tryPush(deps.pushEntry, entry, serverChildId);
     if (id != null) entry.serverId = id;
     done++;
     onProgress?.(done, total);
@@ -101,7 +107,7 @@ export async function uploadUnsynced(
       onProgress?.(done, total);
       continue;
     }
-    const id = await tryPush(deps.pushMeasurement, { ...m, childId: String(serverChildId) });
+    const id = await tryPush(deps.pushMeasurement, m, serverChildId);
     if (id != null) m.serverId = id;
     done++;
     onProgress?.(done, total);

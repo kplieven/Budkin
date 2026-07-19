@@ -365,14 +365,92 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   return [...unsynced, ...serverList];
 }
 
+/** Reconcile a server child list onto the local one WITHOUT changing any local
+ *  `id`. A child that exists on both sides is matched by `serverId` and the
+ *  server's field values win, but the local `id` is preserved, because entries
+ *  and measurements reference it and rewriting it would orphan them. That
+ *  orphaning is the bug this whole design exists to prevent.
+ *
+ *  Local children with no `serverId` were never pushed (an offline creation, or
+ *  a child deliberately held back) and are kept, prepended, which is where
+ *  `mergeUnsynced` put them. Server children the app has not seen are added
+ *  with their server-derived id: they never had a local phase, so that id is
+ *  already stable. A local child whose `serverId` is absent from the server list
+ *  was deleted server-side and is dropped, matching today's behaviour. A
+ *  never-pushed local whose `id` collides with a reconciled child's id is
+ *  dropped too, so the result can never contain duplicate ids, matching what
+ *  `mergeUnsynced` guaranteed. */
+export function reconcileChildren(serverChildren: Child[], localChildren: Child[]): Child[] {
+  const localByServerId = new Map<number, Child>();
+  for (const c of localChildren) {
+    if (c.serverId != null) localByServerId.set(c.serverId, c);
+  }
+  const reconciled = serverChildren.map((sc) => {
+    const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
+    return local ? { ...sc, id: local.id } : sc;
+  });
+  const reconciledIds = new Set(reconciled.map((c) => c.id));
+  const neverPushed = localChildren.filter((c) => c.serverId == null && !reconciledIds.has(c.id));
+  return [...neverPushed, ...reconciled];
+}
+
+/** Translate incoming server-loaded records' `childId` from the server's child
+ *  id (what `loadFromServer` writes verbatim, since it has no local state to
+ *  consult) to the LOCAL id of the child that owns it, matched by `serverId`
+ *  against the just-reconciled child list. Must run AFTER `reconcileChildren`,
+ *  using its output: that is the only place the authoritative local id for a
+ *  previously-local, since-synced child is known. A record whose child can't
+ *  be resolved (e.g. deleted server-side mid-request) keeps its existing
+ *  `childId` rather than being dropped or reassigned to the wrong owner.
+ *  `childId` is typed optional here (not just `string`) so this same helper
+ *  covers `Timer`, whose `childId` can be genuinely absent (defaults to the
+ *  selected child); entries and measurements always carry one. */
+export function remapChildIds<T extends { childId?: string }>(records: T[], children: Child[]): T[] {
+  const localIdByServerId = new Map<string, string>();
+  for (const c of children) {
+    if (c.serverId != null) localIdByServerId.set(String(c.serverId), c.id);
+  }
+  return records.map((r) => {
+    if (r.childId == null) return r;
+    const localId = localIdByServerId.get(r.childId);
+    return localId ? { ...r, childId: localId } : r;
+  });
+}
+
+/** The server id of the child a record belongs to, or null when that child has
+ *  never been pushed. A record whose child has no server id MUST NOT be sent:
+ *  the server would reject it and the retry queue would replay it verbatim
+ *  forever. Callers enqueue instead and let the reconnect flush handle it once
+ *  the child exists server-side. */
+function childServerIdFor(children: Child[], childId: string): number | null {
+  return children.find((c) => c.id === childId)?.serverId ?? null;
+}
+
+/** Resolve `loadFromServer`'s `selectedChildId` (see repository.ts) into the
+ *  RECONCILED (local id) space. That value is `String(children[0]?.serverId)`,
+ *  i.e. a SERVER-space id; it is only ever used as a fallback once a caller's
+ *  own preferred selection is no longer valid, so it must be translated the
+ *  same way `remapChildIds` translates an incoming `childId`, by matching
+ *  `serverId` against the just-reconciled child list, not compared to local
+ *  ids directly. Falls back to the reconciled list's first child (covers a
+ *  locally-created, not-yet-synced child, whose `serverId` is absent), then to
+ *  `''` when there is no child at all. */
+function resolveSelectedChildId(reconciledChildren: Child[], serverSelectedChildId: string): string {
+  return (
+    reconciledChildren.find((c) => String(c.serverId) === serverSelectedChildId)?.id ??
+    reconciledChildren[0]?.id ??
+    ''
+  );
+}
+
 /** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
  *  `adopt` and `flushUnsynced` — the only two callers that push local-only
  *  (serverId == null) records up to the server. */
 function buildUploadDeps(conn: Connection): UploadDeps {
   return {
     pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
-    pushEntry: (e) => pushEntryToServer(conn, e),
-    pushMeasurement: (m) => pushMeasurementToServer(conn, m),
+    pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
+    pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
   };
 }
 
@@ -604,24 +682,47 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ connection: conn, queueCount: q.length });
     try {
       const data = await loadFromServer(conn);
-      // `data.timers` is always [] (the server has none); the on-device copy wins.
       // Queued (not-yet-flushed) entries aren't in `data.entries` yet, so merge
       // them in to keep them visible — flushQueue below pushes them, and the
       // NEXT refresh()/hydrate() will replace `entries` with server data that
       // includes them, naturally dropping the local copy.
-      // Children/measurements created offline (serverId == null) have no flush
-      // yet (Phase 3), so read the durable copy and merge it back in the same
-      // way — see `mergeUnsynced`. Entries are deliberately excluded from this
-      // merge (see `mergeUnsynced`'s doc comment).
+      // Children are reconciled by `serverId`, not merged: a child created
+      // offline (serverId == null) is kept under its local id, and a child
+      // already known to the server keeps its local id too, since entries and
+      // measurements reference it. See `reconcileChildren`. Measurements
+      // created offline have no flush yet (Phase 3), so read the durable copy
+      // and merge it back in. See `mergeUnsynced`. Entries are deliberately
+      // excluded from this merge (see `mergeUnsynced`'s doc comment).
       const e = await loadEntities();
+      const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
+      // Incoming entries/measurements/timers carry the SERVER's child id
+      // (loadFromServer has no local state to translate with, since a running
+      // timer's `child` FK is mapped through the same server-shaped list, see
+      // `loadFromServer`'s own `childByServerId`); rewrite it to the local id
+      // now that reconciliation has produced the authoritative mapping. See
+      // `remapChildIds`.
+      const remappedEntries = remapChildIds(data.entries, reconciledChildren);
+      const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
+      // Keep the persisted local selection if it's still visible after
+      // reconciliation (mirrors refresh's fallback below); otherwise fall back
+      // to the server's selection, resolved into local id space (see
+      // `resolveSelectedChildId`). Without this a cold start right after
+      // selecting an offline-only child would silently deselect it, since
+      // `...data` below would otherwise always win with the server's choice.
+      const localSelectedChildId = e?.selectedChildId ?? '';
+      const selectedChildId = reconciledChildren.some((c) => c.id === localSelectedChildId)
+        ? localSelectedChildId
+        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
       set({
         connected: true,
         hydrating: false,
         ...data,
-        children: mergeUnsynced(data.children, e?.children ?? []),
-        measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
-        entries: mergeQueuedEntries(data.entries, q),
-        timers: reconcileTimers(savedTimers, data.timers),
+        children: reconciledChildren,
+        measurements: mergeUnsynced(remappedMeasurements, e?.measurements ?? []),
+        entries: mergeQueuedEntries(remappedEntries, q),
+        timers: reconcileTimers(savedTimers, remappedTimers),
+        selectedChildId,
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -667,28 +768,39 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const localTimers = await loadTimers();
     try {
       const data = await loadFromServer(conn);
-      // Children/measurements created offline (serverId == null) have no flush
-      // yet (Phase 3): merge the in-memory unsynced ones back in so a wholesale
-      // reload doesn't drop them from view. Entries are deliberately excluded
-      // from this merge (see `mergeUnsynced`'s doc comment) — `...data` below
-      // is entries' only source, unchanged.
-      const mergedChildren = mergeUnsynced(data.children, s.children);
+      // Children are reconciled by `serverId`, not merged: a child already
+      // known to the server keeps its local id (entries/measurements
+      // reference it), and a child created offline (serverId == null) is kept
+      // under its local id too. See `reconcileChildren`. Measurements created
+      // offline have no flush yet (Phase 3): merge the in-memory unsynced ones
+      // back in so a wholesale reload doesn't drop them from view. Entries are
+      // deliberately excluded from this merge (see `mergeUnsynced`'s doc
+      // comment); `...data` below is entries' only source, unchanged.
+      const reconciledChildren = reconcileChildren(data.children, s.children);
+      // Incoming entries/measurements/timers carry the SERVER's child id;
+      // rewrite it to the local id now that reconciliation has produced the
+      // authoritative mapping. See `remapChildIds` (mirrors `hydrate` above).
+      const remappedEntries = remapChildIds(data.entries, reconciledChildren);
+      const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the user's current child if it's still visible — checked against
-      // the MERGED list (not just the server's), so an offline-created child
-      // kept visible by mergeUnsynced above doesn't get silently deselected;
-      // otherwise fall back to the server's first child (matches cold `hydrate`).
-      const selectedChildId = mergedChildren.some((c) => c.id === s.selectedChildId)
+      // the RECONCILED list (not just the server's), so a local child kept
+      // visible by reconcileChildren above doesn't get silently deselected;
+      // otherwise fall back to the server's first child, resolved into local
+      // id space (matches cold `hydrate`; see `resolveSelectedChildId`).
+      const selectedChildId = reconciledChildren.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
-        : data.selectedChildId;
+        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
       set({
         connected: true,
         offline: false,
         networkOnline: true,
         ...data,
-        children: mergedChildren,
-        measurements: mergeUnsynced(data.measurements, s.measurements),
+        children: reconciledChildren,
+        entries: remappedEntries,
+        measurements: mergeUnsynced(remappedMeasurements, s.measurements),
         selectedChildId,
-        timers: reconcileTimers(localTimers, data.timers),
+        timers: reconcileTimers(localTimers, remappedTimers),
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -831,8 +943,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void saveConnection(conn);
     void persistServers(savedServers);
     const data = await loadFromServer(conn);
+    // Reconcile rather than taking the server list wholesale: the children
+    // just uploaded above kept their local ids (only `serverId` was stamped),
+    // and entries/measurements still reference those local ids. Taking
+    // `data.children` as-is would swap in server ids and orphan them. See
+    // `reconcileChildren`.
+    const currentSelectedChildId = get().selectedChildId;
+    const reconciledChildren = reconcileChildren(data.children, get().children);
+    // Incoming entries/measurements/timers carry the SERVER's child id;
+    // rewrite it to the local id now that reconciliation has produced the
+    // authoritative mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
+    const remappedEntries = remapChildIds(data.entries, reconciledChildren);
+    const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+    const remappedTimers = remapChildIds(data.timers, reconciledChildren);
+    // Keep the current selection if it's still visible after reconciliation;
+    // otherwise fall back to the server's first child, resolved into local id
+    // space (mirrors `hydrate`/`refresh`; see `resolveSelectedChildId`).
+    const selectedChildId = reconciledChildren.some((c) => c.id === currentSelectedChildId)
+      ? currentSelectedChildId
+      : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
     set({
       ...data,
+      children: reconciledChildren,
+      entries: remappedEntries,
+      measurements: remappedMeasurements,
+      timers: remappedTimers,
+      selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
       profileLoaded: false,
@@ -903,8 +1039,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (q.length === 0) return;
     const remaining: Entry[] = [];
     for (const entry of q) {
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      if (childServerId == null) {
+        // The child still has no server id (e.g. its own push hasn't landed
+        // yet): keep the entry queued for the next flush rather than sending
+        // a local id the server would reject.
+        remaining.push(entry);
+        continue;
+      }
       try {
-        await pushEntryToServer(conn, entry);
+        await pushEntryToServer(conn, entry, childServerId);
       } catch {
         remaining.push(entry);
       }
@@ -925,9 +1069,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     for (const op of ops) {
       try {
         if (op.op === 'update' && op.entity === 'child') await updateChildOnServer(conn, op.payload);
-        else if (op.op === 'update' && op.entity === 'measurement') await updateMeasurementOnServer(conn, op.payload);
-        else if (op.op === 'update' && op.entity === 'entry') await updateEntryOnServer(conn, op.payload);
-        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        else if (op.op === 'update' && op.entity === 'measurement') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          // Child not on the server (edge case: the entity was synced but the
+          // child later lost its server id). Nothing sensible to send; fall
+          // through to the catch below so the op stays queued for retry.
+          if (childServerId == null) throw new Error('child not synced');
+          await updateMeasurementOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'update' && op.entity === 'entry') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          if (childServerId == null) throw new Error('child not synced');
+          await updateEntryOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
         else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
         else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
@@ -1014,15 +1167,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (s.offline) {
       void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
     } else {
-      void pushEntryToServer(conn, entry)
-        .then((serverId) => {
-          if (serverId != null) {
-            set((st) => ({
-              entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
-            }));
-          }
-        })
-        .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      if (childServerId == null) {
+        // The child is not on the server yet, so this entry cannot be either.
+        // Queue it: the reconnect flush pushes it once the child exists.
+        void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
+      } else {
+        void pushEntryToServer(conn, entry, childServerId)
+          .then((serverId) => {
+            if (serverId != null) {
+              set((st) => ({
+                entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
+              }));
+            }
+          })
+          .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
+      }
     }
   },
 
@@ -1113,22 +1273,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
-          // Patch the local id -> the real server id so the new child stays
-          // selected across the next refresh()/hydrate(), which replaces
-          // `children` wholesale with server data keyed by real ids. Adopt the
-          // server picture URL in place of the local file URI. Stamp `serverId`
-          // too (like commitWrite/saveMeasurement do for entries/measurements):
-          // server-child ops — updateChild, deleteChild, flushUnsynced's
-          // synced-vs-unsynced check — all key off `serverId`, so leaving it
-          // unset until the next refresh loses edits, skips deletes (the child
-          // resurrects), and re-uploads a duplicate on reconnect.
+          // Stamp the server id and adopt the server's picture URL. The local
+          // `id` is deliberately NOT rewritten: entries and measurements
+          // reference it, and changing it would orphan them. Reconciliation
+          // matches this child by `serverId` from here on.
           set((st) => ({
             children: st.children.map((c) =>
-              c.id === localId
-                ? { ...c, id: String(res.id), serverId: res.id, picture: res.picture ?? c.picture }
-                : c,
+              c.id === localId ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
             ),
-            selectedChildId: st.selectedChildId === localId ? String(res.id) : st.selectedChildId,
           }));
         })
         .catch(() => {});
@@ -1194,9 +1346,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // Demo: the store's `entries` hold the local seed history for ALL
       // children — scope to the selected child, matching the per-child fetch.
-      const entries = conn.mode === 'local'
-        ? s.entries.filter((e) => e.childId === childId)
-        : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      // Server mode: the API takes the child's SERVER id (see
+      // `childServerIdFor`), not Budkin's local id, which is what
+      // `selectedChildId` is post-reconciliation. A child that has never been
+      // pushed has no server id yet, so there is nothing to fetch: that is
+      // not an error, just an empty result until the child syncs.
+      let entries: Entry[];
+      if (conn.mode === 'local') {
+        entries = s.entries.filter((e) => e.childId === childId);
+      } else {
+        const childServerId = childServerIdFor(s.children, childId);
+        entries = childServerId == null
+          ? []
+          : await loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
+      }
       if (get().selectedChildId !== childId) {
         // A child switch landed while this fetch was in flight — discard the
         // stale result and load for the now-selected child instead.
@@ -1496,7 +1659,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ entries: s.entries.map((e) => (e.id === id ? entry : e)) });
     get().showToast('Updated');
     if (s.connection && s.connection.mode === 'server' && !s.offline) {
-      void updateEntryOnServer(s.connection, entry).catch(() => {});
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      // No server id for the child means nothing sensible to update
+      // server-side; the local edit stands and a future flush handles the
+      // child (and, transitively, this entry) once it can be pushed.
+      if (childServerId != null) {
+        void updateEntryOnServer(s.connection, entry, childServerId).catch(() => {});
+      }
     } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
       void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
     }
@@ -1551,10 +1720,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast(existing ? 'Updated' : 'Saved');
     const conn = s.connection;
     if (conn && conn.mode === 'server' && !s.offline) {
+      const childServerId = childServerIdFor(s.children, m.childId);
       if (existing) {
-        void updateMeasurementOnServer(conn, m).catch(() => {});
-      } else {
-        void pushMeasurementToServer(conn, m)
+        // No server id for the child: nothing sensible to update server-side,
+        // so leave the local edit as-is (same as the offline case below).
+        if (childServerId != null) {
+          void updateMeasurementOnServer(conn, m, childServerId).catch(() => {});
+        }
+      } else if (childServerId != null) {
+        void pushMeasurementToServer(conn, m, childServerId)
           .then((serverId) => {
             if (serverId != null) {
               set((st) => ({
@@ -1564,6 +1738,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           })
           .catch(() => {});
       }
+      // else (!existing && childServerId == null): leave serverId unset,
+      // flushUnsynced picks the measurement up once the child is pushed.
     } else if (conn && conn.mode === 'server' && s.offline && existing && m.serverId != null) {
       // Already on the server, editing while offline: record the update so it
       // replays on reconnect. A brand-new (existing == null) offline
@@ -1868,7 +2044,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (existing) {
       get().showToast('Updated');
       if (s.connection && s.connection.mode === 'server' && !s.offline) {
-        void updateEntryOnServer(s.connection, entry).catch(() => {});
+        const childServerId = childServerIdFor(s.children, entry.childId);
+        // No server id for the child: nothing sensible to update server-side,
+        // so the local edit stands (same as the offline branch below).
+        if (childServerId != null) {
+          void updateEntryOnServer(s.connection, entry, childServerId).catch(() => {});
+        }
       } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
         // Already on the server, edited while offline: record the update so
         // it replays on reconnect. A not-yet-synced local edit needs no op.
