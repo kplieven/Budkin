@@ -655,14 +655,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // and merge it back in. See `mergeUnsynced`. Entries are deliberately
       // excluded from this merge (see `mergeUnsynced`'s doc comment).
       const e = await loadEntities();
+      const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
+      // Keep the persisted local selection if it's still visible after
+      // reconciliation (mirrors refresh's fallback below); otherwise fall back
+      // to the server's selection. Without this a cold start right after
+      // selecting an offline-only child would silently deselect it, since
+      // `...data` below would otherwise always win with the server's choice.
+      const localSelectedChildId = e?.selectedChildId ?? '';
+      const selectedChildId = reconciledChildren.some((c) => c.id === localSelectedChildId)
+        ? localSelectedChildId
+        : data.selectedChildId;
       set({
         connected: true,
         hydrating: false,
         ...data,
-        children: reconcileChildren(data.children, e?.children ?? []),
+        children: reconciledChildren,
         measurements: mergeUnsynced(data.measurements, e?.measurements ?? []),
         entries: mergeQueuedEntries(data.entries, q),
         timers: reconcileTimers(savedTimers, data.timers),
+        selectedChildId,
       });
       void get().flushQueue();
       void get().flushPendingOps();
