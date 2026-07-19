@@ -6,6 +6,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { buildDiaperSeries, buildSleepHeatmap, buildTrend, DAY } from '@/features/insights/compute';
 import { NORMS } from '@/features/insights/norms';
 import { DiaperBars } from '@/features/insights/DiaperBars';
@@ -99,9 +100,12 @@ export default function Insights() {
     enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
   // Re-run on child switch — selectChild resets the cache, this refills it.
+  // Skip for an expecting child: the server has no history for a child that
+  // hasn't been born yet, so loading would just fail and set insightsError.
   useEffect(() => {
+    if (child?.expected) return;
     loadInsights();
-  }, [loadInsights, selectedChildId]);
+  }, [loadInsights, selectedChildId, child?.expected]);
 
   const body = (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
@@ -214,6 +218,10 @@ export default function Insights() {
         {inner}
       </ScrollView>
     );
+
+  // Before the load guards on purpose: an expected child has nothing to load,
+  // so there is no point showing a loading or error state for it.
+  if (child?.expected) return frame(<WaitingForBirth what="Insights" />);
 
   // Order matters: a failed load leaves insightsLoaded=false, so the error
   // check must come FIRST or the error/retry state is unreachable.
