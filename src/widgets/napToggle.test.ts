@@ -28,6 +28,7 @@ vi.mock('@/notifications/postNotification', () => ({
 const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
   childName: 'Ada',
   birth: null,
+  expected: false,
   lastFeedStart: null,
   nextSide: 'left',
   lastDiaper: null,
@@ -71,7 +72,7 @@ describe('toggleNapFromWidget', () => {
     expect(last()?.sleepStart).toBe(1000);
     const timers = await loadTimers();
     expect(timers).toHaveLength(1);
-    expect(timers[0]).toMatchObject({ activity: 'sleep', start: 1000 });
+    expect(timers[0]).toMatchObject({ activity: 'sleep', start: 1000, childId: 'c1' });
     expect(await loadQueue()).toHaveLength(0);
   });
 

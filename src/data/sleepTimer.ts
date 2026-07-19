@@ -7,14 +7,19 @@
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import type { SleepEntry, Timer } from '@/types/models';
 
-/** A fresh running sleep timer starting at `now` (epoch ms). */
-export function startSleepTimer(now: number): Timer {
+/** A fresh running sleep timer starting at `now` (epoch ms), stamped with the
+ *  child it belongs to so a later stop can't misattribute it to whoever
+ *  happens to be selected at that point (e.g. the widget starts a nap, the
+ *  app then switches the selected child, and Stop is tapped from the Timers
+ *  tab). */
+export function startSleepTimer(now: number, childId: string): Timer {
   return {
     id: 't' + now,
     activity: 'sleep',
     name: ACTIVITY_LABEL.sleep,
     start: now,
     saveAs: 'sleep',
+    childId,
   };
 }
 

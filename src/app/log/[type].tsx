@@ -19,13 +19,17 @@ export default function LogDeepLink() {
   const { type } = useLocalSearchParams<{ type: string }>();
   const connected = useAppStore((s) => s.connected);
   const openSheet = useAppStore((s) => s.openSheet);
+  const expected = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.expected ?? false);
 
   useEffect(() => {
-    if (!connected) return;
+    if (!connected || expected) return;
     const activity = type as ActivityType;
     if (ALL_ACTIVITIES.includes(activity)) openSheet(activity);
-  }, [connected, type, openSheet]);
+  }, [connected, expected, type, openSheet]);
 
   if (!connected) return <Redirect href="/onboarding" />;
+  // Always lands on Home. When the selected child is expected, the effect
+  // above refuses to open the quick-log sheet, so this is a plain redirect
+  // there instead of over it.
   return <Redirect href="/(tabs)" />;
 }
