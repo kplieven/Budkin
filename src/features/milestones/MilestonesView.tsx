@@ -1,6 +1,7 @@
 import { View } from 'react-native';
 
 import { Txt } from '@/components/Txt';
+import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { ageMonths } from '@/lib/format';
 import { MILESTONES, aroundNow, groupByCategory, reachedForChild } from '@/lib/milestones';
 import type { MilestoneDef } from '@/lib/milestones';
@@ -33,6 +34,8 @@ export function MilestonesView() {
   const months = child ? ageMonths(child.birth, now) : null;
   const upcoming = aroundNow(months, reached);
   const groups = groupByCategory(MILESTONES);
+
+  if (child?.expected) return <WaitingForBirth what="Milestones" />;
 
   if (!child) {
     return (

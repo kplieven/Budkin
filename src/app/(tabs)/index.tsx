@@ -20,7 +20,7 @@ import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { hexA } from '@/lib/color';
-import { ageStr } from '@/lib/format';
+import { ageOrDueLabel } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
 import { TimelineRail } from '@/shell/TimelineRail';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -204,7 +204,7 @@ export default function Home() {
               <Icon name="chevron-down" color={t.text} size={18} />
             </View>
             <Txt weight={500} size={13.5} color={t.dim} style={{ marginTop: 1 }}>
-              {child ? ageStr(child.birth, now) : ''}
+              {child ? ageOrDueLabel(child.birth, !!child.expected, now) : ''}
             </Txt>
           </Pressable>
           <IconButton name="settings" onPress={() => router.push('/settings')} accessibilityLabel="Open settings" />

@@ -7,6 +7,7 @@ import { PulsingDot } from '@/components/PulsingDot';
 import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
+import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
@@ -54,8 +55,11 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
   // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
+  // Returns a store element, not a derived object, so the reference is stable.
+  const selectedChild = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
 
   if (!hasChild) return <NoChildCard />;
+  if (selectedChild?.expected) return <ExpectingCard child={selectedChild} />;
 
   // Phone tiles stay two-up; desktop tiles auto-fit to as many columns as fit.
   const tileStyle: ViewStyle =
