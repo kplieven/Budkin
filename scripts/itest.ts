@@ -9,6 +9,7 @@ import type { Entry, Measurement, MeasurementKind } from '../src/types/models';
 const URL = process.env.BB_URL ?? 'http://localhost:8000';
 const TOKEN = process.env.BB_TOKEN ?? '';
 const CHILD = process.env.BB_CHILD ?? '1';
+const CHILD_SERVER_ID = Number(CHILD);
 
 let pass = 0;
 let fail = 0;
@@ -35,10 +36,10 @@ async function main() {
     id: 'x', childId: CHILD, type: 'feeding',
     start: now - 20 * M, end: now - 2 * M, feedType: 'formula', method: 'bottle', amount: 120, tags: [],
   };
-  const fid = await client.createEntry(feeding);
+  const fid = await client.createEntry(feeding, CHILD_SERVER_ID);
   check('create feeding returns id', typeof fid === 'number', fid);
 
-  await client.updateEntry({ ...feeding, serverId: fid, amount: 150 });
+  await client.updateEntry({ ...feeding, serverId: fid, amount: 150 }, CHILD_SERVER_ID);
   let feeds = await client.listFeedings(CHILD);
   check('feeding amount updated -> 150', feeds.find((x) => x.serverId === fid)?.amount === 150, feeds.find((x) => x.serverId === fid)?.amount);
 
@@ -55,7 +56,7 @@ async function main() {
   ];
   for (const e of others) {
     try {
-      const id = await client.createEntry(e);
+      const id = await client.createEntry(e, CHILD_SERVER_ID);
       check(`create ${e.type}`, typeof id === 'number');
     } catch (err) {
       check(`create ${e.type}`, false, (err as Error).message);
@@ -69,7 +70,7 @@ async function main() {
     const m: Measurement = { id: 'x', childId: CHILD, kind, value: values[kind], date: now };
     let mid: number | undefined;
     try {
-      mid = await client.createMeasurement(m);
+      mid = await client.createMeasurement(m, CHILD_SERVER_ID);
       check(`create measurement ${kind}`, typeof mid === 'number', mid);
     } catch (err) {
       check(`create measurement ${kind}`, false, (err as Error).message);
@@ -79,7 +80,7 @@ async function main() {
     check(`list ${kind} round-trip`, list.some((x) => x.serverId === mid && x.value === values[kind]), list.map((x) => x.value));
 
     if (kind === 'weight' && mid != null) {
-      await client.updateMeasurement({ ...m, serverId: mid, value: 5.9 });
+      await client.updateMeasurement({ ...m, serverId: mid, value: 5.9 }, CHILD_SERVER_ID);
       const l2 = await client.listMeasurements('weight', CHILD);
       check('weight updated -> 5.9', l2.find((x) => x.serverId === mid)?.value === 5.9, l2.find((x) => x.serverId === mid)?.value);
     }
@@ -93,7 +94,7 @@ async function main() {
     id: 'x', childId: CHILD, type: 'feeding',
     start: now - 300 * M, end: now - 290 * M, feedType: 'breast', method: 'both', amount: 7, tags: ['left'],
   };
-  const tfid = await client.createEntry(taggedFeed);
+  const tfid = await client.createEntry(taggedFeed, CHILD_SERVER_ID);
   check('create breastfeed w/ tag + 1-10 intake', typeof tfid === 'number', tfid);
   const tf = (await client.listFeedings(CHILD)).find((x) => x.serverId === tfid);
   check('feeding tag "left" round-trips', !!tf && tf.tags.includes('left'), tf?.tags);
@@ -103,7 +104,7 @@ async function main() {
     id: 'x', childId: CHILD, type: 'diaper',
     time: now - 15 * M, wet: true, solid: false, color: null, amount: 3, tags: [],
   };
-  const adid = await client.createEntry(amtDiaper);
+  const adid = await client.createEntry(amtDiaper, CHILD_SERVER_ID);
   check('create diaper w/ amount', typeof adid === 'number', adid);
   const ad = (await client.listChanges(CHILD)).find((x) => x.serverId === adid);
   check('diaper amount=3 round-trips', ad?.amount === 3, ad?.amount);

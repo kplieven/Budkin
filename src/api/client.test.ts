@@ -115,20 +115,20 @@ describe('updateChild', () => {
 describe('bath <-> note serialization', () => {
   it('encodes a small wash as a tagged note the tags own as the source of truth', () => {
     const entry: BathEntry = { id: 'e1', childId: 'c1', type: 'bath', time: TIME, wash: 'small', tags: [] };
-    expect(bathToNoteBody(entry)).toEqual({
-      child: 'c1',
+    expect(bathToNoteBody(entry, 1)).toEqual({
+      child: 1,
       time: new Date(TIME).toISOString(),
-      note: 'Bath — small wash',
+      note: 'Bath, small wash',
       tags: ['bath', 'small'],
     });
   });
 
   it('encodes a big wash and keeps user tags after the structural ones', () => {
     const entry: BathEntry = { id: 'e2', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: ['Fussy'] };
-    expect(bathToNoteBody(entry)).toEqual({
-      child: 'c1',
+    expect(bathToNoteBody(entry, 1)).toEqual({
+      child: 1,
       time: new Date(TIME).toISOString(),
-      note: 'Bath — big wash',
+      note: 'Bath, big wash',
       tags: ['bath', 'big', 'Fussy'],
     });
   });
@@ -160,7 +160,7 @@ describe('bath <-> note serialization', () => {
 
   it('round-trips wash and user tags through encode -> server echo -> decode', () => {
     const entry: BathEntry = { id: 'e3', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: ['Fussy'] };
-    const body = bathToNoteBody(entry);
+    const body = bathToNoteBody(entry, 1);
     const back = noteToBathEntry({ id: 99, ...body }, 'c1');
     expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'big', tags: ['Fussy'], serverId: 99 });
   });
@@ -336,13 +336,13 @@ describe('per-entry notes', () => {
   for (const [type, entry] of Object.entries(withNotes)) {
     it(`buildBody sends notes through on a ${type} create`, async () => {
       const calls = stubFetch({ id: 1 });
-      await client().createEntry(entry);
+      await client().createEntry(entry, 1);
       expect(calls[0].body.notes).toBe((entry as any).notes);
     });
 
     it(`buildBody sends an empty-string notes to clear on a ${type} update`, async () => {
       const calls = stubFetch({});
-      await client().updateEntry({ ...entry, serverId: 9, notes: undefined } as Entry);
+      await client().updateEntry({ ...entry, serverId: 9, notes: undefined } as Entry, 1);
       expect(calls[0].body.notes).toBe('');
     });
   }
@@ -350,7 +350,7 @@ describe('per-entry notes', () => {
   it('does not add a notes field to a bath note body (bath excluded)', async () => {
     const calls = stubFetch({ id: 1 });
     const bath: BathEntry = { id: 'b1', childId: 'c1', type: 'bath', time: TIME, wash: 'small', tags: [] };
-    await client().createEntry(bath);
+    await client().createEntry(bath, 1);
     expect('notes' in calls[0].body).toBe(false);
   });
 
@@ -385,7 +385,7 @@ describe('per-entry notes', () => {
 
   it('round-trips a note through buildBody -> server echo -> list mapper', async () => {
     const create = stubFetch({ id: 55 });
-    await client().createEntry(withNotes.feeding);
+    await client().createEntry(withNotes.feeding, 1);
     const echoed = create[0].body; // what the server received
     stubFetch(page({ id: 55, ...echoed }));
     const back = (await client().listFeedings('c1'))[0];
@@ -415,15 +415,15 @@ describe('temperature serialization', () => {
   it('buildBody sends child/time/temperature/notes/tags to the temperature endpoint on create', async () => {
     const calls = stubFetch({ id: 1 });
     const entry: Entry = { id: 'tp1', childId: 'c1', type: 'temperature', time: TIME, value: 37.4, notes: 'warm', tags: ['Fussy'] };
-    await client().createEntry(entry);
+    await client().createEntry(entry, 1);
     expect(calls[0].url).toContain('/temperature/');
-    expect(calls[0].body).toEqual({ child: 'c1', time: ISO, temperature: 37.4, notes: 'warm', tags: ['Fussy'] });
+    expect(calls[0].body).toEqual({ child: 1, time: ISO, temperature: 37.4, notes: 'warm', tags: ['Fussy'] });
   });
 
   it('buildBody sends an empty-string notes to clear on a temperature update', async () => {
     const calls = stubFetch({});
     const entry: Entry = { id: 'tp2', serverId: 9, childId: 'c1', type: 'temperature', time: TIME, value: 36.8, tags: [] };
-    await client().updateEntry(entry);
+    await client().updateEntry(entry, 1);
     expect(calls[0].body.notes).toBe('');
     expect(calls[0].body.temperature).toBe(36.8);
   });
@@ -453,7 +453,7 @@ describe('temperature serialization', () => {
   it('round-trips a reading through buildBody -> server echo -> list mapper', async () => {
     const entry: Entry = { id: 'tp3', childId: 'c1', type: 'temperature', time: TIME, value: 38.1, notes: 'evening', tags: [] };
     const create = stubFetch({ id: 77 });
-    await client().createEntry(entry);
+    await client().createEntry(entry, 1);
     stubFetch({ count: 1, next: null, previous: null, results: [{ id: 77, ...create[0].body }] });
     const back = (await client().listTemperature('c1'))[0];
     expect(back).toMatchObject({ type: 'temperature', time: TIME, value: 38.1, notes: 'evening', serverId: 77 });
@@ -532,21 +532,21 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
 
   it('noteToNoteBody strips structural bath tags so a note can never be misread as a bath', () => {
     const entry: NoteEntry = { id: 'n1', childId: 'c1', type: 'note', time: TIME, text: 'watch her temp', tags: ['bath', 'small', 'big', 'Fussy'] };
-    expect(noteToNoteBody(entry)).toEqual({ child: 'c1', time: ISO, note: 'watch her temp', tags: ['Fussy'] });
+    expect(noteToNoteBody(entry, 1)).toEqual({ child: 1, time: ISO, note: 'watch her temp', tags: ['Fussy'] });
   });
 
   it('buildBody sends a note to /notes/ with its body, stripping structural tags', async () => {
     const calls = stubFetch({ id: 1 });
     const entry: Entry = { id: 'n2', childId: 'c1', type: 'note', time: TIME, text: 'call pediatrician', tags: ['bath', 'Milestone'] };
-    await client().createEntry(entry);
+    await client().createEntry(entry, 1);
     expect(calls[0].url).toContain('/notes/');
-    expect(calls[0].body).toEqual({ child: 'c1', time: ISO, note: 'call pediatrician', tags: ['Milestone'] });
+    expect(calls[0].body).toEqual({ child: 1, time: ISO, note: 'call pediatrician', tags: ['Milestone'] });
   });
 
   it('a bath still serializes as a bath on the shared endpoint (regression)', async () => {
     const calls = stubFetch({ id: 1 });
     const bath: BathEntry = { id: 'b9', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: [] };
-    await client().createEntry(bath);
+    await client().createEntry(bath, 1);
     expect(calls[0].url).toContain('/notes/');
     expect(calls[0].body.tags).toEqual(['bath', 'big']);
   });
@@ -554,7 +554,7 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
   it('round-trips a note through create -> server echo -> listChildNotes (lands in notes, not baths)', async () => {
     const entry: Entry = { id: 'n3', childId: 'c1', type: 'note', time: TIME, text: 'evening fuss', tags: ['Fussy'] };
     const create = stubFetch({ id: 55 });
-    await client().createEntry(entry);
+    await client().createEntry(entry, 1);
     stubFetch({ count: 1, next: null, previous: null, results: [{ id: 55, ...create[0].body }] });
     const { baths, notes } = await client().listChildNotes('c1');
     expect(baths).toHaveLength(0);
@@ -607,14 +607,14 @@ describe('milestone note serialization', () => {
   });
 
   it('milestoneToNoteBody writes the structural tags, keeps user tags, two-line body', () => {
-    const body = milestoneToNoteBody(MS);
-    expect(body.child).toBe('5');
+    const body = milestoneToNoteBody(MS, 1);
+    expect(body.child).toBe(1);
     expect(body.note).toBe('🎉 First steps\ntook three');
     expect(body.tags).toEqual(['milestone', 'mk:first-steps', 'proud']);
   });
 
   it('milestoneToNoteBody omits the second line when there is no note', () => {
-    const body = milestoneToNoteBody({ ...MS, note: undefined });
+    const body = milestoneToNoteBody({ ...MS, note: undefined }, 1);
     expect(body.note).toBe('🎉 First steps');
     expect(body.tags).toEqual(['milestone', 'mk:first-steps', 'proud']);
   });
@@ -653,7 +653,7 @@ describe('milestone note serialization', () => {
 
   it('noteToNoteBody strips milestone structural tags from a general note', () => {
     const note: NoteEntry = { id: 'n1', childId: '5', type: 'note', time: TIME, text: 'hi', tags: ['milestone', 'mk:x', 'keep'] };
-    expect((noteToNoteBody(note).tags as string[])).toEqual(['keep']);
+    expect((noteToNoteBody(note, 1).tags as string[])).toEqual(['keep']);
   });
 });
 
