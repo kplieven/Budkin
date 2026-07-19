@@ -98,13 +98,14 @@ export default function SetupBaby() {
 
       {step === 'ask' && (
         <>
-          <View style={{ flex: 1, minHeight: 24 }} />
-          <Txt weight={800} size={26} tracking={-0.5} style={{ lineHeight: 32 }}>
+          <Txt weight={800} size={26} tracking={-0.5} style={{ marginTop: 12, lineHeight: 32 }}>
             Has your baby arrived?
           </Txt>
-          <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, marginBottom: 24, lineHeight: 22 }}>
+          <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, lineHeight: 22 }}>
             Budkin tracks feeds, naps, nappies and growth from day one.
           </Txt>
+
+          <View style={{ flex: 1, minHeight: 24 }} />
 
           <SetupButton label="Yes, they are here" onPress={() => setStep('form')} />
           <SetupButton
@@ -213,8 +214,7 @@ export default function SetupBaby() {
 
       {step === 'expecting' && (
         <>
-          <View style={{ flex: 1, minHeight: 24 }} />
-          <Txt weight={800} size={26} tracking={-0.5} style={{ lineHeight: 32 }}>
+          <Txt weight={800} size={26} tracking={-0.5} style={{ marginTop: 12, lineHeight: 32 }}>
             We will be ready when they are
           </Txt>
           <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 12, lineHeight: 22 }}>
@@ -224,7 +224,7 @@ export default function SetupBaby() {
 
           <View style={{ flex: 1, minHeight: 24 }} />
 
-          <SetupButton label="Got it" onPress={finish} style={{ marginTop: 24 }} />
+          <SetupButton label="Got it" onPress={finish} />
         </>
       )}
     </ScrollView>
