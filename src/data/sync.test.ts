@@ -283,3 +283,64 @@ describe('matchServerChild', () => {
     expect(matchServerChild(local, [])).toBeNull();
   });
 });
+
+describe('expected children are held back from the server', () => {
+  it('never pushes an expected child', async () => {
+    const pushed: Child[] = [];
+    const deps = makeDeps({
+      pushChild: vi.fn(async (c: Child) => {
+        pushed.push(c);
+        return 99;
+      }),
+    });
+
+    await uploadUnsynced(
+      {
+        children: [child({ id: 'born' }), child({ id: 'unborn', expected: true })],
+        entries: [],
+        measurements: [],
+      },
+      deps,
+    );
+
+    expect(pushed.map((c) => c.id)).toEqual(['born']);
+  });
+
+  it('excludes expected children from the progress total', async () => {
+    const seen: [number, number][] = [];
+
+    await uploadUnsynced(
+      {
+        children: [child({ id: 'born' }), child({ id: 'unborn', expected: true })],
+        entries: [],
+        measurements: [],
+      },
+      makeDeps(),
+      (done, total) => seen.push([done, total]),
+    );
+
+    expect(seen.every(([, total]) => total === 1)).toBe(true);
+  });
+
+  it('leaves the expected child untouched in the returned state', async () => {
+    const out = await uploadUnsynced(
+      { children: [child({ id: 'unborn', expected: true })], entries: [], measurements: [] },
+      makeDeps(),
+    );
+
+    expect(out.children[0].serverId).toBeUndefined();
+    expect(out.children[0].expected).toBe(true);
+  });
+
+  it('never matches an expected child to a server child', () => {
+    const local = child({ expected: true });
+    const server = [child({ serverId: 7 })];
+    expect(matchServerChild(local, server)).toBeNull();
+  });
+
+  it('still matches a born child with the same name and birthday', () => {
+    const local = child();
+    const server = [child({ serverId: 7 })];
+    expect(matchServerChild(local, server)).toBe(7);
+  });
+});

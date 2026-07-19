@@ -121,6 +121,8 @@ interface AppState {
   childSheet: boolean;
   /** id of the child being edited, or null when creating a new one */
   editingChildId: string | null;
+  /** id of the expected child whose birth is being confirmed, or null */
+  confirmBirthFor: string | null;
   /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
   adoptSheet: boolean;
   sheet: { type: ActivityType } | null;
@@ -219,7 +221,13 @@ interface AppActions {
   openAddChild: () => void;
   openEditChild: (id: string) => void;
   closeChildSheet: () => void;
-  saveChild: (fields: { first: string; last: string; birth: number; photo?: PhotoChange }) => void;
+  openConfirmBirth: (id: string) => void;
+  closeConfirmBirth: () => void;
+  saveChild: (fields: { first: string; last: string; birth: number; expected?: boolean; photo?: PhotoChange }) => void;
+  /** Turn an expected child into a born one: clear the flag, set the real birth
+   *  date, and release it for sync. The single implementation of that
+   *  transition, shared by Home's confirm sheet and the child sheet's toggle. */
+  confirmBirth: (id: string, birth: number) => void;
   /** Delete a child (cascades all their history server-side; NOT undoable). See
    *  the implementation for the selection re-point + in-memory purge rules. */
   deleteChild: (id: string) => void;
@@ -309,9 +317,12 @@ export type AppStore = AppState & AppActions;
  * the API never contains a not-yet-flushed queued entry (a queued entry only
  * reaches the server via `flushQueue`, and that copy comes back with a server
  * shape/id on a *later* load). The post-flush no-duplication guarantee comes
- * entirely from `refresh()`/`hydrate()` replacing `entries` wholesale with the
- * next `...data` load once the server has the entry — which drops the local
- * copy. This helper's only job is the initial "keep it visible" prepend.
+ * from `refresh()`/`hydrate()` replacing `entries` wholesale with the next
+ * `...data` load once the server has the entry, which drops the local copy.
+ * This helper's only job is the initial "keep it visible" prepend. An entry
+ * whose owning child is expecting can never flush this way (the server never
+ * has that child to attach it to); see `mergeHeldBackEntries` below for that
+ * case instead.
  */
 export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[]): Entry[] {
   return [...queuedEntries, ...serverEntries];
@@ -354,7 +365,8 @@ export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
  * `src/data/queue.ts`, whose `flushQueue` pushes them to the server WITHOUT
  * stamping the in-memory record's `serverId`; merging entries here would
  * duplicate an entry that has already flushed. See `mergeQueuedEntries` above
- * for the entry-specific (queue-based) equivalent.
+ * for the entry-specific (queue-based) equivalent, and `mergeHeldBackEntries`
+ * below for the narrower expecting-child subset that can never flush at all.
  */
 export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   serverList: T[],
@@ -363,6 +375,104 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   const serverIds = new Set(serverList.map((r) => r.id));
   const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
   return [...unsynced, ...serverList];
+}
+
+/**
+ * True when `entry` is a WITHHELD record (see `mergeHeldBackEntries` below):
+ * written against a child that had no `serverId` at write time, so it was
+ * never offered to the server and never queued for the ordinary retry path.
+ * This reads the `heldBack` flag stamped once, at write time, by
+ * `commitWrite`. See that field's doc comment on `EntryBase`
+ * (`types/models.ts`) for the full contract.
+ *
+ * Deliberately NOT inferred here from `expected`, `birth`, or a timestamp.
+ * Four earlier attempts at exactly that each picked a proxy that quietly
+ * expired at a different transition (a push landing, a birth being
+ * confirmed, a due date passing) and silently dropped real records. Reading
+ * a stored fact has no such expiry, and that is the entire point of the flag.
+ *
+ * `entry.serverId == null` is checked too, purely as belt-and-suspenders:
+ * once a withheld entry is actually pushed, `commitWrite`/`flushUnsynced`
+ * clear `heldBack` in the same update that stamps `serverId`, so the two
+ * should never disagree, but this guarantees an already-synced entry can
+ * never be re-treated as withheld even if that ever drifted.
+ */
+function isHeldBackEntry(entry: Entry): boolean {
+  return entry.heldBack === true && entry.serverId == null;
+}
+
+/**
+ * Merge back held-back entries (see `isHeldBackEntry`) into a freshly-loaded
+ * entries list, so a wholesale refresh/hydrate/adopt reload doesn't drop
+ * them. This is the entries analogue of `mergeUnsynced` for the one record
+ * shape that helper deliberately excludes: an expecting child is never pushed
+ * to the server (its `birth` is a due date, not a valid birth_date; see
+ * `uploadUnsynced`), so NONE of its entries can ever be on the server either.
+ * Unlike an ordinary offline-queued entry, which eventually flushes and must
+ * stop being merged once it does (that's `mergeQueuedEntries`'s job, not this
+ * one), a held-back entry has no such expiry: it stays local for as long as
+ * it stays unsynced.
+ *
+ * De-duplication is by id against the list already assembled (typically
+ * server data, possibly already merged with the write queue): this also
+ * covers the edge case where a still-expecting child's entry was logged after
+ * `adopt()`, failed to push (the server has no such child), and landed in the
+ * write queue too: it would already be present via that queue merge, so it's
+ * skipped here rather than duplicated.
+ *
+ * `children` is used only as a referential-integrity guard: a held-back
+ * entry is re-merged only when its owning child is still present in the
+ * given list, so a child that was actually deleted can't resurrect its
+ * entries. It is NOT used to decide held-back-ness itself (see
+ * `isHeldBackEntry`); pass the list AFTER any child merge (`mergeUnsynced`)
+ * has already run, so an expecting (or just-born) child that only survives
+ * via that merge still counts as present here. Held-back entries are
+ * prepended like the other merge helpers (newest-first, matching `save()`).
+ */
+export function mergeHeldBackEntries(entries: Entry[], localEntries: Entry[], children: Child[]): Entry[] {
+  const existingIds = new Set(entries.map((e) => e.id));
+  const ownerIds = new Set(children.map((c) => c.id));
+  const heldBack = localEntries.filter(
+    (e) => !existingIds.has(e.id) && isHeldBackEntry(e) && ownerIds.has(e.childId),
+  );
+  return [...heldBack, ...entries];
+}
+
+/**
+ * MIGRATION: backfill `heldBack` on entries persisted by a version of the app
+ * that predates the flag (see `EntryBase.heldBack` in `types/models.ts`).
+ * Called on every load of the entity store (`loadEntities()`), immediately
+ * before those entries are used for anything. Idempotent, since it only
+ * touches entries where the flag is `undefined` and never overwrites `true`
+ * or `false`, so re-running it on every app launch is harmless.
+ *
+ * The criterion, the owning child is CURRENTLY `expected`, is a precise
+ * fact, not another decaying proxy: an entry can only ever be an ordinary
+ * QUEUED write (the population this must NOT catch) if its owner was NOT
+ * `expected` at write time, because `commitWrite` has never queued an
+ * expecting child's entries, in any version of this feature. Checking a
+ * child's live `expected` field has no false positives.
+ *
+ * It has one narrow, theoretical gap: a legacy entry whose owner WAS
+ * expecting when the entry was written but has SINCE been confirmed born (by
+ * the time the user upgrades to a version with this fix) would read
+ * `expected: false` here and be missed. In practice that gap is EMPTY, not a
+ * live risk: `Child.expected` has never shipped to a release (this feature
+ * lands on this branch, unmerged), so no entry persisted by any real install
+ * can have an expecting owner yet for this migration to need to recover.
+ * This backfill is defensible insurance against that gap opening up later
+ * (e.g. if `heldBack` itself ever shipped a release behind `expected`), not a
+ * patch for a loss that has already happened. Closing even the theoretical
+ * gap would mean falling back to the very timestamp/`expected` inference this
+ * fix exists to remove, so it stays accepted rather than chased. Every entry
+ * written from this version onward is flagged correctly and permanently at
+ * write time (`commitWrite`).
+ */
+function backfillHeldBack(entries: Entry[], children: Child[]): Entry[] {
+  const expectingIds = new Set(children.filter((c) => c.expected).map((c) => c.id));
+  return entries.map((e) =>
+    e.heldBack === undefined && e.serverId == null && expectingIds.has(e.childId) ? { ...e, heldBack: true } : e,
+  );
 }
 
 /** Reconcile a server child list onto the local one WITHOUT changing any local
@@ -548,6 +658,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   showChildSwitcher: false,
   childSheet: false,
   editingChildId: null,
+  confirmBirthFor: null,
   adoptSheet: false,
   sheet: null,
   editingId: null,
@@ -670,7 +781,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         connected: true,
         hydrating: false,
         children: e?.children ?? [],
-        entries: e?.entries ?? [],
+        entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
         measurements: e?.measurements ?? [],
         selectedChildId: e?.selectedChildId ?? '',
         lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
@@ -694,6 +805,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // and merge it back in. See `mergeUnsynced`. Entries are deliberately
       // excluded from this merge (see `mergeUnsynced`'s doc comment).
       const e = await loadEntities();
+      const localEntries = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
       const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
       // Incoming entries/measurements/timers carry the SERVER's child id
       // (loadFromServer has no local state to translate with, since a running
@@ -720,7 +832,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         ...data,
         children: reconciledChildren,
         measurements: mergeUnsynced(remappedMeasurements, e?.measurements ?? []),
-        entries: mergeQueuedEntries(remappedEntries, q),
+        // An expecting child's entries (e.g. pregnancy notes) are held back
+        // the same way, but were never queued: a note written in local mode
+        // never reaches `commitWrite`'s queue path (it returns early for
+        // local mode). Read them back from the durable entity store instead,
+        // via `mergeHeldBackEntries`, on top of the normal queue merge.
+        entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
         timers: reconcileTimers(savedTimers, remappedTimers),
         selectedChildId,
       });
@@ -745,9 +862,46 @@ export const useAppStore = create<AppStore>((set, get) => ({
         });
       } else {
         // network/server unreachable: enter the app in offline mode. There's
-        // no server data to merge with, so the queued entries are all we have
-        // — best-effort restore so they aren't dropped from view.
-        set({ connected: true, offline: true, hydrating: false, entries: q, timers: savedTimers });
+        // no server data to merge with. Before expecting children, every
+        // local entry in server mode also lived on the write queue, so
+        // restoring from `q` alone was harmless; an expecting child's entries
+        // (or any entry whose owner has since been confirmed born, see
+        // `isHeldBackEntry`) are the first whose only home is the durable
+        // entity store, never the queue. Read it here and use it as the
+        // base: `entries` gets a new reference either way, and the
+        // persistence subscription writes that reference straight over the
+        // entity store, so building it from `q` alone would silently
+        // overwrite (permanently lose) anything the queue didn't have. Any
+        // queued entry not already in the entity store (belt-and-suspenders;
+        // in practice the two should already agree, see `commitWrite`) is
+        // layered on top. `children` and `measurements` need the exact same
+        // treatment as `entries` and for the exact same reason: they too get
+        // a new reference below, which the persistence subscription writes
+        // straight over the entity store. Leaving them out (as this branch
+        // used to) doesn't just fail to restore an expecting child, it
+        // ERASES one the moment the user re-adds it, since `saveChild` then
+        // persists a `children` array built from an empty in-memory list.
+        const e = await loadEntities();
+        const stored = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
+        const storedIds = new Set(stored.map((entry) => entry.id));
+        const queueOnly = q.filter((entry) => !storedIds.has(entry.id));
+        set({
+          connected: true,
+          offline: true,
+          hydrating: false,
+          children: e?.children ?? [],
+          entries: [...queueOnly, ...stored],
+          measurements: e?.measurements ?? [],
+          // `children` getting a new reference above without also restoring
+          // the selection that names one of them is its own regression: a
+          // present-but-unselected child falls through Home's expecting
+          // branch straight to the activity tiles, and a write against it
+          // then carries `childId: ''` (flushQueue can never resolve that).
+          // Mirrors the local-mode branch and `enterLocal` above/below.
+          selectedChildId: e?.selectedChildId ?? '',
+          lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
+          timers: savedTimers,
+        });
       }
     }
   },
@@ -775,7 +929,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // offline have no flush yet (Phase 3): merge the in-memory unsynced ones
       // back in so a wholesale reload doesn't drop them from view. Entries are
       // deliberately excluded from this merge (see `mergeUnsynced`'s doc
-      // comment); `...data` below is entries' only source, unchanged.
+      // comment); `remapChildIds` below is entries' only source, further
+      // merged by `mergeHeldBackEntries` for an expecting child's held-back
+      // entries (see below).
       const reconciledChildren = reconcileChildren(data.children, s.children);
       // Incoming entries/measurements/timers carry the SERVER's child id;
       // rewrite it to the local id now that reconciliation has produced the
@@ -797,8 +953,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         networkOnline: true,
         ...data,
         children: reconciledChildren,
-        entries: remappedEntries,
         measurements: mergeUnsynced(remappedMeasurements, s.measurements),
+        // An expecting child's entries are held back the same way (see
+        // `mergeHeldBackEntries`): they're already in `s.entries` (this is a
+        // warm reload, not a cold restart), never on the server, so merge
+        // them back the same way `hydrate()` does from the entity store.
+        entries: mergeHeldBackEntries(remappedEntries, s.entries, reconciledChildren),
         selectedChildId,
         timers: reconcileTimers(localTimers, remappedTimers),
       });
@@ -918,13 +1078,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const result = await uploadUnsynced(state, buildUploadDeps(conn));
     // Persist stamped serverIds immediately so a partial upload is resumable
-    // on retry, even before we know whether it fully succeeded.
-    set({ children: result.children, entries: result.entries, measurements: result.measurements });
+    // on retry, even before we know whether it fully succeeded. `uploadUnsynced`
+    // stamps `serverId` but knows nothing about `heldBack` (that's this
+    // store's concept, not the uploader's), so clear it here for any entry
+    // that just got a real serverId, mirroring `flushUnsynced`'s "same update
+    // that stamps serverId" clear: a pushed entry is no longer withheld, and
+    // leaving `heldBack: true` on one would contradict the field's own
+    // contract even though nothing reads it that way today (isHeldBackEntry
+    // also guards on serverId == null).
+    set({
+      children: result.children,
+      entries: result.entries.map((e) => (e.heldBack && e.serverId != null ? { ...e, heldBack: false } : e)),
+      measurements: result.measurements,
+    });
 
+    // An expected child is deliberately held back from the server (its
+    // `birth` is a due date, not a valid birth_date), so it never gets a
+    // serverId, and `uploadUnsynced` skips its entries/measurements too (no
+    // server child to attach them to). None of that is a failed upload, so it
+    // must not count as leftover work below.
+    const expectingChildIds = new Set(result.children.filter((c) => c.expected).map((c) => c.id));
     const stillUnsynced =
-      result.children.some((c) => c.serverId == null) ||
-      result.entries.some((e) => e.serverId == null) ||
-      result.measurements.some((m) => m.serverId == null);
+      result.children.some((c) => c.serverId == null && !c.expected) ||
+      result.entries.some((e) => e.serverId == null && !expectingChildIds.has(e.childId)) ||
+      result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId));
     if (stillUnsynced) {
       // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
       // retry against the SAME server doesn't wrongly reset the ids we just stamped.
@@ -942,31 +1119,53 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ connection: conn, connected: true, savedServers });
     void saveConnection(conn);
     void persistServers(savedServers);
+    // Read the pre-existing local children/entries/measurements before the
+    // set() below replaces them with the server's list.
+    const localChildren = get().children;
+    const localEntries = get().entries;
+    const localMeasurements = get().measurements;
+    const localSelectedChildId = get().selectedChildId;
     const data = await loadFromServer(conn);
     // Reconcile rather than taking the server list wholesale: the children
     // just uploaded above kept their local ids (only `serverId` was stamped),
     // and entries/measurements still reference those local ids. Taking
     // `data.children` as-is would swap in server ids and orphan them. See
-    // `reconcileChildren`.
-    const currentSelectedChildId = get().selectedChildId;
-    const reconciledChildren = reconcileChildren(data.children, get().children);
+    // `reconcileChildren`. An expecting child is deliberately never uploaded
+    // (see `stillUnsynced` above), so it's absent from `data.children` too;
+    // `reconcileChildren` keeps it under its local id the same way it keeps
+    // any other never-pushed child.
+    const reconciledChildren = reconcileChildren(data.children, localChildren);
     // Incoming entries/measurements/timers carry the SERVER's child id;
     // rewrite it to the local id now that reconciliation has produced the
     // authoritative mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
     const remappedEntries = remapChildIds(data.entries, reconciledChildren);
     const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
     const remappedTimers = remapChildIds(data.timers, reconciledChildren);
-    // Keep the current selection if it's still visible after reconciliation;
-    // otherwise fall back to the server's first child, resolved into local id
-    // space (mirrors `hydrate`/`refresh`; see `resolveSelectedChildId`).
-    const selectedChildId = reconciledChildren.some((c) => c.id === currentSelectedChildId)
-      ? currentSelectedChildId
+    // The expecting child's measurements are held back the same way its
+    // record is: they never reach the server (uploadUnsynced skips them, no
+    // server child to attach them to), so merge the local copy back in,
+    // mirroring hydrate()/refresh()'s general mergeUnsynced treatment.
+    const mergedMeasurements = mergeUnsynced(remappedMeasurements, localMeasurements);
+    // Its entries are held back too. Use the same expecting-child merge that
+    // refresh()/hydrate() use (mergeHeldBackEntries) rather than a blanket
+    // serverId==null filter: an expecting child's entries can never reach the
+    // server (uploadUnsynced skips them: no server child to attach them to),
+    // so this can never duplicate one that already flushed.
+    const mergedEntries = mergeHeldBackEntries(remappedEntries, localEntries, reconciledChildren);
+    // Keep the current selection if it's still visible after reconciliation
+    // (checked against the RECONCILED list, not just the server's, so an
+    // expecting child kept visible by reconcileChildren above doesn't get
+    // silently deselected); otherwise fall back to the server's first child,
+    // resolved into local id space (mirrors `hydrate`/`refresh`; see
+    // `resolveSelectedChildId`).
+    const selectedChildId = reconciledChildren.some((c) => c.id === localSelectedChildId)
+      ? localSelectedChildId
       : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
     set({
       ...data,
       children: reconciledChildren,
-      entries: remappedEntries,
-      measurements: remappedMeasurements,
+      entries: mergedEntries,
+      measurements: mergedMeasurements,
       timers: remappedTimers,
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
@@ -987,7 +1186,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       connecting: false,
       connectError: null,
       children: e?.children ?? [],
-      entries: e?.entries ?? [],
+      entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
       measurements: e?.measurements ?? [],
       selectedChildId: e?.selectedChildId ?? '',
       lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
@@ -1101,17 +1300,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const s = get();
       const conn = s.connection;
       if (!conn || conn.mode !== 'server' || s.offline) return;
-      // Only children & measurements here — entries still flow through
-      // queue.ts (flushQueue), and mixing would double-push. (Full entry
-      // unification is a later change.) Note: an offline entry created for an
-      // offline-created child while CONNECTED is a niche case not handled here
-      // either — it stays on the queue path.
-      const hasUnsynced = s.children.some((c) => c.serverId == null) || s.measurements.some((m) => m.serverId == null);
+      // Children & measurements, plus the narrow held-back subset of entries
+      // (see `isHeldBackEntry`): entries logged against an expecting child,
+      // which `commitWrite`'s own `expected` guard keeps off the write queue
+      // for exactly this reason, so pushing them here can never race
+      // `flushQueue` into double-posting the same entry. Every OTHER entry
+      // still flows through queue.ts (flushQueue) only; mixing those in here
+      // would double-push. (Full entry unification is a later change.) Note:
+      // an offline entry created for an offline-created (but not expecting)
+      // child while CONNECTED is a niche case not handled here either: it
+      // stays on the queue path.
+      const heldBackEntries = s.entries.filter((e) => isHeldBackEntry(e));
+      const hasUnsynced =
+        s.children.some((c) => c.serverId == null) ||
+        s.measurements.some((m) => m.serverId == null) ||
+        heldBackEntries.length > 0;
       const hasUnsyncedTimer = s.timers.some((t) => t.serverId == null);
       if (!hasUnsynced && !hasUnsyncedTimer) return;
       if (hasUnsynced) {
         const result = await uploadUnsynced(
-          { children: s.children, entries: [], measurements: s.measurements },
+          { children: s.children, entries: heldBackEntries, measurements: s.measurements },
           buildUploadDeps(conn),
         );
         // Count only records that WERE serverId==null in the pre-upload snapshot
@@ -1123,7 +1331,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ).length +
           s.measurements.filter(
             (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
-          ).length;
+          ).length +
+          heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length;
         // Functional merge-by-id (reads the CURRENT state via `st`, not the
         // pre-await snapshot `s`) that only stamps serverIds, so a create that
         // landed during the await isn't dropped by a wholesale replace.
@@ -1136,9 +1345,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
             const u = result.measurements.find((r) => r.id === m.id);
             return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
           }),
+          entries: st.entries.map((e) => {
+            const u = result.entries.find((r) => r.id === e.id);
+            // Successfully pushed: stamp `serverId` and clear `heldBack` in
+            // the same update, since the flag is redundant once a real
+            // serverId exists (see `isHeldBackEntry`'s belt-and-suspenders
+            // check).
+            return u && u.serverId != null ? { ...e, serverId: u.serverId, heldBack: false } : e;
+          }),
         }));
         // Mirrors flushQueue's `Synced N entries`; here the flush legitimately
-        // pushes both children & measurements, so report the true total.
+        // pushes children, measurements & held-back entries, so report the
+        // true total.
         if (syncedCount > 0) {
           get().showToast(`Synced ${syncedCount} ${syncedCount === 1 ? 'item' : 'items'}`);
         }
@@ -1162,8 +1380,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   commitWrite: (entry) => {
     const s = get();
+    const child = s.children.find((c) => c.id === entry.childId);
+    // WITHHELD: the owning child is a due-date placeholder with no
+    // `serverId` (see `childServerIdFor`) and, being `expected`, will not
+    // get one until `confirmBirth` (see `saveChild`). Stamp that as a
+    // durable fact on the entry now, ONCE (this is the only place
+    // `heldBack` is ever set, see its doc comment on `EntryBase`), rather
+    // than something re-derived later from `expected` or a timestamp, which
+    // is exactly what kept expiring at the next transition across earlier
+    // attempts at this. Runs even in local mode / with no connection at all:
+    // `adopt()`'s later merge (`mergeHeldBackEntries`) needs the same marker
+    // on an entry written before the app ever had a server connection.
+    if (child?.expected && !entry.heldBack) {
+      set((st) => ({
+        entries: st.entries.map((e) => (e.id === entry.id ? { ...e, heldBack: true } : e)),
+      }));
+    }
     const conn = s.connection;
     if (!conn || conn.mode !== 'server') return; // local: nothing to push
+    // Leave a withheld entry purely local (in `entries` / the entity store,
+    // like local mode) rather than queueing it. Queueing it would let it
+    // flush silently through `flushQueue`, which never stamps a local
+    // `serverId` on an entry: the only path that does is `flushUnsynced`'s
+    // held-back push once `confirmBirth` gives the child one (see
+    // `isHeldBackEntry`), and mixing the two would risk pushing the same
+    // entry to the server twice.
+    if (child?.expected) return;
     if (s.offline) {
       void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
     } else {
@@ -1201,6 +1443,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   openAddChild: () => set({ childSheet: true, editingChildId: null }),
   openEditChild: (id) => set({ childSheet: true, editingChildId: id }),
   closeChildSheet: () => set({ childSheet: false, editingChildId: null }),
+
+  openConfirmBirth: (id) => set({ confirmBirthFor: id }),
+  closeConfirmBirth: () => set({ confirmBirthFor: null }),
 
   openAdopt: () => set({ adoptSheet: true }),
   closeAdopt: () => set({ adoptSheet: false }),
@@ -1254,6 +1499,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       first: fields.first,
       last: fields.last,
       birth: fields.birth,
+      expected: fields.expected,
       color: childColor(s.children.length),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
@@ -1269,7 +1515,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     get().showToast('Saved');
     const conn = s.connection;
-    if (conn && conn.mode === 'server' && !s.offline) {
+    // An expected child holds a DUE date in `birth`, which the server's
+    // birth_date cannot legitimately hold. confirmBirth releases it later.
+    if (conn && conn.mode === 'server' && !s.offline && !fields.expected) {
       void pushChildToServer(conn, child, change)
         .then((res) => {
           if (!res || res.id == null) return;
@@ -1280,6 +1528,48 @@ export const useAppStore = create<AppStore>((set, get) => ({
           set((st) => ({
             children: st.children.map((c) =>
               c.id === localId ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
+            ),
+          }));
+        })
+        .catch(() => {});
+    }
+  },
+
+  confirmBirth: (id, birth) => {
+    const s = get();
+    const child = s.children.find((c) => c.id === id);
+    if (!child || !child.expected) return;
+    // Push the post-birth fields (real birth date, no longer expected), not
+    // the stale due date the pre-set() `child` above still carries.
+    const bornChild: Child = { ...child, expected: false, birth };
+    set({
+      children: s.children.map((c) => (c.id === id ? bornChild : c)),
+      // The insights cache may hold a stale error from while the child was
+      // still expected (loadInsights had nothing to load for it). Reset it
+      // the same way selectChild does, so the newly born child starts clean.
+      insightsLoaded: false,
+      insightsEntries: [],
+      insightsError: false,
+    });
+    get().showToast('Welcome to the world');
+    const conn = s.connection;
+    // Push the newly born child now (see saveChild's create push above): the
+    // confirmation unlocks logging right away, and the local `id` is
+    // deliberately NOT rewritten here either, for the same reason. Guarded
+    // the same way saveChild's create push is: only in server mode while
+    // online. In local mode or offline, leave the child for the normal
+    // reconnect path.
+    if (conn && conn.mode === 'server' && !s.offline) {
+      void pushChildToServer(conn, bornChild)
+        .then((res) => {
+          if (!res || res.id == null) return;
+          // Stamp the server id and adopt the server's picture URL. The local
+          // `id` is deliberately NOT rewritten: entries and measurements
+          // reference it, and changing it would orphan them. Reconciliation
+          // matches this child by `serverId` from here on.
+          set((st) => ({
+            children: st.children.map((c) =>
+              c.id === id ? { ...c, serverId: res.id, picture: res.picture ?? c.picture } : c,
             ),
           }));
         })
@@ -2007,6 +2297,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     entry.serverId = existing?.serverId;
+    // Carry `heldBack` across the same way: this branch rebuilds a brand-new
+    // entry object per activity type above rather than calling `commitWrite`
+    // (which is the only place that STAMPS the flag), so an edit must copy
+    // the existing value across rather than leaving it undefined. Never
+    // re-derive it from `child.expected` here, that is exactly the inference
+    // this field replaced.
+    entry.heldBack = existing?.heldBack;
 
     // live interval => create a running timer instead of an entry (create only)
     if (!existing && te.ongoing && te.shape === 'interval') {
@@ -2128,7 +2425,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const now = Date.now();
     const resolvedEnd = now;
     const savedTags = tm.tags ?? [];
-    const childId = tm.childId ?? s.selectedChildId;
+    // A running timer belongs to whoever started it, not whoever happens to be
+    // selected when Stop is tapped: the Timers tab deliberately shows every
+    // child's timers at once, including a running nap for a born sibling while
+    // an expecting child is selected. `tm.childId` is the source of truth once
+    // a timer carries one (every creation path stamps it). The `?? ...`
+    // fallback only matters for a timer that somehow reached here without
+    // one; an expecting child can never be logged against (its `birth` is a
+    // due date, not a real one), so that fallback must never resolve to one.
+    // Prefer the selected child if it's born, else the first born child on
+    // file, else fall through to the selection anyway rather than leaving the
+    // timer unstoppable.
+    const selected = s.children.find((c) => c.id === s.selectedChildId);
+    const childId =
+      tm.childId ??
+      (selected && !selected.expected ? selected.id : s.children.find((c) => !c.expected)?.id) ??
+      s.selectedChildId;
     const base = { id: 'e' + now, childId, tags: savedTags, notes: tm.notes };
     let entry: Entry;
     if (saveAs === 'feeding') {

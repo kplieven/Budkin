@@ -61,14 +61,16 @@ export async function uploadUnsynced(
   const measurements = state.measurements.map((m) => ({ ...m }));
 
   const total =
-    children.filter((c) => c.serverId == null).length +
+    children.filter((c) => c.serverId == null && !c.expected).length +
     entries.filter((e) => e.serverId == null).length +
     measurements.filter((m) => m.serverId == null).length;
   let done = 0;
 
   // 1. Children first.
+  // An expected child holds a DUE date in `birth`, which is not a valid
+  // birth_date for the server. It stays local until confirmBirth releases it.
   for (const child of children) {
-    if (child.serverId != null) continue;
+    if (child.serverId != null || child.expected) continue;
     const id = await tryPush(deps.pushChild, child);
     if (id != null) child.serverId = id;
     done++;
@@ -121,6 +123,10 @@ export async function uploadUnsynced(
  *  serverId, or null when there's no match. Used by the "upload anyway" override so a
  *  local child is attached to an existing server child instead of duplicated. */
 export function matchServerChild(local: Child, serverChildren: Child[]): number | null {
+  // An expected child must not adopt a server row: its `birth` is a due date,
+  // so a name-and-birthday match would be a coincidence, not the same child.
+  if (local.expected) return null;
+
   const norm = (s: string) => s.trim().toLowerCase();
   const sameDay = (a: number, b: number) => {
     const da = new Date(a), db = new Date(b);
