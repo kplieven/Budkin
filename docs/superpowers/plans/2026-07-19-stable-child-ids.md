@@ -191,7 +191,7 @@ export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<
 }
 ```
 
-Note the `note` string: the original contains an em-dash (`Bath — ${entry.wash} wash`), which this project forbids. Since you are editing the line anyway, replace it with a comma as shown. Do the same for any other em-dash in a body you touch.
+Note the `note` string: the original joins `Bath` and `${entry.wash} wash` with an em dash, which this project forbids. Since you are editing the line anyway, replace it with a comma as shown. Do the same for any other em dash in a body you touch.
 
 Apply the identical parameter change to `noteToNoteBody` and `milestoneToNoteBody`, replacing their `child: entry.childId` with `child: childServerId` and leaving everything else alone.
 
