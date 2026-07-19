@@ -831,21 +831,27 @@ Replace these lines (currently 27 and 32-34):
 with:
 
 ```tsx
-  const children = useAppStore((s) => s.children);
   const finish = useFinishSetup();
 ```
 
 ```tsx
   // A fresh Baby Buddy install has no children on it, so connecting is not the
   // end of setup: continue into the add-baby step instead of dropping the user
-  // on an empty Home. `children` is the raw store array, not a derived one, so
-  // this selector is reference-stable.
+  // on an empty Home. The child count is read at fire time rather than being an
+  // effect dependency: this screen stays mounted underneath the pushed route, so
+  // depending on it would re-fire the branch every time the count changes later,
+  // including a mid-session delete of the last child.
   useEffect(() => {
     if (!connected) return;
-    if (nextAfterConnect(children.length) === '/setup/baby') router.push('/setup/baby');
-    else finish();
-  }, [connected, children.length, finish]);
+    if (nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby') {
+      router.push('/setup/baby');
+    } else {
+      finish();
+    }
+  }, [connected, finish]);
 ```
+
+The fire-time read is load-bearing. `router.push` leaves this screen mounted underneath the add-baby step, so an effect that depends on `children.length` stays armed for the whole session: tapping "Add baby" would re-fire it (count 0 to 1) and finish twice, and deleting the last child later would push the user into the wizard unprompted.
 
 Note: `enterLocal` is removed because Step 4 deletes its only caller.
 
