@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { mergeQueuedEntries, mergeUnsynced, useAppStore, visibleTags } from '@/store/useAppStore';
+import { mergeQueuedEntries, mergeUnsynced, reconcileChildren, useAppStore, visibleTags } from '@/store/useAppStore';
 import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -3272,5 +3272,67 @@ describe('walkthrough persistence', () => {
     useAppStore.setState({ tutorialSeen: false });
     await s().hydrate();
     expect(s().tutorialSeen).toBe(false);
+  });
+});
+
+describe('reconcileChildren', () => {
+  const kid = (over: Partial<Child> = {}): Child => ({
+    id: 'x',
+    first: 'Ada',
+    last: '',
+    birth: Date.parse('2026-01-01'),
+    color: '#E8A87C',
+    ...over,
+  });
+
+  it('keeps the LOCAL id when a server child matches by serverId', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Ada' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada' })];
+    const out = reconcileChildren(server, local);
+    expect(out).toHaveLength(1);
+    expect(out[0].id).toBe('child1752');
+    expect(out[0].serverId).toBe(501);
+  });
+
+  it('takes the server copy of every other field on a match', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg' })];
+    const out = reconcileChildren(server, local);
+    expect(out[0].first).toBe('Adaline');
+    expect(out[0].picture).toBe('https://s/a.jpg');
+  });
+
+  it('adds a server child the app has never seen, keeping its server-derived id', () => {
+    const out = reconcileChildren([kid({ id: '502', serverId: 502 })], []);
+    expect(out.map((c) => c.id)).toEqual(['502']);
+  });
+
+  it('keeps a local child that has never been pushed', () => {
+    const local = [kid({ id: 'child999' })]; // no serverId
+    const out = reconcileChildren([kid({ id: '501', serverId: 501 })], local);
+    expect(out.map((c) => c.id)).toEqual(['child999', '501']);
+  });
+
+  it('never duplicates a child that is both local-with-serverId and on the server', () => {
+    const server = [kid({ id: '501', serverId: 501 })];
+    const local = [kid({ id: 'child1752', serverId: 501 })];
+    expect(reconcileChildren(server, local)).toHaveLength(1);
+  });
+
+  it('prepends local-only children and preserves the server order', () => {
+    const server = [kid({ id: '501', serverId: 501 }), kid({ id: '502', serverId: 502 })];
+    const local = [kid({ id: 'localA' }), kid({ id: 'localB' })];
+    expect(reconcileChildren(server, local).map((c) => c.id)).toEqual(['localA', 'localB', '501', '502']);
+  });
+
+  it('drops a local child whose serverId is no longer on the server', () => {
+    // Deleted from Baby Buddy elsewhere. The server is authoritative for
+    // children it knows about, which is today's behaviour and must not change.
+    const out = reconcileChildren([], [kid({ id: 'child1752', serverId: 501 })]);
+    expect(out).toEqual([]);
+  });
+
+  it('returns an empty list when both sides are empty', () => {
+    expect(reconcileChildren([], [])).toEqual([]);
   });
 });
