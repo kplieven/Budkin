@@ -1,11 +1,13 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import { pageFromOffset } from '@/features/walkthrough/pager';
 import { WALKTHROUGH_SLIDES } from '@/features/walkthrough/slides';
+import { useWheelPaging } from '@/features/walkthrough/useWheelPaging';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useTheme } from '@/theme/useTheme';
@@ -40,6 +42,26 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
     else goTo(index + 1);
   };
 
+  // Wheel and trackpad gestures move one slide at a time, forwards or back.
+  useWheelPaging(scrollRef, (delta) => goTo(index + delta), size.w > 0);
+
+  // Keep the dots and the button label on the slide actually in view. On web the
+  // momentum callbacks never fire (react-native-web only ever emits `onScroll`),
+  // so without this a drag moves the deck while the rest of the screen believes
+  // it is still on the old slide, and Next then jumps back to it.
+  const syncIndex = (offsetX: number) =>
+    setIndex(pageFromOffset(offsetX, size.w, WALKTHROUGH_SLIDES.length));
+
+  // Re-measuring (first layout, or a resize) leaves the old pixel offset pointing
+  // at the wrong slide, which `syncIndex` would then read as a page change.
+  const indexRef = useRef(index);
+  useEffect(() => {
+    indexRef.current = index;
+  });
+  useEffect(() => {
+    if (size.w > 0) scrollRef.current?.scrollTo({ x: indexRef.current * size.w, animated: false });
+  }, [size.w]);
+
   return (
     <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}>
       {/* Skip (hidden on the last slide, where the primary button dismisses) */}
@@ -70,9 +92,8 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             scrollEventThrottle={16}
-            onMomentumScrollEnd={(e) =>
-              setIndex(Math.max(0, Math.min(WALKTHROUGH_SLIDES.length - 1, Math.round(e.nativeEvent.contentOffset.x / size.w))))
-            }
+            onScroll={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
+            onMomentumScrollEnd={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
           >
             {WALKTHROUGH_SLIDES.map((slide) => (
               // Each slide is sized to the measured pager box (width + height) so
