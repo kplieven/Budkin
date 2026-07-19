@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   mergeHeldBackEntries,
@@ -10,6 +10,7 @@ import {
   visibleTags,
 } from '@/store/useAppStore';
 import { entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { toDisplay } from '@/lib/units';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -402,6 +403,41 @@ describe('openSheet defaults', () => {
     expect(s().te.amount).toBe(90);
     expect(s().te.method).toBe('both');
     expect(s().te.durationMin).toBe(15);
+  });
+});
+
+describe('adjustAmount (stepper presses land in the display unit system)', () => {
+  // The units preference is not part of the shared beforeEach reset, so put it
+  // back or an imperial case would leak into every test after it.
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  it('metric: a press moves the stored amount by 10 ml', () => {
+    useAppStore.setState({ unitSystem: 'metric' });
+    s().openSheet('pumping');
+    s().adjustAmount(1);
+    expect(s().te.amount).toBe(100);
+    s().adjustAmount(-1);
+    expect(s().te.amount).toBe(90);
+  });
+
+  it('imperial: a press moves by half a fl oz, and stores canonical ml', () => {
+    useAppStore.setState({ unitSystem: 'imperial' });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(90); // the seeded default stays 90 ml either way
+
+    s().adjustAmount(1);
+    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3.5, 9);
+    s().adjustAmount(1);
+    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(4, 9);
+    // What is persisted and synced is millilitres, never the fl oz number.
+    expect(s().te.amount).toBeCloseTo(118.294, 3);
+  });
+
+  it('clamps at zero rather than going negative', () => {
+    useAppStore.setState({ unitSystem: 'imperial' });
+    s().openSheet('pumping');
+    for (let i = 0; i < 10; i++) s().adjustAmount(-1);
+    expect(s().te.amount).toBe(0);
   });
 });
 
