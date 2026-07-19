@@ -390,14 +390,23 @@ export function reconcileChildren(serverChildren: Child[], localChildren: Child[
   return [...neverPushed, ...reconciled];
 }
 
+/** The server id of the child a record belongs to, or null when that child has
+ *  never been pushed. A record whose child has no server id MUST NOT be sent:
+ *  the server would reject it and the retry queue would replay it verbatim
+ *  forever. Callers enqueue instead and let the reconnect flush handle it once
+ *  the child exists server-side. */
+function childServerIdFor(children: Child[], childId: string): number | null {
+  return children.find((c) => c.id === childId)?.serverId ?? null;
+}
+
 /** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
  *  `adopt` and `flushUnsynced` — the only two callers that push local-only
  *  (serverId == null) records up to the server. */
 function buildUploadDeps(conn: Connection): UploadDeps {
   return {
     pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
-    pushEntry: (e) => pushEntryToServer(conn, e),
-    pushMeasurement: (m) => pushMeasurementToServer(conn, m),
+    pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
+    pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
   };
 }
 
@@ -928,8 +937,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (q.length === 0) return;
     const remaining: Entry[] = [];
     for (const entry of q) {
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      if (childServerId == null) {
+        // The child still has no server id (e.g. its own push hasn't landed
+        // yet): keep the entry queued for the next flush rather than sending
+        // a local id the server would reject.
+        remaining.push(entry);
+        continue;
+      }
       try {
-        await pushEntryToServer(conn, entry);
+        await pushEntryToServer(conn, entry, childServerId);
       } catch {
         remaining.push(entry);
       }
@@ -950,9 +967,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     for (const op of ops) {
       try {
         if (op.op === 'update' && op.entity === 'child') await updateChildOnServer(conn, op.payload);
-        else if (op.op === 'update' && op.entity === 'measurement') await updateMeasurementOnServer(conn, op.payload);
-        else if (op.op === 'update' && op.entity === 'entry') await updateEntryOnServer(conn, op.payload);
-        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        else if (op.op === 'update' && op.entity === 'measurement') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          // Child not on the server (edge case: the entity was synced but the
+          // child later lost its server id). Nothing sensible to send; fall
+          // through to the catch below so the op stays queued for retry.
+          if (childServerId == null) throw new Error('child not synced');
+          await updateMeasurementOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'update' && op.entity === 'entry') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          if (childServerId == null) throw new Error('child not synced');
+          await updateEntryOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
         else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
         else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
@@ -1039,15 +1065,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (s.offline) {
       void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
     } else {
-      void pushEntryToServer(conn, entry)
-        .then((serverId) => {
-          if (serverId != null) {
-            set((st) => ({
-              entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
-            }));
-          }
-        })
-        .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      if (childServerId == null) {
+        // The child is not on the server yet, so this entry cannot be either.
+        // Queue it: the reconnect flush pushes it once the child exists.
+        void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
+      } else {
+        void pushEntryToServer(conn, entry, childServerId)
+          .then((serverId) => {
+            if (serverId != null) {
+              set((st) => ({
+                entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
+              }));
+            }
+          })
+          .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
+      }
     }
   },
 
@@ -1521,7 +1554,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ entries: s.entries.map((e) => (e.id === id ? entry : e)) });
     get().showToast('Updated');
     if (s.connection && s.connection.mode === 'server' && !s.offline) {
-      void updateEntryOnServer(s.connection, entry).catch(() => {});
+      const childServerId = childServerIdFor(s.children, entry.childId);
+      // No server id for the child means nothing sensible to update
+      // server-side; the local edit stands and a future flush handles the
+      // child (and, transitively, this entry) once it can be pushed.
+      if (childServerId != null) {
+        void updateEntryOnServer(s.connection, entry, childServerId).catch(() => {});
+      }
     } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
       void addPendingOp({ op: 'update', entity: 'entry', payload: entry });
     }
@@ -1576,10 +1615,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast(existing ? 'Updated' : 'Saved');
     const conn = s.connection;
     if (conn && conn.mode === 'server' && !s.offline) {
+      const childServerId = childServerIdFor(s.children, m.childId);
       if (existing) {
-        void updateMeasurementOnServer(conn, m).catch(() => {});
-      } else {
-        void pushMeasurementToServer(conn, m)
+        // No server id for the child: nothing sensible to update server-side,
+        // so leave the local edit as-is (same as the offline case below).
+        if (childServerId != null) {
+          void updateMeasurementOnServer(conn, m, childServerId).catch(() => {});
+        }
+      } else if (childServerId != null) {
+        void pushMeasurementToServer(conn, m, childServerId)
           .then((serverId) => {
             if (serverId != null) {
               set((st) => ({
@@ -1589,6 +1633,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           })
           .catch(() => {});
       }
+      // else (!existing && childServerId == null): leave serverId unset,
+      // flushUnsynced picks the measurement up once the child is pushed.
     } else if (conn && conn.mode === 'server' && s.offline && existing && m.serverId != null) {
       // Already on the server, editing while offline: record the update so it
       // replays on reconnect. A brand-new (existing == null) offline
@@ -1893,7 +1939,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (existing) {
       get().showToast('Updated');
       if (s.connection && s.connection.mode === 'server' && !s.offline) {
-        void updateEntryOnServer(s.connection, entry).catch(() => {});
+        const childServerId = childServerIdFor(s.children, entry.childId);
+        // No server id for the child: nothing sensible to update server-side,
+        // so the local edit stands (same as the offline branch below).
+        if (childServerId != null) {
+          void updateEntryOnServer(s.connection, entry, childServerId).catch(() => {});
+        }
       } else if (s.connection && s.connection.mode === 'server' && s.offline && entry.serverId != null) {
         // Already on the server, edited while offline: record the update so
         // it replays on reconnect. A not-yet-synced local edit needs no op.
