@@ -7,7 +7,7 @@ import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { pageFromOffset } from '@/features/walkthrough/pager';
 import { WALKTHROUGH_SLIDES } from '@/features/walkthrough/slides';
-import { useWheelPaging } from '@/features/walkthrough/useWheelPaging';
+import { useWebPaging } from '@/features/walkthrough/useWebPaging';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useTheme } from '@/theme/useTheme';
@@ -42,13 +42,14 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
     else goTo(index + 1);
   };
 
-  // Wheel and trackpad gestures move one slide at a time, forwards or back.
-  useWheelPaging(scrollRef, (delta) => goTo(index + delta), size.w > 0);
+  // Wheel, trackpad and touch all move one slide at a time, forwards or back.
+  // A 0 step is a gesture that fell short, which settles back onto `index`.
+  useWebPaging(scrollRef, WALKTHROUGH_SLIDES.length, (delta) => goTo(index + delta), size.w > 0);
 
-  // Keep the dots and the button label on the slide actually in view. On web the
-  // momentum callbacks never fire (react-native-web only ever emits `onScroll`),
-  // so without this a drag moves the deck while the rest of the screen believes
-  // it is still on the old slide, and Next then jumps back to it.
+  // Native only: react-native-web never fires the momentum callbacks, so on web
+  // `index` is authoritative and every gesture arrives through `useWebPaging`.
+  // Deriving it from the scroll offset there would double-count a drag, which
+  // already moved the deck one page before the release commits the turn.
   const syncIndex = (offsetX: number) =>
     setIndex(pageFromOffset(offsetX, size.w, WALKTHROUGH_SLIDES.length));
 
@@ -92,7 +93,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             pagingEnabled
             showsHorizontalScrollIndicator={false}
             scrollEventThrottle={16}
-            onScroll={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
             onMomentumScrollEnd={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
           >
             {WALKTHROUGH_SLIDES.map((slide) => (

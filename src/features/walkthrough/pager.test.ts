@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  FLICK_MS,
   IDLE_WHEEL_PAGER,
   WHEEL_GESTURE_GAP_MS,
   WHEEL_STEP_PX,
+  dragScrollLeft,
   pageFromOffset,
   readWheel,
+  stepFromDrag,
   type WheelPagerState,
 } from '@/features/walkthrough/pager';
 
@@ -28,6 +31,64 @@ describe('pageFromOffset', () => {
 
   it('returns 0 before the pager has been measured', () => {
     expect(pageFromOffset(0, 0, 5)).toBe(0);
+  });
+});
+
+const W = 400; // page width used throughout the drag tests
+const COUNT = 5;
+
+describe('dragScrollLeft', () => {
+  it('tracks the finger 1:1', () => {
+    expect(dragScrollLeft(W, -120, W, COUNT)).toBe(W + 120);
+    expect(dragScrollLeft(W, 120, W, COUNT)).toBe(W - 120);
+  });
+
+  it('never travels more than one page from where the drag began', () => {
+    // The reported bug: a hard swipe used to fly across several slides. Even an
+    // absurd finger travel can only reach the neighbouring slide.
+    expect(dragScrollLeft(W, -5000, W, COUNT)).toBe(2 * W);
+    expect(dragScrollLeft(W, 5000, W, COUNT)).toBe(0);
+  });
+
+  it('does not scroll past either end of the deck', () => {
+    expect(dragScrollLeft(0, 400, W, COUNT)).toBe(0);
+    expect(dragScrollLeft(4 * W, -400, W, COUNT)).toBe(4 * W);
+  });
+
+  it('anchors to the nearest page when a drag starts mid-animation', () => {
+    // Started 10px shy of page 1, so the one-page budget is measured from page 1.
+    expect(dragScrollLeft(W - 10, -5000, W, COUNT)).toBe(2 * W);
+  });
+
+  it('returns 0 before the pager has been measured', () => {
+    expect(dragScrollLeft(0, -100, 0, COUNT)).toBe(0);
+  });
+});
+
+describe('stepFromDrag', () => {
+  const SLOW = FLICK_MS + 100;
+
+  it('commits a page once the finger passes the ratio', () => {
+    expect(stepFromDrag(-W * 0.25, W, SLOW)).toBe(1);
+    expect(stepFromDrag(W * 0.25, W, SLOW)).toBe(-1);
+  });
+
+  it('eases back when a slow drag falls short', () => {
+    expect(stepFromDrag(-W * 0.1, W, SLOW)).toBe(0);
+  });
+
+  it('commits a short quick flick that falls under the ratio', () => {
+    expect(stepFromDrag(-40, W, 120)).toBe(1);
+    expect(stepFromDrag(40, W, 120)).toBe(-1);
+  });
+
+  it('ignores the jitter of a tap', () => {
+    expect(stepFromDrag(-3, W, 60)).toBe(0);
+  });
+
+  it('never reports more than one page, however far the finger went', () => {
+    expect(stepFromDrag(-5000, W, 80)).toBe(1);
+    expect(stepFromDrag(5000, W, 80)).toBe(-1);
   });
 });
 

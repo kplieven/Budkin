@@ -15,12 +15,56 @@ export const WHEEL_STEP_PX = 24;
 export const WHEEL_GESTURE_GAP_MS = 140;
 
 /**
+ * Fraction of a page a finger must travel before releasing commits the turn.
+ * Below it the deck eases back to where the drag started.
+ */
+export const DRAG_COMMIT_RATIO = 0.2;
+/** A drag shorter than this (ms) counts as a flick and commits on distance alone. */
+export const FLICK_MS = 250;
+/** Minimum travel (px) for a flick to count, so a tap never turns a page. */
+export const FLICK_MIN_PX = 12;
+
+/**
  * Nearest page for a horizontal scroll offset, clamped to the deck. `pageWidth`
  * is 0 until the pager has been measured, which would otherwise divide by zero.
  */
 export function pageFromOffset(offsetX: number, pageWidth: number, count: number): number {
   if (pageWidth <= 0) return 0;
   return Math.max(0, Math.min(count - 1, Math.round(offsetX / pageWidth)));
+}
+
+/**
+ * Where to hold the deck mid-drag, for a finger that has travelled `dx` from a
+ * drag that began at `startScroll`. Tracks the finger 1:1 but never further than
+ * one page from the slide the drag started on, so the neighbouring slide is the
+ * most that can ever come into view. That bound is what makes a hard flick
+ * physically unable to skip, rather than something corrected after the fact.
+ */
+export function dragScrollLeft(
+  startScroll: number,
+  dx: number,
+  pageWidth: number,
+  count: number,
+): number {
+  if (pageWidth <= 0) return 0;
+  const anchor = pageFromOffset(startScroll, pageWidth, count) * pageWidth;
+  const lo = Math.max(0, anchor - pageWidth);
+  const hi = Math.min((count - 1) * pageWidth, anchor + pageWidth);
+  return Math.max(lo, Math.min(hi, startScroll - dx));
+}
+
+/**
+ * How far to turn when a drag of `dx` over `elapsedMs` is released: one slide at
+ * most, or 0 to ease back. Dragging left (negative `dx`) moves the deck forward,
+ * the way the content follows the finger. A short flick commits on distance
+ * alone so a quick nudge is not swallowed for falling under the ratio.
+ */
+export function stepFromDrag(dx: number, pageWidth: number, elapsedMs: number): -1 | 0 | 1 {
+  if (pageWidth <= 0) return 0;
+  const far = Math.abs(dx) >= pageWidth * DRAG_COMMIT_RATIO;
+  const flicked = elapsedMs <= FLICK_MS && Math.abs(dx) >= FLICK_MIN_PX;
+  if (!far && !flicked) return 0;
+  return dx < 0 ? 1 : -1;
 }
 
 /**
