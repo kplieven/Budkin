@@ -4,12 +4,12 @@ import type { ActivityType, FeedMethod, FeedType } from '@/types/models';
 import type { TimeEntryShape } from '@/types/timeEntry';
 
 /**
- * Does a feeding's `amount` hold a VOLUME, or a dimensionless intake score?
+ * Does a feeding's `amount` hold a VOLUME, or a dimensionless intake level?
  *
  * The field is dual-purpose. A bottle or formula feed measures millilitres, so
  * it gets the ml/fl oz stepper and converts with the units preference. A feed
- * taken at the breast records a subjective 1 to 10 intake score instead, which
- * has no unit and must never be converted or labelled.
+ * taken at the breast records a subjective intake level instead (1, 2 or 3, see
+ * `INTAKE_LEVELS`), which has no unit and must never be converted or labelled.
  *
  * Both the log sheet (picking which control to show) and the history detail
  * line (picking how to format) must agree on this, so they share one predicate
@@ -17,6 +17,58 @@ import type { TimeEntryShape } from '@/types/timeEntry';
  */
 export function feedAmountIsVolume(feedType: FeedType | undefined, method: FeedMethod | undefined): boolean {
   return feedType !== 'breast' || method === 'bottle';
+}
+
+/**
+ * A three-level qualitative scale stored in an entry's numeric `amount` as 1, 2
+ * or 3. One shape, two uses: a solid diaper's size and a breast feed's intake.
+ *
+ * `bucket` maps a stored number onto one of the three levels. It exists because
+ * the field has held other things over time (both scales began life as a 1 to
+ * 10 score) and because Baby Buddy's own amount fields are plain floats, so any
+ * finite number can arrive. Every bucket MUST be the identity on 1, 2 and 3:
+ * that is what lets today's levels survive a round-trip while older wider-range
+ * values still land somewhere sensible instead of nowhere.
+ */
+export interface LevelSet {
+  labels: readonly [string, string, string];
+  bucket: (value: number) => 1 | 2 | 3;
+}
+
+/** Solid diaper size. Unchanged from the original 3-level diaper control. */
+export const DIAPER_LEVELS: LevelSet = {
+  labels: ['Small', 'Medium', 'Large'],
+  bucket: (v) => (v <= 1 ? 1 : v === 2 ? 2 : 3),
+};
+
+/**
+ * How much the baby took at the breast.
+ *
+ * The bucket is deliberately NON-MONOTONIC: 3 is "A lot" but 4 is "Some". That
+ * reads oddly until you know what the two ranges mean. This scale only ever
+ * writes 1, 2 or 3, so a value above 3 cannot be a level and can only be a
+ * leftover from the old 1 to 10 score. The two ranges are therefore different
+ * kinds of number and are read differently: 1 to 3 are levels and map to
+ * themselves, while 4 and up are old scores and take the same "by thirds"
+ * reading the API layer gives an untagged score off the wire (4-7 some, 8-10 a
+ * lot). Making it monotonic would mean either mangling today's levels or
+ * misreading every old score, and both are worse than looking odd.
+ *
+ * That leaves an old 2 or 3 as the only residual misread: by thirds they were
+ * both "A little", here they read as "Some" and "A lot". Those two values are
+ * genuinely ambiguous (a stored 3 is both a valid level and a valid old score)
+ * and nothing in the data can separate them, so today's meaning wins. Old
+ * scores that reached a server are converted once, on read (see `client.ts`),
+ * and arrive here already reduced to a level.
+ */
+export const INTAKE_LEVELS: LevelSet = {
+  labels: ['A little', 'Some', 'A lot'],
+  bucket: (v) => (v < 1.5 ? 1 : v < 2.5 ? 2 : v <= 3 ? 3 : v <= 7 ? 2 : 3),
+};
+
+/** The word for a stored intake `amount`, e.g. 3 -> "A lot". */
+export function intakeLevelLabel(amount: number): string {
+  return INTAKE_LEVELS.labels[INTAKE_LEVELS.bucket(amount) - 1];
 }
 
 export const ACTIVITY_LABEL: Record<ActivityType, string> = {

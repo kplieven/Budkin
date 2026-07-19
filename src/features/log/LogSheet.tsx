@@ -2,17 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AmountScale } from '@/components/AmountScale';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
-import { DiaperAmountScale } from '@/components/DiaperAmountScale';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { LevelScale } from '@/components/LevelScale';
 import { Stepper } from '@/components/Stepper';
 import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
-import { ACTIVITY_LABEL, DURATION_SHORTCUTS, feedAmountIsVolume } from '@/lib/activities';
+import { ACTIVITY_LABEL, DIAPER_LEVELS, DURATION_SHORTCUTS, INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
 import { fmtValue, toMetric, unitLabel } from '@/lib/units';
@@ -228,9 +227,9 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 }
 
 /**
- * Decimal temperature reading. The Stepper is integer-only and AmountScale is
- * 1–10, so neither fits 37.4 — this is a free decimal TextInput (styled like
- * MeasurementSheet's value input). Local text state holds the raw string so a
+ * Decimal temperature reading. The Stepper is integer-only and LevelScale has
+ * three fixed steps, so neither fits 37.4. This is a free decimal TextInput
+ * (styled like MeasurementSheet's value input). Local text state holds the raw string so a
  * trailing "." while typing "37." isn't dropped. The stored value (`te.temperature`)
  * is always canonical °C: the field shows it in the user's units lens and
  * converts the typed value back to °C before pushing it to the store. The block
@@ -455,9 +454,9 @@ export function LogSheet() {
             )}
             {showIntake && (
               <>
-                <FieldLabel>Intake — 1 to 10 (optional)</FieldLabel>
+                <FieldLabel>Intake (optional)</FieldLabel>
                 <View style={{ marginBottom: 16 }}>
-                  <AmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
+                  <LevelScale levels={INTAKE_LEVELS} value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
                 </View>
               </>
             )}
@@ -519,7 +518,7 @@ export function LogSheet() {
               <>
                 <FieldLabel>Amount (optional)</FieldLabel>
                 <View style={{ marginBottom: 16 }}>
-                  <DiaperAmountScale value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
+                  <LevelScale levels={DIAPER_LEVELS} value={te.amount} color={color} onSelect={(n) => setTE({ amount: n })} />
                 </View>
               </>
             )}

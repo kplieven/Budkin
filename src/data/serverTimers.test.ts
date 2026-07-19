@@ -35,6 +35,22 @@ describe('encode/decode timer name', () => {
     expect(decodeTimerName(encodeTimerName(t))).toMatchObject({ method: 'both', startSide: 'right' });
   });
 
+  it('carries a breast feed intake level in amt:, unconverted and unmarked', () => {
+    // `amt:` is the draft's raw amount, whatever kind of number that is. The
+    // ft:/m: tokens ride alongside, so a decoder can always tell a level from
+    // millilitres and the level needs no marker of its own.
+    const t = base({ saveAs: 'feeding', feedType: 'breast', method: 'left', amount: 3 });
+    const name = encodeTimerName(t);
+    expect(name).toBe('Feeding · v1 · ft:breast · m:left · amt:3');
+    expect(decodeTimerName(name)).toMatchObject({ feedType: 'breast', method: 'left', amount: 3 });
+  });
+
+  it('still decodes a timer left on the old 1 to 10 intake scale', () => {
+    // Same grammar, same version: only the range of the number changed, so an
+    // in-flight timer from an older build stays readable.
+    expect(decodeTimerName('Feeding · v1 · ft:breast · m:both · amt:7')).toMatchObject({ amount: 7 });
+  });
+
   it('round-trips a pumping timer amount', () => {
     const t = base({ saveAs: 'pumping', method: 'bottle', amount: 120 });
     expect(decodeTimerName(encodeTimerName(t))).toMatchObject({ saveAs: 'pumping', amount: 120 });

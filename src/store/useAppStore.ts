@@ -635,8 +635,8 @@ function mirrorTimerDelete(get: Get, timer: Timer): void {
  *
  * Pumping is always millilitres. A feeding's `amount` is dual-purpose, so it
  * defers to the one predicate the log sheet and the history line already share:
- * a breast feed records a dimensionless 1-to-10 intake score, which must never
- * be treated as a measurement. No other activity shows the stepper (a diaper's
+ * a breast feed records a dimensionless intake level, which must never be
+ * treated as a measurement. No other activity shows the stepper (a diaper's
  * solid amount is its own scale), so nothing else qualifies.
  */
 function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
@@ -2255,6 +2255,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setTE: (patch) =>
     set((s) => {
       const next = { ...s.te, ...patch };
+      // A feeding's `amount` means millilitres on one side of
+      // `feedAmountIsVolume` and an intake level on the other. Changing the feed
+      // type or method can move the draft across that line, and the number left
+      // behind is meaningless there: an intake of 3 is not 3 ml, and 90 ml is
+      // not a level. Clear it so the stale value can never be saved, converted
+      // or snapped to the volume step grid as the wrong kind of number.
+      //
+      // A patch that names an `amount` itself is left alone: it is stating the
+      // value for where the draft is landing, so there is nothing stale to drop.
+      // Every production caller patches one key at a time (the sheet's chips and
+      // scales each set exactly one), so this only comes up for a compound patch,
+      // which today means a test setting up a draft in a single call.
+      if (
+        s.sheet?.type === 'feeding' &&
+        ('feedType' in patch || 'method' in patch) &&
+        !('amount' in patch) &&
+        feedAmountIsVolume(s.te.feedType, s.te.method) !== feedAmountIsVolume(next.feedType, next.method)
+      ) {
+        next.amount = undefined;
+      }
       if ('agoMin' in patch) next.absTime = undefined; // point: a relative pick drops the edit anchor
       // A manual time pick (precise editor, "Now") deselects the "When" anchor,
       // unless the patch itself is that anchor selection.
