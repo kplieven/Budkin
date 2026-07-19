@@ -426,6 +426,23 @@ function childServerIdFor(children: Child[], childId: string): number | null {
   return children.find((c) => c.id === childId)?.serverId ?? null;
 }
 
+/** Resolve `loadFromServer`'s `selectedChildId` (see repository.ts) into the
+ *  RECONCILED (local id) space. That value is `String(children[0]?.serverId)`,
+ *  i.e. a SERVER-space id; it is only ever used as a fallback once a caller's
+ *  own preferred selection is no longer valid, so it must be translated the
+ *  same way `remapChildIds` translates an incoming `childId`, by matching
+ *  `serverId` against the just-reconciled child list, not compared to local
+ *  ids directly. Falls back to the reconciled list's first child (covers a
+ *  locally-created, not-yet-synced child, whose `serverId` is absent), then to
+ *  `''` when there is no child at all. */
+function resolveSelectedChildId(reconciledChildren: Child[], serverSelectedChildId: string): string {
+  return (
+    reconciledChildren.find((c) => String(c.serverId) === serverSelectedChildId)?.id ??
+    reconciledChildren[0]?.id ??
+    ''
+  );
+}
+
 /** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
  *  `adopt` and `flushUnsynced` — the only two callers that push local-only
  *  (serverId == null) records up to the server. */
@@ -680,7 +697,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
       // Incoming entries/measurements/timers carry the SERVER's child id
       // (loadFromServer has no local state to translate with, since a running
-      // timer's `child` FK is mapped through the same server-shaped list — see
+      // timer's `child` FK is mapped through the same server-shaped list, see
       // `loadFromServer`'s own `childByServerId`); rewrite it to the local id
       // now that reconciliation has produced the authoritative mapping. See
       // `remapChildIds`.
@@ -689,13 +706,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the persisted local selection if it's still visible after
       // reconciliation (mirrors refresh's fallback below); otherwise fall back
-      // to the server's selection. Without this a cold start right after
+      // to the server's selection, resolved into local id space (see
+      // `resolveSelectedChildId`). Without this a cold start right after
       // selecting an offline-only child would silently deselect it, since
       // `...data` below would otherwise always win with the server's choice.
       const localSelectedChildId = e?.selectedChildId ?? '';
       const selectedChildId = reconciledChildren.some((c) => c.id === localSelectedChildId)
         ? localSelectedChildId
-        : data.selectedChildId;
+        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
       set({
         connected: true,
         hydrating: false,
@@ -768,10 +786,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Keep the user's current child if it's still visible — checked against
       // the RECONCILED list (not just the server's), so a local child kept
       // visible by reconcileChildren above doesn't get silently deselected;
-      // otherwise fall back to the server's first child (matches cold `hydrate`).
+      // otherwise fall back to the server's first child, resolved into local
+      // id space (matches cold `hydrate`; see `resolveSelectedChildId`).
       const selectedChildId = reconciledChildren.some((c) => c.id === s.selectedChildId)
         ? s.selectedChildId
-        : data.selectedChildId;
+        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
       set({
         connected: true,
         offline: false,
@@ -937,9 +956,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const remappedEntries = remapChildIds(data.entries, reconciledChildren);
     const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
     const remappedTimers = remapChildIds(data.timers, reconciledChildren);
+    // Keep the current selection if it's still visible after reconciliation;
+    // otherwise fall back to the server's first child, resolved into local id
+    // space (mirrors `hydrate`/`refresh`; see `resolveSelectedChildId`).
     const selectedChildId = reconciledChildren.some((c) => c.id === currentSelectedChildId)
       ? currentSelectedChildId
-      : data.selectedChildId;
+      : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
     set({
       ...data,
       children: reconciledChildren,
@@ -1324,9 +1346,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     try {
       // Demo: the store's `entries` hold the local seed history for ALL
       // children — scope to the selected child, matching the per-child fetch.
-      const entries = conn.mode === 'local'
-        ? s.entries.filter((e) => e.childId === childId)
-        : await loadInsightsHistory(conn, childId, s.now - 90 * 86400000);
+      // Server mode: the API takes the child's SERVER id (see
+      // `childServerIdFor`), not Budkin's local id, which is what
+      // `selectedChildId` is post-reconciliation. A child that has never been
+      // pushed has no server id yet, so there is nothing to fetch: that is
+      // not an error, just an empty result until the child syncs.
+      let entries: Entry[];
+      if (conn.mode === 'local') {
+        entries = s.entries.filter((e) => e.childId === childId);
+      } else {
+        const childServerId = childServerIdFor(s.children, childId);
+        entries = childServerId == null
+          ? []
+          : await loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
+      }
       if (get().selectedChildId !== childId) {
         // A child switch landed while this fetch was in flight — discard the
         // stale result and load for the now-selected child instead.
