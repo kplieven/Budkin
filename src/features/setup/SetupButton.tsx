@@ -1,0 +1,64 @@
+import { Pressable, type ViewStyle } from 'react-native';
+
+import { isHovered } from '@/components/hover';
+import { Txt } from '@/components/Txt';
+import { hexA } from '@/lib/color';
+import { shadowStyle } from '@/theme/shadow';
+import { useTheme } from '@/theme/useTheme';
+
+/**
+ * The setup wizard's button. Primary is the filled, shadowed call to action,
+ * secondary the outlined alternative that sits beneath it. Both wizard screens
+ * use this so the steps stay visually identical, and a disabled primary keeps
+ * its shape while dropping the shadow and the pointer cursor.
+ */
+export function SetupButton({
+  label,
+  onPress,
+  variant = 'primary',
+  disabled = false,
+  style,
+}: {
+  label: string;
+  onPress: () => void;
+  variant?: 'primary' | 'secondary';
+  disabled?: boolean;
+  style?: ViewStyle;
+}) {
+  const t = useTheme();
+  const primary = variant === 'primary';
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled }}
+      style={(s) => [
+        {
+          height: 56,
+          borderRadius: 17,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: primary ? t.primary : t.surface,
+          borderWidth: primary ? 0 : 1.5,
+          borderColor: t.line2,
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? 'auto' : 'pointer',
+        },
+        primary && !disabled && shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
+        !disabled && isHovered(s) && (primary ? { opacity: 0.9 } : { borderColor: t.line }),
+        style,
+      ]}
+    >
+      <Txt
+        unselectable
+        weight={primary ? 800 : 700}
+        size={primary ? 17 : 16}
+        color={primary ? t.onPrimary : t.text}
+      >
+        {label}
+      </Txt>
+    </Pressable>
+  );
+}
