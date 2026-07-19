@@ -9,7 +9,7 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -2366,6 +2366,133 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     expect(s().children.map((c) => c.id)).toEqual(['localM']); // local id preserved
     expect(s().selectedChildId).toBe('localM');
     expectSelectionNamesARealChild();
+  });
+});
+
+describe('history is scoped to the selected child', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const expecting: Child = { id: 'localBean', first: 'Bean', last: '', birth: NOW + 60 * 86400000, color: '#ddd', expected: true };
+  /** A record owned by Mira, the server's FIRST child, as it arrives from
+   *  loadFromServer: `childId` is still in SERVER id space at that point. */
+  const miraFeed: Entry = { id: 'f1', childId: '1', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+  const serverChildren = [
+    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
+    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
+  ];
+
+  it('refresh asks the server for the SELECTED child, not the server\'s first', async () => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    // The SERVER id of the locally selected child, bridged from local id space.
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    expect(s().selectedChildId).toBe('localTheo');
+    expectSelectionNamesARealChild();
+  });
+
+  it('hydrate asks the server for the persisted local selection', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira, theo],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localTheo',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('hydrate passes no preferred child when the selection has never been pushed', async () => {
+    // An expecting child has no serverId, so there is nothing the server could
+    // match. loadFromServer must fall back to its own children[0], as before.
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira, expecting],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'localBean',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().hydrate();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBeNull();
+  });
+
+  it("refresh with an expecting child selected does not surface a sibling's entries", async () => {
+    // The reported bug: for an expected child, the history shown was the
+    // previous child's. An expecting child has no serverId, so loadFromServer
+    // still falls back to the server's first child (Mira) and her records DO
+    // land in the flat `entries` array. What must not happen is those records
+    // being shown under the expecting child, which is what every history
+    // surface reads via `entriesForChild`.
+    useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localBean', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [miraFeed],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(s().selectedChildId).toBe('localBean');
+    // The store still holds the sibling's record, remapped into local id space.
+    expect(s().entries.find((e) => e.id === 'f1')?.childId).toBe('localMira');
+    // But nothing is shown for the expecting child.
+    expect(entriesForChild(s().entries, s().selectedChildId)).toEqual([]);
+    // ...while the sibling's own history is intact.
+    expect(entriesForChild(s().entries, 'localMira').map((e) => e.id)).toEqual(['f1']);
+  });
+
+  it("switching to a sibling never shows the other child's records", async () => {
+    // The same bug with no expecting child involved: the demo seed owns all
+    // entries under c1, so selecting c2 used to render c1's history verbatim.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [miraFeed],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(entriesForChild(s().entries, 'localTheo')).toEqual([]);
   });
 });
 

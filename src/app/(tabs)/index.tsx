@@ -76,7 +76,13 @@ export default function Home() {
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
           <DashboardContent layout="desktop" />
         </ScrollView>
-        {showRail(width) && <TimelineRail />}
+        {/* Hidden while expecting: the main region is the countdown card, and a
+            "Recent activity" rail inviting the parent to log activity for an
+            unborn baby is the same dead affordance that DashboardContent and
+            Growth already suppress (ExpectingCard / WaitingForBirth). Scoping
+            entries by child leaves it correctly empty, but empty is not the
+            same as absent. */}
+        {showRail(width) && !child?.expected && <TimelineRail />}
       </View>
     );
   }

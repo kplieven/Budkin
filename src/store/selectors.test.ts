@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { endAnchorVisible, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
-import type { Entry } from '@/types/models';
+import { endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import type { Entry, Measurement } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -176,5 +176,33 @@ describe('nextWashKind', () => {
       bath(NOW - M, 'small'),
     ];
     expect(nextWashKind(entries)).toBe('big');
+  });
+});
+
+describe('entriesForChild / measurementsForChild', () => {
+  const mine: Entry = { id: 'a', childId: 'c1', type: 'diaper', time: NOW, solid: false, wet: true, color: null, tags: [] };
+  const sibling: Entry = { id: 'b', childId: 'c2', type: 'diaper', time: NOW, solid: false, wet: true, color: null, tags: [] };
+
+  it('keeps only the entries owned by the given child', () => {
+    expect(entriesForChild([mine, sibling], 'c1')).toEqual([mine]);
+    expect(entriesForChild([mine, sibling], 'c2')).toEqual([sibling]);
+  });
+
+  it('returns nothing when no child is selected, rather than everything', () => {
+    expect(entriesForChild([mine, sibling], '')).toEqual([]);
+    expect(entriesForChild([mine, sibling], undefined)).toEqual([]);
+  });
+
+  it('returns nothing for a child that owns no entries (the expecting case)', () => {
+    expect(entriesForChild([mine, sibling], 'c3')).toEqual([]);
+  });
+
+  const w1: Measurement = { id: 'm1', childId: 'c1', kind: 'weight', value: 4, date: NOW };
+  const w2: Measurement = { id: 'm2', childId: 'c2', kind: 'weight', value: 5, date: NOW };
+
+  it('scopes measurements the same way', () => {
+    expect(measurementsForChild([w1, w2], 'c1')).toEqual([w1]);
+    expect(measurementsForChild([w1, w2], '')).toEqual([]);
+    expect(measurementsForChild([w1, w2], undefined)).toEqual([]);
   });
 });

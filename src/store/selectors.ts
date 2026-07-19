@@ -22,6 +22,32 @@ export function selectPendingCount(s: { queueCount: number; measurements: Measur
   return s.queueCount + s.measurements.filter((m) => m.serverId == null).length;
 }
 
+/**
+ * The entries owned by one child. `entries` is a single flat, globally-scoped
+ * array holding every child's records, so every history surface must scope it
+ * before rendering, otherwise switching child (or selecting an expecting one)
+ * shows the previous child's history.
+ *
+ * An absent `childId` yields `[]`, not everything: with no child selected there
+ * is no history to show, and a permissive fallback would resurrect the bug.
+ * There is deliberately no fallback for an entry with a missing `childId`
+ * either, for the same reason.
+ *
+ * Pure, so it must be called in the render body over a raw-selected array, not
+ * inside a `useAppStore` selector: returning a fresh array from a selector makes
+ * zustand v5 see a perpetually-changed snapshot and loop forever.
+ */
+export function entriesForChild(entries: Entry[], childId: string | undefined): Entry[] {
+  if (!childId) return [];
+  return entries.filter((e) => e.childId === childId);
+}
+
+/** Measurements owned by one child. Same scoping rules as `entriesForChild`. */
+export function measurementsForChild(measurements: Measurement[], childId: string | undefined): Measurement[] {
+  if (!childId) return [];
+  return measurements.filter((m) => m.childId === childId);
+}
+
 const DEFAULT_ORDER: TimeField[] = ['end', 'lasted', 'start'];
 
 /** The derived (computed) interval quantity — order[2]. */
