@@ -18,7 +18,7 @@ export interface Prefs {
   themeMode: ThemeMode;
   /** Budkin-local metric/imperial display lens (default 'metric'). */
   unitSystem: UnitSystem;
-  /** true once the first-run walkthrough carousel has been dismissed. */
+  /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
 }
 

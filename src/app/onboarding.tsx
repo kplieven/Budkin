@@ -1,6 +1,6 @@
 import { openBrowserAsync } from 'expo-web-browser';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -13,6 +13,8 @@ import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
 import type { SavedServer } from '@/data/servers';
 import { useTheme } from '@/theme/useTheme';
+import { nextAfterConnect } from '@/features/setup/routing';
+import { useFinishSetup } from '@/features/setup/useFinishSetup';
 
 export default function Onboarding() {
   const t = useTheme();
@@ -24,14 +26,37 @@ export default function Onboarding() {
   const connecting = useAppStore((s) => s.connecting);
   const connectError = useAppStore((s) => s.connectError);
   const connect = useAppStore((s) => s.connect);
-  const enterLocal = useAppStore((s) => s.enterLocal);
   const savedServers = useAppStore((s) => s.savedServers);
   const forgetServer = useAppStore((s) => s.forgetServer);
+  const connection = useAppStore((s) => s.connection);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  const finish = useFinishSetup();
 
-  useEffect(() => {
-    if (connected) router.replace('/(tabs)');
-  }, [connected]);
+  // Local mode also sets `connected`, so this screen keys off a real SERVER
+  // connection: entering local mode must not make the connect form unreachable.
+  const serverConnected = connected && connection?.mode === 'server';
+  const offeredBabyStep = useRef(false);
+
+  // Re-decided on focus, not just on a dependency change. Coming BACK to this
+  // screen (from the add-baby step) has to be handled too, or a user who
+  // reached it as the stack root would be stranded on a form that can no longer
+  // do anything. A fresh Baby Buddy install has no children on it, so a
+  // successful connect continues into the add-baby step rather than dropping
+  // the user on an empty Home; anything else means setup is done.
+  useFocusEffect(
+    useCallback(() => {
+      if (!serverConnected) return;
+      if (
+        !offeredBabyStep.current &&
+        nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby'
+      ) {
+        offeredBabyStep.current = true;
+        router.push('/setup/baby');
+        return;
+      }
+      finish();
+    }, [serverConnected, finish]),
+  );
 
   // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
   // fields ready to fix) and reuses the normal connect action.
@@ -60,6 +85,20 @@ export default function Onboarding() {
       contentContainerStyle={{ paddingTop: insets.top + 24, paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }}
       keyboardShouldPersistTaps="handled"
     >
+      {router.canGoBack() && (
+        <Pressable
+          onPress={() => router.back()}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          hitSlop={10}
+          style={(s) => [
+            { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginLeft: -8, marginBottom: 8, cursor: 'pointer' },
+            isHovered(s) && { backgroundColor: t.chip },
+          ]}
+        >
+          <Icon name="chevron-left" color={t.text} size={22} />
+        </Pressable>
+      )}
       <View
         style={[
           {
@@ -246,17 +285,6 @@ export default function Onboarding() {
           Learn how to host one
         </Txt>
       </Txt>
-
-      <Pressable
-        onPress={enterLocal}
-        accessibilityRole="button"
-        style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
-      >
-        <Txt unselectable weight={600} size={13.5} color={t.dim}>
-          No server?{' '}
-          <Txt unselectable weight={700} size={13.5} color={t.primary}>Start now — connect later →</Txt>
-        </Txt>
-      </Pressable>
     </ScrollView>
   );
 }
