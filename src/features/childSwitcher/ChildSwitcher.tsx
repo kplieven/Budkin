@@ -6,7 +6,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
-import { ageStr } from '@/lib/format';
+import { ageOrDueLabel } from '@/lib/format';
 import { hexA } from '@/lib/color';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -61,7 +61,7 @@ export function ChildSwitcher() {
                   {c.first} {c.last}
                 </Txt>
                 <Txt weight={500} size={13} color={t.dim}>
-                  {ageStr(c.birth, now)}
+                  {ageOrDueLabel(c.birth, !!c.expected, now)}
                 </Txt>
               </View>
               <Pressable

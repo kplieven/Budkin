@@ -41,6 +41,13 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const openMeasurement = useAppStore((s) => s.openMeasurement);
   const openEditMeasurement = useAppStore((s) => s.openEditMeasurement);
 
+  // Reached only via a typed or bookmarked /metric/<kind> URL: Growth's
+  // guarded body means the cards that link here aren't rendered while the
+  // selected child is expected. Mirror log/[type].tsx: refuse to open the
+  // sheet and redirect to Home instead of showing measurement data for a
+  // child who has none yet.
+  if (child?.expected) return <Redirect href="/(tabs)" />;
+
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
   // Stored values are canonical metric. Convert the whole series to the display

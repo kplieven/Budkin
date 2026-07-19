@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
+import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { MetricCard } from '@/features/measurements/MetricCard';
 import { seriesFor } from '@/features/measurements/growthChart';
 import { MEAS_KINDS } from '@/lib/measurements';
@@ -22,7 +23,12 @@ export default function Growth() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openMeasurement = useAppStore((s) => s.openMeasurement);
 
-  const body = (
+  // Rendered in place of the normal content below, rather than an early return
+  // above the wrappers, so the waiting state keeps the header (child-switcher
+  // avatar), safe-area padding, and desktop max-width like the rest of the page.
+  const body = child?.expected ? (
+    <WaitingForBirth what="Growth charts" />
+  ) : (
     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
       {MEAS_KINDS.map((kind) => {
         const points = seriesFor(measurements, kind);

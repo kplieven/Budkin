@@ -4,9 +4,9 @@ import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import type { Timer } from '@/types/models';
 
 describe('startSleepTimer', () => {
-  it('creates a running sleep timer starting at now', () => {
-    const t = startSleepTimer(1000);
-    expect(t).toMatchObject({ activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: 1000 });
+  it('creates a running sleep timer starting at now, stamped with the owning child', () => {
+    const t = startSleepTimer(1000, 'c1');
+    expect(t).toMatchObject({ activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: 1000, childId: 'c1' });
     expect(t.id).toBe('t1000');
   });
 });

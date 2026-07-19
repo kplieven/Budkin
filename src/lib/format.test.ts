@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ageMonths,
+  ageOrDueLabel,
   ageStr,
   ANCHOR_LABEL,
   anchorLabel,
@@ -102,5 +103,45 @@ describe('anchorLabel / ANCHOR_LABEL', () => {
   it('returns the base label unchanged when no ago is given', () => {
     expect(anchorLabel(ANCHOR_LABEL.diaper)).toBe('Diaper');
     expect(anchorLabel(ANCHOR_LABEL.woke)).toBe('Woke');
+  });
+});
+
+describe('ageOrDueLabel', () => {
+  const DAY = 86400000;
+  const NOW = new Date(2026, 5, 15, 12, 0, 0).getTime(); // 15 June 2026, midday
+
+  it('falls back to the plain age when the child is not expected', () => {
+    expect(ageOrDueLabel(NOW - 3 * DAY, false, NOW)).toBe('3 days old');
+    expect(ageOrDueLabel(NOW - 60 * DAY, false, NOW)).toBe('8 weeks old');
+  });
+
+  it('counts down in whole weeks when the due date is far out', () => {
+    expect(ageOrDueLabel(NOW + 42 * DAY, true, NOW)).toBe('Due in 6 weeks');
+  });
+
+  it('uses weeks from 15 days out', () => {
+    expect(ageOrDueLabel(NOW + 15 * DAY, true, NOW)).toBe('Due in 2 weeks');
+  });
+
+  it('uses days from 14 days out down to 2', () => {
+    expect(ageOrDueLabel(NOW + 14 * DAY, true, NOW)).toBe('Due in 14 days');
+    expect(ageOrDueLabel(NOW + 9 * DAY, true, NOW)).toBe('Due in 9 days');
+    expect(ageOrDueLabel(NOW + 2 * DAY, true, NOW)).toBe('Due in 2 days');
+  });
+
+  it('says tomorrow at one day out', () => {
+    expect(ageOrDueLabel(NOW + 1 * DAY, true, NOW)).toBe('Due tomorrow');
+  });
+
+  it('holds at a calm phrase on the day and after it', () => {
+    expect(ageOrDueLabel(NOW, true, NOW)).toBe('Due any day now');
+    expect(ageOrDueLabel(NOW - 1 * DAY, true, NOW)).toBe('Due any day now');
+    expect(ageOrDueLabel(NOW - 30 * DAY, true, NOW)).toBe('Due any day now');
+  });
+
+  it('never counts up past the due date', () => {
+    const label = ageOrDueLabel(NOW - 8 * DAY, true, NOW);
+    expect(label).not.toMatch(/overdue|late|-/);
+    expect(label).toBe('Due any day now');
   });
 });

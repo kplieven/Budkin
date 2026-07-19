@@ -20,6 +20,8 @@ export interface Child {
   last: string;
   /** birth date, epoch ms */
   birth: number;
+  /** true while the baby is not yet born; `birth` then holds the DUE date */
+  expected?: boolean;
   /** avatar tint color (hex) */
   color: string;
   /** API slug, when connected to a real server */
@@ -51,6 +53,30 @@ interface EntryBase {
   serverId?: number;
   childId: string;
   tags: string[];
+  /**
+   * True when this entry was written against a child that had no `serverId`
+   * at write time (an expecting child, whose `birth` holds a due date the
+   * server can never accept as a birth_date, see `Child.expected`), so the
+   * entry was never offered to the server and never queued for the ordinary
+   * retry path (see `commitWrite` in the store).
+   *
+   * Stamped exactly once, in `commitWrite`, and NEVER recomputed afterward.
+   * Earlier code tried to INFER this fact later instead of recording it,
+   * from `serverId == null` plus a timestamp comparison, or by re-checking
+   * `expected` at some later point, and every one of those proxies quietly
+   * expired at a different transition (birth confirmed, entry pushed, due
+   * date passed), silently dropping real records. Reading a stored fact has
+   * no such expiry.
+   *
+   * Cleared back to `false` once the entry is actually pushed and a real
+   * `serverId` is stamped (see `flushUnsynced`), at which point it is
+   * redundant.
+   *
+   * Absent (`undefined`) on any entry written by a version of the app that
+   * predates this field. See the store's migration backfill
+   * (`backfillHeldBack`) for how those are recovered on upgrade.
+   */
+  heldBack?: boolean;
 }
 
 export interface FeedingEntry extends EntryBase {

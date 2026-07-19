@@ -9,7 +9,7 @@
 
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 
-import { ageStr, fmtAgoShort, fmtDur } from '@/lib/format';
+import { ageOrDueLabel, fmtAgoShort, fmtDur } from '@/lib/format';
 import type { WidgetSnapshot } from '@/widgets/snapshot';
 import { activitySvg } from '@/widgets/widgetIcons';
 
@@ -66,7 +66,7 @@ function IconButton({ kind, label, color, uri }: { kind: 'feeding' | 'diaper' | 
 export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; now: number }) {
   const s = snapshot;
   const nextSide = s?.nextSide === 'right' ? 'Right' : 'Left';
-  const age = s?.birth != null ? ageStr(s.birth, now) : '';
+  const age = s?.birth != null ? ageOrDueLabel(s.birth, s.expected, now) : '';
   const napping = s?.sleepStart != null;
   const sleepValue = napping
     ? fmtDur((now - (s as WidgetSnapshot).sleepStart!) / 60000)

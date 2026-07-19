@@ -14,6 +14,7 @@ import type { Child, Entry, Timer } from '@/types/models';
 export interface WidgetSnapshot {
   childName: string;
   birth: number | null;
+  expected: boolean;
   /** start of the most recent completed feeding — the widget shows "x ago" from feed start */
   lastFeedStart: number | null;
   nextSide: 'left' | 'right';
@@ -78,6 +79,7 @@ export function buildWidgetSnapshot(s: {
   return {
     childName: child ? child.first : '',
     birth: child?.birth ?? null,
+    expected: !!child?.expected,
     lastFeedStart: lastFeeding?.start ?? null,
     nextSide: nextStartSide(s.entries),
     lastDiaper: diaper?.time ?? null,
