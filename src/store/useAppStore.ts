@@ -793,7 +793,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ connection: conn, queueCount: q.length });
     // Read the durable entity store BEFORE fetching, so the persisted selection
     // can steer which child the fetch is for. Reused by both branches below, so
-    // neither path reads it twice.
+    // neither path reads it twice. It goes unused on the 401/403 branch, which
+    // clears the connection and drops to the reconnect screen; one storage read
+    // there is not worth splitting this into two conditional paths, and
+    // `loadEntities` never rejects (see its doc comment), so hoisting it out of
+    // the try changes no error handling.
     const saved = await loadEntities();
     try {
       // Fetch the child the user actually had selected, not whichever child the
@@ -1442,14 +1446,29 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- child switcher ----
-  selectChild: (id) =>
+  selectChild: (id) => {
     set({
       selectedChildId: id,
       showChildSwitcher: false,
       insightsLoaded: false,
       insightsEntries: [],
       insightsError: false,
-    }),
+    });
+    // In server mode `entries`/`measurements` only ever hold the ONE child the
+    // last fetch asked for (see `loadFromServer`'s `preferredChildServerId`),
+    // so scoping the display by child is only half the fix: without this the
+    // sibling we just switched to shows an empty History, Growth and status
+    // strip until the user happens to pull to refresh. Local mode already has
+    // every child's records in memory, so there is nothing to fetch.
+    //
+    // Fire-and-forget, like the flushes elsewhere: the switch itself is a local
+    // UI action and must land whatever the network does. `refresh` guards its
+    // own re-entry (`refreshInFlight`) and no-ops for demo, no connection, and
+    // the manual offline override, so this needs no further gating. A failed
+    // fetch does leave the offline banner up, which is deliberate: it is the
+    // only thing that explains the empty history, and it carries the retry.
+    if (get().connection?.mode === 'server') void get().refresh();
+  },
   openSwitcher: () => set({ showChildSwitcher: true }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
 
