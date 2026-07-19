@@ -365,6 +365,31 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   return [...unsynced, ...serverList];
 }
 
+/** Reconcile a server child list onto the local one WITHOUT changing any local
+ *  `id`. A child that exists on both sides is matched by `serverId` and the
+ *  server's field values win, but the local `id` is preserved, because entries
+ *  and measurements reference it and rewriting it would orphan them. That
+ *  orphaning is the bug this whole design exists to prevent.
+ *
+ *  Local children with no `serverId` were never pushed (an offline creation, or
+ *  a child deliberately held back) and are kept, prepended, which is where
+ *  `mergeUnsynced` put them. Server children the app has not seen are added
+ *  with their server-derived id: they never had a local phase, so that id is
+ *  already stable. A local child whose `serverId` is absent from the server list
+ *  was deleted server-side and is dropped, matching today's behaviour. */
+export function reconcileChildren(serverChildren: Child[], localChildren: Child[]): Child[] {
+  const localByServerId = new Map<number, Child>();
+  for (const c of localChildren) {
+    if (c.serverId != null) localByServerId.set(c.serverId, c);
+  }
+  const reconciled = serverChildren.map((sc) => {
+    const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
+    return local ? { ...sc, id: local.id } : sc;
+  });
+  const neverPushed = localChildren.filter((c) => c.serverId == null);
+  return [...neverPushed, ...reconciled];
+}
+
 /** Build uploadUnsynced's push-fn deps bound to a server connection. Shared by
  *  `adopt` and `flushUnsynced` — the only two callers that push local-only
  *  (serverId == null) records up to the server. */
