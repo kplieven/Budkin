@@ -415,6 +415,7 @@ Replace the entire contents of `src/app/welcome.tsx` with:
 
 ```tsx
 import { router } from 'expo-router';
+import { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
