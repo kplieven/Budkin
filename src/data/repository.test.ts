@@ -98,7 +98,6 @@ describe('loadProfileFromServer', () => {
   });
 });
 
-
 describe('loadFromServer child selection', () => {
   const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
   const serverChildren = [

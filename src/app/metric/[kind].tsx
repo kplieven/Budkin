@@ -14,6 +14,7 @@ import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
 import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { measurementsForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { MeasurementKind } from '@/types/models';
@@ -48,13 +49,20 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   // child who has none yet.
   if (child?.expected) return <Redirect href="/(tabs)" />;
 
+  // Scoped to the selected child: `measurements` holds every child's, so an
+  // unscoped read interleaves a sibling's weights into this child's chart and
+  // history list. Growth's card is already scoped, and this screen is one tap
+  // from it. Safe below the early return above, since this is a plain call,
+  // not a hook.
+  const childMeasurements = measurementsForChild(measurements, child?.id);
+
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
   // Stored values are canonical metric. Convert the whole series to the display
   // unit up front so the hero, delta chip, chart (line + y-axis labels + hover)
   // and ticks all agree. (These kinds are weight/height/head/bmi — no additive
   // offset — so a converted delta stays a true difference.)
-  const rawPoints = seriesFor(measurements, kind);
+  const rawPoints = seriesFor(childMeasurements, kind);
   const points = rawPoints.map((p) => ({ ...p, value: toDisplay(kind, p.value, unitSystem) }));
   const latest = rawPoints.length ? rawPoints[rawPoints.length - 1] : null;
   const change = changeSince(points);
@@ -62,7 +70,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
   const maxXTicks = Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)); // ~56px per label; 36 = svg gutter+right
   const { ticks: xTicks, fmtX } = xTicksFor(points, maxXTicks);
-  const history = measurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
+  const history = childMeasurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
 
   const body = (
     <>

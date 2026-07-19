@@ -2496,6 +2496,110 @@ describe('history is scoped to the selected child', () => {
   });
 });
 
+describe('switching child refetches that child\'s records (server mode)', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const expecting: Child = { id: 'localBean', first: 'Bean', last: '', birth: NOW + 60 * 86400000, color: '#ddd', expected: true };
+  const serverChildren = [
+    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
+    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
+  ];
+  const theoFeed: Entry = { id: 'tf1', childId: '2', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+
+  it("fetches the newly selected child, so its history is not left empty", async () => {
+    // In server mode `entries` only ever holds the ONE child the last fetch
+    // asked for. Scoping the display by child (the history-scope fix) is
+    // therefore only half the story: without a refetch, switching to a
+    // sibling shows "Nothing logged yet" until the user pulls to refresh.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [theoFeed],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // Asked the server for Theo, not Mira.
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
+    // And his records are now what the History surfaces will render.
+    expect(entriesForChild(s().entries, 'localTheo').map((e) => e.id)).toEqual(['tf1']);
+  });
+
+  it('does not hit the server in local mode', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+    });
+    vi.mocked(loadFromServer).mockClear();
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // Local mode already holds every child's records in memory, so there is
+    // nothing to fetch and no server to fetch it from.
+    expect(vi.mocked(loadFromServer)).not.toHaveBeenCalled();
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('still selects the child when the refetch fails', async () => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
+
+    s().selectChild('localTheo');
+    await flush();
+
+    // The switch is a local UI action: it must land regardless of the network.
+    expect(s().selectedChildId).toBe('localTheo');
+  });
+
+  it('passes no preferred child when switching to an expecting one', async () => {
+    // An expecting child has no serverId, so there is nothing to ask for and
+    // loadFromServer falls back to the server's first child. The display
+    // filter is what keeps the sibling's records off the expecting screen.
+    useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    s().selectChild('localBean');
+    await flush();
+
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBeNull();
+  });
+
+  it('keeps resetting the insights cache (pre-existing behaviour)', async () => {
+    useAppStore.setState({
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+      insightsLoaded: true,
+      insightsEntries: [theoFeed],
+      insightsError: true,
+    });
+    vi.mocked(loadFromServer).mockClear();
+
+    s().selectChild('localTheo');
+    await flush();
+
+    expect(s().insightsLoaded).toBe(false);
+    expect(s().insightsEntries).toEqual([]);
+    expect(s().insightsError).toBe(false);
+  });
+});
+
 describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
   const sleepTimer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
 
@@ -3165,6 +3269,22 @@ describe('insights slice', () => {
       () => new Promise<Entry[]>((r) => { resolveC1 = r; }),
     );
     const inFlight = useAppStore.getState().loadInsights(); // c1 fetch starts
+    // selectChild also refetches the child's records now (see 'switching child
+    // refetches...'), so give that fetch a server view matching this test's own
+    // fixture. The shared default mock reports an EMPTY server, which
+    // reconcileChildren correctly reads as "both children deleted server-side"
+    // and drops them, which is not the situation under test here.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [
+        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+      ],
+      entries: [],
+      timers: [],
+      selectedChildId: '502',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
     useAppStore.getState().selectChild('c2'); // switch lands mid-flight
     resolveC1([{ id: 'a1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any]);
     await inFlight;
