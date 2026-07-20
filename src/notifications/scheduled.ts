@@ -10,7 +10,8 @@
  * alert. So the reconcile reads the OS's pending set and diffs against THAT.
  */
 
-import type { Child, Timer } from '@/types/models';
+import { ACTIVITY_LABEL } from '@/lib/activities';
+import type { ActivityType, Child, Timer } from '@/types/models';
 
 /** Every identifier we own starts with this. `diffScheduled` refuses to cancel
  *  anything without it, so a timer notification (bare uuid) is never touched. */
@@ -114,10 +115,64 @@ function dueReminders(child: Child, now: number): ScheduledNotification[] {
   return out;
 }
 
+/**
+ * How long a running timer may go before we suspect it was forgotten. Only the
+ * four interval-shaped activities can run a timer; the rest are `null`.
+ *
+ * Sleep is deliberately the widest: a night sleep entry legitimately runs
+ * twelve hours, and a false alarm at 3am is far worse than a late catch.
+ */
+export const STALE_AFTER_MIN: Record<ActivityType, number | null> = {
+  tummy: 45,
+  pumping: 120,
+  feeding: 180,
+  sleep: 840,
+  diaper: null,
+  bath: null,
+  temperature: null,
+  note: null,
+  milestone: null,
+};
+
+/** "45 minutes", "3 hours". Every STALE_AFTER_MIN value is a whole number of
+ *  hours or under an hour, so no mixed "1 hour 30" case can arise. */
+function spanLabel(min: number): string {
+  if (min < 60) return `${min} minutes`;
+  const h = min / 60;
+  return h === 1 ? '1 hour' : `${h} hours`;
+}
+
+function staleReminders(timer: Timer, children: Child[], now: number): ScheduledNotification[] {
+  const threshold = STALE_AFTER_MIN[timer.saveAs];
+  if (threshold == null) return [];
+  const fireAt = timer.start + threshold * 60_000;
+  // Already past: if the app was closed, the OS fired the alert scheduled when
+  // the timer started. Nothing to do.
+  if (fireAt <= now) return [];
+  const label = ACTIVITY_LABEL[timer.saveAs];
+  const child = children.find((c) => c.id === timer.childId);
+  return [
+    {
+      // The fire time is in the identifier because editing a running timer's
+      // start moves the alert without changing the title or body, and the diff
+      // compares only those two.
+      identifier: `${REMINDER_PREFIX}stale:${timer.id}:${fireAt}`,
+      kind: 'stale',
+      title: child?.first ? `${child.first} · ${label}` : label,
+      body: `Running for ${spanLabel(threshold)}. Still going?`,
+      fireAt,
+      data: { url: '/timers' },
+    },
+  ];
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
     for (const c of input.children) out.push(...dueReminders(c, now));
+  }
+  if (input.prefs.staleTimerReminders) {
+    for (const t of input.timers) out.push(...staleReminders(t, input.children, now));
   }
   return out;
 }

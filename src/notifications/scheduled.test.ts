@@ -7,10 +7,11 @@ import {
   desiredScheduled,
   diffScheduled,
   REMINDER_PREFIX,
+  STALE_AFTER_MIN,
   type ReminderPrefs,
   type ScheduleInput,
 } from '@/notifications/scheduled';
-import type { Child } from '@/types/models';
+import type { Child, Timer } from '@/types/models';
 
 /** Local-time construction, so the 09:00 assertions hold in any timezone. */
 const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
@@ -39,6 +40,16 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   timers: [],
   prefs: prefs(),
   lastPumpAt: null,
+  ...over,
+});
+
+const timer = (over: Partial<Timer> = {}): Timer => ({
+  id: 't1',
+  childId: 'c1',
+  activity: 'sleep',
+  name: 'Sleep',
+  start: at(2026, 9, 1, 20),
+  saveAs: 'sleep',
   ...over,
 });
 
@@ -110,6 +121,103 @@ describe('desiredScheduled: due date', () => {
     const second = child({ id: 'c2', first: 'Wren', expected: true, birth: at(2026, 10, 1) });
     const out = desiredScheduled(input({ children: [expecting, second] }), at(2026, 8, 1));
     expect(out).toHaveLength(4);
+  });
+});
+
+describe('desiredScheduled: stale timers', () => {
+  const born = child({ birth: at(2020, 1, 1) });
+
+  it('schedules one alert per running timer at start plus its threshold', () => {
+    const out = desiredScheduled(
+      input({ children: [born], timers: [timer()], prefs: prefs({ ageMilestones: false }) }),
+      at(2026, 9, 1, 21),
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].kind).toBe('stale');
+    // Non-null assertion: the Record is typed `number | null` because point
+    // activities have no threshold, but sleep always has one.
+    expect(out[0].fireAt).toBe(at(2026, 9, 1, 20) + STALE_AFTER_MIN.sleep! * 60_000);
+    expect(out[0].title).toBe('Rowan · Sleep');
+    expect(out[0].body).toBe('Running for 14 hours. Still going?');
+    expect(out[0].data.url).toBe('/timers');
+  });
+
+  it('uses the per-activity threshold', () => {
+    expect(STALE_AFTER_MIN.tummy).toBe(45);
+    expect(STALE_AFTER_MIN.pumping).toBe(120);
+    expect(STALE_AFTER_MIN.feeding).toBe(180);
+    expect(STALE_AFTER_MIN.sleep).toBe(840);
+  });
+
+  it('phrases sub-hour thresholds in minutes', () => {
+    const out = desiredScheduled(
+      input({
+        children: [born],
+        timers: [timer({ saveAs: 'tummy', activity: 'tummy' })],
+        prefs: prefs({ ageMilestones: false }),
+      }),
+      at(2026, 9, 1, 20),
+    );
+    expect(out[0].body).toBe('Running for 45 minutes. Still going?');
+  });
+
+  it('encodes the fire time, so editing a running timer\'s start reschedules', () => {
+    const a = desiredScheduled(
+      input({ children: [born], timers: [timer()], prefs: prefs({ ageMilestones: false }) }),
+      at(2026, 9, 1, 21),
+    );
+    const b = desiredScheduled(
+      input({
+        children: [born],
+        timers: [timer({ start: at(2026, 9, 1, 21) })],
+        prefs: prefs({ ageMilestones: false }),
+      }),
+      at(2026, 9, 1, 21),
+    );
+    // Title and body are identical, so only the identifier can carry the change.
+    expect(a[0].title).toBe(b[0].title);
+    expect(a[0].body).toBe(b[0].body);
+    expect(a[0].identifier).not.toBe(b[0].identifier);
+  });
+
+  it('does not schedule a timer already past its threshold', () => {
+    const out = desiredScheduled(
+      input({ children: [born], timers: [timer()], prefs: prefs({ ageMilestones: false }) }),
+      at(2026, 9, 2, 12),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('omits a point activity that cannot run a timer', () => {
+    const out = desiredScheduled(
+      input({
+        children: [born],
+        timers: [timer({ saveAs: 'diaper', activity: 'diaper' })],
+        prefs: prefs({ ageMilestones: false }),
+      }),
+      at(2026, 9, 1, 20),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('falls back to the bare label when the timer has no matching child', () => {
+    const out = desiredScheduled(
+      input({ children: [], timers: [timer({ childId: 'gone' })], prefs: prefs({ ageMilestones: false }) }),
+      at(2026, 9, 1, 21),
+    );
+    expect(out[0].title).toBe('Sleep');
+  });
+
+  it('drops stale alerts when the pref is off', () => {
+    const out = desiredScheduled(
+      input({
+        children: [born],
+        timers: [timer()],
+        prefs: prefs({ staleTimerReminders: false, ageMilestones: false }),
+      }),
+      at(2026, 9, 1, 21),
+    );
+    expect(out).toEqual([]);
   });
 });
 
