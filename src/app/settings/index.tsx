@@ -7,39 +7,13 @@ import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
+import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
-
-function Toggle({ on }: { on: boolean }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        width: 50,
-        height: 30,
-        borderRadius: 99,
-        backgroundColor: on ? t.primary : t.elevated,
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: on ? 23 : 3,
-          width: 24,
-          height: 24,
-          borderRadius: 99,
-          backgroundColor: '#fff',
-          boxShadow: '0px 1px 3px rgba(0,0,0,0.3)',
-        }}
-      />
-    </View>
-  );
-}
 
 export default function Settings() {
   const t = useTheme();
@@ -64,24 +38,7 @@ export default function Settings() {
     loadProfile();
   }, [loadProfile]);
 
-  const group = {
-    backgroundColor: t.surface,
-    borderWidth: 1.5,
-    borderColor: t.line,
-    borderRadius: 18,
-    overflow: 'hidden' as const,
-  };
-  const row = {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  };
-  const sectionLabel = {
-    marginTop: 22,
-    marginBottom: 9,
-    marginHorizontal: 4,
-  };
+  const { group, row, sectionLabel } = makeSettingsListStyles(t);
 
   const host =
     connection?.mode === 'local'
@@ -167,6 +124,23 @@ export default function Settings() {
             <Toggle on={simulateOffline} />
           </Pressable>
         )}
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Reminders
+      </Txt>
+      <View style={group}>
+        <Pressable
+          onPress={() => router.navigate('/settings/notifications')}
+          accessibilityRole="button"
+          accessibilityLabel="Notifications"
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
+            Notifications
+          </Txt>
+          <Icon name="chevron-right" color={t.faint} size={18} />
+        </Pressable>
       </View>
 
       {showProfileGroup && (
