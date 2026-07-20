@@ -8,6 +8,7 @@ import {
   atReminderHour,
   desiredScheduled,
   diffScheduled,
+  PUMP_AHEAD,
   REMINDER_PREFIX,
   STALE_AFTER_MIN,
   type ReminderPrefs,
@@ -315,6 +316,109 @@ describe('desiredScheduled: age milestones', () => {
       at(2026, 9, 1, 12),
     );
     expect(out).toEqual([]);
+  });
+});
+
+describe('desiredScheduled: pumping', () => {
+  const only = (over: Partial<ReminderPrefs>) =>
+    prefs({ dueDateReminders: false, staleTimerReminders: false, ageMilestones: false, ...over });
+
+  it('schedules a run of occurrences on the interval grid from the last pump', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toHaveLength(PUMP_AHEAD);
+    expect(out[0].fireAt).toBe(at(2026, 9, 1, 9));
+    expect(out[1].fireAt).toBe(at(2026, 9, 1, 12));
+    expect(out[0].title).toBe('Time to pump');
+    expect(out[0].body).toBe('Tap to log a session.');
+    expect(out[0].data.url).toBe('/timers');
+  });
+
+  it('re-anchors when a newer pump is logged', () => {
+    const a = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+      }),
+      at(2026, 9, 1, 7),
+    );
+    const b = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 7),
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(b[0].fireAt).toBe(at(2026, 9, 1, 10));
+    expect(a[0].identifier).not.toBe(b[0].identifier);
+  });
+
+  it('falls back to the enable time when nothing has been pumped yet', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 6) }),
+        lastPumpAt: null,
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out[0].fireAt).toBe(at(2026, 9, 1, 9));
+  });
+
+  it('re-enters the grid on phase when every occurrence has already passed', () => {
+    // Enabled two days ago, app never opened since. Naively scheduling from the
+    // anchor would produce only past instants and therefore nothing at all.
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 6) }),
+        lastPumpAt: null,
+      }),
+      at(2026, 9, 3, 7),
+    );
+    expect(out).toHaveLength(PUMP_AHEAD);
+    expect(out.every((n) => n.fireAt > at(2026, 9, 3, 7))).toBe(true);
+    expect(out[0].fireAt).toBe(at(2026, 9, 3, 9));
+  });
+
+  it('schedules nothing while the pref is off', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: false, pumpingEnabledAt: at(2026, 9, 1, 6) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('schedules nothing when there is no anchor at all', () => {
+    const out = desiredScheduled(
+      input({ prefs: only({ pumpingReminders: true, pumpingEnabledAt: null }), lastPumpAt: null }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('keeps the same identifier for an occurrence while now advances toward it', () => {
+    // The grid stays anchored, so an identifier must depend only on the anchor
+    // and the occurrence number, never on `now`. Otherwise every reconcile
+    // (e.g. a bare clock tick) would look like a change and re-trigger a
+    // cancel-and-reschedule of the whole pumping set.
+    const pumpPrefs = only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) });
+    const a = desiredScheduled(
+      input({ prefs: pumpPrefs, lastPumpAt: at(2026, 9, 1, 6) }),
+      at(2026, 9, 1, 7),
+    );
+    const b = desiredScheduled(
+      input({ prefs: pumpPrefs, lastPumpAt: at(2026, 9, 1, 6) }),
+      at(2026, 9, 1, 8),
+    );
+    expect(a[0].fireAt).toBe(b[0].fireAt);
+    expect(a[0].identifier).toBe(b[0].identifier);
   });
 });
 

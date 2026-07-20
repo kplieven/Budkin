@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -15,7 +16,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
 
-type ReminderKey = 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones';
+type ReminderKey = 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders';
 
 export default function NotificationSettings() {
   const t = useTheme();
@@ -24,7 +25,10 @@ export default function NotificationSettings() {
   const dueDateReminders = useAppStore((s) => s.dueDateReminders);
   const staleTimerReminders = useAppStore((s) => s.staleTimerReminders);
   const ageMilestones = useAppStore((s) => s.ageMilestones);
+  const pumpingReminders = useAppStore((s) => s.pumpingReminders);
+  const pumpingIntervalMin = useAppStore((s) => s.pumpingIntervalMin);
   const setReminderPref = useAppStore((s) => s.setReminderPref);
+  const setPumpingInterval = useAppStore((s) => s.setPumpingInterval);
 
   const [granted, setGranted] = useState(true);
   useEffect(() => {
@@ -51,6 +55,12 @@ export default function NotificationSettings() {
       label: 'Age milestones',
       hint: 'One week, one month, then every few months.',
       on: ageMilestones,
+    },
+    {
+      key: 'pumpingReminders',
+      label: 'Pumping',
+      hint: 'On a set interval from your last session.',
+      on: pumpingReminders,
     },
   ];
 
@@ -105,6 +115,25 @@ export default function NotificationSettings() {
           </Pressable>
         ))}
       </View>
+
+      {pumpingReminders && (
+        <View style={{ ...group, marginTop: 12, padding: 16 }}>
+          <Txt size={13} color={t.faint} style={{ marginBottom: 10 }}>
+            Remind me every
+          </Txt>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            {[120, 180, 240, 300].map((min) => (
+              <Chip
+                key={min}
+                label={`${min / 60}h`}
+                color={t.primary}
+                selected={pumpingIntervalMin === min}
+                onPress={() => setPumpingInterval(min)}
+              />
+            ))}
+          </View>
+        </View>
+      )}
     </>
   );
 

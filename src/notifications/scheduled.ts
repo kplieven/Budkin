@@ -242,6 +242,48 @@ function ageReminders(child: Child, now: number): ScheduledNotification[] {
   return out;
 }
 
+/** How many pumping occurrences to schedule ahead. A repeating reminder built
+ *  from one-shot triggers needs the app to reschedule after each fire; eight
+ *  keeps the chain alive through roughly a day of the app never being opened. */
+export const PUMP_AHEAD = 8;
+
+/**
+ * Repeating reminder on a fixed interval, anchored to the last pumping entry
+ * (or, before any entry exists, to when the toggle was switched on). Unlike
+ * the other three kinds, this one is not a fixed calendar instant: it is a
+ * grid of occurrences `n * interval` past the anchor, and several are
+ * scheduled ahead so the chain survives the app never being reopened.
+ */
+function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification[] {
+  const { pumpingIntervalMin, pumpingEnabledAt } = input.prefs;
+  const anchor = Math.max(input.lastPumpAt ?? 0, pumpingEnabledAt ?? 0);
+  if (!anchor || pumpingIntervalMin <= 0) return [];
+  const interval = pumpingIntervalMin * 60_000;
+  // Deriving the first occurrence from `now` rather than blindly from the
+  // anchor is what makes this self-healing: if every scheduled occurrence has
+  // already passed, we re-enter the grid on phase instead of scheduling
+  // nothing. The grid stays anchored, so identifiers only churn when an
+  // occurrence actually passes.
+  const first = Math.max(1, Math.ceil((now - anchor) / interval));
+  const out: ScheduledNotification[] = [];
+  for (let n = first; out.length < PUMP_AHEAD && n < first + PUMP_AHEAD + 1; n++) {
+    const fireAt = anchor + n * interval;
+    if (fireAt <= now) continue;
+    out.push({
+      identifier: `${REMINDER_PREFIX}pump:${anchor}:${n}`,
+      kind: 'pump',
+      title: 'Time to pump',
+      // Deliberately no elapsed time: occurrence n fires n * interval after the
+      // last pump, so a fixed "last pumped 3 hours ago" would be wrong for
+      // every occurrence after the first.
+      body: 'Tap to log a session.',
+      fireAt,
+      data: { url: '/timers' },
+    });
+  }
+  return out;
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
@@ -252,6 +294,9 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.ageMilestones) {
     for (const c of input.children) out.push(...ageReminders(c, now));
+  }
+  if (input.prefs.pumpingReminders) {
+    out.push(...pumpReminders(input, now));
   }
   return out;
 }
