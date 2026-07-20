@@ -22,7 +22,7 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
 import { initTimerNotificationSync } from '@/notifications/sync';
-import { initScheduledReminderSync } from '@/notifications/scheduleSync';
+import { initScheduledReminderSync, reconcileNow } from '@/notifications/scheduleSync';
 import { initWidgetSync } from '@/widgets/sync';
 
 SplashScreen.preventAutoHideAsync();
@@ -44,9 +44,19 @@ export default function RootLayout() {
   // tab regains focus). `expo-network` only reports *device* connectivity and its
   // effect fires only on a change, so without this a stale `offline` set while
   // backgrounded would stick until a full restart.
+  //
+  // `reconcileNow()` rides along for the same reason: `refresh()` only does
+  // anything for a live server connection, so local mode otherwise has no
+  // reconcile at all after `initScheduledReminderSync()`'s launch-time run.
+  // The scheduled reminders are one-shot triggers that need reschedule after
+  // each fire (see PUMP_AHEAD in scheduled.ts), so a foreground with no
+  // gated store write in between would otherwise let the chain run out.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refresh();
+      if (state === 'active') {
+        void refresh();
+        reconcileNow();
+      }
     });
     return () => sub.remove();
   }, [refresh]);

@@ -55,10 +55,10 @@ async function setup(opts: { hydrating?: boolean } = {}) {
   // silently include earlier tests' calls; see the `.at(-1)` note below.
   const appliesAtInit = apply.mock.calls.length;
   const buildsAtInit = desired.mock.calls.length;
-  const { initScheduledReminderSync } = await import('@/notifications/scheduleSync');
+  const { initScheduledReminderSync, reconcileNow } = await import('@/notifications/scheduleSync');
   initScheduledReminderSync();
   await flush();
-  return { desired, apply, useAppStore, appliesAtInit, buildsAtInit };
+  return { desired, apply, useAppStore, appliesAtInit, buildsAtInit, reconcileNow };
 }
 
 beforeEach(() => {
@@ -210,6 +210,72 @@ describe('run serialization (concurrent store changes must not interleave OS cal
     expect(desired.mock.calls.length).toBe(buildsBefore + 2);
     const lastInput = desired.mock.calls.at(-1)?.[0];
     expect(lastInput?.children[0]?.id).toBe('c3');
+  });
+});
+
+describe('reconcileNow (manual reconcile for call sites that touch no gated store slice)', () => {
+  it('triggers a reconcile when called', async () => {
+    const { apply, desired, reconcileNow } = await setup();
+    const applies = apply.mock.calls.length;
+    const builds = desired.mock.calls.length;
+
+    reconcileNow();
+    await flush();
+
+    expect(apply.mock.calls.length).toBe(applies + 1);
+    expect(desired.mock.calls.length).toBe(builds + 1);
+  });
+
+  it('does not reconcile while hydrating is true', async () => {
+    const { apply, appliesAtInit, reconcileNow } = await setup({ hydrating: true });
+
+    reconcileNow();
+    await flush();
+
+    expect(apply.mock.calls.length).toBe(appliesAtInit);
+  });
+
+  it('goes through the same coalescing latch as a store-driven run: two requests while one is in flight collapse to a single follow-up built from the latest state', async () => {
+    const { apply, desired, useAppStore, reconcileNow } = await setup();
+    const appliesBefore = apply.mock.calls.length;
+    const buildsBefore = desired.mock.calls.length;
+
+    // Hang the first run mid-flight, the way a real applyScheduled would sit
+    // across several awaited native calls.
+    let resolveFirst!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    apply.mockImplementationOnce(() => pending);
+
+    reconcileNow();
+    await flush();
+    expect(apply.mock.calls.length).toBe(appliesBefore + 1);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 1);
+
+    // The store changes (which on its own would also ask for a run via the
+    // subscriber) and then reconcileNow is called again, both while the first
+    // run is still in flight.
+    useAppStore.setState({
+      children: [{ id: 'cLatest', first: 'Latest', last: 'Latest', birth: Date.now(), color: '#fff' }],
+    });
+    reconcileNow();
+    await flush();
+
+    // Neither triggered a new call: both were coalesced behind the busy run,
+    // not interleaved with it as a second concurrent read-then-write pass.
+    expect(apply.mock.calls.length).toBe(appliesBefore + 1);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 1);
+
+    resolveFirst();
+    await flush();
+    await flush();
+
+    // Exactly one follow-up run landed, built from the latest state.
+    expect(apply.mock.calls.length).toBe(appliesBefore + 2);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 2);
+    const lastInput = desired.mock.calls.at(-1)?.[0];
+    expect(lastInput?.children[0]?.id).toBe('cLatest');
   });
 });
 

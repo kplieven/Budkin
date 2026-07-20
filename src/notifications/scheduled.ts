@@ -244,7 +244,11 @@ function ageReminders(child: Child, now: number): ScheduledNotification[] {
 
 /** How many pumping occurrences to schedule ahead. A repeating reminder built
  *  from one-shot triggers needs the app to reschedule after each fire; eight
- *  keeps the chain alive through roughly a day of the app never being opened. */
+ *  keeps the chain alive through roughly a day of the app never coming to the
+ *  foreground. A foreground resume reconciles too (`reconcileNow` in
+ *  scheduleSync.ts, called from `_layout.tsx`'s AppState handler), not only a
+ *  gated store write, so this margin only has to cover the gap between
+ *  foregrounds, not between writes specifically. */
 export const PUMP_AHEAD = 8;
 
 /**
