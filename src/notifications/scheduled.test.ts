@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays,
   addMonths,
+  AGE_HORIZON_MONTHS,
+  AGE_STEPS,
   atReminderHour,
   desiredScheduled,
   diffScheduled,
@@ -236,6 +238,81 @@ describe('desiredScheduled: stale timers', () => {
         prefs: prefs({ staleTimerReminders: false, ageMilestones: false }),
       }),
       at(2026, 9, 1, 21),
+    );
+    expect(out).toEqual([]);
+  });
+});
+
+describe('desiredScheduled: age milestones', () => {
+  const noOthers = prefs({ dueDateReminders: false, staleTimerReminders: false });
+
+  it('uses the 1w / 1m / 3m / 6m / 9m cadence and nothing clinical', () => {
+    expect(AGE_STEPS.map((s) => s.slug)).toEqual(['1w', '1m', '3m', '6m', '9m']);
+  });
+
+  it('schedules every upcoming step at 09:00', () => {
+    const born = child({ birth: at(2026, 9, 1) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 9, 1, 12));
+    expect(out.map((n) => n.fireAt)).toEqual([
+      at(2026, 9, 8, 9),
+      at(2026, 10, 1, 9),
+      at(2026, 12, 1, 9),
+      at(2027, 3, 1, 9),
+      at(2027, 6, 1, 9),
+      at(2027, 9, 1, 9),
+    ]);
+    expect(out[0].title).toBe('Rowan is one week old today.');
+    expect(out[2].title).toBe('Rowan is three months old today.');
+    expect(out[5].title).toBe('Happy first birthday, Rowan.');
+    expect(out.every((n) => n.data.url === '/history')).toBe(true);
+  });
+
+  it('clamps a month step to the last day of a short month', () => {
+    const born = child({ birth: at(2026, 1, 31) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 1, 31, 12));
+    // 31 January plus three months has no 31 April.
+    expect(out.find((n) => n.identifier.includes(':3m:'))?.fireAt).toBe(at(2026, 4, 30, 9));
+  });
+
+  it('drops steps that have already passed', () => {
+    const born = child({ birth: at(2026, 1, 1) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 5, 1));
+    expect(out.map((n) => n.identifier.split(':')[3])).toEqual(['6m', '9m', '1y']);
+  });
+
+  it('schedules only inside the rolling horizon', () => {
+    expect(AGE_HORIZON_MONTHS).toBe(12);
+    const born = child({ birth: at(2026, 9, 1) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 9, 1, 12));
+    const horizon = addMonths(at(2026, 9, 1, 12), AGE_HORIZON_MONTHS);
+    expect(out.every((n) => n.fireAt <= horizon)).toBe(true);
+  });
+
+  it('keeps going with yearly birthdays past the first', () => {
+    const born = child({ birth: at(2024, 9, 1) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 1, 1));
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe('Happy 2nd birthday, Rowan.');
+    expect(out[0].fireAt).toBe(at(2026, 9, 1, 9));
+  });
+
+  it('ordinalises third and later birthdays correctly', () => {
+    const born = child({ birth: at(2023, 9, 1) });
+    const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 1, 1));
+    expect(out[0].title).toBe('Happy 3rd birthday, Rowan.');
+  });
+
+  it('excludes an expecting child, whose birth field holds a due date', () => {
+    const expecting = child({ expected: true, birth: at(2026, 9, 1) });
+    const out = desiredScheduled(input({ children: [expecting], prefs: noOthers }), at(2026, 8, 1));
+    expect(out).toEqual([]);
+  });
+
+  it('drops age milestones when the pref is off', () => {
+    const born = child({ birth: at(2026, 9, 1) });
+    const out = desiredScheduled(
+      input({ children: [born], prefs: prefs({ dueDateReminders: false, staleTimerReminders: false, ageMilestones: false }) }),
+      at(2026, 9, 1, 12),
     );
     expect(out).toEqual([]);
   });

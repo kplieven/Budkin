@@ -166,6 +166,82 @@ function staleReminders(timer: Timer, children: Child[], now: number): Scheduled
   ];
 }
 
+/**
+ * Age milestones worth a notification, and their copy.
+ *
+ * Quarterly after the first month, so the parent gets a pattern they can
+ * anticipate. The obvious alternative spine, roughly 1 / 2 / 4 / 6 / 9 / 12
+ * months, is rejected on purpose: those are the well-baby visit and vaccination
+ * dates, and a notification landing on them invites a parent to read it as a
+ * reminder about an appointment. That is a medical implication the app has not
+ * earned. Keep this cadence, and keep the copy celebratory.
+ */
+export const AGE_STEPS: { slug: string; days?: number; months?: number; label: string }[] = [
+  { slug: '1w', days: 7, label: 'one week' },
+  { slug: '1m', months: 1, label: 'one month' },
+  { slug: '3m', months: 3, label: 'three months' },
+  { slug: '6m', months: 6, label: 'six months' },
+  { slug: '9m', months: 9, label: 'nine months' },
+];
+
+/** Only occurrences this far ahead are scheduled. Each launch extends it. */
+export const AGE_HORIZON_MONTHS = 12;
+
+/** Highest birthday we will ever schedule, a loop bound rather than a policy. */
+const MAX_BIRTHDAY_YEAR = 25;
+
+function ordinal(n: number): string {
+  const rem100 = n % 100;
+  if (rem100 >= 11 && rem100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+function ageReminders(child: Child, now: number): ScheduledNotification[] {
+  // `birth` holds a DUE date while expecting, so there is no age to celebrate.
+  if (child.expected) return [];
+  const horizon = addMonths(now, AGE_HORIZON_MONTHS);
+  const out: ScheduledNotification[] = [];
+
+  const push = (slug: string, fireAt: number, title: string) => {
+    if (fireAt <= now || fireAt > horizon) return;
+    out.push({
+      identifier: `${REMINDER_PREFIX}age:${child.id}:${slug}:${fireAt}`,
+      kind: 'age',
+      title,
+      body: 'Tap to look back.',
+      fireAt,
+      data: { url: '/history' },
+    });
+  };
+
+  for (const step of AGE_STEPS) {
+    const on =
+      step.days != null ? addDays(child.birth, step.days) : addMonths(child.birth, step.months ?? 0);
+    push(step.slug, atReminderHour(on), `${child.first} is ${step.label} old today.`);
+  }
+
+  for (let y = 1; y <= MAX_BIRTHDAY_YEAR; y++) {
+    const fireAt = atReminderHour(addMonths(child.birth, y * 12));
+    if (fireAt > horizon) break;
+    const title =
+      y === 1
+        ? `Happy first birthday, ${child.first}.`
+        : `Happy ${ordinal(y)} birthday, ${child.first}.`;
+    push(`${y}y`, fireAt, title);
+  }
+
+  return out;
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
@@ -173,6 +249,9 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.staleTimerReminders) {
     for (const t of input.timers) out.push(...staleReminders(t, input.children, now));
+  }
+  if (input.prefs.ageMilestones) {
+    for (const c of input.children) out.push(...ageReminders(c, now));
   }
   return out;
 }
