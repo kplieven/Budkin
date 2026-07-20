@@ -420,6 +420,51 @@ describe('desiredScheduled: pumping', () => {
     expect(a[0].fireAt).toBe(b[0].fireAt);
     expect(a[0].identifier).toBe(b[0].identifier);
   });
+
+  it('changes the identifier when the interval changes, so a moved cadence reschedules', () => {
+    // Same anchor, same occurrence number (both are the first occurrence), but a
+    // different interval means a different fire time. The title and body of a
+    // pumping alert never change, so the identifier is the only thing that can
+    // tell the diff an occurrence moved.
+    const anchor = at(2026, 9, 1, 0);
+    const now = at(2026, 9, 1, 1);
+    const a = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: anchor }),
+        lastPumpAt: null,
+      }),
+      now,
+    );
+    const b = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 120, pumpingEnabledAt: anchor }),
+        lastPumpAt: null,
+      }),
+      now,
+    );
+    expect(a[0].fireAt).not.toBe(b[0].fireAt);
+    expect(a[0].identifier).not.toBe(b[0].identifier);
+  });
+
+  it('skips a candidate that lands exactly on now, and still produces a full PUMP_AHEAD run', () => {
+    // (now - anchor) % interval === 0 puts the first candidate exactly on `now`,
+    // which `if (fireAt <= now) continue;` skips. The loop bound is one wider
+    // than PUMP_AHEAD specifically to compensate for that one skip, so this
+    // pins that the compensation still produces a full run.
+    const anchor = at(2026, 9, 1, 0);
+    const now = at(2026, 9, 1, 3); // anchor plus exactly one 180-minute interval
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: anchor }),
+        lastPumpAt: null,
+      }),
+      now,
+    );
+    expect(out).toHaveLength(PUMP_AHEAD);
+    expect(out.some((o) => o.fireAt === now)).toBe(false);
+    expect(out[0].fireAt).toBe(at(2026, 9, 1, 6));
+    expect(out[out.length - 1].fireAt).toBe(at(2026, 9, 2, 3));
+  });
 });
 
 describe('diffScheduled', () => {
