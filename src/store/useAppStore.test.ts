@@ -3948,6 +3948,126 @@ describe('unit-system persistence', () => {
   });
 });
 
+describe('reminder preference persistence', () => {
+  it('setReminderPref updates state and persists via savePrefs for a plain toggle', () => {
+    useAppStore.setState({ dueDateReminders: true });
+    s().setReminderPref('dueDateReminders', false);
+    expect(s().dueDateReminders).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ dueDateReminders: false });
+  });
+
+  it('setReminderPref updates staleTimerReminders and persists', () => {
+    useAppStore.setState({ staleTimerReminders: true });
+    s().setReminderPref('staleTimerReminders', false);
+    expect(s().staleTimerReminders).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ staleTimerReminders: false });
+  });
+
+  it('setReminderPref updates ageMilestones and persists', () => {
+    useAppStore.setState({ ageMilestones: true });
+    s().setReminderPref('ageMilestones', false);
+    expect(s().ageMilestones).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ ageMilestones: false });
+  });
+
+  it('switching pumpingReminders ON stamps pumpingEnabledAt with the current time', () => {
+    useAppStore.setState({ pumpingReminders: false, pumpingEnabledAt: null });
+    const before = Date.now();
+    s().setReminderPref('pumpingReminders', true);
+    const after = Date.now();
+    expect(s().pumpingReminders).toBe(true);
+    expect(s().pumpingEnabledAt).not.toBeNull();
+    expect(s().pumpingEnabledAt as number).toBeGreaterThanOrEqual(before);
+    expect(s().pumpingEnabledAt as number).toBeLessThanOrEqual(after);
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingReminders: true, pumpingEnabledAt: s().pumpingEnabledAt });
+  });
+
+  it('switching pumpingReminders OFF clears pumpingEnabledAt to null', () => {
+    useAppStore.setState({ pumpingReminders: true, pumpingEnabledAt: NOW });
+    s().setReminderPref('pumpingReminders', false);
+    expect(s().pumpingReminders).toBe(false);
+    expect(s().pumpingEnabledAt).toBeNull();
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingReminders: false, pumpingEnabledAt: null });
+  });
+
+  it('setPumpingInterval updates state and persists via savePrefs', () => {
+    useAppStore.setState({ pumpingIntervalMin: 180 });
+    s().setPumpingInterval(240);
+    expect(s().pumpingIntervalMin).toBe(240);
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingIntervalMin: 240 });
+  });
+
+  it('hydrate applies persisted reminder prefs', async () => {
+    h.prefs = {
+      dueDateReminders: false,
+      staleTimerReminders: false,
+      ageMilestones: false,
+      pumpingReminders: true,
+      pumpingIntervalMin: 120,
+      pumpingEnabledAt: NOW,
+    };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({
+      dueDateReminders: true,
+      staleTimerReminders: true,
+      ageMilestones: true,
+      pumpingReminders: false,
+      pumpingIntervalMin: 180,
+      pumpingEnabledAt: null,
+    });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(false);
+    expect(s().staleTimerReminders).toBe(false);
+    expect(s().ageMilestones).toBe(false);
+    expect(s().pumpingReminders).toBe(true);
+    expect(s().pumpingIntervalMin).toBe(120);
+    expect(s().pumpingEnabledAt).toBe(NOW);
+  });
+
+  it('hydrate leaves reminder prefs at their defaults when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({
+      dueDateReminders: true,
+      staleTimerReminders: true,
+      ageMilestones: true,
+      pumpingReminders: false,
+      pumpingIntervalMin: 180,
+      pumpingEnabledAt: null,
+    });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(true);
+    expect(s().staleTimerReminders).toBe(true);
+    expect(s().ageMilestones).toBe(true);
+    expect(s().pumpingReminders).toBe(false);
+    expect(s().pumpingIntervalMin).toBe(180);
+    expect(s().pumpingEnabledAt).toBeNull();
+  });
+
+  // Regression guard: a persisted `false` is meaningful and must survive
+  // hydration. A truthiness check (`if (prefs.dueDateReminders)`) would treat
+  // a stored `false` as "nothing persisted" and silently resurrect the
+  // default `true`. This test fails under that regression.
+  it('hydrate restores a persisted false, not the default true (truthiness regression guard)', async () => {
+    h.prefs = { dueDateReminders: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ dueDateReminders: true });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(false);
+  });
+
+  // pumpingEnabledAt's own guard is `!== undefined` rather than `!= null`,
+  // because a persisted explicit `null` (pumping was turned off) must
+  // overwrite a stale non-null value already in memory.
+  it('hydrate restores a persisted null pumpingEnabledAt over a stale in-memory value', async () => {
+    h.prefs = { pumpingEnabledAt: null };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ pumpingEnabledAt: NOW });
+    await s().hydrate();
+    expect(s().pumpingEnabledAt).toBeNull();
+  });
+});
+
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
     useAppStore.setState({ connection: { mode: 'local' } });

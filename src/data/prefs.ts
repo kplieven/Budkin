@@ -20,6 +20,14 @@ export interface Prefs {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
+  dueDateReminders: boolean;
+  staleTimerReminders: boolean;
+  ageMilestones: boolean;
+  pumpingReminders: boolean;
+  pumpingIntervalMin: number;
+  /** when the pumping toggle was last switched on, epoch ms */
+  pumpingEnabledAt: number | null;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */
