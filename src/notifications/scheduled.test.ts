@@ -142,6 +142,11 @@ describe('diffScheduled', () => {
     expect(diffScheduled(existing, [n]).toSchedule).toEqual([n]);
   });
 
+  it('reschedules when only the body changed', () => {
+    const existing = [{ identifier: n.identifier, title: n.title, body: 'Something else.' }];
+    expect(diffScheduled(existing, [n]).toSchedule).toEqual([n]);
+  });
+
   it('never cancels an identifier it does not own', () => {
     const existing = [{ identifier: 'some-timer-uuid', title: 'Rowan · Sleep', body: 'Started 14:45' }];
     expect(diffScheduled(existing, [])).toEqual({ toSchedule: [], toCancel: [] });
