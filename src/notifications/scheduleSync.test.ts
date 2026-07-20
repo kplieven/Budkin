@@ -37,19 +37,28 @@ vi.mock('@/notifications/scheduled', async (importActual) => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-async function setup() {
+// `hydrating` defaults to false: most tests want a store that already finished
+// hydrating (the realistic state for a "then the user does X" scenario). The
+// hydration-gating tests below override it to true to exercise the gate itself.
+async function setup(opts: { hydrating?: boolean } = {}) {
   vi.resetModules();
   const { desiredScheduled } = await import('@/notifications/scheduled');
   const { applyScheduled } = await import('@/notifications/applySchedule');
   const { useAppStore } = await import('@/store/useAppStore');
+  useAppStore.setState({ hydrating: opts.hydrating ?? false });
+  const desired = vi.mocked(desiredScheduled);
+  const apply = vi.mocked(applyScheduled);
+  // Captured before initScheduledReminderSync's launch-time run, so callers can
+  // measure exactly what THIS setup() produced. The mock factories above are
+  // shared across every setup() call in this file (their call history is
+  // cumulative, not reset per vi.resetModules()), so an absolute count would
+  // silently include earlier tests' calls; see the `.at(-1)` note below.
+  const appliesAtInit = apply.mock.calls.length;
+  const buildsAtInit = desired.mock.calls.length;
   const { initScheduledReminderSync } = await import('@/notifications/scheduleSync');
   initScheduledReminderSync();
   await flush();
-  return {
-    desired: vi.mocked(desiredScheduled),
-    apply: vi.mocked(applyScheduled),
-    useAppStore,
-  };
+  return { desired, apply, useAppStore, appliesAtInit, buildsAtInit };
 }
 
 beforeEach(() => {
@@ -84,11 +93,131 @@ describe('initScheduledReminderSync gating', () => {
   });
 });
 
+describe('hydration gating (regression: launch must not reconcile pre-hydration state)', () => {
+  it('does not reconcile at launch while the store is still hydrating', async () => {
+    // Mirrors the real mount sequence: `hydrating` is still true (hydrate()'s
+    // async work hasn't landed yet) when initScheduledReminderSync's
+    // launch-time run fires.
+    const { apply, appliesAtInit } = await setup({ hydrating: true });
+
+    expect(apply.mock.calls.length).toBe(appliesAtInit);
+  });
+
+  it('does not reconcile a store change that lands mid-hydration', async () => {
+    const { apply, appliesAtInit, useAppStore } = await setup({ hydrating: true });
+
+    // hydrate() issues several separate set() calls before the one that
+    // flips hydrating to false; this simulates one landing early.
+    useAppStore.setState({
+      children: [{ id: 'c1', first: 'Test', last: 'Kid', birth: Date.now(), color: '#fff' }],
+    });
+    await flush();
+
+    expect(apply.mock.calls.length).toBe(appliesAtInit);
+  });
+
+  it('reconciles on the hydrating transition alone, with no other slice changing', async () => {
+    // Isolates the subtlety: a set() that flips ONLY `hydrating` (nothing else
+    // in the compared slice list changes) must still trigger a run. If
+    // `hydrating` were left out of the slice comparison, this exact set()
+    // would look like "nothing changed" and the post-hydration reconcile
+    // would never happen.
+    const { apply, appliesAtInit, useAppStore } = await setup({ hydrating: true });
+
+    useAppStore.setState({ hydrating: false });
+    await flush();
+
+    expect(apply.mock.calls.length).toBe(appliesAtInit + 1);
+  });
+
+  it('reconciles with the real store content once hydration completes', async () => {
+    const { apply, appliesAtInit, useAppStore } = await setup({ hydrating: true });
+    const dueSoon = Date.now() + 14 * 24 * 60 * 60 * 1000; // comfortably in the future
+
+    // The true-to-false hydrating transition, alongside the real children the
+    // store hydrated with, must trigger exactly one reconcile.
+    useAppStore.setState({
+      hydrating: false,
+      children: [{ id: 'c1', first: 'Due', last: 'Soon', birth: dueSoon, color: '#fff', expected: true }],
+    });
+    await flush();
+
+    expect(apply.mock.calls.length).toBe(appliesAtInit + 1);
+    const sent = apply.mock.calls.at(-1)?.[0] ?? [];
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.some((n) => n.identifier.startsWith('budkin:due:'))).toBe(true);
+  });
+});
+
+describe('desired reminder flow (regression: a real reminder must reach applyScheduled)', () => {
+  it('passes a non-empty desired set with a due-date identifier through to applyScheduled', async () => {
+    const { apply, useAppStore } = await setup();
+    const dueSoon = Date.now() + 14 * 24 * 60 * 60 * 1000; // comfortably in the future
+
+    useAppStore.setState({
+      children: [{ id: 'c1', first: 'Due', last: 'Soon', birth: dueSoon, color: '#fff', expected: true }],
+    });
+    await flush();
+
+    const sent = apply.mock.calls.at(-1)?.[0] ?? [];
+    expect(sent.length).toBeGreaterThan(0);
+    expect(sent.some((n) => n.identifier.startsWith('budkin:due:'))).toBe(true);
+  });
+});
+
+describe('run serialization (concurrent store changes must not interleave OS calls)', () => {
+  it('coalesces runs that arrive while one is in flight, to the latest state only', async () => {
+    const { apply, desired, useAppStore } = await setup();
+    const appliesBefore = apply.mock.calls.length;
+    const buildsBefore = desired.mock.calls.length;
+
+    // Hang the first run mid-flight, the way a real applyScheduled would sit
+    // across several awaited native calls.
+    let resolveFirst!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      resolveFirst = resolve;
+    });
+    apply.mockImplementationOnce(() => pending);
+
+    useAppStore.setState({
+      children: [{ id: 'c1', first: 'A', last: 'A', birth: Date.now(), color: '#fff' }],
+    });
+    await flush();
+    expect(apply.mock.calls.length).toBe(appliesBefore + 1);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 1);
+
+    // Two more changes land while that run is still in flight.
+    useAppStore.setState({
+      children: [{ id: 'c2', first: 'B', last: 'B', birth: Date.now(), color: '#fff' }],
+    });
+    useAppStore.setState({
+      children: [{ id: 'c3', first: 'C', last: 'C', birth: Date.now(), color: '#fff' }],
+    });
+    await flush();
+
+    // Neither triggered a new call: they were coalesced behind the busy run,
+    // not interleaved with it.
+    expect(apply.mock.calls.length).toBe(appliesBefore + 1);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 1);
+
+    resolveFirst();
+    await flush();
+    await flush();
+
+    // Exactly one follow-up run landed, built from c3 (the LATEST queued
+    // state), never from the c2 state that arrived in between.
+    expect(apply.mock.calls.length).toBe(appliesBefore + 2);
+    expect(desired.mock.calls.length).toBe(buildsBefore + 2);
+    const lastInput = desired.mock.calls.at(-1)?.[0];
+    expect(lastInput?.children[0]?.id).toBe('c3');
+  });
+});
+
 describe('toInput lastPumpAt derivation', () => {
   it('yields null when there are no pumping entries', async () => {
     const { desired } = await setup();
 
-    expect(desired.mock.calls[0][0].lastPumpAt).toBeNull();
+    expect(desired.mock.calls.at(-1)?.[0].lastPumpAt).toBeNull();
   });
 
   it('prefers end over start for a single pumping entry', async () => {
