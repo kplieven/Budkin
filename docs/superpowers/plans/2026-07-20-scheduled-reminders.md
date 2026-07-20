@@ -1593,7 +1593,11 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
     const fireAt = anchor + n * interval;
     if (fireAt <= now) continue;
     out.push({
-      identifier: `${REMINDER_PREFIX}pump:${anchor}:${n}`,
+      // The fire time is in the identifier, matching the other three kinds:
+      // title and body never change, so without fireAt here a changed interval
+      // would recompute fireAt for the same anchor:n but leave the identifier
+      // unchanged, and the diff would never notice.
+      identifier: `${REMINDER_PREFIX}pump:${anchor}:${n}:${fireAt}`,
       kind: 'pump',
       title: 'Time to pump',
       // Deliberately no elapsed time: occurrence n fires n * interval after the

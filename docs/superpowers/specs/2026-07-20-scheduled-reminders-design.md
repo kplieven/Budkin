@@ -82,7 +82,7 @@ that.
 | Due date | `budkin:due:<childId>:<lead\|day>:<fireAtMs>` |
 | Stale timer | `budkin:stale:<timerId>:<fireAtMs>` |
 | Age milestone | `budkin:age:<childId>:<slug>:<fireAtMs>` |
-| Pumping | `budkin:pump:<anchorMs>:<n>` |
+| Pumping | `budkin:pump:<anchorMs>:<n>:<fireAtMs>` |
 
 Encoding the fire time means editing a due date changes the identifier, so the
 diff cancels the stale alert and schedules the new one with no special-case

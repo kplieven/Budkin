@@ -270,7 +270,15 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
     const fireAt = anchor + n * interval;
     if (fireAt <= now) continue;
     out.push({
-      identifier: `${REMINDER_PREFIX}pump:${anchor}:${n}`,
+      // The fire time is in the identifier, matching the other three kinds,
+      // because title and body are constant ('Time to pump' every time) so
+      // they carry no signal that the interval changed. Without fireAt here, a
+      // changed pumpingIntervalMin recomputes fireAt for the same anchor:n but
+      // leaves the identifier (and therefore the diff's verdict) unchanged, so
+      // Android's already-pending alarm stays pinned at the old spacing. It is
+      // still stable while now advances: fireAt is anchor + n * interval, which
+      // only moves when the anchor or interval actually moves.
+      identifier: `${REMINDER_PREFIX}pump:${anchor}:${n}:${fireAt}`,
       kind: 'pump',
       title: 'Time to pump',
       // Deliberately no elapsed time: occurrence n fires n * interval after the
