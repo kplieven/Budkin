@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
@@ -126,22 +126,29 @@ export default function Settings() {
         )}
       </View>
 
-      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-        Reminders
-      </Txt>
-      <View style={group}>
-        <Pressable
-          onPress={() => router.navigate('/settings/notifications')}
-          accessibilityRole="button"
-          accessibilityLabel="Notifications"
-          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
-        >
-          <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
-            Notifications
+      {/* Scheduled reminders only fire on Android (permission.ts's stub is a
+          permanent no off it), so the row is hidden rather than linking to a
+          screen that can never do anything there. */}
+      {Platform.OS === 'android' && (
+        <>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+            Reminders
           </Txt>
-          <Icon name="chevron-right" color={t.faint} size={18} />
-        </Pressable>
-      </View>
+          <View style={group}>
+            <Pressable
+              onPress={() => router.navigate('/settings/notifications')}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications"
+              style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+            >
+              <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
+                Notifications
+              </Txt>
+              <Icon name="chevron-right" color={t.faint} size={18} />
+            </Pressable>
+          </View>
+        </>
+      )}
 
       {showProfileGroup && (
         <>

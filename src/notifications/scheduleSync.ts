@@ -34,38 +34,65 @@ function toInput(s: State): ScheduleInput {
   };
 }
 
+// Runs must not overlap. `applyScheduled` reads Android's pending set and
+// then writes to it across several awaits, so two in-flight runs can
+// interleave: a stale run's cancel can land after a fresh run already read
+// the pre-cancel state and concluded there was nothing to do, leaving a
+// reminder cancelled with nothing left to reschedule it. `hydrate()` alone
+// issues many separate set() calls, so this is not an edge case.
+//
+// Coalesce instead of queueing every call: while a run is in flight, keep
+// only the LATEST state that arrived and run once more with it after the
+// current run finishes. Only the last desired set matters, so this also
+// avoids a burst of redundant native round trips during hydration.
+//
+// Module-scoped, not local to initScheduledReminderSync, so `reconcileNow`
+// below shares this exact latch instead of running its own: two independent
+// busy flags could still let a store-driven run and a manual reconcile
+// interleave, which is the exact hazard this latch exists to close.
+let busy = false;
+let queued: State | null = null;
+function run(s: State): void {
+  if (busy) {
+    queued = s;
+    return;
+  }
+  // Built before `busy` flips, so a throw here (a malformed toInput or
+  // desiredScheduled call) never latches `busy` true. Nothing set it, so the
+  // next call is still free to run instead of queueing behind a flag that no
+  // `finally` will ever clear.
+  const desired = desiredScheduled(toInput(s), Date.now());
+  busy = true;
+  void applyScheduled(desired).finally(() => {
+    busy = false;
+    if (queued) {
+      const next = queued;
+      queued = null;
+      run(next);
+    }
+  });
+}
+
+/**
+ * Request a reconcile right now, through the same coalescing latch `run`
+ * above uses for every store-driven reconcile. For the two call sites that
+ * change what Android should hold WITHOUT touching a gated store slice:
+ * granting permission from the notifications settings screen, and the app
+ * returning to the foreground (see `_layout.tsx`). Mirrors the subscriber's
+ * `hydrating` guard below: a reconcile against the pre-hydrate() empty store
+ * would read every pending reminder as no longer desired and cancel the
+ * user's whole set. Never requests permission itself; `applyScheduled` only
+ * checks it.
+ */
+export function reconcileNow(): void {
+  const state = useAppStore.getState();
+  if (state.hydrating) return;
+  run(state);
+}
+
 export function initScheduledReminderSync(): void {
   if (started) return;
   started = true;
-
-  // Runs must not overlap. `applyScheduled` reads Android's pending set and
-  // then writes to it across several awaits, so two in-flight runs can
-  // interleave: a stale run's cancel can land after a fresh run already read
-  // the pre-cancel state and concluded there was nothing to do, leaving a
-  // reminder cancelled with nothing left to reschedule it. `hydrate()` alone
-  // issues many separate set() calls, so this is not an edge case.
-  //
-  // Coalesce instead of queueing every call: while a run is in flight, keep
-  // only the LATEST state that arrived and run once more with it after the
-  // current run finishes. Only the last desired set matters, so this also
-  // avoids a burst of redundant native round trips during hydration.
-  let busy = false;
-  let queued: State | null = null;
-  const run = (s: State) => {
-    if (busy) {
-      queued = s;
-      return;
-    }
-    busy = true;
-    void applyScheduled(desiredScheduled(toInput(s), Date.now())).finally(() => {
-      busy = false;
-      if (queued) {
-        const next = queued;
-        queued = null;
-        run(next);
-      }
-    });
-  };
 
   useAppStore.subscribe((state, previous) => {
     // Never reconcile against a store that is still hydrating: `children` and

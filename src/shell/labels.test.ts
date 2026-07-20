@@ -50,4 +50,8 @@ describe('screenTitleFor', () => {
   it('titles the insights route', () => {
     expect(screenTitleFor('/insights')).toBe('Insights');
   });
+
+  it('titles the notifications settings route', () => {
+    expect(screenTitleFor('/settings/notifications')).toBe('Notifications');
+  });
 });

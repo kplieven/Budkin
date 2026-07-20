@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
@@ -10,6 +10,7 @@ import { IconButton } from '@/components/IconButton';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { hasReminderPermission, requestReminderPermission } from '@/notifications/permission';
+import { reconcileNow } from '@/notifications/scheduleSync';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -66,26 +67,53 @@ export default function NotificationSettings() {
 
   const body = (
     <>
-      {!granted && (
-        <Pressable
-          onPress={() => void requestReminderPermission().then(setGranted)}
-          accessibilityRole="button"
-          accessibilityLabel="Allow notifications"
-          style={(s) => [
-            { ...group, ...row, marginBottom: 16, cursor: 'pointer' },
-            isHovered(s) && { backgroundColor: t.elevated },
-          ]}
-        >
+      {Platform.OS === 'android' ? (
+        !granted && (
+          <Pressable
+            onPress={() =>
+              void requestReminderPermission().then((g) => {
+                setGranted(g);
+                // Granting touches no store slice, so the scheduleSync
+                // subscriber never sees it: nothing would reconcile until the
+                // next gated write or the next cold launch without this.
+                if (g) reconcileNow();
+              })
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Allow notifications"
+            style={(s) => [
+              { ...group, ...row, marginBottom: 16, cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Txt unselectable weight={600} size={16} color={t.primary}>
+                Allow notifications
+              </Txt>
+              <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                Budkin cannot remind you until you turn these on.
+              </Txt>
+            </View>
+            <Icon name="chevron-right" color={t.faint} size={18} />
+          </Pressable>
+        )
+      ) : (
+        // Off Android there is no permission to grant and nothing here ever
+        // schedules: `permission.ts`'s stub always reports not-granted, so the
+        // card above would otherwise show permanently with copy that tells a
+        // web (or iOS) user to turn on something they have no way to turn on.
+        // Reached directly by URL off Android too, so this branch has to hold
+        // on its own, not just when navigated to from settings/index.tsx.
+        <View style={{ ...group, ...row, marginBottom: 16 }}>
           <View style={{ flex: 1 }}>
-            <Txt unselectable weight={600} size={16} color={t.primary}>
-              Allow notifications
+            <Txt unselectable weight={600} size={16}>
+              Android only
             </Txt>
             <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
-              Budkin cannot remind you until you turn these on.
+              Scheduled reminders are available on Android. This device cannot receive them.
             </Txt>
           </View>
-          <Icon name="chevron-right" color={t.faint} size={18} />
-        </Pressable>
+        </View>
       )}
 
       <View style={group}>
