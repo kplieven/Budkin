@@ -107,6 +107,14 @@ interface AppState {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
+  dueDateReminders: boolean;
+  staleTimerReminders: boolean;
+  ageMilestones: boolean;
+  pumpingReminders: boolean;
+  pumpingIntervalMin: number;
+  /** when the pumping toggle was last switched on, epoch ms */
+  pumpingEnabledAt: number | null;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -189,6 +197,11 @@ interface AppActions {
   completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
+  setReminderPref: (
+    key: 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders',
+    value: boolean,
+  ) => void;
+  setPumpingInterval: (minutes: number) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -688,6 +701,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   themeMode: 'dark',
   unitSystem: 'metric',
   tutorialSeen: false,
+  dueDateReminders: true,
+  staleTimerReminders: true,
+  ageMilestones: true,
+  pumpingReminders: false,
+  pumpingIntervalMin: 180,
+  pumpingEnabledAt: null,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -754,6 +773,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
   },
+  setReminderPref: (key, value) => {
+    // Switching pumping ON stamps the anchor the reminder grid is built from,
+    // so a parent who has never logged a pump still gets reminders. Switching
+    // OFF clears it, so re-enabling later does not resume an ancient phase.
+    if (key === 'pumpingReminders') {
+      const pumpingEnabledAt = value ? Date.now() : null;
+      set({ pumpingReminders: value, pumpingEnabledAt });
+      void savePrefs({ pumpingReminders: value, pumpingEnabledAt });
+      return;
+    }
+    set({ [key]: value } as Pick<AppState, typeof key>);
+    void savePrefs({ [key]: value });
+  },
+  setPumpingInterval: (minutes) => {
+    set({ pumpingIntervalMin: minutes });
+    void savePrefs({ pumpingIntervalMin: minutes });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -793,6 +829,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
+    if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });
+    if (prefs.staleTimerReminders != null) set({ staleTimerReminders: prefs.staleTimerReminders });
+    if (prefs.ageMilestones != null) set({ ageMilestones: prefs.ageMilestones });
+    if (prefs.pumpingReminders != null) set({ pumpingReminders: prefs.pumpingReminders });
+    if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
+    if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
