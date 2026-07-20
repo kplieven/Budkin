@@ -98,8 +98,19 @@ describe('desiredScheduled: due date', () => {
     expect(out[0].fireAt).toBe(at(2026, 9, 1, 9));
   });
 
+  it('does not schedule the lead-up reminder at the exact instant it is due to fire', () => {
+    const out = desiredScheduled(input({ children: [expecting] }), at(2026, 8, 25, 9));
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Today is Rowan's due date");
+  });
+
   it('schedules nothing once the due date has passed', () => {
     const out = desiredScheduled(input({ children: [expecting] }), at(2026, 9, 2));
+    expect(out).toEqual([]);
+  });
+
+  it('does not schedule the day-of reminder at the exact instant it is due to fire', () => {
+    const out = desiredScheduled(input({ children: [expecting] }), at(2026, 9, 1, 9));
     expect(out).toEqual([]);
   });
 
@@ -184,6 +195,15 @@ describe('desiredScheduled: stale timers', () => {
     const out = desiredScheduled(
       input({ children: [born], timers: [timer()], prefs: prefs({ ageMilestones: false }) }),
       at(2026, 9, 2, 12),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('does not schedule a stale alert at the exact instant its threshold fires', () => {
+    const fireAt = timer().start + STALE_AFTER_MIN.sleep! * 60_000;
+    const out = desiredScheduled(
+      input({ children: [born], timers: [timer()], prefs: prefs({ ageMilestones: false }) }),
+      fireAt,
     );
     expect(out).toEqual([]);
   });
