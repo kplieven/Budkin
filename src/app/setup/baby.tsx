@@ -10,6 +10,7 @@ import { Txt } from '@/components/Txt';
 import { SetupButton } from '@/features/setup/SetupButton';
 import { useFinishSetup } from '@/features/setup/useFinishSetup';
 import { clampBirth, clampDueDate } from '@/lib/birthDate';
+import { requestReminderPermission } from '@/notifications/permission';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -64,9 +65,23 @@ export default function SetupBaby() {
 
   // Guarded against a double tap for the same reason as onAdd: saveChild returns
   // before its work settles and finish() only schedules the navigation.
-  const onAddExpected = () => {
+  // setSaving(true) still runs before the first await below, so a second tap
+  // during the permission dialog is blocked exactly as it was before this
+  // handler became async.
+  const onAddExpected = async () => {
     if (!canSave || saving) return;
     setSaving(true);
+    // Ask BEFORE saving, not after: saveChild's store write is what triggers
+    // the scheduling reconciler (scheduleSync), and that reconciler silently
+    // skips scheduling when permission is missing rather than requesting it
+    // itself. A permission dialog takes seconds for a human to answer, so an
+    // ask fired after saveChild would race the reconciler and lose, and
+    // granting permission afterwards touches no store slice, so nothing would
+    // ever re-run the reconciler to pick it up. Asking first means the store
+    // write in saveChild always happens with permission already resolved,
+    // granted or not. A denial still saves the child; it just means no
+    // reminders, not no baby.
+    await requestReminderPermission();
     saveChild({
       first: first.trim(),
       last: last.trim(),
