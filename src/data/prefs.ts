@@ -22,7 +22,7 @@ export interface Prefs {
   tutorialSeen: boolean;
   /**
    * Bath rhythm: how many SMALL washes fall between two big ones (default 3,
-   * range 1..7). Purely local — Baby Buddy has no notion of wash size, so this
+   * range 1..30). Purely local — Baby Buddy has no notion of wash size, so this
    * only drives Budkin's "what's due next" pre-selection.
    */
   smallWashesPerBig: number;

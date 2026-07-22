@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -151,7 +151,7 @@ describe('nextWashKind', () => {
     expect(nextWashKind(smalls(6), 7)).toBe('small');
   });
   it('flips to big exactly on the configured number of smalls', () => {
-    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 30]) {
       expect(nextWashKind(smalls(n - 1), n)).toBe('small');
       expect(nextWashKind(smalls(n), n)).toBe('big');
     }
@@ -197,21 +197,21 @@ describe('nextWashKind', () => {
     // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
     expect(nextWashKind([], 0)).toBe('small');
     expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
-    expect(nextWashKind(smalls(6), 99)).toBe('small'); // 99 clamps to the 7 maximum
-    expect(nextWashKind(smalls(7), 99)).toBe('big');
+    expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
+    expect(nextWashKind(smalls(30), 99)).toBe('big');
     expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
   });
 });
 
 describe('clampSmallWashesPerBig', () => {
   it('passes every supported rhythm through untouched', () => {
-    for (const n of [1, 2, 3, 4, 5, 6, 7]) expect(clampSmallWashesPerBig(n)).toBe(n);
+    for (let n = 1; n <= 30; n++) expect(clampSmallWashesPerBig(n)).toBe(n);
   });
-  it('clamps to the 1..7 range', () => {
+  it('clamps to the 1..30 range', () => {
     expect(clampSmallWashesPerBig(0)).toBe(1);
     expect(clampSmallWashesPerBig(-4)).toBe(1);
-    expect(clampSmallWashesPerBig(8)).toBe(7);
-    expect(clampSmallWashesPerBig(1000)).toBe(7);
+    expect(clampSmallWashesPerBig(31)).toBe(30);
+    expect(clampSmallWashesPerBig(1000)).toBe(30);
   });
   it('rounds a fractional rhythm', () => {
     expect(clampSmallWashesPerBig(2.4)).toBe(2);
@@ -389,5 +389,41 @@ describe('fmtMinuteOfDay', () => {
     expect(fmtMinuteOfDay(1140)).toBe('19:00');
     expect(fmtMinuteOfDay(1230)).toBe('20:30');
     expect(fmtMinuteOfDay(1439)).toBe('23:59');
+  });
+});
+
+describe('parseMinuteOfDay', () => {
+  it('parses a full clock string', () => {
+    expect(parseMinuteOfDay('07:00')).toBe(420);
+    expect(parseMinuteOfDay('19:00')).toBe(1140);
+    expect(parseMinuteOfDay('00:00')).toBe(0);
+    expect(parseMinuteOfDay('23:59')).toBe(1439);
+  });
+
+  it('parses digits-first shorthand', () => {
+    expect(parseMinuteOfDay('7')).toBe(420);
+    expect(parseMinuteOfDay('19')).toBe(1140);
+    expect(parseMinuteOfDay('730')).toBe(450);
+    expect(parseMinuteOfDay('1930')).toBe(1170);
+  });
+
+  it('reaches minute granularity the old half-hour grid could not', () => {
+    expect(parseMinuteOfDay('715')).toBe(435);
+    expect(parseMinuteOfDay('7:15')).toBe(435);
+  });
+
+  it('rejects text that is not a 24-hour time', () => {
+    expect(parseMinuteOfDay('')).toBeNull();
+    expect(parseMinuteOfDay('   ')).toBeNull();
+    expect(parseMinuteOfDay('7pm')).toBeNull();
+    expect(parseMinuteOfDay('24:00')).toBeNull();
+    expect(parseMinuteOfDay('7:75')).toBeNull();
+    expect(parseMinuteOfDay('99999')).toBeNull();
+  });
+
+  it('round-trips with fmtMinuteOfDay', () => {
+    for (const min of [0, 1, 435, 420, 1140, 1439]) {
+      expect(parseMinuteOfDay(fmtMinuteOfDay(min))).toBe(min);
+    }
   });
 });
