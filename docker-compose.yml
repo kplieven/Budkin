@@ -1,8 +1,9 @@
 services:
-  babybuddy_mobile_web:
+  budkin:
     build:
       context: .
       dockerfile: Dockerfile.web
+    image: git.karellievens.dev/karel/budkin:${TAG:?TAG is required}
     container_name: babybuddy_mobile_web
     ports:
       - "1235:80"
