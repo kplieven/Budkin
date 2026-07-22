@@ -10,7 +10,9 @@
  * alert. So the reconcile reads the OS's pending set and diffs against THAT.
  */
 
+import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
+import { fmtDur } from '@/lib/format';
 import type { ActivityType, Child, Timer } from '@/types/models';
 
 /** Every identifier we own starts with this. `diffScheduled` refuses to cancel
@@ -23,7 +25,7 @@ export const REMINDER_HOUR = 9;
 /** Days before the due date for the lead-up reminder. */
 export const DUE_LEAD_DAYS = 7;
 
-export type ReminderKind = 'due' | 'stale' | 'age' | 'pump';
+export type ReminderKind = 'due' | 'stale' | 'age' | 'pump' | 'nap';
 
 export interface ScheduledNotification {
   /** stable, and encodes the fire time so a moved date yields a new id */
@@ -304,6 +306,77 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
   return out;
 }
 
+/** Minutes before the band's upper bound that the nudge fires. Firing AT the
+ *  bound would announce the parent is already late, and the overtired window
+ *  has arrived by then. */
+export const NAP_LEAD_MIN = 15;
+
+/** Local hours the nudge may fire in. The same boundary `sleepTimer.ts` uses
+ *  to default a sleep entry's `nap` flag, so "nap" means one thing app-wide. */
+export const NAP_DAY_START_HOUR = 7;
+export const NAP_DAY_END_HOUR = 19;
+
+const DAY_MS = 86_400_000;
+
+function withinNapHours(ms: number): boolean {
+  const h = new Date(ms).getHours();
+  return h >= NAP_DAY_START_HOUR && h < NAP_DAY_END_HOUR;
+}
+
+/**
+ * Suggests a nap as the child nears the upper end of the typical wake window
+ * for their age, anchored to the end of their last sleep.
+ *
+ * The only reminder here that gives ADVICE rather than reporting a fact, and
+ * it is built on a rule of thumb the app itself labels as not medical
+ * consensus (see NORMS.wakeWindow). Hence the hedged title, the body that
+ * states the observation instead of an instruction, and the preference that
+ * ships off.
+ */
+function napReminders(child: Child, input: ScheduleInput, now: number): ScheduledNotification[] {
+  // `birth` holds a DUE date while expecting, so there is no age.
+  if (child.expected) return [];
+  // Null past the age the source covers, rather than extrapolating forever.
+  const band = wakeWindowBand((now - child.birth) / DAY_MS);
+  if (band?.hi == null) return [];
+
+  // Asleep right now, so there is nothing to suggest. A timer started from the
+  // headless widget carries no childId and belongs to the selected child.
+  const asleep = input.timers.some(
+    (t) => t.saveAs === 'sleep' && (t.childId ?? input.selectedChildId) === child.id,
+  );
+  if (asleep) return [];
+
+  const wokeAt = input.lastSleepEndByChild[child.id];
+  if (wokeAt == null) return [];
+
+  const awakeMin = band.hi - NAP_LEAD_MIN;
+  const fireAt = wokeAt + awakeMin * 60_000;
+  if (fireAt <= now) return [];
+  // Dropped, NOT deferred to the morning: a window that elapses at 21:00 is
+  // meaningless by 07:00, because the baby has slept the night in between and
+  // the anchor that justified it is stale.
+  if (!withinNapHours(fireAt)) return [];
+
+  return [
+    {
+      // The fire time is in the identifier, as with pump: logging a sleep
+      // moves the anchor, and title/body alone carry too little signal for the
+      // diff to notice.
+      identifier: `${REMINDER_PREFIX}nap:${child.id}:${fireAt}`,
+      kind: 'nap',
+      // Hedged on purpose. The app has a population rule of thumb; the parent
+      // has an actual baby in front of them.
+      title: `${child.first} may be ready for a nap`,
+      // `spanLabel` above assumes whole hours and would render this as
+      // "1.25 hours". fmtDur gives "1h 15m".
+      body: `Awake ${fmtDur(awakeMin)}.`,
+      fireAt,
+      data: { url: '/timers' },
+    },
+  ];
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
@@ -317,6 +390,9 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.pumpingReminders) {
     out.push(...pumpReminders(input, now));
+  }
+  if (input.prefs.napSuggestions) {
+    for (const c of input.children) out.push(...napReminders(c, input, now));
   }
   return out;
 }
