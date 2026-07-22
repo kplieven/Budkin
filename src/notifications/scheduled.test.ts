@@ -576,7 +576,8 @@ describe('nap suggestions', () => {
   });
 
   it('resolves an ownerless sleep timer to the selected child', () => {
-    // A timer started from the headless widget carries no childId.
+    // Defensive case: a timer persisted before childId stamping existed.
+    // Every current timer source (including the headless widget) stamps one.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
     expect(naps(napInput({ timers: [t], selectedChildId: 'c1' }))).toEqual([]);
     // ...and must not suppress a DIFFERENT child's nudge.
