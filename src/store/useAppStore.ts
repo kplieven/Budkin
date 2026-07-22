@@ -56,7 +56,7 @@ import {
   type PendingOp,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
+import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -615,6 +615,81 @@ function mirrorTimerEdit(get: Get, timer: Timer): void {
   }
 }
 
+/**
+ * Where a "still ongoing" interval actually started.
+ *
+ * When the draft is an EDIT of an already-logged entry, that entry's own
+ * `start` is the only exact answer. `openEdit` pins the end plus a duration
+ * ROUNDED to whole minutes and leaves the start derived (`end − lasted`), so
+ * the resolved start drifts the moment the user nudges either of those, and the
+ * rounding alone can move it by half a minute. Only prefer the draft's own
+ * start once the user has actually set it (`startEdited`).
+ *
+ * Either way a start later than `now` is clamped to `now`, matching
+ * `adjustTimerStart`/`setTimerStart`: nothing can have started in the future. A
+ * start in the past is kept however old it is.
+ */
+function ongoingStartMs(
+  te: TimeEntryState,
+  entries: Entry[],
+  editingId: string | null,
+  now: number,
+): number {
+  if (!te.startEdited && editingId) {
+    const src = entries.find((e) => e.id === editingId);
+    if (src && 'start' in src) return Math.min(src.start, now);
+  }
+  return Math.min(teStart(te, now) ?? now, now);
+}
+
+/**
+ * Build a running Timer from the log sheet's draft.
+ *
+ * Shared by the two paths that turn a live interval into a timer: starting one
+ * from a fresh draft, and converting an already-logged entry back into one
+ * ("Still ongoing" while editing). Both used to create the timer bare, which
+ * silently dropped a note or an amount the user had just typed, so everything
+ * the draft carries rides along. The per-activity split mirrors
+ * `saveTimerDetails`, so a timer never carries another activity's metadata.
+ *
+ * `notes` and `tags` stay device-local: `encodeTimerName` deliberately keeps
+ * them out of the server timer's name (that grammar is a cross-device wire
+ * format, see serverTimers.ts), so another device picking this timer up sees
+ * the structural fields only.
+ */
+function buildTimerFromDraft(
+  id: string,
+  type: ActivityType,
+  te: TimeEntryState,
+  start: number,
+  childId: string,
+): Timer {
+  const timer: Timer = {
+    id,
+    activity: type,
+    name: ACTIVITY_LABEL[type],
+    start,
+    saveAs: type,
+    childId,
+    notes: te.notes?.trim() || undefined,
+    tags: te.tags,
+  };
+  if (type === 'feeding') {
+    timer.feedType = te.feedType;
+    timer.method = te.method;
+    timer.startSide = te.startSide;
+    timer.amount = te.amount;
+  } else if (type === 'pumping') {
+    timer.method = te.method;
+    timer.amount = te.amount;
+  } else if (type === 'sleep') {
+    timer.nap = te.nap;
+  } else if (type === 'tummy') {
+    timer.milestone = te.milestone;
+  }
+  return timer;
+}
+
 /** Mirror a stop/discard: delete the server timer (online) or queue the delete
  *  (offline). Unsynced timers (serverId == null) have no server record. */
 function mirrorTimerDelete(get: Get, timer: Timer): void {
@@ -664,10 +739,56 @@ function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSys
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-// The most recently deleted entry, held so an "Undo" toast can restore it.
+// The most recently removed entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
 // undo only re-creates it server-side when a server record was really removed.
-let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | null = null;
+// `timerId` is set when the entry was REPLACED by a running timer ("Still
+// ongoing" on a logged entry): undo must discard that timer in the same step,
+// so the user can never end up holding both. `requeue` records that the entry
+// came off the offline write queue and has to go back on it.
+let lastDeleted: {
+  entry: Entry;
+  index: number;
+  didServerDelete: boolean;
+  timerId?: string;
+  requeue: boolean;
+} | null = null;
+
+/**
+ * Take an entry out of circulation everywhere it might still exist, and record
+ * what Undo needs to put it back. Shared by `deleteEntry` and by `save()`'s
+ * convert-to-timer path, which removes the entry for the same reason: it is not
+ * an entry any more.
+ *
+ * The write-queue scrub is the non-obvious half. An entry created offline sits
+ * on `babybuddy.queue.v1` until a reconnect, and `flushQueue` pushes whatever it
+ * finds there without consulting `entries`, so without this the deleted entry
+ * would be POSTed on reconnect anyway, resurrecting it (and, on the convert
+ * path, duplicating the timer that replaced it).
+ *
+ * Caller removes the entry from `entries`; this only handles what lives outside
+ * the store.
+ */
+function detachEntry(get: Get, set: Set, entry: Entry, index: number, timerId?: string): void {
+  const s = get();
+  const conn = s.connection;
+  const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
+  const record = { entry, index, didServerDelete, timerId, requeue: false };
+  lastDeleted = record;
+  if (didServerDelete) {
+    void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
+  } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
+    // Already on the server, removed while offline: record the delete so it
+    // replays on reconnect instead of the record resurrecting on the next refresh().
+    void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
+  }
+  void removeQueuedEntry(entry.id).then(({ removed, queue }) => {
+    if (!removed) return;
+    set({ queueCount: queue.length });
+    record.requeue = true;
+  });
+}
+
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
@@ -1498,10 +1619,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } else {
         void pushEntryToServer(conn, entry, childServerId)
           .then((serverId) => {
-            if (serverId != null) {
+            if (serverId == null) return;
+            if (get().entries.some((e) => e.id === entry.id)) {
               set((st) => ({
                 entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
               }));
+            } else {
+              // Deleted, or replaced by a running timer, while the POST was in
+              // flight: the local record never got the serverId, so nothing
+              // else can ever remove the copy this call just created. Delete the
+              // orphan here, the same way `mirrorTimerCreate` does for timers.
+              void deleteEntryFromServer(conn, entry.type, serverId).catch(() => {});
             }
           })
           .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
@@ -2079,36 +2207,39 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const index = s.entries.findIndex((e) => e.id === id);
     if (index === -1) return;
     const entry = s.entries[index];
-    const conn = s.connection;
-    const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
       editingId: s.editingId === id ? null : s.editingId,
     });
-    lastDeleted = { entry, index, didServerDelete };
-    if (didServerDelete) {
-      void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
-    } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
-      // Already on the server, deleted while offline: record the delete so it
-      // replays on reconnect instead of the record resurrecting on the next refresh().
-      void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
-    }
+    detachEntry(get, set, entry, index);
     get().showToast('Deleted', { label: 'Undo', run: () => get().undoDelete() });
   },
   undoDelete: () => {
     const d = lastDeleted;
     if (!d) return;
     lastDeleted = null;
+    // The entry was replaced by a running timer: discard that timer in the same
+    // step, so undo can never leave the user holding the entry AND the timer.
+    const timer = d.timerId ? get().timers.find((t) => t.id === d.timerId) : undefined;
     set((s) => {
-      if (s.entries.some((e) => e.id === d.entry.id)) return {};
-      const next = s.entries.slice();
-      next.splice(Math.min(d.index, next.length), 0, d.entry);
-      return { entries: next };
+      const patch: Partial<AppState> = {};
+      if (!s.entries.some((e) => e.id === d.entry.id)) {
+        const next = s.entries.slice();
+        next.splice(Math.min(d.index, next.length), 0, d.entry);
+        patch.entries = next;
+      }
+      if (d.timerId) patch.timers = s.timers.filter((t) => t.id !== d.timerId);
+      return patch;
     });
-    // Only re-create server-side if the delete actually removed a server record;
-    // a local-only (offline/demo) delete leaves the server copy intact.
-    if (d.didServerDelete) get().commitWrite(d.entry);
+    // Drop the server mirror too. A timer whose create POST hasn't landed yet
+    // has no serverId to delete, but `mirrorTimerCreate` cleans that orphan up
+    // itself once the POST resolves and the timer is gone from the store.
+    if (timer) mirrorTimerDelete(get, timer);
+    // Re-create server-side only if the removal actually took something away:
+    // a real server record, or a place in the not-yet-flushed write queue. A
+    // local-only (offline/demo) delete leaves the server copy intact.
+    if (d.didServerDelete || d.requeue) get().commitWrite(d.entry);
     // Cancel any queued offline pending-delete op for this entry so it doesn't
     // replay on reconnect and delete the just-restored record out from under the
     // user. Harmless no-op if no such op was recorded (online delete, or a
@@ -2328,9 +2459,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return { te: next };
     }),
+  // Going live pins the start, because the end becomes "now" and can no longer
+  // anchor it. Editing a logged entry, that pin must be the entry's OWN start,
+  // not the draft's derived one (see `ongoingStartMs`), so the sheet shows the
+  // same instant the resulting timer will carry.
   setOngoing: () =>
     set((s) => {
-      const startMs = teStart(s.te, s.now) ?? s.now;
+      const startMs = ongoingStartMs(s.te, s.entries, s.editingId, s.now);
       return { te: { ...s.te, ongoing: true, startAbs: startMs, order: ['end', 'start', 'lasted'] } };
     }),
   setLasted: (min) =>
@@ -2361,7 +2496,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setStartedAt: (ms, anchor) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'start');
-      const next = { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined };
+      const next = { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined, startEdited: true };
       if (ov) {
         next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
         next.endAgoMin = undefined;
@@ -2374,7 +2509,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setStartedAgo: (min) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'start');
-      const next = { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined };
+      const next = { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined, startEdited: true };
       if (ov) {
         next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
         next.endAgoMin = undefined;
@@ -2524,22 +2659,44 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // this field replaced.
     entry.heldBack = existing?.heldBack;
 
-    // live interval => create a running timer instead of an entry (create only)
-    if (!existing && te.ongoing && te.shape === 'interval') {
-      const timer: Timer = {
-        id: 't' + Date.now(),
-        activity: type,
-        name: ACTIVITY_LABEL[type],
-        start: teStart(te, now) as number,
-        saveAs: type,
-        childId,
-      };
+    // A live interval is a running timer, never an entry.
+    //
+    // On a fresh draft that is the plain "start live timer" path. On an EDIT it
+    // is a conversion: the user has told us the activity never ended, so the
+    // finished entry is simply wrong and gets REPLACED. Patching it to
+    // `end: null` (what this used to fall through to) is not a timer at all,
+    // and the API client pushes such an entry as `end: entry.end ?? entry.start`,
+    // a zero-length record that the next refresh() then copies back over the
+    // local one. So the entry is deleted, on the server too, and a timer
+    // carrying the same settings and the same original start takes its place.
+    //
+    // Undo is transactional (see `undoDelete`): it restores the entry and
+    // discards the timer together, so the user can never hold both.
+    if (te.ongoing && te.shape === 'interval') {
+      // A timer belongs to whoever the record was about, not to whoever happens
+      // to be selected. Same rule `stopTimer` follows in reverse.
+      const timerChildId = existing?.childId ?? childId;
+      const timer = buildTimerFromDraft(
+        't' + Date.now(),
+        type,
+        te,
+        ongoingStartMs(te, s.entries, s.editingId, now),
+        timerChildId,
+      );
+      const index = existing ? s.entries.findIndex((e) => e.id === existing.id) : -1;
       set({
+        entries: existing ? s.entries.filter((e) => e.id !== existing.id) : s.entries,
         timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
         sheet: null,
+        editingId: null,
         fromTimerId: null,
       });
-      get().showToast('Live timer started');
+      if (existing) {
+        detachEntry(get, set, existing, index, timer.id);
+        get().showToast('Replaced with a live timer', { label: 'Undo', run: () => get().undoDelete() });
+      } else {
+        get().showToast('Live timer started');
+      }
       mirrorTimerCreate(get, set, timer.id);
       return;
     }

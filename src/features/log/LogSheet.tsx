@@ -316,8 +316,12 @@ export function LogSheet() {
   const showVolume = type === 'feeding' && feedAmountIsVolume(te.feedType, te.method);
   const showIntake = type === 'feeding' && !feedAmountIsVolume(te.feedType, te.method);
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
+  // Marking a logged entry as still ongoing does not save changes to it, it
+  // replaces it with a running timer, so the button must not promise an edit.
   const saveLabel = editingId
-    ? 'Save changes'
+    ? te.ongoing && te.shape === 'interval'
+      ? 'Start live timer'
+      : 'Save changes'
     : fromTimerId
       ? te.ongoing
         ? 'Save details'
