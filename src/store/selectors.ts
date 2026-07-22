@@ -199,7 +199,13 @@ export function lastSleepStartMinAgo(entries: Entry[], now: number): number | nu
  */
 export const SMALL_WASHES_PER_BIG_DEFAULT = 3;
 export const SMALL_WASHES_PER_BIG_MIN = 1;
-export const SMALL_WASHES_PER_BIG_MAX = 7;
+/**
+ * A soft cap, not a real limit on anyone's rhythm: 30 is far past any bath
+ * routine a person actually keeps, while still low enough that a typo like 500
+ * is caught rather than quietly meaning "a big wash never comes due". The
+ * minimum stays 1 for the harder reason given on `clampSmallWashesPerBig`.
+ */
+export const SMALL_WASHES_PER_BIG_MAX = 30;
 
 /**
  * Coerce a rhythm from anywhere (a persisted pref, a stale build's value) into

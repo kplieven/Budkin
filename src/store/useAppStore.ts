@@ -122,7 +122,7 @@ interface AppState {
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
-   *  range 1..7). Global rather than per-child, like every other pref. Local
+   *  range 1..30). Global rather than per-child, like every other pref. Local
    *  only: it drives the wash pre-selection, never anything sent to the server. */
   smallWashesPerBig: number;
   /** Sleep rhythm: the window in which a sleep counts as a NAP, as minutes

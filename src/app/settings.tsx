@@ -20,12 +20,6 @@ import { useAppStore } from '@/store/useAppStore';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 
-/** The selectable bath rhythms, 1..7 small washes between big ones. */
-const WASH_CHOICES = Array.from(
-  { length: SMALL_WASHES_PER_BIG_MAX - SMALL_WASHES_PER_BIG_MIN + 1 },
-  (_, i) => SMALL_WASHES_PER_BIG_MIN + i,
-);
-
 /**
  * One endpoint of the nap window as a type-able 24-hour clock field, the same
  * digits-first shorthand as the log sheet's time editor ("7" is 07:00, "730" is
@@ -93,6 +87,135 @@ function ClockField({
           color: t.text,
         }}
       />
+    </View>
+  );
+}
+
+/**
+ * A whole-number setting as a type-able field with − / + on either side. One
+ * chip per allowed value stops scaling long before the range does, and it also
+ * makes the range look like a rule when it is only a sanity bound, so the count
+ * is typed and the buttons are there for the one-step nudge.
+ *
+ * Same draft-then-commit as ClockField, and here it is load-bearing rather than
+ * tidy: the store's clamp turns NaN into the DEFAULT, not into the previous
+ * value, so committing per keystroke would reset a user's 5 to 3 and persist it
+ * the moment they cleared the field to type a new number. Empty or unparseable
+ * text is discarded instead and the stored value comes back.
+ */
+function CountField({
+  label,
+  value,
+  min,
+  max,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (n: number) => void;
+}) {
+  const t = useTheme();
+  const [text, setText] = useState<string | null>(null); // null = not editing
+
+  const display = String(value);
+  const atMin = value <= min;
+  const atMax = value >= max;
+
+  const commit = (raw: string) => {
+    setText(null);
+    const n = Number(raw.trim());
+    // Number('') is 0, which would clamp to the minimum rather than cancel, so
+    // an emptied field has to be caught before the parse is trusted.
+    if (!raw.trim() || !Number.isFinite(n)) return;
+    onCommit(Math.min(max, Math.max(min, Math.round(n))));
+  };
+
+  // Stepping abandons any half-typed draft and moves from the stored value, so
+  // the two ways of editing can never compose into something out of range.
+  const step = (delta: -1 | 1) => {
+    setText(null);
+    const next = Math.min(max, Math.max(min, value + delta));
+    if (next !== value) onCommit(next);
+  };
+
+  const btn = (disabled: boolean) => ({
+    width: 54,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: t.chip,
+    borderWidth: 1.5,
+    borderColor: t.line,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    opacity: disabled ? 0.4 : 1,
+    cursor: (disabled ? 'auto' : 'pointer') as 'auto' | 'pointer',
+  });
+
+  return (
+    <View style={{ gap: 4 }}>
+      <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
+        {label}
+      </Txt>
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Pressable
+          onPress={() => step(-1)}
+          disabled={atMin}
+          accessibilityRole="button"
+          accessibilityLabel={`Fewer ${label.toLowerCase()}`}
+          accessibilityState={{ disabled: atMin }}
+          style={(s) => [btn(atMin), !atMin && isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <Txt unselectable weight={700} size={22} color={t.text}>
+            −
+          </Txt>
+        </Pressable>
+        {/* The sizing View around the TextInput is load-bearing on
+            react-native-web, same as in ClockField: a bare flex-item TextInput
+            keeps min-width: auto and overflows the row. */}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            value={text ?? display}
+            onFocus={() => setText('')}
+            onChangeText={setText}
+            onBlur={() => text != null && commit(text)}
+            onSubmitEditing={() => text != null && commit(text)}
+            placeholder={display}
+            placeholderTextColor={t.faint}
+            inputMode="numeric"
+            keyboardType="number-pad"
+            returnKeyType="done"
+            selectTextOnFocus
+            accessibilityLabel={label}
+            style={{
+              width: '100%',
+              height: 46,
+              borderRadius: 12,
+              backgroundColor: t.surface,
+              borderWidth: 1.5,
+              borderColor: text != null ? t.primary : t.line2,
+              textAlign: 'center',
+              fontSize: 19,
+              fontFamily: fontFamily(800),
+              fontVariant: ['tabular-nums'],
+              color: t.text,
+            }}
+          />
+        </View>
+        <Pressable
+          onPress={() => step(1)}
+          disabled={atMax}
+          accessibilityRole="button"
+          accessibilityLabel={`More ${label.toLowerCase()}`}
+          accessibilityState={{ disabled: atMax }}
+          style={(s) => [btn(atMax), !atMax && isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <Txt unselectable weight={700} size={22} color={t.text}>
+            +
+          </Txt>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -274,20 +397,18 @@ export default function Settings() {
               After every {smallWashesPerBig} small {smallWashesPerBig === 1 ? 'wash' : 'washes'}
             </Txt>
           </View>
-          <View style={{ flexDirection: 'row', gap: 7, flexWrap: 'wrap' }}>
-            {WASH_CHOICES.map((n) => (
-              <Chip
-                key={n}
-                label={String(n)}
-                color={t.primary}
-                selected={smallWashesPerBig === n}
-                onPress={() => setSmallWashesPerBig(n)}
-                padH={13}
-                padV={7}
-                fontSize={13.5}
-              />
-            ))}
-          </View>
+          <CountField
+            label="Small washes"
+            value={smallWashesPerBig}
+            min={SMALL_WASHES_PER_BIG_MIN}
+            max={SMALL_WASHES_PER_BIG_MAX}
+            onCommit={setSmallWashesPerBig}
+          />
+          <Txt weight={500} size={12} color={t.faint}>
+            Type a number or use − and +, anywhere from {SMALL_WASHES_PER_BIG_MIN} to{' '}
+            {SMALL_WASHES_PER_BIG_MAX}. The rhythm is read off the baths already logged, so a change
+            shows up straight away in what&apos;s due next.
+          </Txt>
         </View>
 
         {/* Nap window. A sleep is pre-set to Nap when it STARTS inside this

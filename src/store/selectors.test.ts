@@ -151,7 +151,7 @@ describe('nextWashKind', () => {
     expect(nextWashKind(smalls(6), 7)).toBe('small');
   });
   it('flips to big exactly on the configured number of smalls', () => {
-    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 30]) {
       expect(nextWashKind(smalls(n - 1), n)).toBe('small');
       expect(nextWashKind(smalls(n), n)).toBe('big');
     }
@@ -197,21 +197,21 @@ describe('nextWashKind', () => {
     // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
     expect(nextWashKind([], 0)).toBe('small');
     expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
-    expect(nextWashKind(smalls(6), 99)).toBe('small'); // 99 clamps to the 7 maximum
-    expect(nextWashKind(smalls(7), 99)).toBe('big');
+    expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
+    expect(nextWashKind(smalls(30), 99)).toBe('big');
     expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
   });
 });
 
 describe('clampSmallWashesPerBig', () => {
   it('passes every supported rhythm through untouched', () => {
-    for (const n of [1, 2, 3, 4, 5, 6, 7]) expect(clampSmallWashesPerBig(n)).toBe(n);
+    for (let n = 1; n <= 30; n++) expect(clampSmallWashesPerBig(n)).toBe(n);
   });
-  it('clamps to the 1..7 range', () => {
+  it('clamps to the 1..30 range', () => {
     expect(clampSmallWashesPerBig(0)).toBe(1);
     expect(clampSmallWashesPerBig(-4)).toBe(1);
-    expect(clampSmallWashesPerBig(8)).toBe(7);
-    expect(clampSmallWashesPerBig(1000)).toBe(7);
+    expect(clampSmallWashesPerBig(31)).toBe(30);
+    expect(clampSmallWashesPerBig(1000)).toBe(30);
   });
   it('rounds a fractional rhythm', () => {
     expect(clampSmallWashesPerBig(2.4)).toBe(2);
