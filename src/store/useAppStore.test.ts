@@ -4261,8 +4261,8 @@ describe('wash-rhythm persistence', () => {
 
   it('setSmallWashesPerBig clamps out-of-range input before storing it', () => {
     s().setSmallWashesPerBig(99);
-    expect(s().smallWashesPerBig).toBe(7);
-    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 7 });
+    expect(s().smallWashesPerBig).toBe(30);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 30 });
     s().setSmallWashesPerBig(0);
     expect(s().smallWashesPerBig).toBe(1);
     expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 1 });
