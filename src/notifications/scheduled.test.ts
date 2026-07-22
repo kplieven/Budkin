@@ -567,6 +567,13 @@ describe('nap suggestions', () => {
     expect(naps(napInput({ timers: [t] }))).toEqual([]);
   });
 
+  it('does not suppress the nudge for a running non-sleep timer', () => {
+    // Only a running SLEEP timer means the baby is currently asleep. A
+    // running feeding (or any other) timer must not suppress the nudge.
+    const t = timer({ id: 't1', childId: 'c1', activity: 'feeding', saveAs: 'feeding' });
+    expect(naps(napInput({ timers: [t] })).length).toBe(1);
+  });
+
   it('resolves an ownerless sleep timer to the selected child', () => {
     // A timer started from the headless widget carries no childId.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
