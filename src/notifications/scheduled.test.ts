@@ -509,3 +509,149 @@ describe('diffScheduled', () => {
     expect(diffScheduled(existing, [])).toEqual({ toSchedule: [], toCancel: [] });
   });
 });
+
+describe('nap suggestions', () => {
+  // Born 2026-09-01. At `now` below she is 60 days old, so band 60 to 90,
+  // firing at 90 - 15 = 75 minutes awake.
+  const born = at(2026, 9, 1);
+  const rowan = () => child({ id: 'c1', first: 'Rowan', birth: born });
+  const now = at(2026, 10, 31, 10); // 10:00 local, age 60 days
+  const napPrefs = { napSuggestions: true };
+
+  const napInput = (over: Partial<ScheduleInput> = {}) =>
+    input({
+      children: [rowan()],
+      prefs: prefs(napPrefs),
+      lastSleepEndByChild: { c1: at(2026, 10, 31, 9) }, // woke 09:00
+      ...over,
+    });
+
+  const naps = (i: ScheduleInput, t = now) =>
+    desiredScheduled(i, t).filter((n) => n.kind === 'nap');
+
+  it('fires 15 minutes before the upper bound of the age band', () => {
+    const [n] = naps(napInput());
+    expect(n.fireAt).toBe(at(2026, 10, 31, 10) + 15 * 60_000); // 09:00 + 1h15
+    expect(n.title).toBe('Rowan may be ready for a nap');
+    expect(n.body).toBe('Awake 1h 15m.');
+    expect(n.data.url).toBe('/timers');
+    expect(n.identifier).toBe(`${REMINDER_PREFIX}nap:c1:${n.fireAt}`);
+  });
+
+  it('uses each age band', () => {
+    const cases: [number, number][] = [
+      [10, 45],   // to 30 days:  band hi 60
+      [60, 75],   // to 90 days:  band hi 90
+      [120, 105], // to 180 days: band hi 120
+      [300, 165], // to 365 days: band hi 180
+    ];
+    for (const [ageDays, awakeMin] of cases) {
+      const t = born + ageDays * 86_400_000;
+      const woke = new Date(t);
+      woke.setHours(9, 0, 0, 0);
+      const at9 = woke.getTime();
+      const [n] = naps(
+        napInput({ lastSleepEndByChild: { c1: at9 } }),
+        at9 + 60_000, // one minute after waking
+      );
+      expect(n.fireAt - at9).toBe(awakeMin * 60_000);
+    }
+  });
+
+  it('is off unless the preference is on', () => {
+    expect(naps(napInput({ prefs: prefs({ napSuggestions: false }) }))).toEqual([]);
+  });
+
+  it('says nothing while the child is asleep', () => {
+    const t = timer({ id: 't1', childId: 'c1', saveAs: 'sleep' });
+    expect(naps(napInput({ timers: [t] }))).toEqual([]);
+  });
+
+  it('resolves an ownerless sleep timer to the selected child', () => {
+    // A timer started from the headless widget carries no childId.
+    const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
+    expect(naps(napInput({ timers: [t], selectedChildId: 'c1' }))).toEqual([]);
+    // ...and must not suppress a DIFFERENT child's nudge.
+    expect(naps(napInput({ timers: [t], selectedChildId: 'c2' })).length).toBe(1);
+  });
+
+  it('says nothing without an anchor', () => {
+    expect(naps(napInput({ lastSleepEndByChild: {} }))).toEqual([]);
+  });
+
+  it('says nothing for an expecting child', () => {
+    expect(naps(napInput({ children: [child({ id: 'c1', expected: true, birth: born })] }))).toEqual([]);
+  });
+
+  it('stops past the age the wake-window source covers', () => {
+    const t = born + 366 * 86_400_000;
+    const woke = new Date(t);
+    woke.setHours(9, 0, 0, 0);
+    expect(
+      naps(napInput({ lastSleepEndByChild: { c1: woke.getTime() } }), woke.getTime() + 60_000),
+    ).toEqual([]);
+  });
+
+  it('does not schedule a fire time already past', () => {
+    // Woke at 09:00, fire is 10:15, and it is already 11:00.
+    expect(naps(napInput(), at(2026, 10, 31, 11))).toEqual([]);
+  });
+
+  describe('quiet hours', () => {
+    it('drops a fire time at or after 19:00', () => {
+      // Woke 17:45 + 1h15 = exactly 19:00. Excluded.
+      const woke = at(2026, 10, 31, 17) + 45 * 60_000;
+      expect(naps(napInput({ lastSleepEndByChild: { c1: woke } }), woke + 60_000)).toEqual([]);
+    });
+
+    it('keeps a fire time at exactly 07:00', () => {
+      // Woke 05:45 + 1h15 = exactly 07:00. Included.
+      const woke = at(2026, 10, 31, 5) + 45 * 60_000;
+      const [n] = naps(napInput({ lastSleepEndByChild: { c1: woke } }), woke + 60_000);
+      expect(n.fireAt).toBe(at(2026, 10, 31, 7));
+    });
+
+    it('drops rather than defers an overnight window', () => {
+      // Woke 03:00, would fire 04:15. Nothing is scheduled, and in particular
+      // nothing is pushed to 07:00: by then the anchor is stale.
+      const woke = at(2026, 10, 31, 3);
+      expect(naps(napInput({ lastSleepEndByChild: { c1: woke } }), woke + 60_000)).toEqual([]);
+    });
+  });
+
+  it('re-anchors to a newer sleep, so the diff reschedules', () => {
+    const first = naps(napInput())[0];
+    const later = naps(napInput({ lastSleepEndByChild: { c1: at(2026, 10, 31, 9) + 30 * 60_000 } }))[0];
+    expect(later.identifier).not.toBe(first.identifier);
+    const { toSchedule, toCancel } = diffScheduled(
+      [{ identifier: first.identifier, title: first.title, body: first.body }],
+      [later],
+    );
+    expect(toCancel).toEqual([first.identifier]);
+    expect(toSchedule).toEqual([later]);
+  });
+
+  it('handles two awake children independently', () => {
+    const out = naps(
+      napInput({
+        children: [rowan(), child({ id: 'c2', first: 'Sam', birth: born })],
+        lastSleepEndByChild: { c1: at(2026, 10, 31, 9), c2: at(2026, 10, 31, 9) + 20 * 60_000 },
+      }),
+    );
+    expect(out.map((n) => n.title)).toEqual([
+      'Rowan may be ready for a nap',
+      'Sam may be ready for a nap',
+    ]);
+  });
+
+  it('one child napping does not suppress the other', () => {
+    const out = naps(
+      napInput({
+        children: [rowan(), child({ id: 'c2', first: 'Sam', birth: born })],
+        timers: [timer({ id: 't1', childId: 'c1', saveAs: 'sleep' })],
+        lastSleepEndByChild: { c1: at(2026, 10, 31, 9), c2: at(2026, 10, 31, 9) },
+      }),
+    );
+    expect(out.map((n) => n.title)).toEqual(['Sam may be ready for a nap']);
+  });
+});
