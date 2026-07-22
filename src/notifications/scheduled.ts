@@ -67,6 +67,13 @@ export interface ScheduleInput {
    *  the current wake window started. Absent when they have never slept on
    *  record. */
   lastSleepEndByChild: Record<string, number>;
+  /** Children with an ONGOING sleep entry (`end == null`), whether or not a
+   *  running Timer also exists for them. Covers a sleep entry that is asleep
+   *  right now with no timer to catch it: one edited to "still ongoing"
+   *  (writes `end: null`, creates no Timer), or a server sleep record with no
+   *  end. `napReminders` treats membership here exactly like a running sleep
+   *  timer. */
+  asleepChildIds: Record<string, true>;
   /** Resolves a running timer that carries no `childId` (one started from the
    *  headless widget). Mirrors `useAppStore.ts:600`. */
   selectedChildId: string;
@@ -340,11 +347,16 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   const band = wakeWindowBand((now - child.birth) / DAY_MS);
   if (band?.hi == null) return [];
 
-  // Asleep right now, so there is nothing to suggest. A timer started from the
-  // headless widget carries no childId and belongs to the selected child.
-  const asleep = input.timers.some(
-    (t) => t.saveAs === 'sleep' && (t.childId ?? input.selectedChildId) === child.id,
-  );
+  // Asleep right now, so there is nothing to suggest. Covers a running sleep
+  // TIMER, and separately an ongoing sleep ENTRY that carries no timer at all
+  // (`asleepChildIds`; see its doc comment on ScheduleInput) — a running timer
+  // does not exist for every ongoing sleep, e.g. one edited to "still
+  // ongoing". A timer started from the headless widget carries no childId and
+  // belongs to the selected child.
+  const asleep =
+    input.timers.some(
+      (t) => t.saveAs === 'sleep' && (t.childId ?? input.selectedChildId) === child.id,
+    ) || input.asleepChildIds[child.id] === true;
   if (asleep) return [];
 
   const wokeAt = input.lastSleepEndByChild[child.id];

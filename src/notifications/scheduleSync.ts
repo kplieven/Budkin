@@ -15,17 +15,28 @@ type State = ReturnType<typeof useAppStore.getState>;
 function toInput(s: State): ScheduleInput {
   let lastPumpAt: number | null = null;
   const lastSleepEndByChild: Record<string, number> = {};
+  const asleepChildIds: Record<string, true> = {};
   for (const e of s.entries) {
     if (e.type === 'pumping') {
       const at = e.end ?? e.start;
       if (lastPumpAt === null || at > lastPumpAt) lastPumpAt = at;
       continue;
     }
-    // Only an ENDED sleep starts a wake window. A running one means the baby
-    // is still asleep, and `timers` already covers that case.
-    if (e.type === 'sleep' && e.end != null) {
-      const cur = lastSleepEndByChild[e.childId];
-      if (cur == null || e.end > cur) lastSleepEndByChild[e.childId] = e.end;
+    if (e.type === 'sleep') {
+      if (e.end != null) {
+        // Ended: starts a wake window.
+        const cur = lastSleepEndByChild[e.childId];
+        if (cur == null || e.end > cur) lastSleepEndByChild[e.childId] = e.end;
+      } else {
+        // Ongoing. Often also has a running Timer (already caught by
+        // `napReminders`' own `timers` check), but not always: editing an
+        // existing entry to "still ongoing" writes `end: null` without
+        // creating a Timer, and a server sleep record with no end maps the
+        // same way. `asleepChildIds` catches the child in either case, so a
+        // stale, still-future `fireAt` from the PREVIOUS ended sleep can't
+        // survive and suggest a nap while the baby is asleep.
+        asleepChildIds[e.childId] = true;
+      }
     }
   }
   return {
@@ -42,6 +53,7 @@ function toInput(s: State): ScheduleInput {
     },
     lastPumpAt,
     lastSleepEndByChild,
+    asleepChildIds,
     selectedChildId: s.selectedChildId,
   };
 }
