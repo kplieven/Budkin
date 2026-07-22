@@ -28,6 +28,9 @@ export interface Prefs {
   pumpingIntervalMin: number;
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
+  /** Nap suggestions. Off by default: unlike the other four this one gives
+   *  advice, from a curve the app labels as not medical consensus. */
+  napSuggestions: boolean;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */
