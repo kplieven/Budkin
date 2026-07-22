@@ -386,3 +386,54 @@ describe('nap anchor projection', () => {
     expect(desired.mock.calls.length).toBeGreaterThan(before);
   });
 });
+
+describe('nap suggestion end-to-end (regression: toInput\'s key space (e.childId) and napReminders\' lookup key (child.id) are aligned only by inspection)', () => {
+  // `desiredScheduled` above is a spy wrapping the REAL implementation
+  // (`vi.fn(actual.desiredScheduled)`), so this exercises the genuine
+  // toInput -> napReminders handoff end to end, not a mock of it.
+  it('carries a real kind: "nap" reminder through to applyScheduled', async () => {
+    // Fake ONLY Date, so `flush`'s real setTimeout still resolves. Date.now()
+    // (what `run()` in scheduleSync.ts uses as `now`) becomes deterministic,
+    // so the fire-time arithmetic below is robust to whatever wall-clock time
+    // the suite actually runs at.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const fixedNow = new Date(2026, 6, 15, 10, 0, 0).getTime(); // 10:00 local, well inside quiet hours
+      vi.setSystemTime(fixedNow);
+
+      const { apply, useAppStore } = await setup();
+
+      // 60 days old: wakeWindowBand's 90-day bucket applies (hi: 90), so the
+      // nudge fires 90 - NAP_LEAD_MIN(15) = 75 minutes after waking.
+      const birth = fixedNow - 60 * 24 * 60 * 60 * 1000;
+      // Woke 10 minutes before "now": fire = woke + 75min = now + 65min, i.e.
+      // 11:05 local — in the future and inside 07:00-19:00 quiet hours.
+      const woke = fixedNow - 10 * 60 * 1000;
+
+      useAppStore.setState({
+        napSuggestions: true,
+        children: [{ id: 'c1', first: 'Rowan', last: '', birth, color: '#208AEF' }],
+        entries: [
+          {
+            id: 'e1',
+            childId: 'c1',
+            type: 'sleep',
+            start: woke - 60 * 60 * 1000,
+            end: woke,
+            nap: true,
+            tags: [],
+          },
+        ],
+      });
+      await flush();
+
+      const sent = apply.mock.calls.at(-1)?.[0] ?? [];
+      const nap = sent.find((n) => n.kind === 'nap');
+      expect(nap).toBeDefined();
+      expect(nap?.fireAt).toBe(woke + 75 * 60_000);
+      expect(nap?.fireAt).toBeGreaterThan(fixedNow);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
