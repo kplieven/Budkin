@@ -8,11 +8,11 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
-import { groupByDay } from '@/features/activity/groupByDay';
+import { groupByDay, isTimer } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
-import { entriesForChild } from '@/store/selectors';
+import { entriesForChild, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -21,6 +21,7 @@ export default function History() {
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
   const entries = useAppStore((s) => s.entries);
+  const timers = useAppStore((s) => s.timers);
   // Primitive selector, so no new reference per render (zustand v5); the
   // child-scoping filter itself runs in the render body below.
   const selectedChildId = useAppStore((s) => s.selectedChildId);
@@ -28,6 +29,7 @@ export default function History() {
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openEdit = useAppStore((s) => s.openEdit);
+  const openTimerEdit = useAppStore((s) => s.openTimerEdit);
   const refresh = useAppStore((s) => s.refresh);
 
   // Pull-to-refresh, mirroring Home: native uses RefreshControl, touch-web a
@@ -50,10 +52,17 @@ export default function History() {
   const activityEntries = entriesForChild(entries, selectedChildId).filter(
     (e) => e.type !== 'note' && e.type !== 'milestone',
   );
-  const groups = groupByDay(activityEntries, now);
+  // Running timers belong here too: they are this child's activity, just not
+  // finished. Marking an already-logged entry "still ongoing" converts it into
+  // a timer, so without this the row the user was looking at would vanish from
+  // the very list they marked it in.
+  const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
+  const groups = groupByDay(items, now);
 
   const body =
-    activityEntries.length === 0 ? (
+    // A running timer counts as something logged, so the empty state stays away
+    // while one is going.
+    items.length === 0 ? (
       <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
         <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
           <Icon name="list" color={t.faint} size={34} />
@@ -72,14 +81,17 @@ export default function History() {
             {g.label}
           </Txt>
           {/* A continuous timeline spine per day. Tap a row to open the
-              editor, where entries can be edited or deleted. */}
+              editor, where entries can be edited or deleted. A timer row opens
+              the RUNNING-timer editor instead: `openEdit` looks the id up in
+              `entries` and returns early on a miss, so sending a timer there
+              would make the row silently dead. */}
           <View>
             {g.items.map((e, i) => (
               <TimelineEntry
-                key={e.id}
-                entry={e}
+                key={isTimer(e) ? `timer:${e.id}` : e.id}
+                item={e}
                 now={now}
-                onPress={() => openEdit(e.id)}
+                onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
                 isFirst={i === 0}
                 isLast={i === g.items.length - 1}
               />
