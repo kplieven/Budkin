@@ -62,9 +62,17 @@ function bucketFor(norm: Norm, ageDays: number): NormBucket | null {
 export const WAKE_WINDOW_MAX_AGE_DAYS = 365;
 
 /** The wake-window band for a child of `ageDays`, or null outside the range
- *  the source covers. See WAKE_WINDOW_MAX_AGE_DAYS. */
+ *  the source covers. See WAKE_WINDOW_MAX_AGE_DAYS.
+ *
+ *  `Number.isFinite` guards a NaN/Infinity age (e.g. a corrupt `child.birth`):
+ *  NaN fails both comparisons below, so without this it would fall through to
+ *  `bucketFor`, whose loop condition `NaN <= b.maxAgeDays` is always false and
+ *  therefore returns the LAST bucket rather than null. Unlike other NaN paths
+ *  in the nap-reminder feature, that would not poison the caller's fire time
+ *  (the anchor is a real number), so it would schedule a real notification for
+ *  a child of unknown age. */
 export function wakeWindowBand(ageDays: number): NormBucket | null {
-  if (ageDays < 0 || ageDays > WAKE_WINDOW_MAX_AGE_DAYS) return null;
+  if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > WAKE_WINDOW_MAX_AGE_DAYS) return null;
   return bucketFor(NORMS.wakeWindow, ageDays);
 }
 

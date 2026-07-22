@@ -61,4 +61,12 @@ describe('wakeWindowBand', () => {
   it('returns null for a negative age', () => {
     expect(wakeWindowBand(-1)).toBeNull();
   });
+
+  it('returns null for a non-finite age, rather than falling through to the last bucket', () => {
+    // NaN fails both `ageDays < 0` and `ageDays > WAKE_WINDOW_MAX_AGE_DAYS`, so
+    // without an explicit finite check it reaches `bucketFor`, whose loop
+    // condition `NaN <= b.maxAgeDays` is always false and therefore returns the
+    // LAST bucket instead of null.
+    expect(wakeWindowBand(NaN)).toBeNull();
+  });
 });
