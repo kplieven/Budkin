@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
@@ -12,12 +12,12 @@ import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
   fmtMinuteOfDay,
-  MINUTES_PER_DAY,
-  NAP_WINDOW_STEP_MIN,
+  parseMinuteOfDay,
   SMALL_WASHES_PER_BIG_MAX,
   SMALL_WASHES_PER_BIG_MIN,
 } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
+import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 
 /** The selectable bath rhythms, 1..7 small washes between big ones. */
@@ -26,59 +26,74 @@ const WASH_CHOICES = Array.from(
   (_, i) => SMALL_WASHES_PER_BIG_MIN + i,
 );
 
-/** Every half hour of the day, 00:00 to 23:30, as minutes since midnight. */
-const CLOCK_CHOICES = Array.from(
-  { length: MINUTES_PER_DAY / NAP_WINDOW_STEP_MIN },
-  (_, i) => i * NAP_WINDOW_STEP_MIN,
-);
-
 /**
- * One endpoint of the nap window as a single-line, horizontally-scrollable strip
- * of half-hour chips (the same strip pattern as the log sheet's quick-set row).
- * 48 chips would be eight wrapped rows inline, which would swamp the group; one
- * scrolling line keeps both endpoints readable at a glance.
+ * One endpoint of the nap window as a type-able 24-hour clock field, the same
+ * digits-first shorthand as the log sheet's time editor ("7" is 07:00, "730" is
+ * 07:30). A picker over a day's worth of times is a lot of travel for a value
+ * that changes about twice a childhood, and typing also reaches the minute,
+ * which a half-hour grid never could.
+ *
+ * Draft-then-commit, not commit-per-keystroke: the field holds its own text
+ * while focused (null means "not editing, show the stored value") and only
+ * writes on blur or submit. Unparseable text is discarded silently and the
+ * stored value comes back, so a half-typed "1" can never land as 01:00.
  */
-function ClockStrip({ value, onSelect }: { value: number; onSelect: (min: number) => void }) {
+function ClockField({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  onCommit: (min: number) => void;
+}) {
   const t = useTheme();
-  const ref = useRef<ScrollView>(null);
+  const [text, setText] = useState<string | null>(null); // null = not editing
 
-  // Bring the selected chip into view. The strip is 48 chips wide and starts at
-  // 00:00, so a default 07:00 would otherwise sit well off the right edge and
-  // the row would look like nothing was selected at all.
-  //
-  // Driven by the selected chip's own onLayout rather than by arithmetic over an
-  // assumed chip width: the labels are proportional text, so a computed offset
-  // would drift. onLayout fires when the chip is first placed and again only if
-  // it actually moves, so tapping a different chip does not yank the strip.
-  const revealSelected = (x: number) => {
-    ref.current?.scrollTo({ x: Math.max(0, x - 12), animated: false });
+  const display = fmtMinuteOfDay(value);
+
+  const commit = (raw: string) => {
+    setText(null);
+    const min = parseMinuteOfDay(raw);
+    if (min != null) onCommit(min);
   };
 
+  // The sizing View around the TextInput is load-bearing on react-native-web:
+  // a TextInput left as a direct flex item keeps min-width: auto and is pinned
+  // to its intrinsic width, overflowing the row. Same workaround as DateFields.
   return (
-    <ScrollView
-      ref={ref}
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ gap: 7, paddingRight: 4 }}
-    >
-      {CLOCK_CHOICES.map((min) => (
-        <View
-          key={min}
-          onLayout={min === value ? (e) => revealSelected(e.nativeEvent.layout.x) : undefined}
-        >
-          <Chip
-            label={fmtMinuteOfDay(min)}
-            color={t.primary}
-            selected={value === min}
-            onPress={() => onSelect(min)}
-            padH={11}
-            padV={7}
-            fontSize={13}
-            radius={11}
-          />
-        </View>
-      ))}
-    </ScrollView>
+    <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
+      <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
+        {label}
+      </Txt>
+      <TextInput
+        value={text ?? display}
+        onFocus={() => setText('')}
+        onChangeText={setText}
+        onBlur={() => text != null && commit(text)}
+        onSubmitEditing={() => text != null && commit(text)}
+        placeholder={display}
+        placeholderTextColor={t.faint}
+        inputMode="numeric"
+        keyboardType="number-pad"
+        returnKeyType="done"
+        selectTextOnFocus
+        accessibilityLabel={label}
+        style={{
+          width: '100%',
+          height: 46,
+          borderRadius: 12,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: text != null ? t.primary : t.line2,
+          textAlign: 'center',
+          fontSize: 19,
+          fontFamily: fontFamily(800),
+          fontVariant: ['tabular-nums'],
+          color: t.text,
+        }}
+      />
+    </View>
   );
 }
 
@@ -291,20 +306,21 @@ export default function Settings() {
                 : `Sleep starting between ${fmtMinuteOfDay(napWindowStartMin)} and ${fmtMinuteOfDay(napWindowEndMin)} is a nap`}
             </Txt>
           </View>
-          <View style={{ gap: 4 }}>
-            <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
-              Naps start
-            </Txt>
-            <ClockStrip value={napWindowStartMin} onSelect={(m) => setNapWindow(m, napWindowEndMin)} />
-          </View>
-          <View style={{ gap: 4 }}>
-            <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
-              Naps end
-            </Txt>
-            <ClockStrip value={napWindowEndMin} onSelect={(m) => setNapWindow(napWindowStartMin, m)} />
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <ClockField
+              label="Naps start"
+              value={napWindowStartMin}
+              onCommit={(m) => setNapWindow(m, napWindowEndMin)}
+            />
+            <ClockField
+              label="Naps end"
+              value={napWindowEndMin}
+              onCommit={(m) => setNapWindow(napWindowStartMin, m)}
+            />
           </View>
           <Txt weight={500} size={12} color={t.faint}>
-            Only affects new entries. Sleep already logged keeps whatever it was saved as.
+            24-hour clock: type 7 for 07:00, or 1930 for 19:30. Only affects new entries. Sleep
+            already logged keeps whatever it was saved as.
           </Txt>
         </View>
       </View>

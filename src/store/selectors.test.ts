@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -389,5 +389,41 @@ describe('fmtMinuteOfDay', () => {
     expect(fmtMinuteOfDay(1140)).toBe('19:00');
     expect(fmtMinuteOfDay(1230)).toBe('20:30');
     expect(fmtMinuteOfDay(1439)).toBe('23:59');
+  });
+});
+
+describe('parseMinuteOfDay', () => {
+  it('parses a full clock string', () => {
+    expect(parseMinuteOfDay('07:00')).toBe(420);
+    expect(parseMinuteOfDay('19:00')).toBe(1140);
+    expect(parseMinuteOfDay('00:00')).toBe(0);
+    expect(parseMinuteOfDay('23:59')).toBe(1439);
+  });
+
+  it('parses digits-first shorthand', () => {
+    expect(parseMinuteOfDay('7')).toBe(420);
+    expect(parseMinuteOfDay('19')).toBe(1140);
+    expect(parseMinuteOfDay('730')).toBe(450);
+    expect(parseMinuteOfDay('1930')).toBe(1170);
+  });
+
+  it('reaches minute granularity the old half-hour grid could not', () => {
+    expect(parseMinuteOfDay('715')).toBe(435);
+    expect(parseMinuteOfDay('7:15')).toBe(435);
+  });
+
+  it('rejects text that is not a 24-hour time', () => {
+    expect(parseMinuteOfDay('')).toBeNull();
+    expect(parseMinuteOfDay('   ')).toBeNull();
+    expect(parseMinuteOfDay('7pm')).toBeNull();
+    expect(parseMinuteOfDay('24:00')).toBeNull();
+    expect(parseMinuteOfDay('7:75')).toBeNull();
+    expect(parseMinuteOfDay('99999')).toBeNull();
+  });
+
+  it('round-trips with fmtMinuteOfDay', () => {
+    for (const min of [0, 1, 435, 420, 1140, 1439]) {
+      expect(parseMinuteOfDay(fmtMinuteOfDay(min))).toBe(min);
+    }
   });
 });
