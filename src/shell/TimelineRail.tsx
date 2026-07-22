@@ -4,8 +4,8 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
-import { groupByDay } from '@/features/activity/groupByDay';
-import { entriesForChild } from '@/store/selectors';
+import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import { entriesForChild, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -17,17 +17,23 @@ import { useTheme } from '@/theme/useTheme';
 export function TimelineRail() {
   const t = useTheme();
   const entries = useAppStore((s) => s.entries);
+  const timers = useAppStore((s) => s.timers);
   // Primitive selector, so no new reference per render (zustand v5).
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const now = useAppStore((s) => s.now);
   const openEdit = useAppStore((s) => s.openEdit);
+  const openTimerEdit = useAppStore((s) => s.openTimerEdit);
 
   // Scoped to the selected child, like History: `entries` holds every child's
   // records. Notes have their own dedicated tab, so keep them out of the rail.
   const activityEntries = entriesForChild(entries, selectedChildId).filter(
     (e) => e.type !== 'note' && e.type !== 'milestone',
   );
-  const groups = groupByDay(activityEntries, now);
+  // Running timers show here as well, on the same terms as on History: desktop
+  // and mobile run the identical pipeline and must not disagree about whether
+  // an unfinished activity exists.
+  const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
+  const groups = groupByDay(items, now);
 
   return (
     <View
@@ -63,7 +69,7 @@ export function TimelineRail() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>
-        {activityEntries.length === 0 ? (
+        {items.length === 0 ? (
           <Txt weight={500} size={13.5} color={t.faint} style={{ paddingTop: 8, lineHeight: 20 }}>
             Logged activity shows up here.
           </Txt>
@@ -74,8 +80,18 @@ export function TimelineRail() {
                 {g.label}
               </Txt>
               <View>
+                {/* A timer row opens the running-timer editor: `openEdit` only
+                    knows ids that exist in `entries` and returns early on a
+                    miss, so a timer sent there would be a dead row. */}
                 {g.items.map((e, i) => (
-                  <TimelineEntry key={e.id} entry={e} now={now} onPress={() => openEdit(e.id)} isFirst={i === 0} isLast={i === g.items.length - 1} />
+                  <TimelineEntry
+                    key={isTimer(e) ? `timer:${e.id}` : e.id}
+                    item={e}
+                    now={now}
+                    onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
+                    isFirst={i === 0}
+                    isLast={i === g.items.length - 1}
+                  />
                 ))}
               </View>
             </View>

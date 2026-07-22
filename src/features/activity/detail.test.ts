@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { detailFor } from '@/features/activity/detail';
-import type { Entry, FeedMethod, FeedType } from '@/types/models';
+import type { Entry, FeedMethod, FeedType, Timer } from '@/types/models';
 
 // `detailFor` reads only the units preference off the store, non-reactively.
 // Mock that single read rather than standing up the whole store harness.
@@ -75,5 +75,65 @@ describe('detailFor: feeding amount is dual-purpose', () => {
   it('omits the amount entirely when there is none', () => {
     h.unitSystem = 'imperial';
     expect(detailFor(feed('breast', 'left', null))).toBe('Breast milk · left breast · 12 min');
+  });
+});
+
+const timer = (over: Partial<Timer> = {}): Timer => ({
+  id: 't1',
+  childId: 'c1',
+  activity: 'sleep',
+  saveAs: 'sleep',
+  name: 'Sleep',
+  start: NOW - 40 * 60000,
+  ...over,
+});
+
+describe('detailFor: a running timer', () => {
+  it('never quotes a duration, because the timer has no end yet', () => {
+    h.unitSystem = 'metric';
+    for (const saveAs of ['feeding', 'sleep', 'pumping', 'tummy'] as const) {
+      expect(detailFor(timer({ saveAs }))).not.toContain('min');
+    }
+  });
+
+  it('reads a sleep timer the way an ongoing sleep entry reads', () => {
+    h.unitSystem = 'metric';
+    expect(detailFor(timer({ saveAs: 'sleep', nap: true }))).toBe('Nap · ongoing');
+    expect(detailFor(timer({ saveAs: 'sleep', nap: false }))).toBe('Night · ongoing');
+  });
+
+  it('does not guess Nap or Night before the user has said which', () => {
+    // `nap` is only set once the running timer is edited, and calling an
+    // unedited night feed "Nap" would be a fabrication.
+    expect(detailFor(timer({ saveAs: 'sleep' }))).toBe('ongoing');
+  });
+
+  it('carries the feeding settings the timer was given', () => {
+    h.unitSystem = 'metric';
+    expect(detailFor(timer({ saveAs: 'feeding', feedType: 'formula', method: 'bottle', amount: 90 }))).toBe(
+      'Formula · bottle · 90 ml',
+    );
+  });
+
+  it('words a breast feed timer amount as an intake level, not a volume', () => {
+    h.unitSystem = 'imperial';
+    const d = detailFor(timer({ saveAs: 'feeding', feedType: 'breast', method: 'left', amount: 2 }));
+    expect(d).not.toContain('fl oz');
+    expect(d.split(' · ')).toContain('Some');
+  });
+
+  it('says nothing at all for a timer carrying no settings', () => {
+    expect(detailFor(timer({ saveAs: 'feeding' }))).toBe('');
+  });
+
+  it('converts a pumping timer amount and shows a tummy milestone', () => {
+    h.unitSystem = 'imperial';
+    expect(detailFor(timer({ saveAs: 'pumping', amount: 90 }))).toBe('3 fl oz');
+    expect(detailFor(timer({ saveAs: 'tummy', milestone: 'Rolled over' }))).toBe('Rolled over');
+  });
+
+  it('appends the note the user typed on the running timer', () => {
+    expect(detailFor(timer({ saveAs: 'tummy', notes: 'on the mat' }))).toBe('on the mat');
+    expect(detailFor(timer({ saveAs: 'sleep', nap: true, notes: 'pram' }))).toBe('Nap · ongoing · pram');
   });
 });

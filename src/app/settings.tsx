@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -10,8 +10,77 @@ import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import {
+  fmtMinuteOfDay,
+  MINUTES_PER_DAY,
+  NAP_WINDOW_STEP_MIN,
+  SMALL_WASHES_PER_BIG_MAX,
+  SMALL_WASHES_PER_BIG_MIN,
+} from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+
+/** The selectable bath rhythms, 1..7 small washes between big ones. */
+const WASH_CHOICES = Array.from(
+  { length: SMALL_WASHES_PER_BIG_MAX - SMALL_WASHES_PER_BIG_MIN + 1 },
+  (_, i) => SMALL_WASHES_PER_BIG_MIN + i,
+);
+
+/** Every half hour of the day, 00:00 to 23:30, as minutes since midnight. */
+const CLOCK_CHOICES = Array.from(
+  { length: MINUTES_PER_DAY / NAP_WINDOW_STEP_MIN },
+  (_, i) => i * NAP_WINDOW_STEP_MIN,
+);
+
+/**
+ * One endpoint of the nap window as a single-line, horizontally-scrollable strip
+ * of half-hour chips (the same strip pattern as the log sheet's quick-set row).
+ * 48 chips would be eight wrapped rows inline, which would swamp the group; one
+ * scrolling line keeps both endpoints readable at a glance.
+ */
+function ClockStrip({ value, onSelect }: { value: number; onSelect: (min: number) => void }) {
+  const t = useTheme();
+  const ref = useRef<ScrollView>(null);
+
+  // Bring the selected chip into view. The strip is 48 chips wide and starts at
+  // 00:00, so a default 07:00 would otherwise sit well off the right edge and
+  // the row would look like nothing was selected at all.
+  //
+  // Driven by the selected chip's own onLayout rather than by arithmetic over an
+  // assumed chip width: the labels are proportional text, so a computed offset
+  // would drift. onLayout fires when the chip is first placed and again only if
+  // it actually moves, so tapping a different chip does not yank the strip.
+  const revealSelected = (x: number) => {
+    ref.current?.scrollTo({ x: Math.max(0, x - 12), animated: false });
+  };
+
+  return (
+    <ScrollView
+      ref={ref}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ gap: 7, paddingRight: 4 }}
+    >
+      {CLOCK_CHOICES.map((min) => (
+        <View
+          key={min}
+          onLayout={min === value ? (e) => revealSelected(e.nativeEvent.layout.x) : undefined}
+        >
+          <Chip
+            label={fmtMinuteOfDay(min)}
+            color={t.primary}
+            selected={value === min}
+            onPress={() => onSelect(min)}
+            padH={11}
+            padV={7}
+            fontSize={13}
+            radius={11}
+          />
+        </View>
+      ))}
+    </ScrollView>
+  );
+}
 
 function Toggle({ on }: { on: boolean }) {
   const t = useTheme();
@@ -52,6 +121,11 @@ export default function Settings() {
   const connection = useAppStore((s) => s.connection);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setUnitSystem = useAppStore((s) => s.setUnitSystem);
+  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
+  const setSmallWashesPerBig = useAppStore((s) => s.setSmallWashesPerBig);
+  const napWindowStartMin = useAppStore((s) => s.napWindowStartMin);
+  const napWindowEndMin = useAppStore((s) => s.napWindowEndMin);
+  const setNapWindow = useAppStore((s) => s.setNapWindow);
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
@@ -167,6 +241,72 @@ export default function Settings() {
             <Toggle on={simulateOffline} />
           </Pressable>
         )}
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Rhythm
+      </Txt>
+      <View style={group}>
+        {/* The value counts SMALL washes between big ones, so the copy has to
+            say "after every N small washes" — "every N baths" would be off by
+            one, since the big wash is the (N+1)th bath of the cycle. */}
+        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}>
+          <View>
+            <Txt weight={600} size={16}>
+              Big wash
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              After every {smallWashesPerBig} small {smallWashesPerBig === 1 ? 'wash' : 'washes'}
+            </Txt>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 7, flexWrap: 'wrap' }}>
+            {WASH_CHOICES.map((n) => (
+              <Chip
+                key={n}
+                label={String(n)}
+                color={t.primary}
+                selected={smallWashesPerBig === n}
+                onPress={() => setSmallWashesPerBig(n)}
+                padH={13}
+                padV={7}
+                fontSize={13.5}
+              />
+            ))}
+          </View>
+        </View>
+
+        {/* Nap window. A sleep is pre-set to Nap when it STARTS inside this
+            window and to Night sleep otherwise; the log sheet always offers a
+            manual override. Start inclusive, end exclusive, and a start later
+            than the end wraps midnight, so an "inverted" pair still means
+            something rather than matching nothing. */}
+        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
+          <View>
+            <Txt weight={600} size={16}>
+              Naps
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              {napWindowStartMin === napWindowEndMin
+                ? 'No nap window, so every sleep starts as night sleep'
+                : `Sleep starting between ${fmtMinuteOfDay(napWindowStartMin)} and ${fmtMinuteOfDay(napWindowEndMin)} is a nap`}
+            </Txt>
+          </View>
+          <View style={{ gap: 4 }}>
+            <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
+              Naps start
+            </Txt>
+            <ClockStrip value={napWindowStartMin} onSelect={(m) => setNapWindow(m, napWindowEndMin)} />
+          </View>
+          <View style={{ gap: 4 }}>
+            <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
+              Naps end
+            </Txt>
+            <ClockStrip value={napWindowEndMin} onSelect={(m) => setNapWindow(napWindowStartMin, m)} />
+          </View>
+          <Txt weight={500} size={12} color={t.faint}>
+            Only affects new entries. Sleep already logged keeps whatever it was saved as.
+          </Txt>
+        </View>
       </View>
 
       {showProfileGroup && (

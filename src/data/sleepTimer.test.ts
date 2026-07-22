@@ -20,16 +20,45 @@ describe('buildSleepEntry', () => {
     expect(e.id).toBe('e5000');
   });
 
-  it('derives nap=true during the day and false at night', () => {
-    const noon = new Date(2026, 0, 1, 12, 0, 0).getTime();
-    const night = new Date(2026, 0, 1, 2, 0, 0).getTime();
-    expect(buildSleepEntry(base, noon, 'c1').nap).toBe(true);
-    expect(buildSleepEntry(base, night, 'c1').nap).toBe(false);
+  it('derives nap from the START of the sleep, not the wake', () => {
+    // The classifying instant is the timer's start. A nap begun at noon and
+    // slept through to 20:00 is still a nap; a night sleep begun at 22:00 and
+    // woken from at 08:00 is still night sleep. Keying on the wake time (as
+    // this did before) made the answer flip once the record round-tripped
+    // through Baby Buddy, which classifies on start only.
+    const startNoon = new Date(2026, 0, 1, 12, 0, 0).getTime();
+    const wakeEvening = new Date(2026, 0, 1, 20, 0, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNoon }, wakeEvening, 'c1').nap).toBe(true);
+
+    const startNight = new Date(2026, 0, 1, 22, 0, 0).getTime();
+    const wakeMorning = new Date(2026, 0, 2, 8, 0, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNight }, wakeMorning, 'c1').nap).toBe(false);
   });
 
-  it('honors an explicit nap flag on the timer', () => {
-    const noon = new Date(2026, 0, 1, 12, 0, 0).getTime();
-    expect(buildSleepEntry({ ...base, nap: false }, noon, 'c1').nap).toBe(false);
+  it('honors an explicit nap flag on the timer over the window', () => {
+    const startNoon = new Date(2026, 0, 1, 12, 0, 0).getTime();
+    const wake = new Date(2026, 0, 1, 14, 0, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNoon, nap: false }, wake, 'c1').nap).toBe(false);
+
+    const startNight = new Date(2026, 0, 1, 23, 0, 0).getTime();
+    const wakeLater = new Date(2026, 0, 2, 6, 0, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNight, nap: true }, wakeLater, 'c1').nap).toBe(true);
+  });
+
+  it('classifies against a caller-supplied nap window', () => {
+    // The widget task has no store, so the window arrives as an argument.
+    const startNine = new Date(2026, 0, 1, 9, 0, 0).getTime();
+    const wake = new Date(2026, 0, 1, 11, 0, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNine }, wake, 'c1', { startMin: 600, endMin: 1140 }).nap).toBe(false);
+    expect(buildSleepEntry({ ...base, start: startNine }, wake, 'c1', { startMin: 480, endMin: 1140 }).nap).toBe(true);
+  });
+
+  it('defaults to the 07:00-19:00 window when no window is passed', () => {
+    const startNoon = new Date(2026, 0, 1, 12, 0, 0).getTime();
+    const startNight = new Date(2026, 0, 1, 2, 0, 0).getTime();
+    const wake = new Date(2026, 0, 2, 12, 30, 0).getTime();
+    expect(buildSleepEntry({ ...base, start: startNoon }, wake, 'c1').nap).toBe(true);
+    expect(buildSleepEntry({ ...base, start: startNight }, wake, 'c1').nap).toBe(false);
   });
 
   it('carries the timer tags', () => {
