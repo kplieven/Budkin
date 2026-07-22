@@ -21,6 +21,7 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
+import { requestPersistentStorage } from '@/lib/persistentStorage';
 import { initTimerNotificationSync } from '@/notifications/sync';
 import { initWidgetSync } from '@/widgets/sync';
 
@@ -53,6 +54,9 @@ export default function RootLayout() {
   useEffect(() => {
     initWidgetSync();
     initTimerNotificationSync();
+    // Web only (no-ops on native): keep the browser from evicting localStorage,
+    // which is where the entity store, the offline queue and the op-log all live.
+    void requestPersistentStorage();
   }, []);
 
   useEffect(() => {
