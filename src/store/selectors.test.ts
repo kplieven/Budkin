@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { clampSmallWashesPerBig, endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -136,19 +136,41 @@ describe('nextWashKind', () => {
     tags: [],
   });
 
+  /** `n` consecutive small washes, oldest first, ending one minute ago. */
+  const smalls = (n: number): Entry[] => Array.from({ length: n }, (_, i) => bath(NOW - (n - i) * M, 'small'));
+
   it('defaults to small with no bath history', () => {
     expect(nextWashKind([])).toBe('small');
   });
-  it('is small with fewer than three washes', () => {
-    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'small')])).toBe('small');
+  it('an omitted interval means three smalls, matching the historical rule', () => {
+    expect(nextWashKind(smalls(2))).toBe('small');
+    expect(nextWashKind(smalls(3))).toBe('big');
   });
-  it('the three most recent all small => big is due', () => {
-    const entries: Entry[] = [
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
-    ];
-    expect(nextWashKind(entries)).toBe('big');
+  it('is small with fewer washes on record than the interval', () => {
+    expect(nextWashKind(smalls(2), 3)).toBe('small');
+    expect(nextWashKind(smalls(6), 7)).toBe('small');
+  });
+  it('flips to big exactly on the configured number of smalls', () => {
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(nextWashKind(smalls(n - 1), n)).toBe('small');
+      expect(nextWashKind(smalls(n), n)).toBe('big');
+    }
+  });
+  it('an interval of 1 alternates small, big, small, big', () => {
+    expect(nextWashKind([], 1)).toBe('small');
+    expect(nextWashKind([bath(NOW - M, 'small')], 1)).toBe('big');
+    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'big')], 1)).toBe('small');
+  });
+  it('an interval of 7 needs seven smalls before a big is due', () => {
+    expect(nextWashKind(smalls(7), 7)).toBe('big');
+    expect(nextWashKind([bath(NOW - 8 * M, 'big'), ...smalls(6)], 7)).toBe('small');
+  });
+  it('raising the interval takes a big wash back off the schedule', () => {
+    // The same history reads differently under a different rhythm: derived from
+    // history every time, never from a stored counter.
+    const history = smalls(3);
+    expect(nextWashKind(history, 3)).toBe('big');
+    expect(nextWashKind(history, 5)).toBe('small');
   });
   it('a big as the most recent wash => back to small', () => {
     const entries: Entry[] = [
@@ -156,26 +178,51 @@ describe('nextWashKind', () => {
       bath(NOW - 2 * M, 'small'),
       bath(NOW - M, 'big'),
     ];
-    expect(nextWashKind(entries)).toBe('small');
+    expect(nextWashKind(entries, 3)).toBe('small');
   });
-  it('looks only at the three most recent, ignoring older washes', () => {
+  it('looks only at the most recent interval, ignoring older washes', () => {
     // three recent smalls => big, even though an older big precedes them
-    const entries: Entry[] = [
-      bath(NOW - 4 * M, 'big'),
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
-    ];
-    expect(nextWashKind(entries)).toBe('big');
+    const entries: Entry[] = [bath(NOW - 4 * M, 'big'), ...smalls(3)];
+    expect(nextWashKind(entries, 3)).toBe('big');
   });
   it('ignores non-bath entries when reading the rhythm', () => {
     const entries: Entry[] = [
       { id: 'f', childId: 'c1', type: 'feeding', start: NOW - M, end: NOW, feedType: 'breast', method: 'left', amount: null, tags: [] },
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
+      ...smalls(3),
     ];
-    expect(nextWashKind(entries)).toBe('big');
+    expect(nextWashKind(entries, 3)).toBe('big');
+  });
+  it('clamps a nonsense interval rather than reading an empty window as due', () => {
+    // slice(0, 0) would be an empty array, and [].every() is vacuously true —
+    // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
+    expect(nextWashKind([], 0)).toBe('small');
+    expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
+    expect(nextWashKind(smalls(6), 99)).toBe('small'); // 99 clamps to the 7 maximum
+    expect(nextWashKind(smalls(7), 99)).toBe('big');
+    expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
+  });
+});
+
+describe('clampSmallWashesPerBig', () => {
+  it('passes every supported rhythm through untouched', () => {
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) expect(clampSmallWashesPerBig(n)).toBe(n);
+  });
+  it('clamps to the 1..7 range', () => {
+    expect(clampSmallWashesPerBig(0)).toBe(1);
+    expect(clampSmallWashesPerBig(-4)).toBe(1);
+    expect(clampSmallWashesPerBig(8)).toBe(7);
+    expect(clampSmallWashesPerBig(1000)).toBe(7);
+  });
+  it('rounds a fractional rhythm', () => {
+    expect(clampSmallWashesPerBig(2.4)).toBe(2);
+    expect(clampSmallWashesPerBig(2.6)).toBe(3);
+  });
+  it('falls back to the default for a non-finite value', () => {
+    expect(clampSmallWashesPerBig(Number.NaN)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+    expect(clampSmallWashesPerBig(Number.POSITIVE_INFINITY)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+  });
+  it('the default is 3 smalls between bigs, preserving the original rhythm', () => {
+    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
   });
 });
 

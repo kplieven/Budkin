@@ -69,7 +69,17 @@ import {
 import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
-import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
+import {
+  clampSmallWashesPerBig,
+  entriesForChild,
+  nextStartSide,
+  nextWashKind,
+  overruleLasted,
+  reorder,
+  SMALL_WASHES_PER_BIG_DEFAULT,
+  teEnd,
+  teStart,
+} from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -107,6 +117,10 @@ interface AppState {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
+   *  range 1..7). Global rather than per-child, like every other pref. Local
+   *  only: it drives the wash pre-selection, never anything sent to the server. */
+  smallWashesPerBig: number;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -189,6 +203,7 @@ interface AppActions {
   completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
+  setSmallWashesPerBig: (n: number) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -809,6 +824,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   themeMode: 'dark',
   unitSystem: 'metric',
   tutorialSeen: false,
+  smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -875,6 +891,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
   },
+  setSmallWashesPerBig: (n) => {
+    // Clamp before storing so a bad value can never reach persistence, and so
+    // the number shown in Settings is the one the rhythm actually uses.
+    const v = clampSmallWashesPerBig(n);
+    set({ smallWashesPerBig: v });
+    void savePrefs({ smallWashesPerBig: v });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -914,6 +937,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
+    // `!= null`, not a truthy guard: this one is a number, and a truthy check
+    // would silently discard a legitimately stored value at the low end.
+    if (prefs.smallWashesPerBig != null) {
+      set({ smallWashesPerBig: clampSmallWashesPerBig(prefs.smallWashesPerBig) });
+    }
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
@@ -2063,8 +2091,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.nap = hr >= 7 && hr < 19;
     }
     if (type === 'bath') {
-      // Pre-select the wash that's due from the small/big rhythm.
-      te.wash = nextWashKind(get().entries);
+      // Pre-select the wash that's due from the small/big rhythm. Scoped to the
+      // selected child: `entries` holds every child's records, so an unscoped
+      // read would let a sibling's baths decide this child's next wash.
+      te.wash = nextWashKind(entriesForChild(get().entries, get().selectedChildId), get().smallWashesPerBig);
     }
     if (type === 'temperature') {
       // Seed a normal baseline so the decimal input opens on a sensible value.

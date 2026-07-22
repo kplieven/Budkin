@@ -20,6 +20,12 @@ export interface Prefs {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /**
+   * Bath rhythm: how many SMALL washes fall between two big ones (default 3,
+   * range 1..7). Purely local — Baby Buddy has no notion of wash size, so this
+   * only drives Budkin's "what's due next" pre-selection.
+   */
+  smallWashesPerBig: number;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */

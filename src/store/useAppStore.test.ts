@@ -9,7 +9,7 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { entriesForChild, isActive, selectPendingCount, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { toDisplay } from '@/lib/units';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -366,6 +366,7 @@ beforeEach(() => {
     tagsLoading: false,
     toast: null,
     savedServers: [],
+    smallWashesPerBig: 3,
   });
 });
 
@@ -668,6 +669,43 @@ describe('bath tracking', () => {
     });
     s().openSheet('bath');
     expect(s().te.wash).toBe('big');
+  });
+  it('openSheet honours a configured rhythm shorter than three', () => {
+    useAppStore.setState({
+      smallWashesPerBig: 1,
+      entries: [{ id: 'b1', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] }],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('big');
+  });
+  it('openSheet honours a configured rhythm longer than three', () => {
+    useAppStore.setState({
+      smallWashesPerBig: 5,
+      entries: [
+        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
+        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+      ],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('small'); // three smalls no longer complete the cycle
+  });
+  it('openSheet reads only the selected child\'s baths, not a sibling\'s', () => {
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' },
+        { id: 'c2', first: 'Theo', last: 'O', birth: NOW - 90 * 86400000, color: '#eee' },
+      ],
+      selectedChildId: 'c1',
+      entries: [
+        // The sibling has completed a full small-wash cycle; Mira has not bathed.
+        { id: 'b1', childId: 'c2', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c2', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
+        { id: 'b3', childId: 'c2', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+      ],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('small');
   });
   it('setWash selects the wash size', () => {
     s().openSheet('bath');
@@ -4209,6 +4247,59 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     await s().hydrate();
     expect(s().unitSystem).toBe('metric');
+  });
+});
+
+describe('wash-rhythm persistence', () => {
+  it('setSmallWashesPerBig updates state and persists via savePrefs', () => {
+    s().setSmallWashesPerBig(5);
+    expect(s().smallWashesPerBig).toBe(5);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 5 });
+  });
+
+  it('setSmallWashesPerBig clamps out-of-range input before storing it', () => {
+    s().setSmallWashesPerBig(99);
+    expect(s().smallWashesPerBig).toBe(7);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 7 });
+    s().setSmallWashesPerBig(0);
+    expect(s().smallWashesPerBig).toBe(1);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 1 });
+  });
+
+  it('hydrate applies a persisted wash rhythm', async () => {
+    h.prefs = { smallWashesPerBig: 6 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(6);
+  });
+
+  it('hydrate applies a persisted rhythm at the low end of the range', async () => {
+    // A truthiness guard (`if (prefs.smallWashesPerBig)`) would survive 1 but
+    // silently drop a 0, so keep the `!= null` check honest at the boundary.
+    h.prefs = { smallWashesPerBig: 1 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(1);
+  });
+
+  it('hydrate clamps a persisted rhythm from outside the supported range', async () => {
+    h.prefs = { smallWashesPerBig: 0 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(1);
+  });
+
+  it('hydrate leaves the rhythm alone when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ smallWashesPerBig: 5 });
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(5);
+  });
+
+  it('the store boots on the default rhythm of 3, preserving the old behaviour', () => {
+    expect(useAppStore.getInitialState().smallWashesPerBig).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
   });
 });
 
