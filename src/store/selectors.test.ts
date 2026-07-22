@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampSmallWashesPerBig, endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -286,5 +286,108 @@ describe('timersForChild', () => {
 
   it('returns nothing but the unowned ones for a child running no timer', () => {
     expect(timersForChild([timer('t1', 'c1'), timer('t2', 'c2')], 'c3')).toEqual([]);
+  });
+});
+
+describe('minuteOfDayIsNap', () => {
+  const W = { startMin: 420, endMin: 1140 }; // 07:00 to 19:00, the default
+
+  it('matches the old hardcoded 07:00-19:00 rule across the whole day', () => {
+    for (let m = 0; m < 1440; m++) {
+      expect(minuteOfDayIsNap(m, W)).toBe(m >= 420 && m < 1140);
+    }
+  });
+
+  it('treats start as inclusive and end as exclusive', () => {
+    expect(minuteOfDayIsNap(419, W)).toBe(false);
+    expect(minuteOfDayIsNap(420, W)).toBe(true); // start: in
+    expect(minuteOfDayIsNap(1139, W)).toBe(true);
+    expect(minuteOfDayIsNap(1140, W)).toBe(false); // end: out
+  });
+
+  it('wraps around midnight when start is later than end', () => {
+    // A night-shift household: "naps" run 20:00 to 04:00.
+    const w = { startMin: 1200, endMin: 240 };
+    expect(minuteOfDayIsNap(1200, w)).toBe(true); // 20:00, start inclusive
+    expect(minuteOfDayIsNap(1439, w)).toBe(true); // 23:59
+    expect(minuteOfDayIsNap(0, w)).toBe(true); // midnight, inside the wrap
+    expect(minuteOfDayIsNap(239, w)).toBe(true); // 03:59
+    expect(minuteOfDayIsNap(240, w)).toBe(false); // 04:00, end exclusive
+    expect(minuteOfDayIsNap(720, w)).toBe(false); // noon, outside
+    expect(minuteOfDayIsNap(1199, w)).toBe(false); // 19:59
+  });
+
+  it('reads start === end as an empty window, so nothing is a nap', () => {
+    // Half-open [s, s) is empty. That is the consistent reading of an
+    // inclusive start and an exclusive end, and it gives a usable state:
+    // an older child who no longer naps, so every sleep is night sleep.
+    const w = { startMin: 420, endMin: 420 };
+    for (let m = 0; m < 1440; m += 7) expect(minuteOfDayIsNap(m, w)).toBe(false);
+    expect(minuteOfDayIsNap(420, w)).toBe(false);
+  });
+
+  it('handles a full-day-minus-one-minute window', () => {
+    const w = { startMin: 0, endMin: 1439 };
+    expect(minuteOfDayIsNap(0, w)).toBe(true);
+    expect(minuteOfDayIsNap(1438, w)).toBe(true);
+    expect(minuteOfDayIsNap(1439, w)).toBe(false);
+  });
+
+  it('defaults to the 07:00-19:00 window when none is passed', () => {
+    expect(minuteOfDayIsNap(720)).toBe(true);
+    expect(minuteOfDayIsNap(120)).toBe(false);
+  });
+});
+
+describe('isNapStart', () => {
+  it('classifies on the local wall clock of the given instant', () => {
+    const noon = new Date(2026, 0, 1, 12, 0, 0).getTime();
+    const night = new Date(2026, 0, 1, 2, 0, 0).getTime();
+    expect(isNapStart(noon)).toBe(true);
+    expect(isNapStart(night)).toBe(false);
+  });
+
+  it('honours a custom window', () => {
+    const nine = new Date(2026, 0, 1, 9, 0, 0).getTime();
+    expect(isNapStart(nine, { startMin: 600, endMin: 1140 })).toBe(false); // window opens at 10:00
+    expect(isNapStart(nine, { startMin: 480, endMin: 1140 })).toBe(true); // window opens at 08:00
+  });
+
+  it('respects the minute, not just the hour', () => {
+    const w = { startMin: 450, endMin: 1140 }; // 07:30
+    expect(isNapStart(new Date(2026, 0, 1, 7, 29, 0).getTime(), w)).toBe(false);
+    expect(isNapStart(new Date(2026, 0, 1, 7, 30, 0).getTime(), w)).toBe(true);
+  });
+});
+
+describe('clampMinuteOfDay', () => {
+  it('keeps in-range values, including 0', () => {
+    expect(clampMinuteOfDay(0, 420)).toBe(0);
+    expect(clampMinuteOfDay(1439, 420)).toBe(1439);
+    expect(clampMinuteOfDay(630, 420)).toBe(630);
+  });
+
+  it('falls back for non-finite input rather than producing NaN', () => {
+    expect(clampMinuteOfDay(NaN, 420)).toBe(420);
+    expect(clampMinuteOfDay(Infinity, 1140)).toBe(1140);
+  });
+
+  it('clamps out-of-range values into the day', () => {
+    expect(clampMinuteOfDay(-30, 420)).toBe(0);
+    expect(clampMinuteOfDay(5000, 420)).toBe(1439);
+  });
+
+  it('rounds a fractional minute', () => {
+    expect(clampMinuteOfDay(420.6, 0)).toBe(421);
+  });
+});
+
+describe('fmtMinuteOfDay', () => {
+  it('renders a zero-padded 24-hour clock', () => {
+    expect(fmtMinuteOfDay(0)).toBe('00:00');
+    expect(fmtMinuteOfDay(420)).toBe('07:00');
+    expect(fmtMinuteOfDay(1140)).toBe('19:00');
+    expect(fmtMinuteOfDay(1230)).toBe('20:30');
+    expect(fmtMinuteOfDay(1439)).toBe('23:59');
   });
 });

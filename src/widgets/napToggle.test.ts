@@ -88,6 +88,42 @@ describe('toggleNapFromWidget', () => {
     expect(q[0]).toMatchObject({ type: 'sleep', start: 1000, end: 5000, childId: 'c1' });
   });
 
+  it('stop: classifies the queued nap with the persisted nap window', async () => {
+    // The widget task has no store, so the window has to come off disk. Naps
+    // here run 10:00 to 13:00, and this sleep started at 09:00.
+    mem.store.set('babybuddy.prefs.v1', JSON.stringify({ napWindowStartMin: 600, napWindowEndMin: 780 }));
+    const start = new Date(2026, 0, 15, 9, 0, 0).getTime();
+    const end = new Date(2026, 0, 15, 11, 0, 0).getTime();
+    await writeWidgetSnapshot(snap({ sleepStart: start }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    const { render } = capture();
+    await toggleNapFromWidget(end, render);
+    expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: false });
+  });
+
+  it('stop: falls back to the 07:00-19:00 default when no window is persisted', async () => {
+    const start = new Date(2026, 0, 15, 9, 0, 0).getTime();
+    const end = new Date(2026, 0, 15, 11, 0, 0).getTime();
+    await writeWidgetSnapshot(snap({ sleepStart: start }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    const { render } = capture();
+    await toggleNapFromWidget(end, render);
+    expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: true });
+  });
+
+  it('stop: honours a persisted midnight window boundary rather than treating 0 as unset', async () => {
+    // `?? default` not `||`: startMin 0 is midnight. Naps run 00:00 to 06:00,
+    // so a 02:00 sleep is a nap and the default 07:00 window would disagree.
+    mem.store.set('babybuddy.prefs.v1', JSON.stringify({ napWindowStartMin: 0, napWindowEndMin: 360 }));
+    const start = new Date(2026, 0, 15, 2, 0, 0).getTime();
+    const end = new Date(2026, 0, 15, 4, 0, 0).getTime();
+    await writeWidgetSnapshot(snap({ sleepStart: start }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    const { render } = capture();
+    await toggleNapFromWidget(end, render);
+    expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: true });
+  });
+
   it('stop in demo mode: clears the timer but queues nothing', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000, canQueueNap: false }));
     await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);

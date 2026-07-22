@@ -63,6 +63,27 @@ describe('prefs persistence', () => {
     expect(await loadPrefs()).toEqual({ themeMode: 'light', unitSystem: 'imperial', smallWashesPerBig: 7 });
   });
 
+  it('round-trips a saved nap window', async () => {
+    await savePrefs({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+    expect(await loadPrefs()).toEqual({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+  });
+
+  it('round-trips a midnight boundary, which a truthy guard would drop', async () => {
+    await savePrefs({ napWindowStartMin: 0, napWindowEndMin: 720 });
+    expect(await loadPrefs()).toEqual({ napWindowStartMin: 0, napWindowEndMin: 720 });
+  });
+
+  it('a partial save of the nap window does NOT clobber the other prefs', async () => {
+    await savePrefs({ themeMode: 'light', smallWashesPerBig: 4 });
+    await savePrefs({ napWindowStartMin: 390, napWindowEndMin: 1110 });
+    expect(await loadPrefs()).toEqual({
+      themeMode: 'light',
+      smallWashesPerBig: 4,
+      napWindowStartMin: 390,
+      napWindowEndMin: 1110,
+    });
+  });
+
   it('a later save overwrites the same field but keeps the others', async () => {
     await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
     await savePrefs({ unitSystem: 'metric' });

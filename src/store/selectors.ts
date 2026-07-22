@@ -232,6 +232,83 @@ export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL
   return recent.length === n && recent.every((b) => b.wash === 'small') ? 'big' : 'small';
 }
 
+/**
+ * The window, in minutes since local midnight, in which a sleep counts as a NAP.
+ * A sleep that STARTS inside it is a nap; one that starts outside it is night
+ * sleep. Start is inclusive, end is exclusive.
+ *
+ * Minutes rather than a Date because this is a wall-clock rule, not an instant:
+ * "naps run 07:00 to 19:00" has to mean the same thing on every date, across DST
+ * shifts, and inside the headless widget task that has no store to read.
+ */
+export interface NapWindow {
+  startMin: number;
+  endMin: number;
+}
+
+/** 07:00 to 19:00, reproducing the rule that used to be hardcoded in three places. */
+export const NAP_WINDOW_START_DEFAULT = 420;
+export const NAP_WINDOW_END_DEFAULT = 1140;
+export const DEFAULT_NAP_WINDOW: NapWindow = {
+  startMin: NAP_WINDOW_START_DEFAULT,
+  endMin: NAP_WINDOW_END_DEFAULT,
+};
+
+/** Settings offers half-hour granularity, which is fine for a rhythm this soft. */
+export const NAP_WINDOW_STEP_MIN = 30;
+export const MINUTES_PER_DAY = 1440;
+
+/**
+ * Coerce a minute-of-day from anywhere (a persisted pref, a stale build) into
+ * 0..1439. `fallback` covers non-finite input only; an out-of-range but finite
+ * number is clamped, since that still expresses an intent (a very early or very
+ * late boundary) worth honouring.
+ */
+export function clampMinuteOfDay(n: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(MINUTES_PER_DAY - 1, Math.max(0, Math.round(n)));
+}
+
+/** A minute-of-day as a zero-padded 24-hour clock, e.g. 420 to "07:00". */
+export function fmtMinuteOfDay(min: number): string {
+  const m = clampMinuteOfDay(min, 0);
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Whether a minute-of-day falls inside the nap window. Start inclusive, end
+ * exclusive, so the default 420/1140 reproduces the old `hr >= 7 && hr < 19`
+ * exactly.
+ *
+ * A window with start AFTER end WRAPS midnight (e.g. 20:00 to 04:00, for a
+ * household whose long sleep is in the daytime). Without that case an inverted
+ * setting would match nothing at all and every sleep would silently become
+ * night sleep, which reads as a bug rather than as a setting.
+ *
+ * start === end is an EMPTY window, not a full day: [s, s) is empty under an
+ * inclusive start and exclusive end, and the empty reading is the useful one
+ * (an older child who no longer naps, so every sleep is night sleep). A
+ * full-day reading is still reachable as 00:00 to 23:59.
+ */
+export function minuteOfDayIsNap(min: number, w: NapWindow = DEFAULT_NAP_WINDOW): boolean {
+  const s = clampMinuteOfDay(w.startMin, NAP_WINDOW_START_DEFAULT);
+  const e = clampMinuteOfDay(w.endMin, NAP_WINDOW_END_DEFAULT);
+  if (s === e) return false;
+  return s < e ? min >= s && min < e : min >= s || min < e;
+}
+
+/**
+ * Whether a sleep STARTING at `startMs` is a nap.
+ *
+ * Deliberately keyed on the start, not the wake: Baby Buddy classifies on start
+ * only, so anything else flips its answer the moment the record round-trips
+ * through the server.
+ */
+export function isNapStart(startMs: number, w: NapWindow = DEFAULT_NAP_WINDOW): boolean {
+  const d = new Date(startMs);
+  return minuteOfDayIsNap(d.getHours() * 60 + d.getMinutes(), w);
+}
+
 /** Most recent diaper change, or null. */
 export function lastDiaper(entries: Entry[]) {
   return entries

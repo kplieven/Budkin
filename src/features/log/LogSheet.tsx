@@ -288,6 +288,7 @@ export function LogSheet() {
   const toggleWet = useAppStore((s) => s.toggleWet);
   const toggleSolid = useAppStore((s) => s.toggleSolid);
   const setWash = useAppStore((s) => s.setWash);
+  const setNap = useAppStore((s) => s.setNap);
   const toggleTag = useAppStore((s) => s.toggleTag);
   const createTag = useAppStore((s) => s.createTag);
   const tags = useAppStore((s) => s.tags);
@@ -526,6 +527,37 @@ export function LogSheet() {
                 </View>
               </>
             )}
+          </>
+        )}
+
+        {/* sleep fields — nap vs night sleep */}
+        {type === 'sleep' && (
+          <>
+            <FieldLabel hint="follows your rhythm">Kind</FieldLabel>
+            <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
+              {/* The sheet already seeded te.nap from the nap window on open,
+                  and save() writes whatever te.nap holds, so flipping this
+                  simply wins. No separate "user touched it" flag is needed. */}
+              {([true, false] as const).map((isNap) => {
+                const selected = (te.nap ?? true) === isNap;
+                return (
+                  <Pressable
+                    key={String(isNap)}
+                    onPress={() => setNap(isNap)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={(sh) => [
+                      { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: selected ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: selected ? color : t.line, cursor: 'pointer' },
+                      !selected && isHovered(sh) && { borderColor: t.line2 },
+                    ]}
+                  >
+                    <Txt unselectable weight={700} size={14.5}>
+                      {isNap ? 'Nap' : 'Night sleep'}
+                    </Txt>
+                  </Pressable>
+                );
+              })}
+            </View>
           </>
         )}
 

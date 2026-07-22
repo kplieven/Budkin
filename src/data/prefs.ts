@@ -26,6 +26,16 @@ export interface Prefs {
    * only drives Budkin's "what's due next" pre-selection.
    */
   smallWashesPerBig: number;
+  /**
+   * Sleep rhythm: the window in which a sleep counts as a NAP rather than night
+   * sleep, as minutes since local midnight (default 420/1140 = 07:00 to 19:00).
+   * Start inclusive, end exclusive; a start later than the end wraps midnight.
+   *
+   * Minutes since midnight rather than a timestamp because this is a wall-clock
+   * rule that must mean the same thing on every date and across DST.
+   */
+  napWindowStartMin: number;
+  napWindowEndMin: number;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */
