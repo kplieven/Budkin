@@ -102,6 +102,11 @@ vi.mock('@/data/queue', () => ({
     h.q = [...h.q, e];
     return h.q;
   }),
+  removeQueuedEntry: vi.fn(async (id: string) => {
+    const removed = (h.q as { id: string }[]).find((e) => e.id === id) ?? null;
+    h.q = (h.q as { id: string }[]).filter((e) => e.id !== id);
+    return { removed, queue: h.q };
+  }),
   clearQueue: vi.fn(async () => {
     h.q = [];
   }),
@@ -848,6 +853,32 @@ describe('save', () => {
     expect(s().timers).toHaveLength(1);
     expect(s().entries).toHaveLength(0);
     expect(s().timers[0].saveAs).toBe('sleep');
+  });
+
+  it('a live interval carries the draft\'s details onto the timer', () => {
+    // Everything typed into the sheet before "Still feeding" must survive; the
+    // timer used to be created bare, silently dropping a just-typed note.
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 3, notes: '  dozy  ' });
+    s().toggleTag('Fussy');
+    s().setOngoing();
+    s().save();
+    const tm = s().timers[0];
+    expect(tm.feedType).toBe('breast');
+    expect(tm.method).toBe('both');
+    expect(tm.startSide).toBe('right');
+    expect(tm.amount).toBe(3);
+    expect(tm.notes).toBe('dozy'); // trimmed, like an entry's notes
+    expect(tm.tags).toEqual(['Fussy']);
+    expect(tm.childId).toBe('c1');
+  });
+
+  it('a live sleep interval carries the nap flag', () => {
+    s().openSheet('sleep');
+    s().setTE({ nap: false });
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].nap).toBe(false);
   });
 
   it('offline save enqueues instead of pushing', async () => {
@@ -1810,6 +1841,239 @@ describe('edit / delete entry', () => {
     // The queued delete op must be removed, or a later flushPendingOps would
     // delete the just-restored entry from the server anyway.
     expect(h.pendingOps).toHaveLength(0);
+  });
+});
+
+describe('"Still ongoing" on a logged entry converts it into a live timer', () => {
+  // A finished entry the user marks as still running is not an entry any more.
+  // It used to be patched to `end: null`, which is not a timer at all and which
+  // the API client pushes as a ZERO-LENGTH record (`end: entry.end ?? start`),
+  // so the next refresh overwrote the local copy with a nonsense one. The entry
+  // must be removed and replaced by a running timer instead.
+  const sleepEntry = (over: Partial<Extract<Entry, { type: 'sleep' }>> = {}): Entry => ({
+    id: 'sleep-1',
+    serverId: 7,
+    childId: 'c1',
+    type: 'sleep',
+    start: NOW - 90 * M,
+    end: NOW - 30 * M,
+    nap: true,
+    tags: [],
+    ...over,
+  });
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
+
+  const convert = (id: string) => {
+    s().openEdit(id);
+    s().setOngoing();
+    s().save();
+  };
+
+  it('removes the entry and starts a timer instead of writing a fake-ongoing entry', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    convert('sleep-1');
+    expect(s().entries).toHaveLength(0); // no `end: null` entry left behind
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0].saveAs).toBe('sleep');
+    expect(s().timers[0].start).toBe(NOW - 90 * M); // the original start, exactly
+    expect(s().sheet).toBeNull();
+    expect(s().editingId).toBeNull();
+  });
+
+  it('carries the entry\'s settings onto the timer, not just its start', () => {
+    useAppStore.setState({
+      entries: [
+        {
+          id: 'feed-1',
+          serverId: 8,
+          childId: 'c1',
+          type: 'feeding',
+          start: NOW - 20 * M,
+          end: NOW - 5 * M,
+          feedType: 'breast',
+          method: 'both',
+          amount: 2,
+          notes: 'sleepy latch',
+          tags: ['right', 'Fussy'],
+        },
+      ],
+    });
+    convert('feed-1');
+    const tm = s().timers[0];
+    expect(tm.feedType).toBe('breast');
+    expect(tm.method).toBe('both');
+    expect(tm.startSide).toBe('right');
+    expect(tm.amount).toBe(2);
+    expect(tm.notes).toBe('sleepy latch');
+    expect(tm.tags).toEqual(['right', 'Fussy']);
+  });
+
+  it('keeps a sleep nap flag and a tummy milestone', () => {
+    useAppStore.setState({ entries: [sleepEntry({ nap: false })] });
+    convert('sleep-1');
+    expect(s().timers[0].nap).toBe(false);
+
+    useAppStore.setState({
+      entries: [{ id: 'tt-1', childId: 'c1', type: 'tummy', start: NOW - 8 * M, end: NOW - 2 * M, milestone: 'rolled over', tags: [] }],
+      timers: [],
+    });
+    convert('tt-1');
+    expect(s().timers[0].milestone).toBe('rolled over');
+  });
+
+  it('deletes the entry on the server and creates the timer there', async () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    convert('sleep-1');
+    await flush();
+    expect(h.deleted).toEqual([{ type: 'sleep', id: 7 }]);
+    expect(h.timerPushed).toHaveLength(1);
+    expect(h.updated).toHaveLength(0); // never patched into a fake-ongoing entry
+  });
+
+  it('undo restores the entry AND discards the new timer (never both)', async () => {
+    useAppStore.setState({ entries: [sleepEntry(), { id: 'other', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }] });
+    convert('sleep-1');
+    await flush();
+    expect(s().toastAction?.label).toBe('Undo');
+
+    s().toastAction?.run();
+    expect(s().timers).toHaveLength(0); // the timer is gone
+    expect(s().entries.map((e) => e.id)).toEqual(['sleep-1', 'other']); // restored in place
+    await flush();
+    expect(h.pushed).toHaveLength(1); // the server copy is re-created
+    expect(h.timerDeleted).toEqual([555]); // and the server timer is discarded
+  });
+
+  it('keeps the entry\'s original start when only the END was nudged in the same sheet session', () => {
+    // `openEdit` leaves the start DERIVED (end − lasted), so nudging the end
+    // silently slides it. The recorded start is the only exact answer.
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setEndedAbs(NOW - 5 * M); // user fiddles with the end first
+    s().setOngoing();
+    expect(s().te.startAbs).toBe(NOW - 90 * M); // the sheet shows the true start too
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 90 * M);
+  });
+
+  it('keeps the original start when the DURATION was nudged', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setLasted(15);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 90 * M);
+  });
+
+  it('honours a start the user edited themselves', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setStartedAt(NOW - 200 * M);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 200 * M);
+  });
+
+  it('preserves a days-old start', () => {
+    useAppStore.setState({ entries: [sleepEntry({ start: NOW - 3 * 24 * 60 * M, end: NOW - 3 * 24 * 60 * M + 30 * M })] });
+    convert('sleep-1');
+    expect(s().timers[0].start).toBe(NOW - 3 * 24 * 60 * M);
+  });
+
+  it('clamps a start in the future to now', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setStartedAt(NOW + 10 * M);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW);
+  });
+
+  it('the timer belongs to the entry\'s child, not the selected one', () => {
+    useAppStore.setState({
+      children: [SYNCED_C1, { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 400 * 86400000, color: '#abc' }],
+      entries: [sleepEntry({ childId: 'c2' })],
+      selectedChildId: 'c1',
+    });
+    convert('sleep-1');
+    expect(s().timers[0].childId).toBe('c2');
+  });
+
+  it('never converts a point entry', () => {
+    useAppStore.setState({
+      entries: [{ id: 'd1', serverId: 9, childId: 'c1', type: 'diaper', time: NOW - 20 * M, wet: true, solid: false, color: null, tags: [] }],
+    });
+    s().openEdit('d1');
+    s().setOngoing(); // the flag exists on the shared draft; a point must ignore it
+    s().save();
+    expect(s().timers).toHaveLength(0);
+    expect(s().entries).toHaveLength(1);
+  });
+
+  it('scrubs the offline write queue so the entry does not resurrect on reconnect', async () => {
+    useAppStore.setState({ offline: true });
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save(); // created offline: queued, no serverId
+    await flush();
+    expect(h.q).toHaveLength(1);
+    const id = s().entries[0].id;
+
+    convert(id);
+    await flush();
+    expect(h.q).toHaveLength(0); // pulled off the queue
+    expect(s().queueCount).toBe(0);
+
+    // ...and a reconnect flush must not re-create it alongside the timer.
+    useAppStore.setState({ offline: false });
+    await s().flushQueue();
+    expect(h.pushed).toHaveLength(0);
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(1);
+  });
+
+  it('undo puts a scrubbed queued entry back on the queue', async () => {
+    useAppStore.setState({ offline: true });
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save();
+    await flush();
+    const id = s().entries[0].id;
+
+    convert(id);
+    await flush();
+    expect(h.q).toHaveLength(0);
+
+    s().toastAction?.run();
+    await flush();
+    expect(s().entries).toHaveLength(1);
+    expect(h.q).toHaveLength(1); // still unsent, exactly as it was
+  });
+
+  it('cleans up the orphan when the entry\'s create POST lands after the conversion', async () => {
+    // commitWrite's push is fire-and-forget: converting before it resolves
+    // leaves serverId null, so no delete goes out at conversion time.
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save(); // POST in flight, serverId not stamped yet
+    const id = s().entries[0].id;
+    expect(s().entries[0].serverId).toBeUndefined();
+
+    convert(id);
+    await flush();
+    expect(h.deleted).toEqual([{ type: 'sleep', id: 999 }]); // orphan removed
+    expect(s().entries).toHaveLength(0);
+  });
+
+  it('records a pending delete op when converting offline', async () => {
+    useAppStore.setState({ entries: [sleepEntry()], offline: true });
+    convert('sleep-1');
+    await flush();
+    expect(h.deleted).toHaveLength(0);
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'sleep', serverId: 7 }]);
   });
 });
 
