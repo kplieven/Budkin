@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
-import type { Entry, Measurement } from '@/types/models';
+import { endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -204,5 +204,40 @@ describe('entriesForChild / measurementsForChild', () => {
     expect(measurementsForChild([w1, w2], 'c1')).toEqual([w1]);
     expect(measurementsForChild([w1, w2], '')).toEqual([]);
     expect(measurementsForChild([w1, w2], undefined)).toEqual([]);
+  });
+});
+
+describe('timersForChild', () => {
+  const timer = (id: string, childId?: string): Timer => ({
+    id,
+    childId,
+    activity: 'sleep',
+    saveAs: 'sleep',
+    name: id,
+    start: NOW - 20 * M,
+  });
+
+  it('keeps only the timers owned by the given child', () => {
+    const mine = timer('t1', 'c1');
+    const sibling = timer('t2', 'c2');
+    expect(timersForChild([mine, sibling], 'c1')).toEqual([mine]);
+    expect(timersForChild([mine, sibling], 'c2')).toEqual([sibling]);
+  });
+
+  it('adopts an unowned timer, which the rest of the app already reads as the current child', () => {
+    const unowned = timer('t3');
+    const sibling = timer('t2', 'c2');
+    expect(timersForChild([unowned, sibling], 'c1')).toEqual([unowned]);
+  });
+
+  it('returns nothing when no child is selected, rather than everything', () => {
+    const mine = timer('t1', 'c1');
+    const unowned = timer('t3');
+    expect(timersForChild([mine, unowned], '')).toEqual([]);
+    expect(timersForChild([mine, unowned], undefined)).toEqual([]);
+  });
+
+  it('returns nothing but the unowned ones for a child running no timer', () => {
+    expect(timersForChild([timer('t1', 'c1'), timer('t2', 'c2')], 'c3')).toEqual([]);
   });
 });

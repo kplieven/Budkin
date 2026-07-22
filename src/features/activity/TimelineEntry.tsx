@@ -6,9 +6,9 @@ import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
-import { type Entry } from '@/types/models';
 import { useTheme } from '@/theme/useTheme';
 import { detailFor } from './detail';
+import { isTimer, type TimelineItem } from './groupByDay';
 
 const RAIL_W = 26;   // width of the spine column
 const TIME_W = 46;   // width of the clock column
@@ -41,34 +41,46 @@ function barHeight(min: number): number {
  * (its end) sits at the capsule head and its start at the foot — the gap between
  * the two clock labels reads as the event's real span. `isFirst`/`isLast` trim
  * the spine so it doesn't overhang a day group.
+ *
+ * A running timer is one of these too. It needs no new visual: it is exactly the
+ * ongoing shape the row already draws for an interval with no end, so its
+ * capsule grows to `now`, renders at 45% alpha and shows no end clock. `saveAs`
+ * stands in for `type` and drives the icon, colour and label.
  */
-export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
-  entry: Entry; now: number; onPress: () => void; isFirst: boolean; isLast: boolean;
+export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
+  item: TimelineItem; now: number; onPress: () => void; isFirst: boolean; isLast: boolean;
 }) {
   const t = useTheme();
-  const color = t.activity[entry.type];
+  const timer = isTimer(item);
+  const type = timer ? item.saveAs : item.type;
+  const color = t.activity[type];
   const isPoint =
-    entry.type === 'diaper' ||
-    entry.type === 'bath' ||
-    entry.type === 'temperature' ||
-    entry.type === 'note' ||
-    entry.type === 'milestone';
-  const start =
-    entry.type === 'diaper' ||
-    entry.type === 'bath' ||
-    entry.type === 'temperature' ||
-    entry.type === 'note' ||
-    entry.type === 'milestone'
-      ? entry.time
-      : entry.start;
-  const endTs =
-    entry.type === 'diaper' ||
-    entry.type === 'bath' ||
-    entry.type === 'temperature' ||
-    entry.type === 'note' ||
-    entry.type === 'milestone'
+    !timer &&
+    (item.type === 'diaper' ||
+      item.type === 'bath' ||
+      item.type === 'temperature' ||
+      item.type === 'note' ||
+      item.type === 'milestone');
+  const start = timer
+    ? item.start
+    : item.type === 'diaper' ||
+        item.type === 'bath' ||
+        item.type === 'temperature' ||
+        item.type === 'note' ||
+        item.type === 'milestone'
+      ? item.time
+      : item.start;
+  // A running timer has no end by definition, so `ongoing` below turns true for
+  // it through the very same rule an unfinished entry follows.
+  const endTs = timer
+    ? null
+    : item.type === 'diaper' ||
+        item.type === 'bath' ||
+        item.type === 'temperature' ||
+        item.type === 'note' ||
+        item.type === 'milestone'
       ? null
-      : entry.end;
+      : item.end;
   const ongoing = !isPoint && endTs == null;
 
   const durMin = isPoint ? 0 : ((endTs ?? now) - start) / 60000;
@@ -81,13 +93,13 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
   // the capsule's head and foot.
   const nodeTop = isPoint ? (minHeight - bh) / 2 : NODE_TOP;
   const nodeBottom = nodeTop + bh;
-  const detail = detailFor(entry);
+  const detail = detailFor(item);
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={`Edit ${ACTIVITY_LABEL[entry.type]}`}
+      accessibilityLabel={timer ? `Edit running ${ACTIVITY_LABEL[type]} timer` : `Edit ${ACTIVITY_LABEL[type]}`}
       style={(s) => [
         // A faint full-bleed wash in the entry's own activity color, spanning the
         // whole row (width and height). Kept very light so the timeline spine and
@@ -147,10 +159,10 @@ export function TimelineEntry({ entry, now, onPress, isFirst, isLast }: {
       <View style={{ flex: 1, paddingLeft: 4, paddingTop: nodeTop + bh / 2 - CONTENT_H / 2, paddingBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <View style={{ width: CONTENT_H, height: CONTENT_H, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name={entry.type as IconName} color={color} size={17} />
+            <Icon name={type as IconName} color={color} size={17} />
           </View>
           <Txt weight={700} size={16} tracking={-0.2}>
-            {ACTIVITY_LABEL[entry.type]}
+            {ACTIVITY_LABEL[type]}
           </Txt>
           {detail ? (
             <>

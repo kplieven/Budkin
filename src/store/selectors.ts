@@ -3,7 +3,7 @@
  * Kept separate from the store so they're trivially unit-testable.
  */
 
-import type { Entry, Measurement } from '@/types/models';
+import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -40,6 +40,27 @@ export function selectPendingCount(s: { queueCount: number; measurements: Measur
 export function entriesForChild(entries: Entry[], childId: string | undefined): Entry[] {
   if (!childId) return [];
   return entries.filter((e) => e.childId === childId);
+}
+
+/**
+ * The running timers belonging on one child's history. Scoped like
+ * `entriesForChild`, with one deliberate difference: a timer with NO `childId`
+ * counts as the selected child's. `childId` is optional on `Timer` and the rest
+ * of the app already reads an unowned timer as the current child's (the
+ * dashboard's running-timer card does no scoping at all), so dropping it here
+ * would hide a genuinely running timer.
+ *
+ * This is NOT the rule the Timers tab uses: that one deliberately lists every
+ * child's timers, so a sibling's timer stays stoppable. History is per-child, so
+ * a sibling's timer belongs in the sibling's history, not this one's.
+ *
+ * Pure, so it must be called in the render body over a raw-selected array, not
+ * inside a `useAppStore` selector: returning a fresh array from a selector makes
+ * zustand v5 see a perpetually-changed snapshot and loop forever.
+ */
+export function timersForChild(timers: Timer[], childId: string | undefined): Timer[] {
+  if (!childId) return [];
+  return timers.filter((t) => t.childId == null || t.childId === childId);
 }
 
 /** Measurements owned by one child. Same scoping rules as `entriesForChild`. */
