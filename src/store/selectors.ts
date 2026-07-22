@@ -3,6 +3,7 @@
  * Kept separate from the store so they're trivially unit-testable.
  */
 
+import { parseClockInput } from '@/lib/timeParse';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
@@ -254,8 +255,6 @@ export const DEFAULT_NAP_WINDOW: NapWindow = {
   endMin: NAP_WINDOW_END_DEFAULT,
 };
 
-/** Settings offers half-hour granularity, which is fine for a rhythm this soft. */
-export const NAP_WINDOW_STEP_MIN = 30;
 export const MINUTES_PER_DAY = 1440;
 
 /**
@@ -273,6 +272,20 @@ export function clampMinuteOfDay(n: number, fallback: number): number {
 export function fmtMinuteOfDay(min: number): string {
   const m = clampMinuteOfDay(min, 0);
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+
+/**
+ * The inverse of `fmtMinuteOfDay`: typed clock text to a minute-of-day.
+ *
+ * Shares `parseClockInput` with the log sheet's time editor, so the same
+ * digits-first shorthand works in both places ("7" to 07:00, "730" to 07:30,
+ * "19:30" to 19:30) and 24-hour is enforced in exactly one place. Returns null
+ * when the text isn't a time, so a caller can discard the edit and keep the
+ * stored value rather than writing a garbage boundary.
+ */
+export function parseMinuteOfDay(text: string): number | null {
+  const parsed = parseClockInput(text);
+  return parsed ? parsed.h * 60 + parsed.m : null;
 }
 
 /**
