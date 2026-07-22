@@ -47,6 +47,22 @@ describe('prefs persistence', () => {
     expect(await loadPrefs()).toEqual({ unitSystem: 'imperial', themeMode: 'dark' });
   });
 
+  it('round-trips a saved wash rhythm', async () => {
+    await savePrefs({ smallWashesPerBig: 5 });
+    expect(await loadPrefs()).toEqual({ smallWashesPerBig: 5 });
+  });
+
+  it('round-trips the low end of the wash-rhythm range', async () => {
+    await savePrefs({ smallWashesPerBig: 1 });
+    expect(await loadPrefs()).toEqual({ smallWashesPerBig: 1 });
+  });
+
+  it('a partial save of the wash rhythm does NOT clobber the other prefs', async () => {
+    await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
+    await savePrefs({ smallWashesPerBig: 7 });
+    expect(await loadPrefs()).toEqual({ themeMode: 'light', unitSystem: 'imperial', smallWashesPerBig: 7 });
+  });
+
   it('a later save overwrites the same field but keeps the others', async () => {
     await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
     await savePrefs({ unitSystem: 'metric' });

@@ -10,8 +10,15 @@ import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { SMALL_WASHES_PER_BIG_MAX, SMALL_WASHES_PER_BIG_MIN } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+
+/** The selectable bath rhythms, 1..7 small washes between big ones. */
+const WASH_CHOICES = Array.from(
+  { length: SMALL_WASHES_PER_BIG_MAX - SMALL_WASHES_PER_BIG_MIN + 1 },
+  (_, i) => SMALL_WASHES_PER_BIG_MIN + i,
+);
 
 function Toggle({ on }: { on: boolean }) {
   const t = useTheme();
@@ -52,6 +59,8 @@ export default function Settings() {
   const connection = useAppStore((s) => s.connection);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setUnitSystem = useAppStore((s) => s.setUnitSystem);
+  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
+  const setSmallWashesPerBig = useAppStore((s) => s.setSmallWashesPerBig);
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
@@ -167,6 +176,39 @@ export default function Settings() {
             <Toggle on={simulateOffline} />
           </Pressable>
         )}
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Rhythm
+      </Txt>
+      <View style={group}>
+        {/* The value counts SMALL washes between big ones, so the copy has to
+            say "after every N small washes" — "every N baths" would be off by
+            one, since the big wash is the (N+1)th bath of the cycle. */}
+        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
+          <View>
+            <Txt weight={600} size={16}>
+              Big wash
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              After every {smallWashesPerBig} small {smallWashesPerBig === 1 ? 'wash' : 'washes'}
+            </Txt>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 7, flexWrap: 'wrap' }}>
+            {WASH_CHOICES.map((n) => (
+              <Chip
+                key={n}
+                label={String(n)}
+                color={t.primary}
+                selected={smallWashesPerBig === n}
+                onPress={() => setSmallWashesPerBig(n)}
+                padH={13}
+                padV={7}
+                fontSize={13.5}
+              />
+            ))}
+          </View>
+        </View>
       </View>
 
       {showProfileGroup && (

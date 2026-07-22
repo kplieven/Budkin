@@ -189,16 +189,47 @@ export function lastSleepStartMinAgo(entries: Entry[], now: number): number | nu
 }
 
 /**
- * The wash due next, from the user's rhythm: a "small wash" most days, a "big
- * wash" every few days. Rule: if the three most recent washes are all small,
- * a big wash is due; otherwise small. Fewer than three washes (or none) → small.
+ * The user's bath rhythm, counted in SMALL washes between two big ones. 3 means
+ * three smalls then a big, i.e. a four-bath cycle. It counts smalls rather than
+ * the whole cycle so the setting reads the way the UI phrases it ("big wash
+ * after every 3 small washes"); reading it as a cycle length is off by one.
+ *
+ * 3 is the default because it reproduces the rhythm that used to be hardcoded.
  */
-export function nextWashKind(entries: Entry[]): 'small' | 'big' {
+export const SMALL_WASHES_PER_BIG_DEFAULT = 3;
+export const SMALL_WASHES_PER_BIG_MIN = 1;
+export const SMALL_WASHES_PER_BIG_MAX = 7;
+
+/**
+ * Coerce a rhythm from anywhere (a persisted pref, a stale build's value) into
+ * the supported range. 0 in particular must not survive: an empty lookback
+ * window makes `every()` vacuously true, so a big wash would read as due
+ * forever.
+ */
+export function clampSmallWashesPerBig(n: number): number {
+  if (!Number.isFinite(n)) return SMALL_WASHES_PER_BIG_DEFAULT;
+  return Math.min(SMALL_WASHES_PER_BIG_MAX, Math.max(SMALL_WASHES_PER_BIG_MIN, Math.round(n)));
+}
+
+/**
+ * The wash due next, from the user's rhythm: a "small wash" most days, a "big
+ * wash" every few days. Rule: if the last `smallWashesPerBig` washes are ALL
+ * small, a big wash is due; otherwise small. Fewer washes on record than the
+ * interval (or none at all) → small.
+ *
+ * The answer is derived from history on every call, never from a stored
+ * counter, so changing the interval re-reads the existing baths immediately.
+ * Raising it can therefore take a big wash back off the schedule, which is
+ * correct by definition: the rule is about the last N washes, not about where
+ * some earlier cycle happened to be anchored.
+ */
+export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL_WASHES_PER_BIG_DEFAULT): 'small' | 'big' {
+  const n = clampSmallWashesPerBig(smallWashesPerBig);
   const recent = entries
     .filter((e): e is Extract<Entry, { type: 'bath' }> => e.type === 'bath')
     .sort((a, b) => b.time - a.time)
-    .slice(0, 3);
-  return recent.length === 3 && recent.every((b) => b.wash === 'small') ? 'big' : 'small';
+    .slice(0, n);
+  return recent.length === n && recent.every((b) => b.wash === 'small') ? 'big' : 'small';
 }
 
 /** Most recent diaper change, or null. */
