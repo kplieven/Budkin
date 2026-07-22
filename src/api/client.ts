@@ -717,7 +717,13 @@ export class BabybuddyClient {
         };
       }
       case 'sleep':
-        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), notes: entry.notes ?? '', tags };
+        // `nap` goes out explicitly so the CLIENT wins. Baby Buddy derives nap
+        // from its own server-side NAP_START_MIN/NAP_START_MAX when the field is
+        // absent, so omitting it (as this did) meant a manual Nap/Night choice
+        // silently reverted on the next `listSleep`. Sending it means Budkin's
+        // nap window overrides that Baby Buddy instance's own setting for
+        // everyone using it, not just this device.
+        return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), nap: entry.nap, notes: entry.notes ?? '', tags };
       case 'diaper':
         return {
           child,

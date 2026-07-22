@@ -9,7 +9,7 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { entriesForChild, isActive, selectPendingCount, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { toDisplay } from '@/lib/units';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -101,6 +101,11 @@ vi.mock('@/data/queue', () => ({
   enqueueEntry: vi.fn(async (e: unknown) => {
     h.q = [...h.q, e];
     return h.q;
+  }),
+  removeQueuedEntry: vi.fn(async (id: string) => {
+    const removed = (h.q as { id: string }[]).find((e) => e.id === id) ?? null;
+    h.q = (h.q as { id: string }[]).filter((e) => e.id !== id);
+    return { removed, queue: h.q };
   }),
   clearQueue: vi.fn(async () => {
     h.q = [];
@@ -361,6 +366,9 @@ beforeEach(() => {
     tagsLoading: false,
     toast: null,
     savedServers: [],
+    smallWashesPerBig: 3,
+    napWindowStartMin: 420,
+    napWindowEndMin: 1140,
   });
 });
 
@@ -664,6 +672,43 @@ describe('bath tracking', () => {
     s().openSheet('bath');
     expect(s().te.wash).toBe('big');
   });
+  it('openSheet honours a configured rhythm shorter than three', () => {
+    useAppStore.setState({
+      smallWashesPerBig: 1,
+      entries: [{ id: 'b1', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] }],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('big');
+  });
+  it('openSheet honours a configured rhythm longer than three', () => {
+    useAppStore.setState({
+      smallWashesPerBig: 5,
+      entries: [
+        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
+        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+      ],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('small'); // three smalls no longer complete the cycle
+  });
+  it('openSheet reads only the selected child\'s baths, not a sibling\'s', () => {
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' },
+        { id: 'c2', first: 'Theo', last: 'O', birth: NOW - 90 * 86400000, color: '#eee' },
+      ],
+      selectedChildId: 'c1',
+      entries: [
+        // The sibling has completed a full small-wash cycle; Mira has not bathed.
+        { id: 'b1', childId: 'c2', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c2', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
+        { id: 'b3', childId: 'c2', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+      ],
+    });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('small');
+  });
   it('setWash selects the wash size', () => {
     s().openSheet('bath');
     s().setWash('big');
@@ -848,6 +893,32 @@ describe('save', () => {
     expect(s().timers).toHaveLength(1);
     expect(s().entries).toHaveLength(0);
     expect(s().timers[0].saveAs).toBe('sleep');
+  });
+
+  it('a live interval carries the draft\'s details onto the timer', () => {
+    // Everything typed into the sheet before "Still feeding" must survive; the
+    // timer used to be created bare, silently dropping a just-typed note.
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 3, notes: '  dozy  ' });
+    s().toggleTag('Fussy');
+    s().setOngoing();
+    s().save();
+    const tm = s().timers[0];
+    expect(tm.feedType).toBe('breast');
+    expect(tm.method).toBe('both');
+    expect(tm.startSide).toBe('right');
+    expect(tm.amount).toBe(3);
+    expect(tm.notes).toBe('dozy'); // trimmed, like an entry's notes
+    expect(tm.tags).toEqual(['Fussy']);
+    expect(tm.childId).toBe('c1');
+  });
+
+  it('a live sleep interval carries the nap flag', () => {
+    s().openSheet('sleep');
+    s().setTE({ nap: false });
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].nap).toBe(false);
   });
 
   it('offline save enqueues instead of pushing', async () => {
@@ -1810,6 +1881,239 @@ describe('edit / delete entry', () => {
     // The queued delete op must be removed, or a later flushPendingOps would
     // delete the just-restored entry from the server anyway.
     expect(h.pendingOps).toHaveLength(0);
+  });
+});
+
+describe('"Still ongoing" on a logged entry converts it into a live timer', () => {
+  // A finished entry the user marks as still running is not an entry any more.
+  // It used to be patched to `end: null`, which is not a timer at all and which
+  // the API client pushes as a ZERO-LENGTH record (`end: entry.end ?? start`),
+  // so the next refresh overwrote the local copy with a nonsense one. The entry
+  // must be removed and replaced by a running timer instead.
+  const sleepEntry = (over: Partial<Extract<Entry, { type: 'sleep' }>> = {}): Entry => ({
+    id: 'sleep-1',
+    serverId: 7,
+    childId: 'c1',
+    type: 'sleep',
+    start: NOW - 90 * M,
+    end: NOW - 30 * M,
+    nap: true,
+    tags: [],
+    ...over,
+  });
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [SYNCED_C1] });
+  });
+
+  const convert = (id: string) => {
+    s().openEdit(id);
+    s().setOngoing();
+    s().save();
+  };
+
+  it('removes the entry and starts a timer instead of writing a fake-ongoing entry', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    convert('sleep-1');
+    expect(s().entries).toHaveLength(0); // no `end: null` entry left behind
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0].saveAs).toBe('sleep');
+    expect(s().timers[0].start).toBe(NOW - 90 * M); // the original start, exactly
+    expect(s().sheet).toBeNull();
+    expect(s().editingId).toBeNull();
+  });
+
+  it('carries the entry\'s settings onto the timer, not just its start', () => {
+    useAppStore.setState({
+      entries: [
+        {
+          id: 'feed-1',
+          serverId: 8,
+          childId: 'c1',
+          type: 'feeding',
+          start: NOW - 20 * M,
+          end: NOW - 5 * M,
+          feedType: 'breast',
+          method: 'both',
+          amount: 2,
+          notes: 'sleepy latch',
+          tags: ['right', 'Fussy'],
+        },
+      ],
+    });
+    convert('feed-1');
+    const tm = s().timers[0];
+    expect(tm.feedType).toBe('breast');
+    expect(tm.method).toBe('both');
+    expect(tm.startSide).toBe('right');
+    expect(tm.amount).toBe(2);
+    expect(tm.notes).toBe('sleepy latch');
+    expect(tm.tags).toEqual(['right', 'Fussy']);
+  });
+
+  it('keeps a sleep nap flag and a tummy milestone', () => {
+    useAppStore.setState({ entries: [sleepEntry({ nap: false })] });
+    convert('sleep-1');
+    expect(s().timers[0].nap).toBe(false);
+
+    useAppStore.setState({
+      entries: [{ id: 'tt-1', childId: 'c1', type: 'tummy', start: NOW - 8 * M, end: NOW - 2 * M, milestone: 'rolled over', tags: [] }],
+      timers: [],
+    });
+    convert('tt-1');
+    expect(s().timers[0].milestone).toBe('rolled over');
+  });
+
+  it('deletes the entry on the server and creates the timer there', async () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    convert('sleep-1');
+    await flush();
+    expect(h.deleted).toEqual([{ type: 'sleep', id: 7 }]);
+    expect(h.timerPushed).toHaveLength(1);
+    expect(h.updated).toHaveLength(0); // never patched into a fake-ongoing entry
+  });
+
+  it('undo restores the entry AND discards the new timer (never both)', async () => {
+    useAppStore.setState({ entries: [sleepEntry(), { id: 'other', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }] });
+    convert('sleep-1');
+    await flush();
+    expect(s().toastAction?.label).toBe('Undo');
+
+    s().toastAction?.run();
+    expect(s().timers).toHaveLength(0); // the timer is gone
+    expect(s().entries.map((e) => e.id)).toEqual(['sleep-1', 'other']); // restored in place
+    await flush();
+    expect(h.pushed).toHaveLength(1); // the server copy is re-created
+    expect(h.timerDeleted).toEqual([555]); // and the server timer is discarded
+  });
+
+  it('keeps the entry\'s original start when only the END was nudged in the same sheet session', () => {
+    // `openEdit` leaves the start DERIVED (end − lasted), so nudging the end
+    // silently slides it. The recorded start is the only exact answer.
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setEndedAbs(NOW - 5 * M); // user fiddles with the end first
+    s().setOngoing();
+    expect(s().te.startAbs).toBe(NOW - 90 * M); // the sheet shows the true start too
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 90 * M);
+  });
+
+  it('keeps the original start when the DURATION was nudged', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setLasted(15);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 90 * M);
+  });
+
+  it('honours a start the user edited themselves', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setStartedAt(NOW - 200 * M);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW - 200 * M);
+  });
+
+  it('preserves a days-old start', () => {
+    useAppStore.setState({ entries: [sleepEntry({ start: NOW - 3 * 24 * 60 * M, end: NOW - 3 * 24 * 60 * M + 30 * M })] });
+    convert('sleep-1');
+    expect(s().timers[0].start).toBe(NOW - 3 * 24 * 60 * M);
+  });
+
+  it('clamps a start in the future to now', () => {
+    useAppStore.setState({ entries: [sleepEntry()] });
+    s().openEdit('sleep-1');
+    s().setStartedAt(NOW + 10 * M);
+    s().setOngoing();
+    s().save();
+    expect(s().timers[0].start).toBe(NOW);
+  });
+
+  it('the timer belongs to the entry\'s child, not the selected one', () => {
+    useAppStore.setState({
+      children: [SYNCED_C1, { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 400 * 86400000, color: '#abc' }],
+      entries: [sleepEntry({ childId: 'c2' })],
+      selectedChildId: 'c1',
+    });
+    convert('sleep-1');
+    expect(s().timers[0].childId).toBe('c2');
+  });
+
+  it('never converts a point entry', () => {
+    useAppStore.setState({
+      entries: [{ id: 'd1', serverId: 9, childId: 'c1', type: 'diaper', time: NOW - 20 * M, wet: true, solid: false, color: null, tags: [] }],
+    });
+    s().openEdit('d1');
+    s().setOngoing(); // the flag exists on the shared draft; a point must ignore it
+    s().save();
+    expect(s().timers).toHaveLength(0);
+    expect(s().entries).toHaveLength(1);
+  });
+
+  it('scrubs the offline write queue so the entry does not resurrect on reconnect', async () => {
+    useAppStore.setState({ offline: true });
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save(); // created offline: queued, no serverId
+    await flush();
+    expect(h.q).toHaveLength(1);
+    const id = s().entries[0].id;
+
+    convert(id);
+    await flush();
+    expect(h.q).toHaveLength(0); // pulled off the queue
+    expect(s().queueCount).toBe(0);
+
+    // ...and a reconnect flush must not re-create it alongside the timer.
+    useAppStore.setState({ offline: false });
+    await s().flushQueue();
+    expect(h.pushed).toHaveLength(0);
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(1);
+  });
+
+  it('undo puts a scrubbed queued entry back on the queue', async () => {
+    useAppStore.setState({ offline: true });
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save();
+    await flush();
+    const id = s().entries[0].id;
+
+    convert(id);
+    await flush();
+    expect(h.q).toHaveLength(0);
+
+    s().toastAction?.run();
+    await flush();
+    expect(s().entries).toHaveLength(1);
+    expect(h.q).toHaveLength(1); // still unsent, exactly as it was
+  });
+
+  it('cleans up the orphan when the entry\'s create POST lands after the conversion', async () => {
+    // commitWrite's push is fire-and-forget: converting before it resolves
+    // leaves serverId null, so no delete goes out at conversion time.
+    s().openSheet('sleep');
+    s().setLasted(30);
+    s().save(); // POST in flight, serverId not stamped yet
+    const id = s().entries[0].id;
+    expect(s().entries[0].serverId).toBeUndefined();
+
+    convert(id);
+    await flush();
+    expect(h.deleted).toEqual([{ type: 'sleep', id: 999 }]); // orphan removed
+    expect(s().entries).toHaveLength(0);
+  });
+
+  it('records a pending delete op when converting offline', async () => {
+    useAppStore.setState({ entries: [sleepEntry()], offline: true });
+    convert('sleep-1');
+    await flush();
+    expect(h.deleted).toHaveLength(0);
+    expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'sleep', serverId: 7 }]);
   });
 });
 
@@ -3948,6 +4252,59 @@ describe('unit-system persistence', () => {
   });
 });
 
+describe('wash-rhythm persistence', () => {
+  it('setSmallWashesPerBig updates state and persists via savePrefs', () => {
+    s().setSmallWashesPerBig(5);
+    expect(s().smallWashesPerBig).toBe(5);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 5 });
+  });
+
+  it('setSmallWashesPerBig clamps out-of-range input before storing it', () => {
+    s().setSmallWashesPerBig(99);
+    expect(s().smallWashesPerBig).toBe(7);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 7 });
+    s().setSmallWashesPerBig(0);
+    expect(s().smallWashesPerBig).toBe(1);
+    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 1 });
+  });
+
+  it('hydrate applies a persisted wash rhythm', async () => {
+    h.prefs = { smallWashesPerBig: 6 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(6);
+  });
+
+  it('hydrate applies a persisted rhythm at the low end of the range', async () => {
+    // A truthiness guard (`if (prefs.smallWashesPerBig)`) would survive 1 but
+    // silently drop a 0, so keep the `!= null` check honest at the boundary.
+    h.prefs = { smallWashesPerBig: 1 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(1);
+  });
+
+  it('hydrate clamps a persisted rhythm from outside the supported range', async () => {
+    h.prefs = { smallWashesPerBig: 0 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(1);
+  });
+
+  it('hydrate leaves the rhythm alone when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ smallWashesPerBig: 5 });
+    await s().hydrate();
+    expect(s().smallWashesPerBig).toBe(5);
+  });
+
+  it('the store boots on the default rhythm of 3, preserving the old behaviour', () => {
+    expect(useAppStore.getInitialState().smallWashesPerBig).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
+  });
+});
+
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
   it('demo mode: profile stays null, marked loaded, no fetch', async () => {
     useAppStore.setState({ connection: { mode: 'local' } });
@@ -5426,5 +5783,229 @@ describe('reconcileChildren', () => {
     expect(out.map((c) => c.id)).toEqual(['c1']);
     const ids = out.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('nap-window persistence', () => {
+  it('the store boots on 07:00-19:00, preserving the old hardcoded behaviour', () => {
+    expect(s().napWindowStartMin).toBe(420);
+    expect(s().napWindowEndMin).toBe(1140);
+  });
+
+  it('setNapWindow updates both endpoints and persists them together', () => {
+    s().setNapWindow(480, 1200);
+    expect(s().napWindowStartMin).toBe(480);
+    expect(s().napWindowEndMin).toBe(1200);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+  });
+
+  it('setNapWindow accepts midnight (0) rather than treating it as unset', () => {
+    s().setNapWindow(0, 720);
+    expect(s().napWindowStartMin).toBe(0);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 0, napWindowEndMin: 720 });
+  });
+
+  it('setNapWindow accepts an inverted pair, which wraps midnight', () => {
+    s().setNapWindow(1200, 240);
+    expect(s().napWindowStartMin).toBe(1200);
+    expect(s().napWindowEndMin).toBe(240);
+  });
+
+  it('setNapWindow clamps out-of-day input before storing it', () => {
+    s().setNapWindow(-60, 5000);
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(1439);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 0, napWindowEndMin: 1439 });
+  });
+
+  it('hydrate applies a persisted nap window', async () => {
+    h.prefs = { napWindowStartMin: 390, napWindowEndMin: 1110 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(390);
+    expect(s().napWindowEndMin).toBe(1110);
+  });
+
+  it('hydrate applies a persisted midnight boundary, which a truthy guard would drop', async () => {
+    // The whole point of the `!= null` guard: 0 is a legitimate wall-clock
+    // value, so `if (prefs.napWindowStartMin)` would silently reset it to 07:00.
+    h.prefs = { napWindowStartMin: 0, napWindowEndMin: 720 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(720);
+  });
+
+  it('hydrate clamps a persisted value from outside the day', async () => {
+    h.prefs = { napWindowStartMin: -5, napWindowEndMin: 99999 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(1439);
+  });
+
+  it('hydrate leaves the window alone when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(480);
+    expect(s().napWindowEndMin).toBe(1200);
+  });
+
+  it('hydrate applies one endpoint independently of the other', async () => {
+    h.prefs = { napWindowEndMin: 1230 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(420); // untouched default
+    expect(s().napWindowEndMin).toBe(1230);
+  });
+});
+
+describe('nap classification', () => {
+  // openSheet('sleep') opens a 90-minute interval ending "now", so the draft's
+  // START is now - 90min. That start, not `now`, is the classifying instant.
+  const at = (h: number, m = 0) => new Date(2026, 0, 15, h, m, 0).getTime();
+
+  it('openSheet seeds nap=true for a draft starting inside the window', () => {
+    useAppStore.setState({ now: at(14) }); // start 12:30, inside 07:00-19:00
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet seeds nap=false for a draft starting outside the window', () => {
+    useAppStore.setState({ now: at(3) }); // start 01:30, outside
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openSheet classifies on the draft START, not on now', () => {
+    // 07:30 now, so the 90-minute draft started at 06:00, before the window
+    // opens. The old rule looked at `now` (07:30) and called this a nap.
+    useAppStore.setState({ now: at(7, 30) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openSheet follows a custom window', () => {
+    // Window 10:00-13:00. At 11:00 the 90-minute draft starts at 09:30, before
+    // the window opens, so it is night sleep under this setting even though the
+    // default 07:00 window would have called it a nap.
+    useAppStore.setState({ now: at(11), napWindowStartMin: 600, napWindowEndMin: 780 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+
+    // Half an hour later the draft starts at 10:00, exactly on the inclusive
+    // start boundary, so it flips to a nap.
+    useAppStore.setState({ now: at(11, 30) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet honours a window that wraps midnight', () => {
+    // Naps run 20:00 to 04:00. A draft ending at 02:00 started at 00:30.
+    useAppStore.setState({ now: at(2), napWindowStartMin: 1200, napWindowEndMin: 240 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet treats start === end as no nap window at all', () => {
+    useAppStore.setState({ now: at(14), napWindowStartMin: 420, napWindowEndMin: 420 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openTimerEdit seeds nap from the running timer start, not from now', () => {
+    useAppStore.setState({
+      now: at(20),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    // Started 13:00, still running at 20:00: still a nap.
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openTimerEdit lets an explicit timer flag beat the window', () => {
+    useAppStore.setState({
+      now: at(14),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), nap: false, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openTimerEdit follows a custom window', () => {
+    useAppStore.setState({
+      now: at(11),
+      napWindowStartMin: 600,
+      napWindowEndMin: 780, // 10:00-13:00
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(9), saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().te.nap).toBe(false); // started 09:00, before the window opens
+  });
+
+  it('setNap flips the draft, and save() keeps the manual choice', () => {
+    useAppStore.setState({ now: at(14) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true); // auto-seeded
+    s().setNap(false);
+    expect(s().te.nap).toBe(false);
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false); // no "user touched it" flag needed
+  });
+
+  it('setNap can also force a nap out of a night-time draft', () => {
+    useAppStore.setState({ now: at(3) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+    s().setNap(true);
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(true);
+  });
+
+  it('stopTimer classifies the finished sleep with the configured window', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(11),
+      napWindowStartMin: 600,
+      napWindowEndMin: 780, // 10:00-13:00
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(9), saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false); // started 09:00, before the window opens
+  });
+
+  it('stopTimer classifies on the timer start, not on the wake', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(20),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    // Woke at 20:00, outside the window, but started at 13:00 inside it. The
+    // old wake-time rule called this night sleep.
+    expect(e.nap).toBe(true);
+  });
+
+  it('stopTimer keeps an explicit nap flag set on the timer', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(14),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), nap: false, saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false);
   });
 });

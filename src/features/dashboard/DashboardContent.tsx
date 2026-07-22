@@ -53,6 +53,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const now = useAppStore((s) => s.now);
   const openSheet = useAppStore((s) => s.openSheet);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
   // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
   // Returns a store element, not a derived object, so the reference is stable.
@@ -99,7 +100,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
   const startSideLabel = nextStartSide(childEntries) === 'left' ? 'Left' : 'Right';
-  const washHint = nextWashKind(childEntries) === 'big' ? 'Big wash due today' : 'Small wash due';
+  const washHint = nextWashKind(childEntries, smallWashesPerBig) === 'big' ? 'Big wash due today' : 'Small wash due';
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,

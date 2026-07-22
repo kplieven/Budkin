@@ -9,6 +9,7 @@ import {
   pageFromOffset,
   readWheel,
   stepFromDrag,
+  stepFromKey,
   type WheelPagerState,
 } from '@/features/walkthrough/pager';
 
@@ -160,5 +161,51 @@ describe('readWheel', () => {
       at: stalled.state.lastAt + WHEEL_GESTURE_GAP_MS + 1,
     });
     expect(later.steps).toEqual([]);
+  });
+});
+
+describe('readWheel consumption', () => {
+  // The listeners cover the whole walkthrough region, so preventing the default
+  // on every wheel event there would swallow scrolling the page as well.
+  it('does not claim vertical travel that has not yet turned a page', () => {
+    const { consumed } = readWheel(IDLE_WHEEL_PAGER, { deltaX: 0, deltaY: 4 }, 1000);
+    expect(consumed).toBe(false);
+  });
+
+  it('claims the event that turns a page', () => {
+    const { consumed } = readWheel(IDLE_WHEEL_PAGER, { deltaX: 0, deltaY: WHEEL_STEP_PX }, 1000);
+    expect(consumed).toBe(true);
+  });
+
+  it('claims the rest of a gesture it has already paged on', () => {
+    const turned = readWheel(IDLE_WHEEL_PAGER, { deltaX: 0, deltaY: WHEEL_STEP_PX }, 1000);
+    const tail = readWheel(turned.state, { deltaX: 0, deltaY: 30 }, 1016);
+    expect(tail.step).toBe(0);
+    expect(tail.consumed).toBe(true);
+  });
+
+  it('claims a sideways swipe from its first event, so the browser cannot go back', () => {
+    const { step, consumed } = readWheel(IDLE_WHEEL_PAGER, { deltaX: 5, deltaY: 1 }, 1000);
+    expect(step).toBe(0);
+    expect(consumed).toBe(true);
+  });
+
+  it('lets a settled wheel go once the gesture has lapsed', () => {
+    const turned = readWheel(IDLE_WHEEL_PAGER, { deltaX: 0, deltaY: WHEEL_STEP_PX }, 1000);
+    const later = readWheel(turned.state, { deltaX: 0, deltaY: 4 }, 1000 + WHEEL_GESTURE_GAP_MS + 1);
+    expect(later.consumed).toBe(false);
+  });
+});
+
+describe('stepFromKey', () => {
+  it('pages forwards and back on the arrow keys', () => {
+    expect(stepFromKey('ArrowRight')).toBe(1);
+    expect(stepFromKey('ArrowLeft')).toBe(-1);
+  });
+
+  it('leaves every other key alone', () => {
+    for (const key of ['ArrowUp', 'ArrowDown', 'Enter', ' ', 'Escape', 'Tab', 'a']) {
+      expect(stepFromKey(key)).toBe(0);
+    }
   });
 });
