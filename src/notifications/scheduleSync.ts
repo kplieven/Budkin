@@ -122,6 +122,12 @@ export function initScheduledReminderSync(): void {
     // `now` tick changes nothing here: fire times are absolute, so a
     // launch-time run plus state-change runs is sufficient and a tick-driven
     // rebuild would be pure churn.
+    //
+    // `selectedChildId` is a genuine input, not just a `timers`-adjacent
+    // disambiguator: `napReminders` resolves an ownerless running sleep
+    // timer's owner as `timer.childId ?? input.selectedChildId`, so which
+    // child is selected can flip which child's nap nudge is suppressed even
+    // though `timers` itself did not change.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&
@@ -133,7 +139,8 @@ export function initScheduledReminderSync(): void {
       state.pumpingReminders === previous.pumpingReminders &&
       state.pumpingIntervalMin === previous.pumpingIntervalMin &&
       state.pumpingEnabledAt === previous.pumpingEnabledAt &&
-      state.napSuggestions === previous.napSuggestions
+      state.napSuggestions === previous.napSuggestions &&
+      state.selectedChildId === previous.selectedChildId
     ) {
       return;
     }

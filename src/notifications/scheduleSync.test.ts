@@ -356,4 +356,17 @@ describe('nap anchor projection', () => {
     await flush();
     expect(desired.mock.calls.length).toBeGreaterThan(before);
   });
+
+  it('reconciles when selectedChildId changes', async () => {
+    // `napReminders` resolves an ownerless running sleep timer's owner as
+    // `timer.childId ?? input.selectedChildId`, so selectedChildId is a
+    // genuine input to the desired set, not just a disambiguator that
+    // `timers` already covers. A change to it alone must trigger a rebuild.
+    const { desired, useAppStore } = await setup();
+    await flush();
+    const before = desired.mock.calls.length;
+    useAppStore.setState({ selectedChildId: 'c2' });
+    await flush();
+    expect(desired.mock.calls.length).toBeGreaterThan(before);
+  });
 });
