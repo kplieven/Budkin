@@ -115,6 +115,7 @@ interface AppState {
   pumpingIntervalMin: number;
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
+  napSuggestions: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -198,7 +199,7 @@ interface AppActions {
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
   setReminderPref: (
-    key: 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders',
+    key: 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders' | 'napSuggestions',
     value: boolean,
   ) => void;
   setPumpingInterval: (minutes: number) => void;
@@ -707,6 +708,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pumpingReminders: false,
   pumpingIntervalMin: 180,
   pumpingEnabledAt: null,
+  napSuggestions: false,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -835,6 +837,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.pumpingReminders != null) set({ pumpingReminders: prefs.pumpingReminders });
     if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
     if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
+    if (prefs.napSuggestions != null) set({ napSuggestions: prefs.napSuggestions });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });

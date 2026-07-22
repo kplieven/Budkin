@@ -4066,6 +4066,32 @@ describe('reminder preference persistence', () => {
     await s().hydrate();
     expect(s().pumpingEnabledAt).toBeNull();
   });
+
+  it('napSuggestions defaults to off, because it is advice rather than a fact', () => {
+    expect(s().napSuggestions).toBe(false);
+  });
+
+  it('setReminderPref updates napSuggestions and persists', () => {
+    useAppStore.setState({ napSuggestions: false });
+    s().setReminderPref('napSuggestions', true);
+    expect(s().napSuggestions).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ napSuggestions: true });
+  });
+
+  it('hydrate applies a persisted napSuggestions, including a stored false', async () => {
+    h.prefs = { napSuggestions: true };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napSuggestions: false });
+    await s().hydrate();
+    expect(s().napSuggestions).toBe(true);
+
+    // `!= null`, not truthiness: a persisted false has to survive hydration.
+    h.prefs = { napSuggestions: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napSuggestions: true });
+    await s().hydrate();
+    expect(s().napSuggestions).toBe(false);
+  });
 });
 
 describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () => {
