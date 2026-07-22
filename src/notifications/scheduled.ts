@@ -51,6 +51,7 @@ export interface ReminderPrefs {
   pumpingIntervalMin: number;
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
+  napSuggestions: boolean;
 }
 
 /** A narrow projection of the store, so this layer never imports store types. */
@@ -60,6 +61,13 @@ export interface ScheduleInput {
   prefs: ReminderPrefs;
   /** end (or start, when still running) of the most recent pumping entry */
   lastPumpAt: number | null;
+  /** Per child, the end of their most recent ENDED sleep entry. The instant
+   *  the current wake window started. Absent when they have never slept on
+   *  record. */
+  lastSleepEndByChild: Record<string, number>;
+  /** Resolves a running timer that carries no `childId` (one started from the
+   *  headless widget). Mirrors `useAppStore.ts:600`. */
+  selectedChildId: string;
 }
 
 /** 09:00 local on the calendar day containing `ms`. Built from local Y/M/D
