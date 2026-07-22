@@ -70,8 +70,12 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import {
+  clampMinuteOfDay,
   clampSmallWashesPerBig,
   entriesForChild,
+  isNapStart,
+  NAP_WINDOW_END_DEFAULT,
+  NAP_WINDOW_START_DEFAULT,
   nextStartSide,
   nextWashKind,
   overruleLasted,
@@ -121,6 +125,13 @@ interface AppState {
    *  range 1..7). Global rather than per-child, like every other pref. Local
    *  only: it drives the wash pre-selection, never anything sent to the server. */
   smallWashesPerBig: number;
+  /** Sleep rhythm: the window in which a sleep counts as a NAP, as minutes
+   *  since local midnight (default 420/1140 = 07:00 to 19:00). Start inclusive,
+   *  end exclusive; a start later than the end wraps midnight. Global, like
+   *  every other pref. It only seeds NEW entries: `SleepEntry.nap` is a stored
+   *  boolean, so changing the window never re-classifies history. */
+  napWindowStartMin: number;
+  napWindowEndMin: number;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -204,6 +215,7 @@ interface AppActions {
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
   setSmallWashesPerBig: (n: number) => void;
+  setNapWindow: (startMin: number, endMin: number) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -286,6 +298,7 @@ interface AppActions {
   toggleSolid: () => void;
   /** bath: pick the wash size (small/big) */
   setWash: (wash: 'small' | 'big') => void;
+  setNap: (nap: boolean) => void;
   toggleTag: (tag: string) => void;
   /** Add a brand-new free-form tag as selected. Trims, rejects blank / structural
    *  (HIDDEN_TAGS) names, and no-ops on a tag already selected. */
@@ -825,6 +838,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   unitSystem: 'metric',
   tutorialSeen: false,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
+  napWindowStartMin: NAP_WINDOW_START_DEFAULT,
+  napWindowEndMin: NAP_WINDOW_END_DEFAULT,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -898,6 +913,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ smallWashesPerBig: v });
     void savePrefs({ smallWashesPerBig: v });
   },
+  setNapWindow: (startMin, endMin) => {
+    // Both endpoints move together in one action, so the pair is always written
+    // as a unit. Two independent setters would each do a load-then-merge inside
+    // savePrefs, and back-to-back edits could interleave and drop one endpoint.
+    const start = clampMinuteOfDay(startMin, NAP_WINDOW_START_DEFAULT);
+    const end = clampMinuteOfDay(endMin, NAP_WINDOW_END_DEFAULT);
+    set({ napWindowStartMin: start, napWindowEndMin: end });
+    void savePrefs({ napWindowStartMin: start, napWindowEndMin: end });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -941,6 +965,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // would silently discard a legitimately stored value at the low end.
     if (prefs.smallWashesPerBig != null) {
       set({ smallWashesPerBig: clampSmallWashesPerBig(prefs.smallWashesPerBig) });
+    }
+    // Same `!= null` reasoning, and it bites harder here: 0 is midnight, a
+    // perfectly ordinary boundary, and a truthy guard would silently drop it.
+    if (prefs.napWindowStartMin != null) {
+      set({ napWindowStartMin: clampMinuteOfDay(prefs.napWindowStartMin, NAP_WINDOW_START_DEFAULT) });
+    }
+    if (prefs.napWindowEndMin != null) {
+      set({ napWindowEndMin: clampMinuteOfDay(prefs.napWindowEndMin, NAP_WINDOW_END_DEFAULT) });
     }
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
@@ -2087,8 +2119,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.color = 'yellow';
     }
     if (type === 'sleep') {
-      const hr = new Date().getHours();
-      te.nap = hr >= 7 && hr < 19;
+      // Seed from the nap window, classified on the draft's START. `te` opens
+      // as an interval ending now, so the start is `now - durationMin`; using
+      // `now` would misread a long sleep that began on the other side of the
+      // window boundary. The user can still override with the Nap/Night toggle,
+      // and whatever `te.nap` holds at save time is what gets saved.
+      // `s.now` rather than `Date.now()` so the seed is computed against the
+      // very clock `save()` will resolve the draft with.
+      const now = get().now;
+      te.nap = isNapStart(teStart(te, now) ?? now, {
+        startMin: get().napWindowStartMin,
+        endMin: get().napWindowEndMin,
+      });
     }
     if (type === 'bath') {
       // Pre-select the wash that's due from the small/big rhythm. Scoped to the
@@ -2219,8 +2261,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.method = tm.method ?? 'both';
     }
     if (type === 'sleep') {
-      const hr = new Date().getHours();
-      te.nap = tm.nap ?? (hr >= 7 && hr < 19);
+      // The timer's own start is the classifying instant, not "now": a nap
+      // begun at 13:00 and still running at 19:30 is a nap. An explicit
+      // `tm.nap` (the user already chose) always wins.
+      te.nap = tm.nap ?? isNapStart(tm.start, { startMin: s.napWindowStartMin, endMin: s.napWindowEndMin });
     }
     if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
     if (tm.notes != null) te.notes = tm.notes;
@@ -2449,6 +2493,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
   setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),
+  // Manual Nap/Night override for the sleep sheet. No companion "user touched
+  // this" flag is needed: the sheet seeds `te.nap` from the window on open and
+  // saves whatever `te.nap` holds, so a flip here simply wins.
+  setNap: (nap) => set((s) => ({ te: { ...s.te, nap } })),
   toggleTag: (tag) =>
     set((s) => {
       const has = s.te.tags.includes(tag);
@@ -2795,6 +2843,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       patch.method = te.method;
       patch.amount = te.amount;
     } else if (tm.saveAs === 'sleep') {
+      // KNOWN LIMITATION: an explicit "Night sleep" choice on a RUNNING timer is
+      // device-local. The cross-device wire format in serverTimers.ts encodes
+      // the flag as a bare presence token (`nap` is pushed only when true), so
+      // `nap: false` round-trips back as `undefined` and another device
+      // re-derives it from its own nap window. Storing it locally is still
+      // right: this device honours the choice, and stopping the timer here
+      // produces the entry the user asked for. Adding a `night` token would fix
+      // it but would change a versioned format that is explicitly frozen, so
+      // the encoding is deliberately left alone.
       patch.nap = te.nap;
     } else if (tm.saveAs === 'tummy') {
       patch.milestone = te.milestone;
@@ -2863,7 +2920,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {
-      entry = buildSleepEntry(tm, resolvedEnd, childId);
+      entry = buildSleepEntry(tm, resolvedEnd, childId, {
+        startMin: s.napWindowStartMin,
+        endMin: s.napWindowEndMin,
+      });
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);

@@ -448,6 +448,28 @@ describe('per-entry notes', () => {
     });
   }
 
+  it('buildBody sends nap on a sleep create so the client choice wins', async () => {
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry(withNotes.sleep, 1);
+    expect(calls[0].body.nap).toBe(true);
+  });
+
+  it('buildBody sends nap:false explicitly rather than omitting it', async () => {
+    // Omitting the field lets Baby Buddy re-derive nap from its own
+    // NAP_START_MIN/NAP_START_MAX, which is what silently reverted a manual
+    // "Night" choice on the next listSleep.
+    const calls = stubFetch({ id: 1 });
+    await client().createEntry({ ...withNotes.sleep, nap: false } as Entry, 1);
+    expect(calls[0].body.nap).toBe(false);
+    expect('nap' in calls[0].body).toBe(true);
+  });
+
+  it('buildBody sends nap on a sleep update too', async () => {
+    const calls = stubFetch({});
+    await client().updateEntry({ ...withNotes.sleep, serverId: 9, nap: false } as Entry, 1);
+    expect(calls[0].body.nap).toBe(false);
+  });
+
   it('does not add a notes field to a bath note body (bath excluded)', async () => {
     const calls = stubFetch({ id: 1 });
     const bath: BathEntry = { id: 'b1', childId: 'c1', type: 'bath', time: TIME, wash: 'small', tags: [] };

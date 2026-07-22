@@ -367,6 +367,8 @@ beforeEach(() => {
     toast: null,
     savedServers: [],
     smallWashesPerBig: 3,
+    napWindowStartMin: 420,
+    napWindowEndMin: 1140,
   });
 });
 
@@ -5781,5 +5783,229 @@ describe('reconcileChildren', () => {
     expect(out.map((c) => c.id)).toEqual(['c1']);
     const ids = out.map((c) => c.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('nap-window persistence', () => {
+  it('the store boots on 07:00-19:00, preserving the old hardcoded behaviour', () => {
+    expect(s().napWindowStartMin).toBe(420);
+    expect(s().napWindowEndMin).toBe(1140);
+  });
+
+  it('setNapWindow updates both endpoints and persists them together', () => {
+    s().setNapWindow(480, 1200);
+    expect(s().napWindowStartMin).toBe(480);
+    expect(s().napWindowEndMin).toBe(1200);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+  });
+
+  it('setNapWindow accepts midnight (0) rather than treating it as unset', () => {
+    s().setNapWindow(0, 720);
+    expect(s().napWindowStartMin).toBe(0);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 0, napWindowEndMin: 720 });
+  });
+
+  it('setNapWindow accepts an inverted pair, which wraps midnight', () => {
+    s().setNapWindow(1200, 240);
+    expect(s().napWindowStartMin).toBe(1200);
+    expect(s().napWindowEndMin).toBe(240);
+  });
+
+  it('setNapWindow clamps out-of-day input before storing it', () => {
+    s().setNapWindow(-60, 5000);
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(1439);
+    expect(savePrefs).toHaveBeenCalledWith({ napWindowStartMin: 0, napWindowEndMin: 1439 });
+  });
+
+  it('hydrate applies a persisted nap window', async () => {
+    h.prefs = { napWindowStartMin: 390, napWindowEndMin: 1110 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(390);
+    expect(s().napWindowEndMin).toBe(1110);
+  });
+
+  it('hydrate applies a persisted midnight boundary, which a truthy guard would drop', async () => {
+    // The whole point of the `!= null` guard: 0 is a legitimate wall-clock
+    // value, so `if (prefs.napWindowStartMin)` would silently reset it to 07:00.
+    h.prefs = { napWindowStartMin: 0, napWindowEndMin: 720 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(720);
+  });
+
+  it('hydrate clamps a persisted value from outside the day', async () => {
+    h.prefs = { napWindowStartMin: -5, napWindowEndMin: 99999 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(0);
+    expect(s().napWindowEndMin).toBe(1439);
+  });
+
+  it('hydrate leaves the window alone when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napWindowStartMin: 480, napWindowEndMin: 1200 });
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(480);
+    expect(s().napWindowEndMin).toBe(1200);
+  });
+
+  it('hydrate applies one endpoint independently of the other', async () => {
+    h.prefs = { napWindowEndMin: 1230 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().napWindowStartMin).toBe(420); // untouched default
+    expect(s().napWindowEndMin).toBe(1230);
+  });
+});
+
+describe('nap classification', () => {
+  // openSheet('sleep') opens a 90-minute interval ending "now", so the draft's
+  // START is now - 90min. That start, not `now`, is the classifying instant.
+  const at = (h: number, m = 0) => new Date(2026, 0, 15, h, m, 0).getTime();
+
+  it('openSheet seeds nap=true for a draft starting inside the window', () => {
+    useAppStore.setState({ now: at(14) }); // start 12:30, inside 07:00-19:00
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet seeds nap=false for a draft starting outside the window', () => {
+    useAppStore.setState({ now: at(3) }); // start 01:30, outside
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openSheet classifies on the draft START, not on now', () => {
+    // 07:30 now, so the 90-minute draft started at 06:00, before the window
+    // opens. The old rule looked at `now` (07:30) and called this a nap.
+    useAppStore.setState({ now: at(7, 30) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openSheet follows a custom window', () => {
+    // Window 10:00-13:00. At 11:00 the 90-minute draft starts at 09:30, before
+    // the window opens, so it is night sleep under this setting even though the
+    // default 07:00 window would have called it a nap.
+    useAppStore.setState({ now: at(11), napWindowStartMin: 600, napWindowEndMin: 780 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+
+    // Half an hour later the draft starts at 10:00, exactly on the inclusive
+    // start boundary, so it flips to a nap.
+    useAppStore.setState({ now: at(11, 30) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet honours a window that wraps midnight', () => {
+    // Naps run 20:00 to 04:00. A draft ending at 02:00 started at 00:30.
+    useAppStore.setState({ now: at(2), napWindowStartMin: 1200, napWindowEndMin: 240 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openSheet treats start === end as no nap window at all', () => {
+    useAppStore.setState({ now: at(14), napWindowStartMin: 420, napWindowEndMin: 420 });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openTimerEdit seeds nap from the running timer start, not from now', () => {
+    useAppStore.setState({
+      now: at(20),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    // Started 13:00, still running at 20:00: still a nap.
+    expect(s().te.nap).toBe(true);
+  });
+
+  it('openTimerEdit lets an explicit timer flag beat the window', () => {
+    useAppStore.setState({
+      now: at(14),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), nap: false, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().te.nap).toBe(false);
+  });
+
+  it('openTimerEdit follows a custom window', () => {
+    useAppStore.setState({
+      now: at(11),
+      napWindowStartMin: 600,
+      napWindowEndMin: 780, // 10:00-13:00
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(9), saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().te.nap).toBe(false); // started 09:00, before the window opens
+  });
+
+  it('setNap flips the draft, and save() keeps the manual choice', () => {
+    useAppStore.setState({ now: at(14) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(true); // auto-seeded
+    s().setNap(false);
+    expect(s().te.nap).toBe(false);
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false); // no "user touched it" flag needed
+  });
+
+  it('setNap can also force a nap out of a night-time draft', () => {
+    useAppStore.setState({ now: at(3) });
+    s().openSheet('sleep');
+    expect(s().te.nap).toBe(false);
+    s().setNap(true);
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(true);
+  });
+
+  it('stopTimer classifies the finished sleep with the configured window', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(11),
+      napWindowStartMin: 600,
+      napWindowEndMin: 780, // 10:00-13:00
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(9), saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false); // started 09:00, before the window opens
+  });
+
+  it('stopTimer classifies on the timer start, not on the wake', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(20),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    // Woke at 20:00, outside the window, but started at 13:00 inside it. The
+    // old wake-time rule called this night sleep.
+    expect(e.nap).toBe(true);
+  });
+
+  it('stopTimer keeps an explicit nap flag set on the timer', () => {
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [SYNCED_C1],
+      selectedChildId: SYNCED_C1.id,
+      now: at(14),
+      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: at(13), nap: false, saveAs: 'sleep', childId: SYNCED_C1.id }],
+    });
+    s().stopTimer('t1');
+    const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
+    expect(e.nap).toBe(false);
   });
 });

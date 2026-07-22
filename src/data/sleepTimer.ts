@@ -5,6 +5,7 @@
  */
 
 import { ACTIVITY_LABEL } from '@/lib/activities';
+import { DEFAULT_NAP_WINDOW, isNapStart, type NapWindow } from '@/store/selectors';
 import type { SleepEntry, Timer } from '@/types/models';
 
 /** A fresh running sleep timer starting at `now` (epoch ms), stamped with the
@@ -25,11 +26,23 @@ export function startSleepTimer(now: number, childId: string): Timer {
 
 /**
  * Build the finished nap entry for a stopped sleep timer. Mirrors the sleep
- * branch of the store's `stopTimer`: `nap` defaults from the hour of day unless
+ * branch of the store's `stopTimer`: `nap` falls back to the nap window unless
  * the timer carries an explicit flag; tags carry through.
+ *
+ * The window is a PARAMETER rather than a store read because this also runs in
+ * the headless widget task, which has no store. `napToggle.ts` loads the pref
+ * itself and passes it down, keeping this function pure.
+ *
+ * The fallback classifies on `timer.start`, not on `now` (the wake). That is a
+ * deliberate change: Baby Buddy classifies on start only, so a wake-time answer
+ * would flip as soon as the entry round-tripped through the server.
  */
-export function buildSleepEntry(timer: Timer, now: number, childId: string): SleepEntry {
-  const hr = new Date(now).getHours();
+export function buildSleepEntry(
+  timer: Timer,
+  now: number,
+  childId: string,
+  napWindow: NapWindow = DEFAULT_NAP_WINDOW,
+): SleepEntry {
   return {
     id: 'e' + now,
     childId,
@@ -37,7 +50,7 @@ export function buildSleepEntry(timer: Timer, now: number, childId: string): Sle
     type: 'sleep',
     start: timer.start,
     end: now,
-    nap: timer.nap ?? (hr >= 7 && hr < 19),
+    nap: timer.nap ?? isNapStart(timer.start, napWindow),
     notes: timer.notes,
   };
 }

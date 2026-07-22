@@ -14,11 +14,13 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { loadPrefs } from '@/data/prefs';
 import { enqueueEntry } from '@/data/queue';
 import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { buildTimerNotification } from '@/notifications/content';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
+import { NAP_WINDOW_END_DEFAULT, NAP_WINDOW_START_DEFAULT, type NapWindow } from '@/store/selectors';
 import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
 
 // Android can re-deliver a widget click (and a physical bounce can double-fire),
@@ -51,14 +53,23 @@ export async function toggleNapFromWidget(
   now: number,
   render: (snapshot: WidgetSnapshot | null) => void,
 ): Promise<void> {
-  // These three reads are independent, so fire them together: on the tap's hot
-  // path they were ~3 sequential AsyncStorage round-trips before the widget
-  // could repaint.
-  const [snap, lastAt, timers] = await Promise.all([
+  // These reads are independent, so fire them together: on the tap's hot path
+  // they were sequential AsyncStorage round-trips before the widget could
+  // repaint. `loadPrefs` joins them rather than being read lazily in the stop
+  // branch, where it would add a serial round-trip in front of the repaint.
+  // There is no store out here, so the nap window has to come from disk.
+  const [snap, lastAt, timers, prefs] = await Promise.all([
     readWidgetSnapshot(),
     readLastToggleAt(),
     loadTimers(),
+    loadPrefs(),
   ]);
+  // `?? default`, not `||`: 0 is midnight, a legitimate boundary that a truthy
+  // fallback would silently replace with 07:00.
+  const napWindow: NapWindow = {
+    startMin: prefs.napWindowStartMin ?? NAP_WINDOW_START_DEFAULT,
+    endMin: prefs.napWindowEndMin ?? NAP_WINDOW_END_DEFAULT,
+  };
 
   if (!snap) {
     render(null); // no snapshot yet (widget added before first app launch) — nothing to toggle
@@ -87,7 +98,7 @@ export async function toggleNapFromWidget(
   if (running) {
     // Stop: queue the finished nap (unless demo/unconfigured) and drop the timer.
     if (snap.canQueueNap && snap.selectedChildId) {
-      await enqueueEntry(buildSleepEntry(running, now, snap.selectedChildId));
+      await enqueueEntry(buildSleepEntry(running, now, snap.selectedChildId, napWindow));
     }
     await saveTimers(timers.filter((t) => t !== running));
     const next: WidgetSnapshot = { ...snap, sleepStart: null };
