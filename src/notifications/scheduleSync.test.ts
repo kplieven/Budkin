@@ -331,8 +331,8 @@ describe('toInput lastPumpAt derivation', () => {
 
 describe('nap anchor projection', () => {
   it('projects the latest ended sleep per child, and the selected child', async () => {
-    const { useAppStore: store, desired: desiredScheduled } = await setup();
-    store.setState({
+    const { desired, useAppStore } = await setup();
+    useAppStore.setState({
       selectedChildId: 'c1',
       entries: [
         { id: 'e1', childId: 'c1', type: 'sleep', start: 1_000, end: 2_000, nap: true, tags: [] },
@@ -343,17 +343,17 @@ describe('nap anchor projection', () => {
       ],
     });
     await flush();
-    const input = vi.mocked(desiredScheduled).mock.calls.at(-1)?.[0];
+    const input = desired.mock.calls.at(-1)?.[0];
     expect(input?.lastSleepEndByChild).toEqual({ c1: 4_000, c2: 6_000 });
     expect(input?.selectedChildId).toBe('c1');
   });
 
   it('reconciles when napSuggestions changes', async () => {
-    const { useAppStore: store, desired: desiredScheduled } = await setup();
+    const { desired, useAppStore } = await setup();
     await flush();
-    const before = vi.mocked(desiredScheduled).mock.calls.length;
-    store.getState().setReminderPref('napSuggestions', true);
+    const before = desired.mock.calls.length;
+    useAppStore.getState().setReminderPref('napSuggestions', true);
     await flush();
-    expect(vi.mocked(desiredScheduled).mock.calls.length).toBeGreaterThan(before);
+    expect(desired.mock.calls.length).toBeGreaterThan(before);
   });
 });
