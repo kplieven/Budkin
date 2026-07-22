@@ -12,6 +12,15 @@ let started = false;
 
 type State = ReturnType<typeof useAppStore.getState>;
 
+// In SERVER mode, `s.entries` only ever holds the one child the last fetch
+// asked for (see the invariant around `useAppStore.ts:1566`; `repository.ts`
+// fetches sleep for `selectedChildId` only). So `lastPumpAt` and
+// `lastSleepEndByChild`/`asleepChildIds` below can only ever reflect ONE
+// child at a time in server mode, and `selectChild`'s `refresh()` replaces
+// `entries` wholesale, which drops the previous child's key entirely — the
+// next diff then reads that as "no longer desired" and cancels that child's
+// already-pending nap reminder. Inherited from `lastPumpAt`'s existing shape;
+// fixing it (fetching sleep for every child) is out of scope here.
 function toInput(s: State): ScheduleInput {
   let lastPumpAt: number | null = null;
   const lastSleepEndByChild: Record<string, number> = {};
@@ -137,9 +146,12 @@ export function initScheduledReminderSync(): void {
     //
     // `selectedChildId` is a genuine input, not just a `timers`-adjacent
     // disambiguator: `napReminders` resolves an ownerless running sleep
-    // timer's owner as `timer.childId ?? input.selectedChildId`, so which
-    // child is selected can flip which child's nap nudge is suppressed even
-    // though `timers` itself did not change.
+    // timer's owner as `timer.childId ?? input.selectedChildId`. Every current
+    // timer source, including the headless widget, stamps a childId, so
+    // "ownerless" only happens for a timer persisted before that stamping
+    // existed — but while it can happen, which child is selected can flip
+    // which child's nap nudge is suppressed even though `timers` itself did
+    // not change.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&

@@ -74,8 +74,12 @@ export interface ScheduleInput {
    *  end. `napReminders` treats membership here exactly like a running sleep
    *  timer. */
   asleepChildIds: Record<string, true>;
-  /** Resolves a running timer that carries no `childId` (one started from the
-   *  headless widget). Mirrors `useAppStore.ts:600`. */
+  /** Resolves a running timer that carries no `childId`. Every current timer
+   *  source stamps one (in-app start, the headless widget's `startSleepTimer`,
+   *  a server-loaded timer, a manual log), so this fallback is defensive for a
+   *  timer persisted by a build that predates that stamping, not a live gap.
+   *  Mirrors the `timer.childId ?? selectedChildId` fallback `mirrorTimerCreate`
+   *  uses in `useAppStore.ts`. */
   selectedChildId: string;
 }
 
@@ -344,6 +348,10 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   // `birth` holds a DUE date while expecting, so there is no age.
   if (child.expected) return [];
   // Null past the age the source covers, rather than extrapolating forever.
+  // The straight division (not `addDays`, unlike the rest of this file) is
+  // fine here: an hour of DST drift only matters within an hour of a
+  // 30/90/180/365-day bucket edge, where the difference is 15 minutes of
+  // awake time, and it matches how `bandForRange` in norms.ts computes age.
   const band = wakeWindowBand((now - child.birth) / DAY_MS);
   if (band?.hi == null) return [];
 
@@ -351,14 +359,21 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   // TIMER, and separately an ongoing sleep ENTRY that carries no timer at all
   // (`asleepChildIds`; see its doc comment on ScheduleInput) — a running timer
   // does not exist for every ongoing sleep, e.g. one edited to "still
-  // ongoing". A timer started from the headless widget carries no childId and
-  // belongs to the selected child.
+  // ongoing". The `?? selectedChildId` fallback below is defensive, not the
+  // normal widget path: every current timer source, including the headless
+  // widget, stamps a childId, so this only resolves a timer persisted before
+  // that stamping existed.
   const asleep =
     input.timers.some(
       (t) => t.saveAs === 'sleep' && (t.childId ?? input.selectedChildId) === child.id,
     ) || input.asleepChildIds[child.id] === true;
   if (asleep) return [];
 
+  // Documents the precondition rather than enforcing it: without this, wokeAt
+  // is undefined, fireAt is NaN, and `fireAt <= now` then `withinNapHours`
+  // both reject a NaN anyway, so no test can tell this guard apart from its
+  // absence. Keep it regardless, so a later reorder of the checks below can't
+  // silently make NaN-propagation load-bearing with nothing testing it.
   const wokeAt = input.lastSleepEndByChild[child.id];
   if (wokeAt == null) return [];
 

@@ -76,9 +76,14 @@ cited source only defines up to 12 months, so the app would be extrapolating
 past its own citation.
 
 **A running sleep timer is resolved with `timer.childId ?? selectedChildId`**,
-the pattern established at `useAppStore.ts:600`. `Timer.childId` is optional and
-a timer started from the headless widget carries none, so comparing `childId`
-alone would let a widget-started nap fail to suppress the nudge.
+the same fallback pattern `mirrorTimerCreate` uses in `useAppStore.ts`.
+`Timer.childId` is optional, but every current timer source stamps one: an
+in-app start, the headless widget's `startSleepTimer` (`src/data/sleepTimer.ts`),
+a server-loaded timer (`repository.ts` drops any timer with a null child), and
+the manual log path. The `?? selectedChildId` fallback is therefore defensive,
+covering a timer persisted by a build that predates the stamping, not the
+normal widget path — comparing `childId` alone would still be wrong for that
+older-timer case, so the fallback stays.
 
 ### Quiet hours
 
@@ -211,7 +216,8 @@ four kinds.
   cancel and one schedule.
 - A sleep timer with no `childId` suppresses the nudge for `selectedChildId`.
 - Two children awake at once get independent reminders, and one napping does not
-  suppress the other's.
+  suppress the other's. **This holds in LOCAL mode only** — see the server-mode
+  edge case below.
 - Age exactly 365 days is included, 366 is not.
 - `napSuggestions: false` yields nothing regardless of state.
 
@@ -225,6 +231,8 @@ four kinds.
 | Child deleted | Leaves the desired set entirely |
 | Timezone change | Fire time and the quiet-hours check are computed at schedule time from local hours. The next launch recomputes, matching the other kinds |
 | Child with no sleep history yet | Nothing scheduled until the first sleep is logged and ended |
+| Server mode, two children awake at once | Not independent. `entries` only ever holds the ONE child the last fetch asked for, so `selectChild`'s `refresh()` replaces `entries` and drops the previous child's key, which cancels that child's already-pending nap reminder. Inherited from `lastPumpAt`'s existing shape; out of scope to fix here |
+| Child crosses an age-band boundary between scheduling and firing | Keeps the OLDER band's fire time. `fireAt` is computed once, at schedule time, from the band then in effect; nothing re-evaluates it before it fires. Corrects itself at the next reconcile |
 
 ## Out of scope
 
