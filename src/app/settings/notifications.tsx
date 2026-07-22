@@ -17,7 +17,12 @@ import { useAppStore } from '@/store/useAppStore';
 import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
 
-type ReminderKey = 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders';
+type ReminderKey =
+  | 'dueDateReminders'
+  | 'staleTimerReminders'
+  | 'ageMilestones'
+  | 'napSuggestions'
+  | 'pumpingReminders';
 
 export default function NotificationSettings() {
   const t = useTheme();
@@ -26,6 +31,7 @@ export default function NotificationSettings() {
   const dueDateReminders = useAppStore((s) => s.dueDateReminders);
   const staleTimerReminders = useAppStore((s) => s.staleTimerReminders);
   const ageMilestones = useAppStore((s) => s.ageMilestones);
+  const napSuggestions = useAppStore((s) => s.napSuggestions);
   const pumpingReminders = useAppStore((s) => s.pumpingReminders);
   const pumpingIntervalMin = useAppStore((s) => s.pumpingIntervalMin);
   const setReminderPref = useAppStore((s) => s.setReminderPref);
@@ -56,6 +62,12 @@ export default function NotificationSettings() {
       label: 'Age milestones',
       hint: 'One week, one month, then every few months.',
       on: ageMilestones,
+    },
+    {
+      key: 'napSuggestions',
+      label: 'Nap suggestions',
+      hint: 'As your baby nears the typical wake window for their age. General guidance, not medical advice.',
+      on: napSuggestions,
     },
     {
       key: 'pumpingReminders',
