@@ -26,6 +26,7 @@ const prefs = (over: Partial<ReminderPrefs> = {}): ReminderPrefs => ({
   pumpingReminders: false,
   pumpingIntervalMin: 180,
   pumpingEnabledAt: null,
+  napSuggestions: false,
   ...over,
 });
 
@@ -43,6 +44,8 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   timers: [],
   prefs: prefs(),
   lastPumpAt: null,
+  lastSleepEndByChild: {},
+  selectedChildId: 'c1',
   ...over,
 });
 

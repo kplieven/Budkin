@@ -14,10 +14,19 @@ type State = ReturnType<typeof useAppStore.getState>;
 
 function toInput(s: State): ScheduleInput {
   let lastPumpAt: number | null = null;
+  const lastSleepEndByChild: Record<string, number> = {};
   for (const e of s.entries) {
-    if (e.type !== 'pumping') continue;
-    const at = e.end ?? e.start;
-    if (lastPumpAt === null || at > lastPumpAt) lastPumpAt = at;
+    if (e.type === 'pumping') {
+      const at = e.end ?? e.start;
+      if (lastPumpAt === null || at > lastPumpAt) lastPumpAt = at;
+      continue;
+    }
+    // Only an ENDED sleep starts a wake window. A running one means the baby
+    // is still asleep, and `timers` already covers that case.
+    if (e.type === 'sleep' && e.end != null) {
+      const cur = lastSleepEndByChild[e.childId];
+      if (cur == null || e.end > cur) lastSleepEndByChild[e.childId] = e.end;
+    }
   }
   return {
     children: s.children,
@@ -29,8 +38,11 @@ function toInput(s: State): ScheduleInput {
       pumpingReminders: s.pumpingReminders,
       pumpingIntervalMin: s.pumpingIntervalMin,
       pumpingEnabledAt: s.pumpingEnabledAt,
+      napSuggestions: s.napSuggestions,
     },
     lastPumpAt,
+    lastSleepEndByChild,
+    selectedChildId: s.selectedChildId,
   };
 }
 
@@ -120,7 +132,8 @@ export function initScheduledReminderSync(): void {
       state.ageMilestones === previous.ageMilestones &&
       state.pumpingReminders === previous.pumpingReminders &&
       state.pumpingIntervalMin === previous.pumpingIntervalMin &&
-      state.pumpingEnabledAt === previous.pumpingEnabledAt
+      state.pumpingEnabledAt === previous.pumpingEnabledAt &&
+      state.napSuggestions === previous.napSuggestions
     ) {
       return;
     }
