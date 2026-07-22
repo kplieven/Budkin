@@ -348,6 +348,22 @@ describe('nap anchor projection', () => {
     expect(input?.selectedChildId).toBe('c1');
   });
 
+  it('projects children with an ongoing sleep entry into asleepChildIds', async () => {
+    const { desired, useAppStore } = await setup();
+    useAppStore.setState({
+      entries: [
+        // Ongoing, no matching Timer (e.g. edited to "still ongoing", or a
+        // server record with no end): must still mark c1 asleep.
+        { id: 'e1', childId: 'c1', type: 'sleep', start: 1_000, end: null, nap: true, tags: [] },
+        // Ended: must NOT appear in asleepChildIds.
+        { id: 'e2', childId: 'c2', type: 'sleep', start: 2_000, end: 3_000, nap: true, tags: [] },
+      ],
+    });
+    await flush();
+    const input = desired.mock.calls.at(-1)?.[0];
+    expect(input?.asleepChildIds).toEqual({ c1: true });
+  });
+
   it('reconciles when napSuggestions changes', async () => {
     const { desired, useAppStore } = await setup();
     await flush();

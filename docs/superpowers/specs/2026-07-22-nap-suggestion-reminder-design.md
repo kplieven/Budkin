@@ -63,6 +63,7 @@ code, which is the same property the other four kinds rely on.
 | `child.expected` | `birth` holds a due date, so there is no age |
 | age > `NAP_MAX_AGE_DAYS` (365) | past where `NORMS.wakeWindow` has data |
 | a sleep timer is running for the child | the baby is asleep right now |
+| the child has an ongoing sleep ENTRY with no running timer (edited to "still ongoing", or a server record with no end) | the baby is asleep right now; `asleepChildIds` catches what the timer check alone would miss |
 | no ended sleep entry for the child | there is no anchor |
 | `fireAt <= now` | matches the other four kinds |
 | `fireAt` outside 07:00 to 19:00 local | quiet hours, see below |
@@ -180,16 +181,21 @@ the same curve should not carry less framing than the chart does.
 
 ```ts
 lastSleepEndByChild: Record<string, number>;
+asleepChildIds: Record<string, true>;
 selectedChildId: string;
 ```
 
 keeping the pure layer's narrow-projection property: it still never imports
 store types.
 
-`scheduleSync.ts` computes `lastSleepEndByChild` the way it already computes
-`lastPumpAt`, one pass over `entries` keeping the maximum `end` per child for
-`type === 'sleep'` entries with a non-null `end`. Its slice gate gains
-`napSuggestions`; `entries` and `timers` are already gated.
+`scheduleSync.ts` computes `lastSleepEndByChild` and `asleepChildIds` in the
+same pass over `entries` it already uses for `lastPumpAt`: a `type === 'sleep'`
+entry with a non-null `end` updates the per-child maximum in
+`lastSleepEndByChild`; one with `end == null` (ongoing) marks the child in
+`asleepChildIds`, whether or not a running `Timer` also exists for it — an
+entry can be ongoing with no timer at all, e.g. one edited to "still ongoing",
+or a server sleep record with no end. Its slice gate gains `napSuggestions`;
+`entries` and `timers` are already gated.
 
 ## Testing
 

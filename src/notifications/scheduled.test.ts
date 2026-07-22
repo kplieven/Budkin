@@ -45,6 +45,7 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   prefs: prefs(),
   lastPumpAt: null,
   lastSleepEndByChild: {},
+  asleepChildIds: {},
   selectedChildId: 'c1',
   ...over,
 });
@@ -580,6 +581,16 @@ describe('nap suggestions', () => {
     expect(naps(napInput({ timers: [t], selectedChildId: 'c1' }))).toEqual([]);
     // ...and must not suppress a DIFFERENT child's nudge.
     expect(naps(napInput({ timers: [t], selectedChildId: 'c2' })).length).toBe(1);
+  });
+
+  it('says nothing while the child has an ongoing sleep ENTRY with no running timer', () => {
+    // e.g. a sleep entry edited to "still ongoing" (end: null, no Timer
+    // created), or a server sleep record with no end.
+    expect(naps(napInput({ asleepChildIds: { c1: true } }))).toEqual([]);
+  });
+
+  it('a DIFFERENT child\'s ongoing sleep entry does not suppress this child\'s nudge', () => {
+    expect(naps(napInput({ asleepChildIds: { c2: true } })).length).toBe(1);
   });
 
   it('says nothing without an anchor', () => {
