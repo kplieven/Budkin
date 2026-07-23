@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
+import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -16,25 +17,6 @@ import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-
-/** Tiny per-timer sync indicator: a check when the timer's server mirror exists,
- *  a clock (amber) while it is still pending a push. Only rendered in server mode. */
-function SyncBadge({ synced }: { synced: boolean }) {
-  const t = useTheme();
-  const color = synced ? t.dim : t.primary;
-  return (
-    <View
-      accessibilityRole="text"
-      accessibilityLabel={synced ? 'Synced to server' : 'Pending sync to server'}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}
-    >
-      <Icon name={synced ? 'check' : 'clock'} color={color} size={12} />
-      <Txt weight={600} size={11.5} color={color}>
-        {synced ? 'Synced' : 'Pending sync'}
-      </Txt>
-    </View>
-  );
-}
 
 export default function Timers() {
   const t = useTheme();
