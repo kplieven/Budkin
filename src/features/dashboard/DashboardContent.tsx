@@ -245,9 +245,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           accessibilityLabel="Start timer, save as any activity"
           style={(s) => [
             {
-              backgroundColor: t.surface,
+              backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
               borderWidth: 1.5,
-              borderColor: t.line,
+              borderColor: hexA(t.primary, 0.5),
+              borderStyle: 'dashed',
               borderRadius: 20,
               paddingVertical: 15,
               paddingHorizontal: 17,
@@ -256,10 +257,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               gap: 13,
               cursor: 'pointer',
             },
-            isHovered(s) && { borderColor: hexA(t.primary, 0.55), boxShadow: t.shadow },
+            isHovered(s) && { borderColor: hexA(t.primary, 0.75), boxShadow: t.shadow },
           ]}
         >
-          <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: hexA(t.primary, 0.16), alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="timer" color={t.primary} size={23} />
           </View>
           <View style={{ flex: 1 }}>
