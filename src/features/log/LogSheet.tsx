@@ -44,7 +44,7 @@ const COLORS: [DiaperColor, string][] = [
 // Quick-pick dosage units. Baby Buddy's `dosage_unit` is free text, so these are
 // just shortcuts; the "+ Other" field takes anything else. µg uses the real
 // micro sign so it reads correctly rather than an ASCII "u".
-const MED_UNITS = ['mg', 'mL', 'µg', 'IU', 'drops', 'tablet', 'puff'];
+const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 /**
  * Dashed "+ New tag" pill that sits at the end of the tag chip row. Tapping it
  * reveals TagInputRow below the chips. Styled lighter than a real Chip (dashed
@@ -408,7 +408,7 @@ function MedicationField({
             setOtherText(v);
             onUnit(v.trim() ? v : undefined);
           }}
-          placeholder="Custom unit, e.g. mL/kg…"
+          placeholder="Custom unit, e.g. ml/kg…"
           placeholderTextColor={t.faint}
           style={{
             minHeight: 44,
