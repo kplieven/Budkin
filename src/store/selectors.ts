@@ -240,6 +240,22 @@ export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL
 }
 
 /**
+ * Whether at least one wash (bath) is on record for today's local date,
+ * relative to `now`. "Today" is the wall-clock day of `now`, so the answer
+ * flips back to false on its own at local midnight as the dashboard's
+ * per-second `now` tick crosses over: no stored flag, no reset logic.
+ *
+ * Multiple washes a day are allowed by the model, so this only asks whether
+ * there is one or more, never how many. Pure and `now`-parametrised, so scope
+ * the entries to the child first (`entriesForChild`) before calling, exactly
+ * like the other status helpers.
+ */
+export function bathGivenToday(entries: Entry[], now: number): boolean {
+  const today = new Date(now).toDateString();
+  return entries.some((e) => e.type === 'bath' && new Date(e.time).toDateString() === today);
+}
+
+/**
  * The window, in minutes since local midnight, in which a sleep counts as a NAP.
  * A sleep that STARTS inside it is a nap; one that starts outside it is night
  * sleep. Start is inclusive, end is exclusive.
