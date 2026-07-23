@@ -41,6 +41,10 @@ const COLORS: [DiaperColor, string][] = [
   ['green', SOLID_COLORS.green],
   ['yellow', SOLID_COLORS.yellow],
 ];
+// Quick-pick dosage units. Baby Buddy's `dosage_unit` is free text, so these are
+// just shortcuts; the "+ Other" field takes anything else. µg uses the real
+// micro sign so it reads correctly rather than an ASCII "u".
+const MED_UNITS = ['mg', 'mL', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 /**
  * Dashed "+ New tag" pill that sits at the end of the tag chip row. Tapping it
  * reveals TagInputRow below the chips. Styled lighter than a real Chip (dashed
@@ -272,6 +276,154 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           {unitLabel('temperature', unitSystem)}
         </Txt>
       </View>
+    </>
+  );
+}
+
+/**
+ * Medication field block: a required name, an optional amount paired with a unit,
+ * and a unit picker of quick-pick chips with a free-text "+ Other" fallback. The
+ * unit is Baby Buddy's free-text `dosage_unit`, so it is stored as a plain string
+ * and never routed through the units.ts converter. Conditionally rendered, so it
+ * remounts (re-seeding its local text state from the store draft) on every open.
+ */
+function MedicationField({
+  name,
+  dosage,
+  unit,
+  color,
+  onName,
+  onDosage,
+  onUnit,
+}: {
+  name?: string;
+  dosage?: number;
+  unit?: string;
+  color: string;
+  onName: (v: string) => void;
+  onDosage: (v?: number) => void;
+  onUnit: (v?: string) => void;
+}) {
+  const t = useTheme();
+  // A stored unit that is not one of the presets is a custom one; open the free
+  // text field on it so an edit doesn't silently drop it.
+  const isCustom = !!unit && !MED_UNITS.includes(unit);
+  const [amountText, setAmountText] = useState(dosage != null ? String(dosage) : '');
+  const [otherOpen, setOtherOpen] = useState(isCustom);
+  const [otherText, setOtherText] = useState(isCustom ? (unit as string) : '');
+  const pickPreset = (u: string) => {
+    onUnit(unit === u ? undefined : u);
+    setOtherOpen(false);
+    setOtherText('');
+  };
+  return (
+    <>
+      <FieldLabel>Medication</FieldLabel>
+      <TextInput
+        value={name ?? ''}
+        onChangeText={onName}
+        placeholder="e.g. Paracetamol, vitamin D…"
+        placeholderTextColor={t.faint}
+        autoFocus
+        style={{
+          minHeight: 48,
+          borderRadius: 14,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          paddingHorizontal: 14,
+          fontSize: 15.5,
+          fontFamily: fontFamily(600),
+          color: t.text,
+          marginBottom: 16,
+        }}
+      />
+      <FieldLabel>Amount (optional)</FieldLabel>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          borderRadius: 16,
+          paddingHorizontal: 16,
+          marginBottom: 12,
+        }}
+      >
+        <TextInput
+          value={amountText}
+          onChangeText={(v) => {
+            setAmountText(v);
+            const n = parseFloat(v.replace(',', '.'));
+            onDosage(Number.isNaN(n) ? undefined : n);
+          }}
+          placeholder="5"
+          placeholderTextColor={t.faint}
+          keyboardType="decimal-pad"
+          style={{ flex: 1, height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text }}
+        />
+        {unit ? (
+          <Txt weight={600} size={16} color={t.dim}>
+            {unit}
+          </Txt>
+        ) : null}
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: otherOpen ? 8 : 16 }}>
+        {MED_UNITS.map((u) => (
+          <Chip key={u} label={u} color={color} selected={unit === u} onPress={() => pickPreset(u)} padH={13} padV={8} fontSize={13.5} />
+        ))}
+        {!otherOpen && (
+          <Pressable
+            onPress={() => setOtherOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Enter a custom unit"
+            style={(s) => [
+              {
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 13,
+                paddingVertical: 8,
+                borderRadius: 13,
+                borderWidth: 1.5,
+                borderStyle: 'dashed',
+                borderColor: t.line2,
+                cursor: 'pointer',
+              },
+              isHovered(s) && { borderColor: t.faint },
+            ]}
+          >
+            <Txt unselectable weight={700} size={13.5} color={t.faint}>
+              + Other
+            </Txt>
+          </Pressable>
+        )}
+      </View>
+      {otherOpen && (
+        <TextInput
+          autoFocus
+          value={otherText}
+          onChangeText={(v) => {
+            setOtherText(v);
+            onUnit(v.trim() ? v : undefined);
+          }}
+          placeholder="Custom unit, e.g. mL/kg…"
+          placeholderTextColor={t.faint}
+          style={{
+            minHeight: 44,
+            borderRadius: 12,
+            backgroundColor: t.surface,
+            borderWidth: 1.5,
+            borderColor: t.line,
+            paddingHorizontal: 14,
+            fontSize: 14,
+            fontFamily: fontFamily(600),
+            color: t.text,
+            marginBottom: 16,
+          }}
+        />
+      )}
     </>
   );
 }
@@ -632,6 +784,21 @@ export function LogSheet() {
         {/* temperature field — a decimal reading with a °C unit */}
         {type === 'temperature' && (
           <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
+        )}
+
+        {/* medication field — a required name + optional amount and unit. Notes
+            come from the shared secondary-notes block below (medication isn't
+            excluded from it, like temperature). */}
+        {type === 'medication' && (
+          <MedicationField
+            name={te.medName}
+            dosage={te.medDosage}
+            unit={te.medUnit}
+            color={color}
+            onName={(v) => setTE({ medName: v })}
+            onDosage={(v) => setTE({ medDosage: v })}
+            onUnit={(v) => setTE({ medUnit: v })}
+          />
         )}
 
         {/* note field — the PRIMARY multiline body (taller than the secondary

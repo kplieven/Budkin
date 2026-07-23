@@ -54,6 +54,9 @@ export function makeSeed(now: number): SeedData {
       // A normal reading yesterday and a slightly warm one a few hours ago.
       { id: 'e12', childId: c1, type: 'temperature', time: now - 26 * 60 * M, value: 36.9, tags: [] },
       { id: 'e13', childId: c1, type: 'temperature', time: now - 5 * 60 * M, value: 37.8, notes: 'a little warm after her nap', tags: [] },
+      // A dose given after the warm reading, plus the daily vitamin.
+      { id: 'e16', childId: c1, type: 'medication', time: now - 4 * 60 * M, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', notes: 'for the low fever', tags: [] },
+      { id: 'e17', childId: c1, type: 'medication', time: now - 12 * 60 * M, name: 'Vitamin D', dosage: 400, dosageUnit: 'IU', tags: [] },
       // General notes (plain — NO bath tag) live in the dedicated Notes tab.
       { id: 'e14', childId: c1, type: 'note', time: now - 9 * 60 * M, text: 'Pediatrician follow-up booked for next Tuesday at 10am.', tags: [] },
       { id: 'e15', childId: c1, type: 'note', time: now - 30 * 60 * M, text: 'First real giggle today when we played peekaboo — melted us.', tags: ['Milestone'] },
