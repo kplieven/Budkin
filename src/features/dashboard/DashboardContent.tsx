@@ -53,6 +53,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const timers = useAppStore((s) => s.timers);
   const now = useAppStore((s) => s.now);
   const openSheet = useAppStore((s) => s.openSheet);
+  const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
   const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
   // Primitive selector, so no new reference per render (zustand v5).
@@ -253,7 +254,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             icon={ICON_FOR[a]}
             hint={activityHint[a]}
             widthStyle={tileStyle}
-            onPress={() => openSheet(a)}
+            // Medication routes through the cure picker (which falls back to the
+            // manual form when the child has no active cures today); every other
+            // tile opens its log sheet directly.
+            onPress={() => (a === 'medication' ? openMedicationLog() : openSheet(a))}
             done={a === 'bath' ? washedToday : undefined}
           />
         ))}

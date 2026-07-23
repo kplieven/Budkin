@@ -76,6 +76,9 @@ export interface TimeEntryState {
   medDosage?: number;
   /** medication (point): the free-text dosage unit (e.g. "mg", "mL") */
   medUnit?: string;
+  /** medication (point): next-dose interval in whole seconds, seeded from an
+   *  interval cure so the saved dose carries Baby Buddy's `next_dose_interval` */
+  medNextDoseIntervalSec?: number;
   /** note (point): the note BODY being edited — the primary free-text field of a
    *  general note. Distinct from `notes` (the secondary per-entry annotation). */
   noteText?: string;

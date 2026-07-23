@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
-import type { Entry, Measurement, Timer } from '@/types/models';
+import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import type { Cure, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -479,5 +479,70 @@ describe('parseMinuteOfDay', () => {
     for (const min of [0, 1, 435, 420, 1140, 1439]) {
       expect(parseMinuteOfDay(fmtMinuteOfDay(min))).toBe(min);
     }
+  });
+});
+
+describe('startOfDay', () => {
+  it('floors a timestamp to local midnight of its own day', () => {
+    const noonish = new Date(2026, 2, 4, 13, 45, 12, 500).getTime();
+    const midnight = new Date(2026, 2, 4, 0, 0, 0, 0).getTime();
+    expect(startOfDay(noonish)).toBe(midnight);
+  });
+  it('is idempotent on a value already at midnight', () => {
+    const midnight = new Date(2026, 2, 4, 0, 0, 0, 0).getTime();
+    expect(startOfDay(midnight)).toBe(midnight);
+  });
+});
+
+describe('isCureActiveToday / activeCuresForChildToday', () => {
+  // Local-midnight day anchors so the numeric range compare is exact.
+  const day = (y: number, m: number, d: number) => new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  const TODAY = day(2026, 3, 4);
+
+  const base: Cure = {
+    id: 'cure-1',
+    childId: 'c1',
+    name: 'Paracetamol',
+    scheduleMode: 'everyHours',
+    everyHours: 6,
+    fromDate: day(2026, 3, 1),
+    toDate: day(2026, 3, 10),
+    active: true,
+  };
+
+  it('is active inside the range for the matching child', () => {
+    expect(isCureActiveToday(base, TODAY, 'c1')).toBe(true);
+  });
+  it('is inactive when paused', () => {
+    expect(isCureActiveToday({ ...base, active: false }, TODAY, 'c1')).toBe(false);
+  });
+  it('is inactive for a different child (per-child scoping)', () => {
+    expect(isCureActiveToday(base, TODAY, 'c2')).toBe(false);
+    expect(isCureActiveToday({ ...base, childId: 'c2' }, TODAY, 'c1')).toBe(false);
+  });
+  it('is inactive before the from date and active exactly on it', () => {
+    expect(isCureActiveToday({ ...base, fromDate: day(2026, 3, 5) }, TODAY, 'c1')).toBe(false);
+    expect(isCureActiveToday({ ...base, fromDate: TODAY }, TODAY, 'c1')).toBe(true);
+  });
+  it('is inactive after the to date and active exactly on it (inclusive boundary)', () => {
+    expect(isCureActiveToday({ ...base, toDate: day(2026, 3, 3) }, TODAY, 'c1')).toBe(false);
+    expect(isCureActiveToday({ ...base, toDate: TODAY }, TODAY, 'c1')).toBe(true);
+  });
+  it('treats an undefined to date as open-ended', () => {
+    expect(isCureActiveToday({ ...base, toDate: undefined }, TODAY, 'c1')).toBe(true);
+  });
+
+  it('activeCuresForChildToday keeps only this child\'s active-today cures', () => {
+    const cures: Cure[] = [
+      base, // active, c1
+      { ...base, id: 'cure-2', childId: 'c2' }, // other child
+      { ...base, id: 'cure-3', active: false }, // paused
+      { ...base, id: 'cure-4', toDate: day(2026, 3, 3) }, // ended yesterday
+      { ...base, id: 'cure-5', toDate: undefined }, // open-ended, active
+    ];
+    expect(activeCuresForChildToday(cures, 'c1', TODAY).map((c) => c.id)).toEqual(['cure-1', 'cure-5']);
+  });
+  it('activeCuresForChildToday returns [] when no child is selected', () => {
+    expect(activeCuresForChildToday([base], '', TODAY)).toEqual([]);
   });
 });
