@@ -59,6 +59,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
     (item.type === 'diaper' ||
       item.type === 'bath' ||
       item.type === 'temperature' ||
+      item.type === 'medication' ||
       item.type === 'note' ||
       item.type === 'milestone');
   const start = timer
@@ -66,6 +67,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
     : item.type === 'diaper' ||
         item.type === 'bath' ||
         item.type === 'temperature' ||
+        item.type === 'medication' ||
         item.type === 'note' ||
         item.type === 'milestone'
       ? item.time
@@ -77,6 +79,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
     : item.type === 'diaper' ||
         item.type === 'bath' ||
         item.type === 'temperature' ||
+        item.type === 'medication' ||
         item.type === 'note' ||
         item.type === 'milestone'
       ? null

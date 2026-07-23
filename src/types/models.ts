@@ -6,7 +6,7 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
-export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note' | 'milestone';
+export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'medication' | 'note' | 'milestone';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
@@ -156,6 +156,29 @@ export interface TemperatureEntry extends EntryBase {
 }
 
 /**
+ * A dose of medication (Baby Buddy `/api/medication/`). Point event — a single
+ * `time` carrying the medication `name` (required) plus an optional amount:
+ * `dosage` (a plain number) and `dosageUnit` (free-text, e.g. "mg" or "mL" — NOT
+ * a units.ts metric/imperial quantity, so it is never converted or relabelled).
+ * `nextDoseIntervalSec` mirrors Baby Buddy's `next_dose_interval` duration; it is
+ * left unset here and populated by the reminder feature. Not timer-eligible.
+ */
+export interface MedicationEntry extends EntryBase {
+  type: 'medication';
+  time: number;
+  /** the medication name (required) */
+  name: string;
+  /** the amount given (a plain number, paired with `dosageUnit`) */
+  dosage?: number;
+  /** free-text dosage unit (e.g. "mg", "mL", "drops"); never unit-converted */
+  dosageUnit?: string;
+  /** Baby Buddy `next_dose_interval` as whole seconds; unset until a reminder is set */
+  nextDoseIntervalSec?: number;
+  /** free-text notes (Baby Buddy `notes` field) */
+  notes?: string;
+}
+
+/**
  * A general free-text note (Baby Buddy `/api/notes/`). Point event — a single
  * `time` whose PRIMARY content is the `text` body. Shares the `/api/notes/`
  * endpoint with baths (which ride on a `bath` tag); a general note carries no
@@ -194,14 +217,15 @@ export type Entry =
   | TummyEntry
   | BathEntry
   | TemperatureEntry
+  | MedicationEntry
   | NoteEntry
   | MilestoneEntry;
 
 /** Activities that are point-in-time (single timestamp) vs interval (start/end). */
-export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature', 'note'];
+export const POINT_ACTIVITIES: ActivityType[] = ['diaper', 'bath', 'temperature', 'medication', 'note'];
 
 export function entryTimestamp(e: Entry): number {
-  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'note' || e.type === 'milestone'
+  return e.type === 'diaper' || e.type === 'bath' || e.type === 'temperature' || e.type === 'medication' || e.type === 'note' || e.type === 'milestone'
     ? e.time
     : (e.end ?? e.start);
 }

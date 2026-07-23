@@ -33,6 +33,7 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   tummy: 'tummy',
   bath: 'bath',
   temperature: 'temperature',
+  medication: 'medication',
   // Notes and milestones are never in ALL_ACTIVITIES, so these tiles never
   // render; present only to satisfy the Record<ActivityType, …> completeness check.
   note: 'note',
@@ -115,6 +116,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     tummy: 'Tap to log',
     bath: washHint,
     temperature: 'Tap to log',
+    medication: 'Tap to log',
     // never rendered (notes and milestones aren't on the Home grid), completeness only
     note: 'Tap to log',
     milestone: 'Tap to log',
