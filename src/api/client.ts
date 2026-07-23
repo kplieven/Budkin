@@ -22,6 +22,7 @@ import type {
   FeedingEntry,
   Measurement,
   MeasurementKind,
+  MedicationEntry,
   MilestoneEntry,
   PhotoChange,
   PickedPhoto,
@@ -134,9 +135,38 @@ const ENDPOINT: Record<ActivityType, string> = {
   tummy: 'tummy-times',
   bath: 'notes',
   temperature: 'temperature',
+  medication: 'medication',
   note: 'notes',
   milestone: 'notes',
 };
+
+/**
+ * Baby Buddy DurationField <-> whole seconds, for the medication
+ * `next_dose_interval`. Django REST Framework serializes a duration as
+ * `[D ]HH:MM:SS[.ffffff]` (an optional leading day count), so parse that shape
+ * back to seconds and format the reverse. A bare numeric string is tolerated on
+ * read. Returns undefined for anything unparseable so a malformed value degrades
+ * to "no interval" rather than NaN.
+ */
+export function durationToSec(raw: string): number | undefined {
+  const str = String(raw).trim();
+  const m = str.match(/^(?:(\d+)\s+)?(\d+):(\d{1,2}):(\d{1,2})(?:\.\d+)?$/);
+  if (!m) {
+    const n = Number(str);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  const days = m[1] ? Number(m[1]) : 0;
+  return days * 86400 + Number(m[2]) * 3600 + Number(m[3]) * 60 + Number(m[4]);
+}
+
+export function secToDuration(sec: number): string {
+  const total = Math.max(0, Math.round(sec));
+  const days = Math.floor(total / 86400);
+  const rem = total % 86400;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const hms = `${pad(Math.floor(rem / 3600))}:${pad(Math.floor((rem % 3600) / 60))}:${pad(rem % 60)}`;
+  return days ? `${days} ${hms}` : hms;
+}
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
 // Baby Buddy has no bath resource, so a bath is a Note tagged `bath` + the wash
@@ -635,6 +665,27 @@ export class BabybuddyClient {
     }));
   }
 
+  async listMedication(childId: string, limit = 50): Promise<MedicationEntry[]> {
+    const data = await this.request<Paginated<any>>(
+      `/medication/?child=${childId}&ordering=-time&limit=${limit}`,
+    );
+    return data.results.map((r) => ({
+      id: `medication-${r.id}`,
+      serverId: r.id,
+      childId,
+      type: 'medication',
+      time: fromISO(r.time),
+      name: r.name ?? '',
+      // dosage is a plain number; dosage_unit is free text (never unit-converted).
+      dosage: r.dosage != null ? Number(r.dosage) : undefined,
+      dosageUnit: r.dosage_unit || undefined,
+      // next_dose_interval is a duration string; parse to seconds when present.
+      nextDoseIntervalSec: r.next_dose_interval ? durationToSec(r.next_dose_interval) : undefined,
+      notes: r.notes || undefined,
+      tags: (r.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
+    }));
+  }
+
   async listPumping(childId: string, limit = 50): Promise<PumpingEntry[]> {
     const data = await this.request<Paginated<any>>(
       `/pumping/?child=${childId}&ordering=-start&limit=${limit}`,
@@ -755,6 +806,21 @@ export class BabybuddyClient {
         };
       case 'temperature':
         return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
+      case 'medication': {
+        // /api/medication/ has a required name + a single time. dosage, unit and
+        // interval are numeric/duration fields whose server nullability is
+        // unknown, so omit them when unset (rather than sending null) so a
+        // partly-filled entry validates and DRF keeps its own defaults.
+        // dosage_unit is Baby Buddy's free text, sent verbatim.
+        const body: Record<string, unknown> = { child, time: toISO(entry.time), name: entry.name, tags };
+        if (entry.dosage != null) body.dosage = entry.dosage;
+        if (entry.dosageUnit) body.dosage_unit = entry.dosageUnit;
+        if (entry.nextDoseIntervalSec != null) body.next_dose_interval = secToDuration(entry.nextDoseIntervalSec);
+        // notes is a blankable text field (temperature clears it the same way),
+        // so always send it: an empty string clears it on a PATCH edit.
+        body.notes = entry.notes ?? '';
+        return body;
+      }
       case 'bath':
         return bathToNoteBody(entry, childServerId);
       case 'note':

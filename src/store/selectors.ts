@@ -4,7 +4,7 @@
  */
 
 import { parseClockInput } from '@/lib/timeParse';
-import type { Entry, Measurement, Timer } from '@/types/models';
+import type { Cure, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -240,6 +240,22 @@ export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL
 }
 
 /**
+ * Whether at least one wash (bath) is on record for today's local date,
+ * relative to `now`. "Today" is the wall-clock day of `now`, so the answer
+ * flips back to false on its own at local midnight as the dashboard's
+ * per-second `now` tick crosses over: no stored flag, no reset logic.
+ *
+ * Multiple washes a day are allowed by the model, so this only asks whether
+ * there is one or more, never how many. Pure and `now`-parametrised, so scope
+ * the entries to the child first (`entriesForChild`) before calling, exactly
+ * like the other status helpers.
+ */
+export function bathGivenToday(entries: Entry[], now: number): boolean {
+  const today = new Date(now).toDateString();
+  return entries.some((e) => e.type === 'bath' && new Date(e.time).toDateString() === today);
+}
+
+/**
  * The window, in minutes since local midnight, in which a sleep counts as a NAP.
  * A sleep that STARTS inside it is a nap; one that starts outside it is night
  * sleep. Start is inclusive, end is exclusive.
@@ -345,4 +361,46 @@ export function lastDiaperMinAgo(entries: Entry[], now: number): number | null {
  *  valid interval: it must land after the current start and no later than now. */
 export function endAnchorVisible(tMs: number, startMs: number, now: number): boolean {
   return tMs > startMs && tMs <= now;
+}
+
+/**
+ * Local midnight of the day containing `ms`, as epoch ms. Cure dates are stored
+ * at local midnight, so the "active today" comparison is a plain numeric one
+ * against this value. Derived from the store's `now` (not the wall clock) so it
+ * is deterministic and clears itself at local midnight the same `now`-keyed way
+ * `bathGivenToday` does. Uses setHours rather than ms arithmetic so it stays put
+ * across DST boundaries.
+ */
+export function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * Whether a cure is active for `childId` on the day whose local midnight is
+ * `todayMidnight`: it must be flagged active, belong to that child, have started
+ * on or before today, and either have no end date or one that is today or later.
+ * Both boundaries are inclusive, so a cure whose fromDate or toDate is exactly
+ * today still counts. Pure numeric compare, no existing helper covered this.
+ */
+export function isCureActiveToday(cure: Cure, todayMidnight: number, childId: string): boolean {
+  return (
+    cure.active &&
+    cure.childId === childId &&
+    cure.fromDate <= todayMidnight &&
+    (cure.toDate == null || cure.toDate >= todayMidnight)
+  );
+}
+
+/**
+ * The cures active for one child today, in the order they are stored. An absent
+ * `childId` yields `[]` (no child selected, nothing to offer), mirroring
+ * `entriesForChild`. Pure, so call it in a render body over a raw-selected
+ * `cures` array, NEVER inside a `useAppStore` selector: returning a fresh
+ * filtered array from a selector makes zustand v5 loop forever.
+ */
+export function activeCuresForChildToday(cures: Cure[], childId: string, todayMidnight: number): Cure[] {
+  if (!childId) return [];
+  return cures.filter((c) => isCureActiveToday(c, todayMidnight, childId));
 }

@@ -78,6 +78,36 @@ describe('detailFor: feeding amount is dual-purpose', () => {
   });
 });
 
+describe('detailFor: medication', () => {
+  const med = (over: Partial<Extract<Entry, { type: 'medication' }>> = {}): Entry => ({
+    id: 'md1',
+    childId: 'c1',
+    tags: [],
+    type: 'medication',
+    time: NOW,
+    name: 'Paracetamol',
+    ...over,
+  });
+
+  it('joins name, amount + free-text unit, and notes', () => {
+    expect(detailFor(med({ dosage: 5, dosageUnit: 'mL', notes: 'for the fever' }))).toBe('Paracetamol · 5 mL · for the fever');
+  });
+
+  it('shows just the name when there is no amount', () => {
+    expect(detailFor(med())).toBe('Paracetamol');
+  });
+
+  it('shows a bare amount when the unit is missing', () => {
+    expect(detailFor(med({ dosage: 400 }))).toBe('Paracetamol · 400');
+  });
+
+  it('never routes the unit through the units converter (free text, verbatim)', () => {
+    // A 5 mL dose must read "5 mL", never a converted "0.2 fl oz".
+    h.unitSystem = 'imperial';
+    expect(detailFor(med({ dosage: 5, dosageUnit: 'mL' }))).toBe('Paracetamol · 5 mL');
+  });
+});
+
 const timer = (over: Partial<Timer> = {}): Timer => ({
   id: 't1',
   childId: 'c1',

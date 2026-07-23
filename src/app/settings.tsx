@@ -8,6 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
+import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
@@ -271,6 +272,9 @@ export default function Settings() {
   const openAdopt = useAppStore((s) => s.openAdopt);
   const children = useAppStore((s) => s.children);
   const entries = useAppStore((s) => s.entries);
+  const cures = useAppStore((s) => s.cures);
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
+  const openCureEditor = useAppStore((s) => s.openCureEditor);
 
   useEffect(() => {
     loadProfile();
@@ -323,6 +327,13 @@ export default function Settings() {
   const showProfileGroup =
     connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
+
+  // Cures are per-child, so scope the management list to the selected child.
+  // Filtered in the render body (never inside a useAppStore selector) so a fresh
+  // array can't drive the zustand v5 re-render loop. Both active and paused cures
+  // are shown here (this is where you manage them); the log picker filters.
+  const selectedChild = children.find((c) => c.id === selectedChildId);
+  const childCures = cures.filter((c) => c.childId === selectedChildId);
 
   const body = (
     <>
@@ -445,6 +456,63 @@ export default function Settings() {
           </Txt>
         </View>
       </View>
+
+      {selectedChild && (
+        <>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+            Cures for {selectedChild.first}
+          </Txt>
+          <View style={group}>
+            {childCures.map((c, i) => (
+              <Pressable
+                key={c.id}
+                onPress={() => openCureEditor(c.id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${c.name}`}
+                style={(s) => [
+                  row,
+                  { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' },
+                  isHovered(s) && { backgroundColor: t.elevated },
+                ]}
+              >
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Txt unselectable weight={600} size={16}>
+                      {c.name}
+                    </Txt>
+                    {!c.active && (
+                      <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: t.elevated }}>
+                        <Txt unselectable weight={700} size={11} color={t.dim}>
+                          Paused
+                        </Txt>
+                      </View>
+                    )}
+                  </View>
+                  <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+                    {[cureDosageLabel(c), cureScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
+                  </Txt>
+                </View>
+                <Icon name="chevron-right" color={t.faint} size={18} />
+              </Pressable>
+            ))}
+            <Pressable
+              onPress={() => openCureEditor()}
+              accessibilityRole="button"
+              accessibilityLabel="Add a cure"
+              style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+            >
+              <Icon name="plus" color={t.primary} size={18} />
+              <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
+                Add a cure
+              </Txt>
+            </Pressable>
+          </View>
+          <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
+            Cures stay on this device and are never sent to Baby Buddy. Logging a dose from a cure
+            still saves the dose the usual way.
+          </Txt>
+        </>
+      )}
 
       {showProfileGroup && (
         <>

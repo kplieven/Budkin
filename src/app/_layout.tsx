@@ -12,6 +12,8 @@ import { Toast } from '@/components/Toast';
 import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { AdoptSheet } from '@/features/connect/AdoptSheet';
+import { CureEditor } from '@/features/cures/CureEditor';
+import { CurePickerSheet } from '@/features/cures/CurePickerSheet';
 import { ConfirmBirthSheet } from '@/features/dashboard/ConfirmBirthSheet';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
@@ -116,6 +118,8 @@ function RootLayoutNav() {
             <LogSheet />
             <MeasurementSheet />
             <MilestoneSheet />
+            <CurePickerSheet />
+            <CureEditor />
             <Toast />
           </View>
           <StatusBar style={t.dark ? 'light' : 'dark'} />

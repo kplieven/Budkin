@@ -33,7 +33,7 @@ import {
 } from '@/data/entityStore';
 import { clearPendingOps } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
-import type { Child, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
+import type { Child, Cure, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -68,6 +68,7 @@ const h = vi.hoisted(() => ({
   tagsFails: false,
   prefs: {} as Record<string, unknown>,
   milestonePrompts: {} as Record<string, string[]>,
+  cures: [] as unknown[],
 }));
 
 // Hoisted so the repository mock factory (also hoisted) can reference it.
@@ -147,6 +148,19 @@ vi.mock('@/data/milestonePrompts', () => ({
   loadMilestonePrompts: vi.fn(async () => h.milestonePrompts),
   saveMilestonePrompts: vi.fn(async (m: Record<string, string[]>) => {
     h.milestonePrompts = m;
+  }),
+}));
+
+// Cures are local-only and AsyncStorage-backed, same reason the timers module is
+// mocked: keep the native module out of the node test env. `h.cures` mirrors the
+// stored list so the persistence subscribe can be observed.
+vi.mock('@/data/cures', () => ({
+  loadCures: vi.fn(async () => h.cures),
+  saveCures: vi.fn(async (c: unknown[]) => {
+    h.cures = c;
+  }),
+  clearCures: vi.fn(async () => {
+    h.cures = [];
   }),
 }));
 
@@ -320,6 +334,7 @@ beforeEach(() => {
   h.tagsFails = false;
   h.prefs = {};
   h.milestonePrompts = {};
+  h.cures = [];
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
@@ -343,6 +358,7 @@ beforeEach(() => {
     entries: [],
     timers: [],
     measurements: [],
+    cures: [],
     lastFeed: { feedType: 'breast', method: 'left' },
     sheet: null,
     editingId: null,
@@ -350,6 +366,8 @@ beforeEach(() => {
     measurementSheet: null,
     editingMeasurementId: null,
     milestoneSheet: null,
+    curePicker: null,
+    cureEditor: null,
     answeredMilestonePrompts: {},
     showChildSwitcher: false,
     childSheet: false,
@@ -778,6 +796,169 @@ describe('temperature tracking', () => {
     expect(s().te.temperature).toBe(37.8);
     expect(s().te.notes).toBe('after nap');
     expect(s().te.agoMin).toBe(20);
+  });
+});
+
+describe('medication tracking', () => {
+  it('openSheet: point shape, blank name', () => {
+    s().openSheet('medication');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.medName).toBe('');
+  });
+
+  it('save builds a point medication entry (name + amount + unit + trimmed notes) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    s().openSheet('medication');
+    s().setTE({ medName: '  Paracetamol  ', medDosage: 2.5, medUnit: 'mL', notes: '  for the fever  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.type).toBe('medication');
+    expect(e.time).toBe(NOW);
+    expect(e.name).toBe('Paracetamol');
+    expect(e.dosage).toBe(2.5);
+    expect(e.dosageUnit).toBe('mL');
+    expect(e.notes).toBe('for the fever');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'medication' }>).type).toBe('medication');
+  });
+
+  it('save is a no-op when the name is blank, even with an amount entered', () => {
+    s().openSheet('medication');
+    s().setTE({ medName: '   ', medDosage: 5, medUnit: 'mL' });
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().sheet).not.toBeNull(); // sheet stays open like a blank note
+  });
+
+  it('openEdit prefills name/amount/unit/notes and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'medication-1', serverId: 5, childId: 'c1', type: 'medication', time: NOW - 20 * M, name: 'Ibuprofen', dosage: 5, dosageUnit: 'mL', notes: 'evening', tags: [] },
+      ],
+    });
+    s().openEdit('medication-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.medName).toBe('Ibuprofen');
+    expect(s().te.medDosage).toBe(5);
+    expect(s().te.medUnit).toBe('mL');
+    expect(s().te.notes).toBe('evening');
+    expect(s().te.agoMin).toBe(20);
+  });
+});
+
+describe('cures (local-only medication regimens)', () => {
+  const DAY = 86400000;
+  const cure = (over: Partial<Cure> = {}): Cure => ({
+    id: 'cure-1',
+    childId: 'c1',
+    name: 'Paracetamol',
+    scheduleMode: 'everyHours',
+    everyHours: 6,
+    dosage: 2.5,
+    dosageUnit: 'mL',
+    fromDate: NOW - 5 * DAY,
+    toDate: undefined,
+    active: true,
+    ...over,
+  });
+
+  it('addCure prepends, updateCure replaces by id, deleteCure removes', () => {
+    s().addCure(cure());
+    s().addCure(cure({ id: 'cure-2', name: 'Vitamin D' }));
+    expect(s().cures.map((c) => c.id)).toEqual(['cure-2', 'cure-1']);
+
+    s().updateCure(cure({ id: 'cure-1', name: 'Ibuprofen' }));
+    expect(s().cures.find((c) => c.id === 'cure-1')?.name).toBe('Ibuprofen');
+
+    s().deleteCure('cure-2');
+    expect(s().cures.map((c) => c.id)).toEqual(['cure-1']);
+  });
+
+  it('mutating cures persists them via the subscribe (never uploads)', async () => {
+    s().addCure(cure());
+    await flush();
+    expect((h.cures as { id: string }[]).map((c) => c.id)).toEqual(['cure-1']);
+    // Local-only: nothing was pushed to the server.
+    expect(h.pushed).toHaveLength(0);
+  });
+
+  it('deleteCure closes the editor when it is open on that cure', () => {
+    useAppStore.setState({ cures: [cure()], cureEditor: { editingId: 'cure-1' } });
+    s().deleteCure('cure-1');
+    expect(s().cureEditor).toBeNull();
+  });
+
+  it('openMedicationLog opens the manual form directly when there are no active cures today', () => {
+    useAppStore.setState({ cures: [] });
+    s().openMedicationLog();
+    expect(s().curePicker).toBeNull();
+    expect(s().sheet).toEqual({ type: 'medication' });
+  });
+
+  it('openMedicationLog opens the picker when the child has an active cure covering today', () => {
+    useAppStore.setState({ cures: [cure()] });
+    s().openMedicationLog();
+    expect(s().curePicker).toEqual({ open: true });
+    expect(s().sheet).toBeNull();
+  });
+
+  it('openMedicationLog ignores a paused cure and a sibling\'s cure (per-child, active-only)', () => {
+    useAppStore.setState({
+      cures: [cure({ id: 'paused', active: false }), cure({ id: 'sibling', childId: 'c2' })],
+    });
+    s().openMedicationLog();
+    expect(s().curePicker).toBeNull();
+    expect(s().sheet).toEqual({ type: 'medication' });
+  });
+
+  it('openMedicationLog ignores a cure whose range ended before today', () => {
+    useAppStore.setState({ cures: [cure({ toDate: NOW - 2 * DAY })] });
+    s().openMedicationLog();
+    expect(s().curePicker).toBeNull();
+    expect(s().sheet).toEqual({ type: 'medication' });
+  });
+
+  it('logMedicationFromCure seeds name/dosage/unit + interval and opens the medication form', () => {
+    useAppStore.setState({ cures: [cure()], curePicker: { open: true } });
+    s().logMedicationFromCure('cure-1');
+    expect(s().sheet).toEqual({ type: 'medication' });
+    expect(s().curePicker).toBeNull();
+    expect(s().te.medName).toBe('Paracetamol');
+    expect(s().te.medDosage).toBe(2.5);
+    expect(s().te.medUnit).toBe('mL');
+    expect(s().te.medNextDoseIntervalSec).toBe(6 * 3600); // everyHours * 3600
+  });
+
+  it('logMedicationFromCure from a times-of-day cure leaves the interval unset', () => {
+    useAppStore.setState({
+      cures: [cure({ scheduleMode: 'timesOfDay', timesOfDay: ['morning', 'evening'], everyHours: undefined })],
+    });
+    s().logMedicationFromCure('cure-1');
+    expect(s().te.medName).toBe('Paracetamol');
+    expect(s().te.medNextDoseIntervalSec).toBeUndefined();
+  });
+
+  it('a dose logged from an interval cure saves an entry carrying nextDoseIntervalSec', () => {
+    useAppStore.setState({ cures: [cure({ everyHours: 8 })] });
+    s().logMedicationFromCure('cure-1');
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.type).toBe('medication');
+    expect(e.name).toBe('Paracetamol');
+    expect(e.dosage).toBe(2.5);
+    expect(e.dosageUnit).toBe('mL');
+    expect(e.nextDoseIntervalSec).toBe(8 * 3600);
+  });
+
+  it('survive disconnect (user data, unlike the synced entity store)', () => {
+    useAppStore.setState({ cures: [cure()] });
+    s().disconnect();
+    expect(s().cures.map((c) => c.id)).toEqual(['cure-1']);
   });
 });
 

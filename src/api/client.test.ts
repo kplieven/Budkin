@@ -4,6 +4,7 @@ import {
   BabybuddyClient,
   bathToNoteBody,
   childBody,
+  durationToSec,
   HIDDEN_TAGS,
   isBathNote,
   isHiddenTag,
@@ -15,6 +16,7 @@ import {
   noteToMilestoneEntry,
   noteToNoteBody,
   noteToNoteEntry,
+  secToDuration,
 } from '@/api/client';
 import type { BathEntry, Child, Entry, MilestoneEntry, NoteEntry, PickedPhoto } from '@/types/models';
 
@@ -725,6 +727,104 @@ describe('temperature serialization', () => {
     stubFetch({ count: 1, next: null, previous: null, results: [{ id: 77, ...create[0].body }] });
     const back = (await client().listTemperature('c1'))[0];
     expect(back).toMatchObject({ type: 'temperature', time: TIME, value: 38.1, notes: 'evening', serverId: 77 });
+  });
+});
+
+// Medication is a POINT event on Baby Buddy's /api/medication/ resource: a
+// required name + a single `time`, plus an optional dosage (number) + free-text
+// dosage_unit + next_dose_interval duration + notes + tags. These exercise
+// buildBody (via createEntry/updateEntry) and the listMedication mapper, plus the
+// duration <-> seconds helpers the interval field rides on.
+describe('medication serialization', () => {
+  const ISO = '2026-03-04T18:30:00.000Z';
+
+  function stubFetch(response: unknown) {
+    const calls: { url: string; body: any }[] = [];
+    const fn = vi.fn(async (url: string, init?: RequestInit) => {
+      const raw = init?.body;
+      calls.push({ url, body: typeof raw === 'string' ? JSON.parse(raw) : raw });
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+  const client = () => new BabybuddyClient('https://x', 't');
+
+  it('durationToSec parses the DRF [D ]HH:MM:SS shape and secToDuration reverses it', () => {
+    expect(durationToSec('06:00:00')).toBe(21600);
+    expect(durationToSec('00:30:00')).toBe(1800);
+    expect(durationToSec('1 12:00:00')).toBe(129600);
+    expect(durationToSec('900')).toBe(900); // bare-number fallback
+    expect(durationToSec('nonsense')).toBeUndefined();
+    expect(secToDuration(21600)).toBe('06:00:00');
+    expect(secToDuration(1800)).toBe('00:30:00');
+    expect(secToDuration(129600)).toBe('1 12:00:00');
+  });
+
+  it('buildBody sends name/dosage/dosage_unit to the medication endpoint on create', async () => {
+    const calls = stubFetch({ id: 1 });
+    const entry: Entry = { id: 'md1', childId: 'c1', type: 'medication', time: TIME, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', notes: 'for the fever', tags: ['Fussy'] };
+    await client().createEntry(entry, 1);
+    expect(calls[0].url).toContain('/medication/');
+    expect(calls[0].body).toEqual({ child: 1, time: ISO, name: 'Paracetamol', dosage: 2.5, dosage_unit: 'mL', notes: 'for the fever', tags: ['Fussy'] });
+  });
+
+  it('buildBody omits unset dosage/unit/interval but always sends notes (blankable, like temperature)', async () => {
+    const calls = stubFetch({ id: 1 });
+    const entry: Entry = { id: 'md2', childId: 'c1', type: 'medication', time: TIME, name: 'Vitamin D', tags: [] };
+    await client().createEntry(entry, 1);
+    expect(calls[0].body).toEqual({ child: 1, time: ISO, name: 'Vitamin D', notes: '', tags: [] });
+    // numeric/duration fields whose server nullability is unknown are omitted when unset
+    for (const k of ['dosage', 'dosage_unit', 'next_dose_interval']) {
+      expect(k in calls[0].body).toBe(false);
+    }
+    // notes is always present, so an empty string clears it on a PATCH edit
+    expect(calls[0].body.notes).toBe('');
+  });
+
+  it('buildBody serializes next_dose_interval as a duration string when set', async () => {
+    const calls = stubFetch({ id: 1 });
+    const entry: Entry = { id: 'md3', childId: 'c1', type: 'medication', time: TIME, name: 'Ibuprofen', dosage: 5, dosageUnit: 'mL', nextDoseIntervalSec: 21600, tags: [] };
+    await client().createEntry(entry, 1);
+    expect(calls[0].body.next_dose_interval).toBe('06:00:00');
+  });
+
+  it('listMedication maps id/serverId/time/name/dosage/unit/interval/notes/tags', async () => {
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 20, time: ISO, name: 'Paracetamol', dosage: '2.50', dosage_unit: 'mL', next_dose_interval: '06:00:00', notes: 'for the fever', tags: ['Fussy'] }] });
+    const [e] = await client().listMedication('c1');
+    expect(e).toEqual({
+      id: 'medication-20',
+      serverId: 20,
+      childId: 'c1',
+      type: 'medication',
+      time: TIME,
+      name: 'Paracetamol',
+      dosage: 2.5,
+      dosageUnit: 'mL',
+      nextDoseIntervalSec: 21600,
+      notes: 'for the fever',
+      tags: ['Fussy'],
+    });
+  });
+
+  it('listMedication drops empty dosage/unit/notes to undefined and reads object-shaped tags', async () => {
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 21, time: ISO, name: 'Vitamin D', dosage: null, dosage_unit: '', notes: '', tags: [{ name: 'Sleepy' }] }] });
+    const [e] = await client().listMedication('c1');
+    expect(e.dosage).toBeUndefined();
+    expect(e.dosageUnit).toBeUndefined();
+    expect(e.nextDoseIntervalSec).toBeUndefined();
+    expect(e.notes).toBeUndefined();
+    expect(e.tags).toEqual(['Sleepy']);
+  });
+
+  it('round-trips a dose through buildBody -> server echo -> list mapper', async () => {
+    const entry: Entry = { id: 'md4', childId: 'c1', type: 'medication', time: TIME, name: 'Ibuprofen', dosage: 5, dosageUnit: 'mL', notes: 'evening', tags: [] };
+    const create = stubFetch({ id: 88 });
+    await client().createEntry(entry, 1);
+    stubFetch({ count: 1, next: null, previous: null, results: [{ id: 88, ...create[0].body }] });
+    const back = (await client().listMedication('c1'))[0];
+    expect(back).toMatchObject({ type: 'medication', time: TIME, name: 'Ibuprofen', dosage: 5, dosageUnit: 'mL', notes: 'evening', serverId: 88 });
   });
 });
 

@@ -118,6 +118,13 @@ export function detailFor(item: TimelineItem): string {
       const base = `${fmtValue('temperature', e.value, system)} ${unitLabel('temperature', system)}`;
       return e.notes ? `${base} · ${e.notes}` : base;
     }
+    case 'medication': {
+      // name, then the amount + free-text unit (e.g. "Paracetamol · 5 mL"). The
+      // unit is Baby Buddy's free-text `dosage_unit`, NOT a units.ts quantity, so
+      // it is shown verbatim and never converted.
+      const dose = e.dosage != null ? (e.dosageUnit ? `${e.dosage} ${e.dosageUnit}` : String(e.dosage)) : '';
+      return [e.name, dose, e.notes ?? ''].filter(Boolean).join(' · ');
+    }
     case 'note':
       return e.text;
     case 'milestone':
