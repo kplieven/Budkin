@@ -4,6 +4,7 @@ import { Pressable, View, type ViewStyle } from 'react-native';
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
+import { SyncBadge } from '@/components/SyncBadge';
 import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
@@ -56,6 +57,9 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
   const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
+  // Sync badges only mean something when mirroring to a server; hidden in local
+  // mode, exactly as on the Timers screen. Primitive selector, stable reference.
+  const isServer = useAppStore((s) => s.connection?.mode === 'server');
   // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
   // Returns a store element, not a derived object, so the reference is stable.
@@ -195,7 +199,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             key={tm.id}
             onPress={() => router.navigate('/timers')}
             accessibilityRole="button"
-            accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running, view timers`}
+            accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running${isServer ? (tm.serverId != null ? ', synced' : ', pending sync') : ''}, view timers`}
             style={(s) => [
               {
                 backgroundColor: t.surface,
@@ -220,6 +224,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
                 {fmtDur((now - tm.start) / 60000)}
               </Txt>
+              {isServer && <SyncBadge synced={tm.serverId != null} />}
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <Txt unselectable weight={600} size={13.5} color={t.dim}>
