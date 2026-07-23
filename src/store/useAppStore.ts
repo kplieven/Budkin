@@ -2142,6 +2142,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Seed a normal baseline so the decimal input opens on a sensible value.
       te.temperature = 37.0;
     }
+    if (type === 'medication') {
+      // Blank name/amount — the medication inputs open empty; the unit is unset
+      // until the user picks a chip or types one.
+      te.medName = '';
+    }
     if (type === 'note') {
       // Blank body — the multiline note input opens empty.
       te.noteText = '';
@@ -2162,6 +2167,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       entry.type === 'diaper' ||
       entry.type === 'bath' ||
       entry.type === 'temperature' ||
+      entry.type === 'medication' ||
       entry.type === 'note' ||
       entry.type === 'milestone';
     const te: TimeEntryState = {
@@ -2187,6 +2193,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.temperature = entry.value;
+    } else if (entry.type === 'medication') {
+      // Notes are seeded above (medication isn't bath/note/milestone); hydrate
+      // the name + amount + free-text unit from the existing entry.
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.medName = entry.name;
+      te.medDosage = entry.dosage;
+      te.medUnit = entry.dosageUnit;
     } else if (entry.type === 'note') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -2616,6 +2630,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // A general note whose body trims to empty isn't worth saving — no-op and
     // leave the sheet open (the X closes it) so a stray tap can't create a blank.
     if (type === 'note' && !s.te.noteText?.trim()) return;
+    // A medication needs a name to be worth saving — same gate as a note's body
+    // (the amount + unit stay optional). No-op and leave the sheet open.
+    if (type === 'medication' && !s.te.medName?.trim()) return;
     const te = s.te;
     const now = s.now;
     const childId = s.selectedChildId;
@@ -2698,6 +2715,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
         type: 'temperature',
         time: teEnd(te, now),
         value: te.temperature ?? 37.0,
+        notes: te.notes?.trim() || undefined,
+        tags,
+      };
+    } else if (type === 'medication') {
+      // medication (point) — a real Baby Buddy /api/medication/ resource. Name is
+      // guaranteed non-empty by the guard above; amount + free-text unit are
+      // optional. `nextDoseIntervalSec` is left unset (set by the reminder feature).
+      entry = {
+        id,
+        childId,
+        type: 'medication',
+        time: teEnd(te, now),
+        name: te.medName?.trim() ?? '',
+        dosage: te.medDosage,
+        dosageUnit: te.medUnit?.trim() || undefined,
         notes: te.notes?.trim() || undefined,
         tags,
       };

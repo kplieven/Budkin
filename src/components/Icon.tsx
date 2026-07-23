@@ -17,6 +17,7 @@ export type IconName =
   | 'solid'
   | 'tummy'
   | 'temperature'
+  | 'medication'
   | 'note'
   | 'milestone'
   | 'timer'
@@ -144,6 +145,14 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
           <Rect x={10} y={3} width={4} height={13} rx={2} fill={color} />
           <Circle cx={12} cy={17.5} r={4} fill={color} />
           <Path d="M12 8.5v7" stroke={detail} strokeWidth={1.6} strokeLinecap="round" />
+        </Svg>
+      );
+    case 'medication':
+      // A capsule pill on the diagonal, split into two halves by a divider line.
+      return (
+        <Svg {...common}>
+          <Rect x={3.5} y={9} width={17} height={6} rx={3} fill={color} transform="rotate(45 12 12)" />
+          <Path d="M9.7 14.3l4.6-4.6" stroke={detail} strokeWidth={1.5} strokeLinecap="round" />
         </Svg>
       );
     case 'milestone':

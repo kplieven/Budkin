@@ -781,6 +781,58 @@ describe('temperature tracking', () => {
   });
 });
 
+describe('medication tracking', () => {
+  it('openSheet: point shape, blank name', () => {
+    s().openSheet('medication');
+    const te = s().te;
+    expect(te.shape).toBe('point');
+    expect(te.agoMin).toBe(0);
+    expect(te.medName).toBe('');
+  });
+
+  it('save builds a point medication entry (name + amount + unit + trimmed notes) and pushes it', async () => {
+    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    s().openSheet('medication');
+    s().setTE({ medName: '  Paracetamol  ', medDosage: 2.5, medUnit: 'mL', notes: '  for the fever  ' });
+    s().save();
+    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.type).toBe('medication');
+    expect(e.time).toBe(NOW);
+    expect(e.name).toBe('Paracetamol');
+    expect(e.dosage).toBe(2.5);
+    expect(e.dosageUnit).toBe('mL');
+    expect(e.notes).toBe('for the fever');
+    expect(e.childId).toBe('c1');
+    expect(s().sheet).toBeNull();
+    await flush();
+    expect(h.pushed).toHaveLength(1);
+    expect((h.pushed[0] as Extract<Entry, { type: 'medication' }>).type).toBe('medication');
+  });
+
+  it('save is a no-op when the name is blank, even with an amount entered', () => {
+    s().openSheet('medication');
+    s().setTE({ medName: '   ', medDosage: 5, medUnit: 'mL' });
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().sheet).not.toBeNull(); // sheet stays open like a blank note
+  });
+
+  it('openEdit prefills name/amount/unit/notes and treats it as a point event', () => {
+    useAppStore.setState({
+      entries: [
+        { id: 'medication-1', serverId: 5, childId: 'c1', type: 'medication', time: NOW - 20 * M, name: 'Ibuprofen', dosage: 5, dosageUnit: 'mL', notes: 'evening', tags: [] },
+      ],
+    });
+    s().openEdit('medication-1');
+    expect(s().te.shape).toBe('point');
+    expect(s().te.medName).toBe('Ibuprofen');
+    expect(s().te.medDosage).toBe(5);
+    expect(s().te.medUnit).toBe('mL');
+    expect(s().te.notes).toBe('evening');
+    expect(s().te.agoMin).toBe(20);
+  });
+});
+
 describe('general notes', () => {
   it('openSheet: point shape, empty note body', () => {
     s().openSheet('note');

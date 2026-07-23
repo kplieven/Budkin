@@ -70,6 +70,12 @@ export interface TimeEntryState {
   wash?: 'small' | 'big';
   /** temperature (point): the numeric reading being entered (°C) */
   temperature?: number;
+  /** medication (point): the medication name being entered (required to save) */
+  medName?: string;
+  /** medication (point): the amount given (paired with `medUnit`) */
+  medDosage?: number;
+  /** medication (point): the free-text dosage unit (e.g. "mg", "mL") */
+  medUnit?: string;
   /** note (point): the note BODY being edited — the primary free-text field of a
    *  general note. Distinct from `notes` (the secondary per-entry annotation). */
   noteText?: string;

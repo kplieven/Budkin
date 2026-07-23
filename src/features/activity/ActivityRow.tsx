@@ -15,11 +15,12 @@ import { detailFor } from './detail';
 export function ActivityRow({ entry, now, onPress }: { entry: Entry; now: number; onPress: () => void }) {
   const t = useTheme();
   // Duration activities show their START time; point events (diaper, bath,
-  // temperature, note) show their single time.
+  // temperature, medication, note) show their single time.
   const ts =
     entry.type === 'diaper' ||
     entry.type === 'bath' ||
     entry.type === 'temperature' ||
+    entry.type === 'medication' ||
     entry.type === 'note' ||
     entry.type === 'milestone'
       ? entry.time

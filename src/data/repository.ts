@@ -75,7 +75,7 @@ export async function loadFromServer(
 
   let entries: Entry[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt, notesData, temp] = await Promise.all([
+    const [f, s, d, p, tt, notesData, temp, med] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
@@ -84,8 +84,9 @@ export async function loadFromServer(
       // ONE /api/notes/ request, partitioned into milestones + baths + general notes.
       client.listChildNotes(selectedChildId).catch(() => ({ baths: [], milestones: [], notes: [] })),
       client.listTemperature(selectedChildId).catch(() => []),
+      client.listMedication(selectedChildId).catch(() => []),
     ]);
-    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp];
+    entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp, ...med];
   }
 
   const lastFeeding = entries

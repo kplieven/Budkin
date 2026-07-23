@@ -79,6 +79,7 @@ export const ACTIVITY_LABEL: Record<ActivityType, string> = {
   tummy: 'Tummy time',
   bath: 'Bath',
   temperature: 'Temperature',
+  medication: 'Medication',
   note: 'Note',
   milestone: 'Milestone',
 };
@@ -91,6 +92,7 @@ export const ACTIVITY_SHAPE: Record<ActivityType, TimeEntryShape> = {
   tummy: 'interval',
   bath: 'point',
   temperature: 'point',
+  medication: 'point',
   note: 'point',
   milestone: 'point',
 };
@@ -104,11 +106,12 @@ export const DEFAULT_DURATION_MIN: Record<ActivityType, number> = {
   diaper: 0,
   bath: 0,
   temperature: 0,
+  medication: 0,
   note: 0,
   milestone: 0,
 };
 
-export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath', 'temperature'];
+export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath', 'temperature', 'medication'];
 
 /** Activities a timer can be saved as. */
 export const TIMER_SAVE_OPTIONS: ActivityType[] = ['feeding', 'sleep', 'pumping', 'tummy'];
