@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -200,6 +200,60 @@ describe('nextWashKind', () => {
     expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
     expect(nextWashKind(smalls(30), 99)).toBe('big');
     expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
+  });
+});
+
+describe('bathGivenToday', () => {
+  const NOON = new Date(2026, 0, 15, 12, 0, 0).getTime(); // 2026-01-15, local noon
+  const bath = (time: number, childId = 'c1'): Entry => ({
+    id: `b-${time}`,
+    childId,
+    type: 'bath',
+    time,
+    wash: 'small',
+    tags: [],
+  });
+
+  it('is true when a wash is logged earlier the same local day', () => {
+    const morning = new Date(2026, 0, 15, 7, 30, 0).getTime();
+    expect(bathGivenToday([bath(morning)], NOON)).toBe(true);
+  });
+
+  it('is true even for a wash logged later the same day than now', () => {
+    // Same wall-clock day is what counts, not whether it is before `now`.
+    const evening = new Date(2026, 0, 15, 20, 0, 0).getTime();
+    expect(bathGivenToday([bath(evening)], NOON)).toBe(true);
+  });
+
+  it('is false with no washes at all', () => {
+    expect(bathGivenToday([], NOON)).toBe(false);
+  });
+
+  it('is false when the only wash was yesterday', () => {
+    const yesterday = new Date(2026, 0, 14, 8, 0, 0).getTime();
+    expect(bathGivenToday([bath(yesterday)], NOON)).toBe(false);
+  });
+
+  it('resets at local midnight: a wash one minute before midnight is not today', () => {
+    const justBeforeMidnight = new Date(2026, 0, 14, 23, 59, 0).getTime();
+    const justAfterMidnight = new Date(2026, 0, 15, 0, 1, 0).getTime();
+    expect(bathGivenToday([bath(justBeforeMidnight)], NOON)).toBe(false);
+    expect(bathGivenToday([bath(justAfterMidnight)], NOON)).toBe(true);
+  });
+
+  it('ignores non-bath entries logged today', () => {
+    const feed: Entry = { id: 'f', childId: 'c1', type: 'feeding', start: NOON, end: NOON + 1, feedType: 'breast', method: 'left', amount: null, tags: [] };
+    const diaper: Entry = { id: 'd', childId: 'c1', type: 'diaper', time: NOON, wet: true, solid: false, color: null, tags: [] };
+    expect(bathGivenToday([feed, diaper], NOON)).toBe(false);
+  });
+
+  it('respects child scoping when composed with entriesForChild', () => {
+    // The helper reads already-scoped entries; a sibling's wash today must not
+    // leak in once scoping is applied upstream.
+    const mine = bath(new Date(2026, 0, 15, 9, 0, 0).getTime(), 'c1');
+    const sibling = bath(new Date(2026, 0, 15, 9, 0, 0).getTime(), 'c2');
+    expect(bathGivenToday(entriesForChild([mine, sibling], 'c1'), NOON)).toBe(true);
+    expect(bathGivenToday(entriesForChild([sibling], 'c1'), NOON)).toBe(false);
   });
 });
 

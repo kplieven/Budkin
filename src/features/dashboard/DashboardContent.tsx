@@ -11,7 +11,7 @@ import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
+import { bathGivenToday, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -100,7 +100,13 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
   const startSideLabel = nextStartSide(childEntries) === 'left' ? 'Left' : 'Right';
-  const washHint = nextWashKind(childEntries, smallWashesPerBig) === 'big' ? 'Big wash due today' : 'Small wash due';
+  // Today's-wash "checked" state: >=1 bath on today's local date. `now`-keyed, so
+  // it clears itself at local midnight without any reset logic.
+  const washedToday = bathGivenToday(childEntries, now);
+  const washKind = nextWashKind(childEntries, smallWashesPerBig);
+  // Once a wash is logged today the tile switches to the "done" copy; otherwise
+  // it keeps the forward-looking "due" hint.
+  const washHint = washedToday ? 'Washed today' : washKind === 'big' ? 'Big wash due today' : 'Small wash due';
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,
@@ -132,6 +138,12 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       color: t.activity.diaper,
       value: diaperAgo != null ? fmtAgoShort(diaperAgo) : '—',
       sub: dia ? (dia.solid ? 'ago · solid' : 'ago · wet') : 'none',
+    },
+    {
+      label: 'Bath',
+      color: t.activity.bath,
+      value: washedToday ? 'Done' : 'Due',
+      sub: washedToday ? 'washed today' : washKind === 'big' ? 'big wash' : 'small wash',
     },
   ];
 
@@ -240,6 +252,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             hint={activityHint[a]}
             widthStyle={tileStyle}
             onPress={() => openSheet(a)}
+            done={a === 'bath' ? washedToday : undefined}
           />
         ))}
         {/* Start timer tile */}
@@ -288,6 +301,7 @@ function ActivityTile({
   hint,
   widthStyle,
   onPress,
+  done,
 }: {
   label: string;
   color: string;
@@ -295,17 +309,22 @@ function ActivityTile({
   hint: string;
   widthStyle: ViewStyle;
   onPress: () => void;
+  /** Marks the tile "done for today" with a check-circle badge and an accent
+   *  border. `undefined` for tiles that have no done state, so only a
+   *  done-capable tile carries the checked accessibility semantics. */
+  done?: boolean;
 }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityState={done === undefined ? undefined : { checked: done }}
       style={(s) => [
         {
           backgroundColor: t.surface,
           borderWidth: 1.5,
-          borderColor: t.line,
+          borderColor: done ? hexA(color, 0.4) : t.line,
           borderRadius: 22,
           paddingVertical: 15,
           paddingHorizontal: 15,
@@ -317,6 +336,23 @@ function ActivityTile({
         isHovered(s) && { borderColor: hexA(color, 0.55), boxShadow: t.shadow },
       ]}
     >
+      {done ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
+            width: 24,
+            height: 24,
+            borderRadius: 999,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: color,
+          }}
+        >
+          <Icon name="check" color={t.onActivity} size={15} />
+        </View>
+      ) : null}
       <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
         <Icon name={icon} color={color} size={25} />
       </View>
