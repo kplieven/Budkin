@@ -150,9 +150,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     },
   ];
 
-  // Newest timer (timers are appended to the end of the list).
-  const runningTimer = timers[timers.length - 1];
-
   return (
     <>
       <MilestoneNudge />
@@ -188,11 +185,59 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         ))}
       </View>
 
-      {/* live timer card */}
-      {runningTimer && (
+      {/* live-timer cards + start-timer card — one full-width card each, same
+          card style. Every running timer shows (global list, so a born
+          sibling's timer stays visible even while another child is selected),
+          then the Start-timer card sits below as the "start another" action. */}
+      <View style={{ gap: 9, marginTop: 4 }}>
+        {timers.map((tm) => (
+          <Pressable
+            key={tm.id}
+            onPress={() => router.navigate('/timers')}
+            accessibilityRole="button"
+            accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running, view timers`}
+            style={(s) => [
+              {
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                borderRadius: 20,
+                paddingVertical: 15,
+                paddingHorizontal: 17,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 11,
+                cursor: 'pointer',
+              },
+              isHovered(s) && { borderColor: t.line2 },
+            ]}
+          >
+            <PulsingDot color={t.activity[tm.saveAs]} />
+            <View style={{ flex: 1 }}>
+              <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
+                {ACTIVITY_LABEL[tm.saveAs]} running
+              </Txt>
+              <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
+                {fmtDur((now - tm.start) / 60000)}
+              </Txt>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Txt unselectable weight={600} size={13.5} color={t.dim}>
+                View
+              </Txt>
+              <Icon name="chevron-right" color={t.dim} size={16} />
+            </View>
+          </Pressable>
+        ))}
+
+        {/* Start-timer card */}
         <Pressable
-          onPress={() => router.navigate('/timers')}
+          onPress={() => {
+            startQuickTimer();
+            router.navigate('/timers');
+          }}
           accessibilityRole="button"
+          accessibilityLabel="Start timer, save as any activity"
           style={(s) => [
             {
               backgroundColor: t.surface,
@@ -201,32 +246,28 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               borderRadius: 20,
               paddingVertical: 15,
               paddingHorizontal: 17,
-              marginTop: 4,
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 11,
+              gap: 13,
               cursor: 'pointer',
             },
-            isHovered(s) && { borderColor: t.line2 },
+            isHovered(s) && { borderColor: hexA(t.primary, 0.55), boxShadow: t.shadow },
           ]}
         >
-          <PulsingDot color={t.activity[runningTimer.saveAs]} />
+          <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: hexA(t.primary, 0.16), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="timer" color={t.primary} size={23} />
+          </View>
           <View style={{ flex: 1 }}>
-            <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
-              {ACTIVITY_LABEL[runningTimer.saveAs]} running
+            <Txt unselectable weight={700} size={17} tracking={-0.2}>
+              Start timer
             </Txt>
-            <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[runningTimer.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
-              {fmtDur((now - runningTimer.start) / 60000)}
+            <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 1 }}>
+              Save as any activity
             </Txt>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Txt unselectable weight={600} size={13.5} color={t.dim}>
-              View
-            </Txt>
-            <Icon name="chevron-right" color={t.dim} size={16} />
-          </View>
+          <Icon name="plus" color={t.primary} size={20} />
         </Pressable>
-      )}
+      </View>
 
       {/* section label */}
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 18, marginBottom: 12, marginHorizontal: 4 }}>
@@ -261,40 +302,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             done={a === 'bath' ? washedToday : undefined}
           />
         ))}
-        {/* Start timer tile */}
-        <Pressable
-          onPress={() => {
-            startQuickTimer();
-            router.navigate('/timers');
-          }}
-          accessibilityRole="button"
-          style={(s) => [
-            {
-              backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
-              borderWidth: 1.5,
-              borderColor: hexA(t.primary, 0.5),
-              borderStyle: 'dashed',
-              borderRadius: 22,
-              paddingVertical: 15,
-              paddingHorizontal: 15,
-              minHeight: 104,
-              gap: 3,
-              cursor: 'pointer',
-            },
-            tileStyle,
-            isHovered(s) && { borderColor: hexA(t.primary, 0.75), boxShadow: t.shadow },
-          ]}
-        >
-          <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
-            <Icon name="timer" color={t.text} size={24} />
-          </View>
-          <Txt unselectable weight={700} size={17} tracking={-0.2}>
-            Start timer
-          </Txt>
-          <Txt unselectable weight={500} size={12.5} color={t.dim}>
-            Save as any activity
-          </Txt>
-        </Pressable>
       </View>
     </>
   );
