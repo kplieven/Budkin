@@ -19,7 +19,7 @@ const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet
 // Quick-pick dosage units, same set as the medication log form. `dosage_unit` is
 // free text, so these are shortcuts; "+ Other" takes anything else. µg uses the
 // real micro sign.
-const MED_UNITS = ['mg', 'mL', 'µg', 'IU', 'drops', 'tablet', 'puff'];
+const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 
 const TIMES_OF_DAY: [CureTimeOfDay, string][] = [
   ['morning', 'Morning'],
@@ -296,7 +296,7 @@ function Inner({ editingId }: { editingId: string | null }) {
               setOtherText(v);
               setUnit(v.trim() ? v : undefined);
             }}
-            placeholder="Custom unit, e.g. mL/kg…"
+            placeholder="Custom unit, e.g. ml/kg…"
             placeholderTextColor={t.faint}
             style={{ ...inputStyle, minHeight: 44, fontSize: 14 }}
           />
