@@ -47,6 +47,7 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
+import { loadCures, saveCures } from '@/data/cures';
 import { loadMilestonePrompts, saveMilestonePrompts } from '@/data/milestonePrompts';
 import {
   addPendingOp,
@@ -70,6 +71,7 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import {
+  activeCuresForChildToday,
   clampMinuteOfDay,
   clampSmallWashesPerBig,
   entriesForChild,
@@ -81,6 +83,7 @@ import {
   overruleLasted,
   reorder,
   SMALL_WASHES_PER_BIG_DEFAULT,
+  startOfDay,
   teEnd,
   teStart,
 } from '@/store/selectors';
@@ -88,6 +91,7 @@ import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
   Child,
+  Cure,
   Entry,
   FeedMethod,
   FeedType,
@@ -162,6 +166,12 @@ interface AppState {
    *  sheets, so its overlay anchors to the viewport, not the page). `log` names
    *  a catalog key to mark reached; `edit` names an existing milestone entry. */
   milestoneSheet: { mode: 'log'; key: string } | { mode: 'edit'; id: string } | null;
+  /** true while the cure-picker sheet is open (tapping the Medication tile when
+   *  the selected child has active cures today; picks a cure to pre-fill a dose). */
+  curePicker: { open: boolean } | null;
+  /** Cure create/edit sheet: `editingId` null = creating a new cure, otherwise
+   *  the id of the cure being edited. null (the field itself) = closed. */
+  cureEditor: { editingId: string | null } | null;
 
   // data
   selectedChildId: string;
@@ -173,6 +183,10 @@ interface AppState {
   entries: Entry[];
   timers: Timer[];
   measurements: Measurement[];
+  /** Per-child medication regimens ("cures"). LOCAL ONLY, never synced (no push
+   *  plumbing, like timers/prefs). Persisted via src/data/cures; survives
+   *  disconnect (user data, not the synced entity store). */
+  cures: Cure[];
   lastFeed: { feedType: FeedType; method: FeedMethod };
   insightsEntries: Entry[];
   insightsLoaded: boolean;
@@ -290,6 +304,25 @@ interface AppActions {
   closeMeasurementSheet: () => void;
   saveMeasurement: (value: number, date: number, notes?: string) => void;
   deleteMeasurement: (id: string) => void;
+
+  // cures (local-only medication regimens; never synced)
+  /** Add a fully-formed cure (the editor stamps id + childId). */
+  addCure: (cure: Cure) => void;
+  /** Replace a cure by id with an updated copy. */
+  updateCure: (cure: Cure) => void;
+  /** Remove a cure by id. */
+  deleteCure: (id: string) => void;
+  /** Open the cure create/edit sheet: no id = create, an id = edit that cure. */
+  openCureEditor: (id?: string) => void;
+  closeCureEditor: () => void;
+  openCurePicker: () => void;
+  closeCurePicker: () => void;
+  /** Medication tile tap: open the cure picker when the selected child has an
+   *  active cure covering today, otherwise open the plain manual log form. */
+  openMedicationLog: () => void;
+  /** Seed the medication draft from a cure (name/dosage/unit, plus the next-dose
+   *  interval for an interval cure) and open the log form to confirm and save. */
+  logMedicationFromCure: (cureId: string) => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
   /** One press of the amount stepper: +1 or -1 step in the user's display
    *  units (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
@@ -857,6 +890,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   measurementSheet: null,
   editingMeasurementId: null,
   milestoneSheet: null,
+  curePicker: null,
+  cureEditor: null,
   answeredMilestonePrompts: {},
 
   selectedChildId: '',
@@ -864,6 +899,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   entries: [],
   timers: [],
   measurements: [],
+  cures: [],
   lastFeed: { feedType: 'breast', method: 'left' },
   insightsEntries: [],
   insightsLoaded: false,
@@ -977,6 +1013,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
+    // Cures are local-only user data (the server has no regimen record), so load
+    // them unconditionally here too, exactly like timers below. They survive
+    // disconnect, so this is the only path that restores them.
+    set({ cures: await loadCures() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -2201,6 +2241,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.medName = entry.name;
       te.medDosage = entry.dosage;
       te.medUnit = entry.dosageUnit;
+      // Carry any next-dose interval so re-saving an edit doesn't drop it.
+      te.medNextDoseIntervalSec = entry.nextDoseIntervalSec;
     } else if (entry.type === 'note') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -2471,6 +2513,50 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void addPendingOp({ op: 'delete', entity: 'measurement', kind: m.kind, serverId: m.serverId });
     }
   },
+
+  // --- cures (local-only medication regimens) ---
+  // No server calls anywhere here: cures never sync. The `cures` subscribe at
+  // the bottom of this file persists every change to on-device storage, the same
+  // single-path way running timers are persisted.
+  addCure: (cure) => set((s) => ({ cures: [cure, ...s.cures] })),
+  updateCure: (cure) => set((s) => ({ cures: s.cures.map((c) => (c.id === cure.id ? cure : c)) })),
+  deleteCure: (id) =>
+    set((s) => ({
+      cures: s.cures.filter((c) => c.id !== id),
+      // If the sheet is open on the cure being deleted, close it.
+      cureEditor: s.cureEditor?.editingId === id ? null : s.cureEditor,
+    })),
+  openCureEditor: (id) => set({ cureEditor: { editingId: id ?? null } }),
+  closeCureEditor: () => set({ cureEditor: null }),
+  openCurePicker: () => set({ curePicker: { open: true } }),
+  closeCurePicker: () => set({ curePicker: null }),
+  openMedicationLog: () => {
+    const s = get();
+    // Scope to the selected child and to cures whose range covers today; if none,
+    // there is nothing to pick from, so skip straight to the manual form rather
+    // than opening an empty picker. `s.now` (not the wall clock) keys "today".
+    const active = activeCuresForChildToday(s.cures, s.selectedChildId, startOfDay(s.now));
+    if (active.length > 0) set({ curePicker: { open: true } });
+    else get().openSheet('medication');
+  },
+  logMedicationFromCure: (cureId) => {
+    const cure = get().cures.find((c) => c.id === cureId);
+    if (!cure) return;
+    // openSheet resets the draft to a blank medication form; seed it afterwards.
+    get().openSheet('medication');
+    const patch: Partial<TimeEntryState> = {
+      medName: cure.name,
+      medDosage: cure.dosage,
+      medUnit: cure.dosageUnit,
+    };
+    // Only an interval cure carries a next-dose interval onto the synced dose;
+    // a times-of-day cure leaves it unset.
+    if (cure.scheduleMode === 'everyHours' && cure.everyHours != null) {
+      patch.medNextDoseIntervalSec = cure.everyHours * 3600;
+    }
+    set((s) => ({ curePicker: null, te: { ...s.te, ...patch } }));
+  },
+
   setTE: (patch) =>
     set((s) => {
       const next = { ...s.te, ...patch };
@@ -2721,7 +2807,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (type === 'medication') {
       // medication (point) — a real Baby Buddy /api/medication/ resource. Name is
       // guaranteed non-empty by the guard above; amount + free-text unit are
-      // optional. `nextDoseIntervalSec` is left unset (set by the reminder feature).
+      // optional. `nextDoseIntervalSec` is seeded from an interval cure when the
+      // dose was logged from one (else undefined), and is preserved across edits.
       entry = {
         id,
         childId,
@@ -2730,6 +2817,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         name: te.medName?.trim() ?? '',
         dosage: te.medDosage,
         dosageUnit: te.medUnit?.trim() || undefined,
+        nextDoseIntervalSec: te.medNextDoseIntervalSec,
         notes: te.notes?.trim() || undefined,
         tags,
       };
@@ -3006,6 +3094,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 // updates keep the same reference, so this writes only on an actual change.
 useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
+});
+
+// Persist cures the same single-path way as timers: local-only user data, so a
+// reference change (add/update/delete replaces the array) writes it, and nothing
+// ever uploads it. Deliberately NOT cleared on disconnect (see `disconnect`).
+useAppStore.subscribe((state, prev) => {
+  if (state.cures !== prev.cures) void saveCures(state.cures);
 });
 
 // Persist the durable local-mode entities to on-device storage whenever they

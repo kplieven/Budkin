@@ -291,6 +291,49 @@ export interface Measurement {
   notes?: string;
 }
 
+/** The four coarse times of day a fixed-schedule cure can be dosed at. */
+export type CureTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
+
+/** How a cure repeats: at fixed times of day, or every N hours. */
+export type CureScheduleMode = 'timesOfDay' | 'everyHours';
+
+/**
+ * A medication regimen ("cure"): a per-child, on-device TEMPLATE the user fills
+ * a medication dose from. This is LOCAL ONLY and never syncs to Baby Buddy,
+ * which has no regimen resource (only individual doses via `MedicationEntry`).
+ * It stays local simply because it has no push plumbing, exactly like running
+ * timers and prefs. A dose logged from a cure is an ordinary `MedicationEntry`
+ * that syncs like any other.
+ */
+export interface Cure {
+  id: string;
+  /** the child this cure belongs to (the selected child at creation) */
+  childId: string;
+  /** medication name (required) */
+  name: string;
+  /** schedule mode: fixed times of day OR a repeating hourly interval */
+  scheduleMode: CureScheduleMode;
+  /** when `scheduleMode` is 'timesOfDay': the subset of times chosen */
+  timesOfDay?: CureTimeOfDay[];
+  /** when `scheduleMode` is 'everyHours': the interval in whole hours. A dose
+   *  logged from an interval cure stamps `next_dose_interval` = everyHours*3600. */
+  everyHours?: number;
+  /** dose amount (a plain number, paired with `dosageUnit`) */
+  dosage?: number;
+  /** free-text dosage unit (e.g. "mg", "mL"); never unit-converted */
+  dosageUnit?: string;
+  /** start date, epoch ms at local midnight */
+  fromDate: number;
+  /** end date, epoch ms at local midnight; undefined = open-ended */
+  toDate?: number;
+  /** free-text notes */
+  notes?: string;
+  /** what the cure is for (free text, optional) */
+  condition?: string;
+  /** false = paused: the cure drops out of the log picker but is kept */
+  active: boolean;
+}
+
 /**
  * The connected user's Baby Buddy account + general settings, as read from
  * `/api/profile/`. All fields optional — the server shape varies and some
