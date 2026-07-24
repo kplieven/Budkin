@@ -110,9 +110,16 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   return (
     <View>
       <View
-        ref={plotRef}
+        ref={(node: View | null) => {
+          plotRef.current = node;
+          // Web only: disable native scroll/zoom on the plot so a drag inside it
+          // moves only the guide. Native refs have no `style`, so the guard skips.
+          const el = node as unknown as { style?: { touchAction?: string } } | null;
+          if (el?.style) el.style.touchAction = 'none';
+        }}
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
+        onResponderTerminationRequest={() => false}
         onResponderGrant={(e) => measureThenScrub(e.nativeEvent.pageX)}
         onResponderMove={(e) => scrubToPageX(e.nativeEvent.pageX)}
       >
