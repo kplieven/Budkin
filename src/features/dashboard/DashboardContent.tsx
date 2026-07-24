@@ -10,6 +10,7 @@ import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
+import { DAY, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { bathGivenToday, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
@@ -53,6 +54,9 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const entries = useAppStore((s) => s.entries);
   const timers = useAppStore((s) => s.timers);
   const now = useAppStore((s) => s.now);
+  // The client-wide day boundary (set in Settings); "today's sleep" below counts
+  // over this window, not calendar midnight.
+  const originHour = useAppStore((s) => s.rhythmOriginHour);
   const openSheet = useAppStore((s) => s.openSheet);
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
@@ -90,9 +94,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .sort((a, b) => (b.end as number) - (a.end as number))[0];
 
+  const dayStartMs = windowStart(now, originHour);
   const todaySleepMin = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
-    .filter((e) => new Date(e.end as number).toDateString() === new Date(now).toDateString())
+    .filter((e) => (e.end as number) >= dayStartMs && (e.end as number) < dayStartMs + DAY)
     .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
 
   const dia = lastDiaper(childEntries);
