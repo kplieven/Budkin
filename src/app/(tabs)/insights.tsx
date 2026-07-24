@@ -127,20 +127,9 @@ export default function Insights() {
 
   const body = (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
-      <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 6 }}>
-        {RANGES.map(([lbl, d]) => (
-          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" accessibilityState={{ selected: rangeDays === d }} style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
-            <Txt weight={rangeDays === d ? 700 : 600} size={13} color={rangeDays === d ? t.text : t.dim}>{lbl}</Txt>
-          </Pressable>
-        ))}
-      </View>
-      <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginBottom: 14 }}>Applies to trend charts</Txt>
-      <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginBottom: 10, textTransform: 'uppercase' }}>
-        Sleep
-      </Txt>
-      <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 15 }}>
+      <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 15, marginBottom: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <Txt weight={700} size={16}>Sleep rhythm</Txt>
+          <Txt weight={700} size={16}>Rhythm</Txt>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <View style={{ width: 9, height: 9, borderRadius: 9, backgroundColor: t.activity.sleep }} />
@@ -161,6 +150,17 @@ export default function Insights() {
           </Txt>
         )}
       </View>
+      <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 6 }}>
+        {RANGES.map(([lbl, d]) => (
+          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" accessibilityState={{ selected: rangeDays === d }} style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
+            <Txt weight={rangeDays === d ? 700 : 600} size={13} color={rangeDays === d ? t.text : t.dim}>{lbl}</Txt>
+          </Pressable>
+        ))}
+      </View>
+      <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginBottom: 14 }}>Applies to trend charts</Txt>
+      <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginBottom: 10, textTransform: 'uppercase' }}>
+        Sleep
+      </Txt>
 
       {phaseNote ? (
         <View style={{ flexDirection: 'row', gap: 12, backgroundColor: t.chip, borderRadius: 18, padding: 15, marginTop: 12 }}>
