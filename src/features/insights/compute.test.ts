@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart, windowStart } from './compute';
 import type { Entry } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
@@ -59,6 +59,18 @@ describe('buildSleepHeatmap', () => {
 it('noonWindowStart bins a pre-noon time into the previous noon', () => {
   const w = noonWindowStart(at(2026, 6, 5, 3)); // 3am 5 Jul → noon 4 Jul
   expect(new Date(w).getDate()).toBe(4);
+});
+
+it('windowStart anchors the 24h window at the given origin hour', () => {
+  // origin 19 (7pm): 3pm is before 7pm → previous day's 7pm
+  const before = windowStart(at(2026, 6, 5, 15), 19);
+  expect(new Date(before).getDate()).toBe(4);
+  expect(new Date(before).getHours()).toBe(19);
+  // 8pm is after 7pm → same day's 7pm
+  const after = windowStart(at(2026, 6, 5, 20), 19);
+  expect(new Date(after).getDate()).toBe(5);
+  // origin 12 matches noonWindowStart
+  expect(windowStart(at(2026, 6, 5, 3), 12)).toBe(noonWindowStart(at(2026, 6, 5, 3)));
 });
 
 const feeding = (start: number): Entry => ({

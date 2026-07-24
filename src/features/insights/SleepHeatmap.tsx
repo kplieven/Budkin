@@ -6,12 +6,13 @@ import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
-import { DAY, noonWindowStart, type HeatRow } from './compute';
+import { DAY, windowStart, type HeatRow } from './compute';
 
-const HOUR_TICKS: [string, number][] = [['12:00', 0], ['18:00', 6], ['00:00', 12], ['06:00', 18], ['12:00', 24]];
 const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
+const TICK_HS = [0, 6, 12, 18, 24];
+const fmtHour = (hr: number) => `${String(hr).padStart(2, '0')}:00`;
 
-export function SleepHeatmap({ rows, width, now, runningSince }: { rows: HeatRow[]; width: number; now: number; runningSince?: number | null }) {
+export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12 }: { rows: HeatRow[]; width: number; now: number; runningSince?: number | null; originHour?: number }) {
   const t = useTheme();
   // Breathing pulse for the live "asleep now" bar. Declared before the early
   // return below so the hook order stays stable across renders (matches
@@ -32,16 +33,22 @@ export function SleepHeatmap({ rows, width, now, runningSince }: { rows: HeatRow
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
   const xAt = (h: number) => gx + (h / 24) * gw;
-  // Fraction of the current noon-to-noon window already elapsed; the remainder
-  // of the Today row hasn't happened yet, so it's dimmed as "yet to come".
-  const todayFrac = Math.min(1, Math.max(0, (now - noonWindowStart(now)) / DAY));
+  // Clock hour shown at offset `h` (0..24) from the window origin, and where
+  // clock-midnight falls inside the row. Midnight is the anchor line; when the
+  // origin doesn't put it on a 6h tick, it gets its own emphasized line + label.
+  const clockAt = (h: number) => (((originHour + h) % 24) + 24) % 24;
+  const midnightH = (24 - (originHour % 24)) % 24;
+  const midnightOnTick = midnightH % 6 === 0;
+  // Fraction of the current window already elapsed; the remainder of the Today
+  // row hasn't happened yet, so it's dimmed as "yet to come".
+  const todayFrac = Math.min(1, Math.max(0, (now - windowStart(now, originHour)) / DAY));
   const future = hexA('#000000', t.dark ? 0.32 : 0.08);
 
   // Live in-progress sleep: a distinct-accent bar on the Today row spanning the
-  // running timer's start up to now. A pre-noon start clamps to the row's left
-  // edge so it never spills onto the previous row. Length grows in the hourly
-  // steps of `now`; the breathing opacity supplies the "live" feel.
-  const win = noonWindowStart(now);
+  // running timer's start up to now. A start before the window origin clamps to
+  // the row's left edge so it never spills onto the previous row. Length grows
+  // in the hourly steps of `now`; the breathing opacity supplies the "live" feel.
+  const win = windowStart(now, originHour);
   const todayIdx = rows.findIndex((r) => r.offsetFromToday === 0);
   const liveX0 = Math.min(1, Math.max(0, (Math.max(win, runningSince ?? win) - win) / DAY));
   const liveX1 = todayFrac;
@@ -50,9 +57,12 @@ export function SleepHeatmap({ rows, width, now, runningSince }: { rows: HeatRow
   return (
     <View>
       <Svg width={width} height={height}>
-        {HOUR_TICKS.map(([, h], i) => (
-          <Line key={`g${i}`} x1={xAt(h)} y1={top} x2={xAt(h)} y2={top + gh} stroke={t.line} strokeWidth={1} opacity={h === 12 ? 1 : 0.5} />
+        {TICK_HS.map((h) => (
+          <Line key={`g${h}`} x1={xAt(h)} y1={top} x2={xAt(h)} y2={top + gh} stroke={t.line} strokeWidth={1} opacity={clockAt(h) === 0 ? 1 : 0.5} />
         ))}
+        {!midnightOnTick ? (
+          <Line x1={xAt(midnightH)} y1={top} x2={xAt(midnightH)} y2={top + gh} stroke={t.line} strokeWidth={1} opacity={1} />
+        ) : null}
         {rows.map((r, idx) => {
           const y = top + idx * pitch;
           const isToday = r.offsetFromToday === 0;
@@ -73,11 +83,20 @@ export function SleepHeatmap({ rows, width, now, runningSince }: { rows: HeatRow
             </Fragment>
           );
         })}
-        {HOUR_TICKS.map(([lbl, h], i) => (
-          <SvgText key={`l${i}`} x={xAt(h)} y={top + gh + 15} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor={h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}>
-            {lbl}
+        {TICK_HS.map((h) => {
+          // Drop a tick label that would collide with the standalone midnight label.
+          if (!midnightOnTick && Math.abs(xAt(h) - xAt(midnightH)) < 20) return null;
+          return (
+            <SvgText key={`l${h}`} x={xAt(h)} y={top + gh + 15} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor={h === 0 ? 'start' : h === 24 ? 'end' : 'middle'}>
+              {fmtHour(clockAt(h))}
+            </SvgText>
+          );
+        })}
+        {!midnightOnTick ? (
+          <SvgText x={xAt(midnightH)} y={top + gh + 15} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="middle">
+            00:00
           </SvgText>
-        ))}
+        ) : null}
       </Svg>
       {showLive ? (
         <Animated.View

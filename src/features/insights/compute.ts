@@ -8,11 +8,23 @@ export function dayStart(ms: number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
+/**
+ * Start (ms) of the 24h window anchored at `originHour` (0..23, local time)
+ * that contains `ms`. originHour 12 is the classic noon-to-noon window (a
+ * normal night lands as one contiguous block in the middle); 0 gives calendar
+ * days; 19 an evening-anchored window. This is the tab's single day boundary —
+ * both the heatmap and the per-window trend bucketing use it, so the graph and
+ * the numbers agree.
+ */
+export function windowStart(ms: number, originHour: number): number {
+  const d = new Date(ms);
+  const origin = new Date(d.getFullYear(), d.getMonth(), d.getDate(), originHour).getTime();
+  return ms >= origin ? origin : origin - DAY;
+}
+
 /** Start (local noon) of the noon-to-noon window containing `ms`. */
 export function noonWindowStart(ms: number): number {
-  const d = new Date(ms);
-  const noon = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 12).getTime();
-  return ms >= noon ? noon : noon - DAY;
+  return windowStart(ms, 12);
 }
 
 export type TrendMetric = 'totalSleep' | 'longestStretch' | 'wakeWindow' | 'feedsPerDay' | 'feedInterval';
@@ -31,8 +43,8 @@ export interface HeatRow { offsetFromToday: number; segments: HeatSegment[] }
  * data is padded, and [] is returned when no sleep falls in range. Sleeps
  * crossing clock-noon spill into two rows.
  */
-export function buildSleepHeatmap(entries: Entry[], now: number, days = 28): HeatRow[] {
-  const todayWin = noonWindowStart(now);
+export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, originHour = 12): HeatRow[] {
+  const todayWin = windowStart(now, originHour);
   const rows = new Map<number, HeatSegment[]>();
   let oldest = -1;
   for (const e of entries) {
@@ -40,7 +52,7 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28): Hea
     let start = e.start;
     const end = e.end;
     while (start < end) {
-      const win = noonWindowStart(start);
+      const win = windowStart(start, originHour);
       const segEnd = Math.min(end, win + DAY);
       const offset = Math.round((todayWin - win) / DAY);
       if (offset >= 0 && offset < days) {
@@ -66,12 +78,12 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28): Hea
 
 export interface DiaperDay { t: number; wet: number; dirty: number }
 
-export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: number): DiaperDay[] {
+export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: number, originHour = 12): DiaperDay[] {
   const cutoff = now - rangeDays * DAY;
   const byDay = new Map<number, { wet: number; dirty: number }>();
   for (const e of entries) {
     if (e.type !== 'diaper' || e.time < cutoff) continue;
-    const d = dayStart(e.time);
+    const d = windowStart(e.time, originHour);
     const cur = byDay.get(d) ?? { wet: 0, dirty: 0 };
     if (e.wet) cur.wet += 1;   // wet and dirty are independent signals —
     if (e.solid) cur.dirty += 1; // a both-diaper increments each, never their sum
@@ -82,14 +94,14 @@ export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: numb
 
 const HOUR = 3600000;
 
-export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, rangeDays: number): TrendPoint[] {
+export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, rangeDays: number, originHour = 12): TrendPoint[] {
   const cutoff = now - rangeDays * DAY;
 
   if (metric === 'feedsPerDay' || metric === 'feedInterval') {
     const byDay = new Map<number, number[]>();
     for (const e of entries) {
       if (e.type !== 'feeding' || e.start < cutoff) continue;
-      const d = dayStart(e.start);
+      const d = windowStart(e.start, originHour);
       (byDay.get(d) ?? byDay.set(d, []).get(d)!).push(e.start);
     }
     const out: TrendPoint[] = [];
@@ -107,7 +119,7 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
   const byWin = new Map<number, { start: number; end: number }[]>();
   for (const e of entries) {
     if (e.type !== 'sleep' || e.end == null || e.end < cutoff) continue;
-    const w = noonWindowStart(e.start);
+    const w = windowStart(e.start, originHour);
     (byWin.get(w) ?? byWin.set(w, []).get(w)!).push({ start: e.start, end: e.end });
   }
   const out: TrendPoint[] = [];
