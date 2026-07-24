@@ -1,6 +1,5 @@
-import { router } from 'expo-router';
-
 import { Walkthrough } from '@/features/walkthrough/Walkthrough';
+import { backOr } from '@/lib/nav';
 
 /**
  * The feature tour, reachable from Settings > Help. First run becomes a setup
@@ -9,5 +8,5 @@ import { Walkthrough } from '@/features/walkthrough/Walkthrough';
  * `tutorialSeen`: the setup flow owns that flag.
  */
 export default function Tour() {
-  return <Walkthrough onDone={() => (router.canGoBack() ? router.back() : router.replace('/(tabs)'))} />;
+  return <Walkthrough onDone={() => backOr()} />;
 }

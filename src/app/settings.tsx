@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels';
+import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
@@ -653,7 +654,7 @@ export default function Settings() {
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
+        <IconButton name="chevron-left" color={t.text} onPress={() => backOr()} accessibilityLabel="Back" />
         <Txt weight={800} size={27} tracking={-0.6}>
           Settings
         </Txt>
