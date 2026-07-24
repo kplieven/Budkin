@@ -216,7 +216,7 @@ export default function Insights() {
       {gated(wake, 'wake window', (
         <TrendCard label="Avg wake window" color={t.activity.sleep} unit="min" value={Math.round(lastVal(wake)).toString()}
           caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
-          yTicks={[0, 60, 120, 180, 240]} fmtY={(v) => `${v}`} width={width} />
+          yTicks={[0, 60, 120, 180, 240]} fmtY={(v) => `${v}`} width={width} todaySoFar={isToday(wake)} />
       ))}
       {safetyFlags.length ? (
         <View style={{ marginTop: 24, marginBottom: 4 }}>
@@ -234,7 +234,7 @@ export default function Insights() {
       {gated(interval, 'feed interval', (
         <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="" value={hmValue(lastVal(interval))}
           norm={NORMS.feedInterval} birth={birth} points={interval}
-          yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} fmtValue={hmValue} width={width} />
+          yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} fmtValue={hmValue} width={width} todaySoFar={isToday(interval)} />
       ))}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 12, textTransform: 'uppercase' }}>
         Diapers
