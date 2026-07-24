@@ -1,4 +1,3 @@
-import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +9,7 @@ import { Txt } from '@/components/Txt';
 import { SetupButton } from '@/features/setup/SetupButton';
 import { useFinishSetup } from '@/features/setup/useFinishSetup';
 import { clampBirth, clampDueDate } from '@/lib/birthDate';
+import { backOr } from '@/lib/nav';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -77,9 +77,11 @@ export default function SetupBaby() {
   };
 
   // Back leaves the fork before it leaves the route, so changing the answer
-  // does not drop the user back to the branch they arrived from.
+  // does not drop the user back to the branch they arrived from. Leaving the
+  // route falls back to the welcome screen, the step this one is pushed from,
+  // for a session that started here (welcome re-gates a finished setup itself).
   const onBack = () => {
-    if (step === 'ask') router.back();
+    if (step === 'ask') backOr('/welcome');
     else setStep('ask');
   };
 

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
+import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -240,10 +241,11 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
  * is conditionally rendered, so it remounts (re-seeding from the store) on every
  * temperature sheet open.
  */
-function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
+function TemperatureField({ value, color, onChange }: { value?: number; color: string; onChange: (v?: number) => void }) {
   const t = useTheme();
   const unitSystem = useAppStore((s) => s.unitSystem);
   const [text, setText] = useState(value != null ? fmtValue('temperature', value, unitSystem) : '');
+  const [focused, setFocused] = useState(false);
   return (
     <>
       <FieldLabel>Temperature</FieldLabel>
@@ -254,7 +256,7 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           gap: 10,
           backgroundColor: t.surface,
           borderWidth: 1.5,
-          borderColor: t.line,
+          borderColor: focused ? color : t.line,
           borderRadius: 16,
           paddingHorizontal: 16,
           marginBottom: 16,
@@ -262,6 +264,8 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
       >
         <TextInput
           value={text}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onChangeText={(v) => {
             setText(v);
             const n = parseFloat(v.replace(',', '.'));
@@ -270,7 +274,7 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           placeholder={unitSystem === 'imperial' ? '98.6' : '37.0'}
           placeholderTextColor={t.faint}
           keyboardType="decimal-pad"
-          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
         />
         <Txt weight={600} size={16} color={t.dim}>
           {unitLabel('temperature', unitSystem)}
@@ -309,6 +313,7 @@ function MedicationField({
   // text field on it so an edit doesn't silently drop it.
   const isCustom = !!unit && !MED_UNITS.includes(unit);
   const [amountText, setAmountText] = useState(dosage != null ? String(dosage) : '');
+  const [amountFocused, setAmountFocused] = useState(false);
   const [otherOpen, setOtherOpen] = useState(isCustom);
   const [otherText, setOtherText] = useState(isCustom ? (unit as string) : '');
   const pickPreset = (u: string) => {
@@ -345,7 +350,7 @@ function MedicationField({
           gap: 10,
           backgroundColor: t.surface,
           borderWidth: 1.5,
-          borderColor: t.line,
+          borderColor: amountFocused ? color : t.line,
           borderRadius: 16,
           paddingHorizontal: 16,
           marginBottom: 12,
@@ -353,6 +358,8 @@ function MedicationField({
       >
         <TextInput
           value={amountText}
+          onFocus={() => setAmountFocused(true)}
+          onBlur={() => setAmountFocused(false)}
           onChangeText={(v) => {
             setAmountText(v);
             const n = parseFloat(v.replace(',', '.'));
@@ -361,7 +368,7 @@ function MedicationField({
           placeholder="5"
           placeholderTextColor={t.faint}
           keyboardType="decimal-pad"
-          style={{ flex: 1, height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text }}
+          style={{ flex: 1, height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
         />
         {unit ? (
           <Txt weight={600} size={16} color={t.dim}>
@@ -788,7 +795,7 @@ export function LogSheet() {
 
         {/* temperature field — a decimal reading with a °C unit */}
         {type === 'temperature' && (
-          <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
+          <TemperatureField value={te.temperature} color={color} onChange={(v) => setTE({ temperature: v })} />
         )}
 
         {/* medication field: in confirm mode, a read-only treatment summary
