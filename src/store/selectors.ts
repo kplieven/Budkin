@@ -299,6 +299,18 @@ export function clampHourOfDay(n: number, fallback: number): number {
   return Math.min(23, Math.max(0, Math.round(n)));
 }
 
+/**
+ * Human label for a day-boundary hour (0..23) in 24-hour style, matching the
+ * "Day starts at" setting: 0 -> "midnight", 12 -> "noon", else "H:00" (no
+ * leading zero, e.g. 7 -> "7:00", 19 -> "19:00").
+ */
+export function fmtDayStartHour(h: number): string {
+  const hr = clampHourOfDay(h, RHYTHM_ORIGIN_DEFAULT);
+  if (hr === 0) return 'midnight';
+  if (hr === 12) return 'noon';
+  return `${hr}:00`;
+}
+
 /** A minute-of-day as a zero-padded 24-hour clock, e.g. 420 to "07:00". */
 export function fmtMinuteOfDay(min: number): string {
   const m = clampMinuteOfDay(min, 0);

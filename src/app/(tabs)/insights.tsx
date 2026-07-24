@@ -19,6 +19,7 @@ import { hexA } from '@/lib/color';
 import { fmtDur } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { fmtDayStartHour } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -83,8 +84,7 @@ export default function Insights() {
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
   const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
-  const clockLabel = (h: number) => (h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`);
-  const originPhrase = `${clockLabel(originHour)} to ${clockLabel(originHour)}`;
+  const originPhrase = `${fmtDayStartHour(originHour)} to ${fmtDayStartHour(originHour)}`;
   // Layer toggles for the Rhythm graph. Sleep is the band; feeds/diapers are the
   // marker lanes. The legend chips double as the on/off toggles.
   const napColor = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);

@@ -12,6 +12,7 @@ import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels'
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
+  fmtDayStartHour,
   fmtMinuteOfDay,
   parseMinuteOfDay,
   SMALL_WASHES_PER_BIG_MAX,
@@ -470,10 +471,10 @@ export default function Settings() {
             </Txt>
           </View>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-            {([['7 PM', 19], ['Noon', 12], ['7 AM', 7], ['12 AM', 0]] as [string, number][]).map(([lbl, h]) => (
+            {[19, 12, 7, 0].map((h) => (
               <Chip
                 key={h}
-                label={lbl}
+                label={fmtDayStartHour(h)}
                 color={t.primary}
                 selected={rhythmOriginHour === h}
                 onPress={() => setRhythmOriginHour(h)}
