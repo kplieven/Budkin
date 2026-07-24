@@ -53,8 +53,10 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const diaperColor = t.activity.diaper;
   // Wider gutter than the trend charts so the full "Today" row label fits. Each
   // row is one band: sleep shaded in, feeding blocks drawn over it (feeding wins
-  // any overlap), and diapers as full-height vertical bars.
-  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8.5, rowH = 6.6;
+  // any overlap), and diapers as full-height vertical bars. Rows are tall (a
+  // 2-week window has half the rows of the old 4-week one, so thicker bars keep
+  // the block its original height and read far less crowded).
+  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 17, rowH = 13;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
