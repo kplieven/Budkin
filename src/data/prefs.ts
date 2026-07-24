@@ -36,6 +36,13 @@ export interface Prefs {
    */
   napWindowStartMin: number;
   napWindowEndMin: number;
+  /**
+   * Insights "Rhythm" graph: the hour of day the 24h window starts at (0..23,
+   * default 12 = noon-to-noon). This is the tab's day boundary — it anchors the
+   * heatmap AND the per-window trend bucketing so the graph and the numbers
+   * agree. A whole hour (not a timestamp) so it means the same on every date.
+   */
+  rhythmOriginHour: number;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */

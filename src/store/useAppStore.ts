@@ -72,6 +72,7 @@ import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import {
   activeCuresForChildToday,
+  clampHourOfDay,
   clampMinuteOfDay,
   clampSmallWashesPerBig,
   entriesForChild,
@@ -82,6 +83,7 @@ import {
   nextWashKind,
   overruleLasted,
   reorder,
+  RHYTHM_ORIGIN_DEFAULT,
   SMALL_WASHES_PER_BIG_DEFAULT,
   startOfDay,
   teEnd,
@@ -136,6 +138,11 @@ interface AppState {
    *  boolean, so changing the window never re-classifies history. */
   napWindowStartMin: number;
   napWindowEndMin: number;
+  /** Insights "Rhythm" graph day boundary: the hour (0..23) the 24h window
+   *  starts at (default 12 = noon-to-noon). Drives both the heatmap and the
+   *  per-window trend bucketing on the tab, so the graph and the numbers agree.
+   *  Global, persisted, like every other pref. */
+  rhythmOriginHour: number;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -230,6 +237,7 @@ interface AppActions {
   toggleUnitSystem: () => void;
   setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
+  setRhythmOriginHour: (hour: number) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -873,6 +881,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
+  rhythmOriginHour: RHYTHM_ORIGIN_DEFAULT,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -958,6 +967,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ napWindowStartMin: start, napWindowEndMin: end });
     void savePrefs({ napWindowStartMin: start, napWindowEndMin: end });
   },
+  setRhythmOriginHour: (hour) => {
+    const h = clampHourOfDay(hour, RHYTHM_ORIGIN_DEFAULT);
+    set({ rhythmOriginHour: h });
+    void savePrefs({ rhythmOriginHour: h });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -1009,6 +1023,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     if (prefs.napWindowEndMin != null) {
       set({ napWindowEndMin: clampMinuteOfDay(prefs.napWindowEndMin, NAP_WINDOW_END_DEFAULT) });
+    }
+    if (prefs.rhythmOriginHour != null) {
+      set({ rhythmOriginHour: clampHourOfDay(prefs.rhythmOriginHour, RHYTHM_ORIGIN_DEFAULT) });
     }
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).

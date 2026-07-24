@@ -70,19 +70,28 @@ export default function Insights() {
   // Start of a currently-running sleep timer (epoch ms), else null. Drives the
   // live breathing bar on the heatmap's Today row.
   const runningSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'sleep')?.start ?? null);
+  // The Rhythm graph's day boundary. It drives the heatmap AND every per-window
+  // trend below, so the graph and the numbers share one "day" (a persisted pref).
+  const originHour = useAppStore((s) => s.rhythmOriginHour);
+  const setRhythmOriginHour = useAppStore((s) => s.setRhythmOriginHour);
   const [width, setWidth] = useState(0);
-  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28), [entries, nowH]);
+  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
   const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
+  // Window presets: the hour each 24h window starts at. Noon-to-noon (12) is the
+  // default and keeps a normal night as one contiguous block in the middle.
+  const ORIGINS: [string, number][] = [['7 PM', 19], ['Noon', 12], ['7 AM', 7], ['12 AM', 0]];
+  const clockLabel = (h: number) => (h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`);
+  const originPhrase = `${clockLabel(originHour)} to ${clockLabel(originHour)}`;
 
-  const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', nowH, rangeDays), [entries, nowH, rangeDays]);
-  const longest = useMemo(() => buildTrend(entries, 'longestStretch', nowH, rangeDays), [entries, nowH, rangeDays]);
-  const wake = useMemo(() => buildTrend(entries, 'wakeWindow', nowH, rangeDays), [entries, nowH, rangeDays]);
-  const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', nowH, rangeDays), [entries, nowH, rangeDays]);
-  const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays), [entries, nowH, rangeDays]);
-  const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays), [entries, nowH, rangeDays]);
+  const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
+  const longest = useMemo(() => buildTrend(entries, 'longestStretch', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
+  const wake = useMemo(() => buildTrend(entries, 'wakeWindow', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
+  const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
+  const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
+  const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
   // The narrow safety net: at most a wet-nappy and a newborn low-feed nudge,
   // only when the signal is real and current (see safety.ts). Range-independent.
   const safetyFlags = useMemo(() => detectSafetyFlags(entries, birth, nowH), [entries, birth, nowH]);
@@ -141,9 +150,17 @@ export default function Insights() {
             </View>
           </View>
         </View>
-        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 6 }}>Last 4 weeks, midnight in the middle</Txt>
+        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 10 }}>Last 4 weeks, {originPhrase}</Txt>
+        <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3 }}>
+          {ORIGINS.map(([lbl, h]) => (
+            <Pressable key={h} onPress={() => setRhythmOriginHour(h)} accessibilityRole="button" accessibilityState={{ selected: originHour === h }} style={{ flex: 1, paddingVertical: 7, borderRadius: 10, backgroundColor: originHour === h ? t.surface : 'transparent', alignItems: 'center' }}>
+              <Txt weight={originHour === h ? 700 : 600} size={12.5} color={originHour === h ? t.text : t.dim}>{lbl}</Txt>
+            </Pressable>
+          ))}
+        </View>
+        <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginTop: 6, marginBottom: 12 }}>Applies to the graph and the trend numbers</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} originHour={originHour} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.

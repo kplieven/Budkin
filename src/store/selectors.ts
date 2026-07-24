@@ -290,6 +290,15 @@ export function clampMinuteOfDay(n: number, fallback: number): number {
   return Math.min(MINUTES_PER_DAY - 1, Math.max(0, Math.round(n)));
 }
 
+/** The Insights "Rhythm" graph's default day boundary: noon (noon-to-noon). */
+export const RHYTHM_ORIGIN_DEFAULT = 12;
+
+/** Coerce a persisted rhythm-origin hour into a whole 0..23. */
+export function clampHourOfDay(n: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(23, Math.max(0, Math.round(n)));
+}
+
 /** A minute-of-day as a zero-padded 24-hour clock, e.g. 420 to "07:00". */
 export function fmtMinuteOfDay(min: number): string {
   const m = clampMinuteOfDay(min, 0);
