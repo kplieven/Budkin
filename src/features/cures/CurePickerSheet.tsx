@@ -48,7 +48,7 @@ export function CurePickerSheet() {
           Log a dose
         </Txt>
         <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-          Tap a cure to log it now, or log manually
+          Tap a treatment to log it now, or log manually
         </Txt>
       </View>
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 10, gap: 8 }}>
