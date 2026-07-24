@@ -143,6 +143,12 @@ interface AppState {
    *  per-window trend bucketing on the tab, so the graph and the numbers agree.
    *  Global, persisted, like every other pref. */
   rhythmOriginHour: number;
+  /** Insights "Rhythm" graph layer toggles: which series the heatmap draws.
+   *  Persisted so a hidden layer stays hidden across restarts. Global, all
+   *  default to visible. */
+  rhythmShowSleep: boolean;
+  rhythmShowFeeds: boolean;
+  rhythmShowDiapers: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -238,6 +244,8 @@ interface AppActions {
   setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
   setRhythmOriginHour: (hour: number) => void;
+  /** Toggle one Insights "Rhythm" graph layer on/off and persist the choice. */
+  setRhythmLayer: (layer: 'sleep' | 'feeds' | 'diapers', on: boolean) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -883,6 +891,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
   rhythmOriginHour: RHYTHM_ORIGIN_DEFAULT,
+  rhythmShowSleep: true,
+  rhythmShowFeeds: true,
+  rhythmShowDiapers: true,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -973,6 +984,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ rhythmOriginHour: h });
     void savePrefs({ rhythmOriginHour: h });
   },
+  setRhythmLayer: (layer, on) => {
+    set((s) => ({
+      rhythmShowSleep: layer === 'sleep' ? on : s.rhythmShowSleep,
+      rhythmShowFeeds: layer === 'feeds' ? on : s.rhythmShowFeeds,
+      rhythmShowDiapers: layer === 'diapers' ? on : s.rhythmShowDiapers,
+    }));
+    const s = get();
+    void savePrefs({
+      rhythmShowSleep: s.rhythmShowSleep,
+      rhythmShowFeeds: s.rhythmShowFeeds,
+      rhythmShowDiapers: s.rhythmShowDiapers,
+    });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -1028,6 +1052,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.rhythmOriginHour != null) {
       set({ rhythmOriginHour: clampHourOfDay(prefs.rhythmOriginHour, RHYTHM_ORIGIN_DEFAULT) });
     }
+    // `!= null`, not truthy: these are booleans and `false` (a hidden layer) is
+    // exactly the state worth remembering, which a truthy guard would drop.
+    if (prefs.rhythmShowSleep != null) set({ rhythmShowSleep: prefs.rhythmShowSleep });
+    if (prefs.rhythmShowFeeds != null) set({ rhythmShowFeeds: prefs.rhythmShowFeeds });
+    if (prefs.rhythmShowDiapers != null) set({ rhythmShowDiapers: prefs.rhythmShowDiapers });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
