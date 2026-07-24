@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
-import Svg, { Circle, Line, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
@@ -19,8 +19,8 @@ const fmtClock = (min: number) => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true }: {
-  rows: HeatRow[]; width: number; now: number; runningSince?: number | null; originHour?: number;
+export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true }: {
+  rows: HeatRow[]; width: number; now: number; runningSince?: number | null; runningFeedSince?: number | null; originHour?: number;
   showSleep?: boolean; showFeeds?: boolean; showDiapers?: boolean;
 }) {
   const t = useTheme();
@@ -43,10 +43,9 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
   const feedColor = t.activity.feeding;
   const diaperColor = t.activity.diaper;
   // Wider gutter than the trend charts so the full "Today" row label fits. Each
-  // row stacks a feed marker lane, the sleep band, then a diaper marker lane
-  // within `pitch`; `bandDy` offsets the band down to leave room for the top lane.
-  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 12;
-  const bandDy = 3.5, rowH = 5, feedDy = 1.6, diaperDy = 9.8, dotR = 1.8;
+  // row is one band: sleep shaded in, feeding blocks drawn over it (feeding wins
+  // any overlap), and diapers as full-height vertical bars.
+  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8.5, rowH = 6.6;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
@@ -62,15 +61,21 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
   const todayFrac = Math.min(1, Math.max(0, (now - windowStart(now, originHour)) / DAY));
   const future = hexA('#000000', t.dark ? 0.32 : 0.08);
 
-  // Live in-progress sleep: a distinct-accent bar on the Today row spanning the
-  // running timer's start up to now. A start before the window origin clamps to
-  // the row's left edge so it never spills onto the previous row. Length grows
-  // in the hourly steps of `now`; the breathing opacity supplies the "live" feel.
+  // Live in-progress bars on the Today row: sleep in the sleep colour, a running
+  // feed in the feeding colour drawn on top so feeding takes precedence. Each
+  // spans its timer's start (clamped to the window origin so it never spills onto
+  // the previous row) up to now, growing in the hourly steps of `now`; the
+  // breathing opacity supplies the "live" feel.
   const win = windowStart(now, originHour);
   const todayIdx = rows.findIndex((r) => r.offsetFromToday === 0);
-  const liveX0 = Math.min(1, Math.max(0, (Math.max(win, runningSince ?? win) - win) / DAY));
-  const liveX1 = todayFrac;
-  const showLive = runningSince != null && runningSince < now && todayIdx >= 0 && liveX1 > liveX0;
+  const liveGeom = (since: number | null | undefined) => {
+    if (since == null || since >= now || todayIdx < 0) return null;
+    const x0 = Math.min(1, Math.max(0, (Math.max(win, since) - win) / DAY));
+    if (todayFrac <= x0) return null;
+    return { x0, x1: todayFrac };
+  };
+  const liveSleep = showSleep ? liveGeom(runningSince) : null;
+  const liveFeed = showFeeds ? liveGeom(runningFeedSince) : null;
 
   // Scrub guide geometry: its x, the clock time it points at (origin + fraction
   // of the 24h window), and a clamped left for the floating time label.
@@ -96,25 +101,26 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
         ) : null}
         {rows.map((r, idx) => {
           const y = top + idx * pitch;
-          const by = y + bandDy;
           const isToday = r.offsetFromToday === 0;
           return (
             <Fragment key={idx}>
-              <Rect x={gx} y={by} width={gw} height={rowH} rx={1.5} fill={t.chip} />
+              <Rect x={gx} y={y} width={gw} height={rowH} rx={1.5} fill={t.chip} />
               {showSleep ? r.segments.map((s, j) => (
-                <Rect key={`s${j}`} x={gx + s.x0 * gw} y={by} width={Math.max(0, (s.x1 - s.x0) * gw)} height={rowH} rx={1.6} fill={s.nap ? nap : night} />
+                <Rect key={`s${j}`} x={gx + s.x0 * gw} y={y} width={Math.max(0, (s.x1 - s.x0) * gw)} height={rowH} rx={1.6} fill={s.nap ? nap : night} />
+              )) : null}
+              {/* feeding over sleep — a feed logged across a sleep wins the overlap */}
+              {showFeeds ? r.feeds.map((f, j) => (
+                <Rect key={`f${j}`} x={gx + f.x0 * gw} y={y} width={Math.max(1.5, (f.x1 - f.x0) * gw)} height={rowH} rx={1.6} fill={feedColor} />
               )) : null}
               {isToday && todayFrac < 1 ? (
-                <Rect x={gx + todayFrac * gw} y={by} width={Math.max(0, (1 - todayFrac) * gw)} height={rowH} rx={1.5} fill={future} />
+                <Rect x={gx + todayFrac * gw} y={y} width={Math.max(0, (1 - todayFrac) * gw)} height={rowH} rx={1.5} fill={future} />
               ) : null}
-              {showFeeds ? r.feeds.map((x, j) => (
-                <Circle key={`f${j}`} cx={gx + x * gw} cy={y + feedDy} r={dotR} fill={feedColor} />
-              )) : null}
+              {/* diapers as thin full-height vertical bars, on top of the blocks */}
               {showDiapers ? r.diapers.map((x, j) => (
-                <Circle key={`d${j}`} cx={gx + x * gw} cy={y + diaperDy} r={dotR} fill={diaperColor} />
+                <Rect key={`d${j}`} x={gx + x * gw - 0.8} y={y - 1} width={1.6} height={rowH + 2} rx={0.6} fill={diaperColor} />
               )) : null}
               {DAY_LABELS[r.offsetFromToday] ? (
-                <SvgText x={gx - 8} y={by + rowH} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">
+                <SvgText x={gx - 8} y={y + rowH} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">
                   {DAY_LABELS[r.offsetFromToday]}
                 </SvgText>
               ) : null}
@@ -140,18 +146,18 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
         ) : null}
       </Svg>
       </Pressable>
-      {showLive ? (
+      {liveSleep ? (
         <Animated.View
           style={[
-            {
-              position: 'absolute',
-              left: gx + liveX0 * gw,
-              top: top + todayIdx * pitch + bandDy,
-              width: (liveX1 - liveX0) * gw,
-              height: rowH,
-              borderRadius: 1.6,
-              backgroundColor: t.primary,
-            },
+            { position: 'absolute', left: gx + liveSleep.x0 * gw, top: top + todayIdx * pitch, width: (liveSleep.x1 - liveSleep.x0) * gw, height: rowH, borderRadius: 1.6, backgroundColor: t.activity.sleep },
+            pulseStyle,
+          ]}
+        />
+      ) : null}
+      {liveFeed ? (
+        <Animated.View
+          style={[
+            { position: 'absolute', left: gx + liveFeed.x0 * gw, top: top + todayIdx * pitch, width: (liveFeed.x1 - liveFeed.x0) * gw, height: rowH, borderRadius: 1.6, backgroundColor: feedColor },
             pulseStyle,
           ]}
         />
