@@ -46,6 +46,10 @@ const h = vi.hoisted(() => ({
   measPushed: [] as unknown[],
   measUpdated: [] as unknown[],
   measDeleted: [] as unknown[],
+  curePushed: [] as unknown[],
+  cureUpdated: [] as unknown[],
+  cureDeleted: [] as unknown[],
+  curePushFails: false,
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
   childDeleted: [] as unknown[],
@@ -172,6 +176,7 @@ vi.mock('@/data/repository', () => ({
     selectedChildId: '',
     lastFeed: { feedType: 'breast', method: 'left' },
     measurements: [],
+    cures: [],
   })),
   pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown) => {
     if (h.pushFails) throw new Error('net');
@@ -193,6 +198,17 @@ vi.mock('@/data/repository', () => ({
   }),
   deleteMeasurementFromServer: vi.fn(async (_c: unknown, kind: unknown, id: unknown) => {
     h.measDeleted.push({ kind, id });
+  }),
+  pushCureToServer: vi.fn(async (_c: unknown, cure: unknown) => {
+    if (h.curePushFails) throw new Error('net');
+    h.curePushed.push(cure);
+    return 555;
+  }),
+  updateCureOnServer: vi.fn(async (_c: unknown, cure: unknown) => {
+    h.cureUpdated.push(cure);
+  }),
+  deleteCureFromServer: vi.fn(async (_c: unknown, serverId: unknown) => {
+    h.cureDeleted.push(serverId);
   }),
   pushChildToServer: vi.fn(async (_c: unknown, child: unknown, change: any) => {
     h.childPushed.push(child);
@@ -314,6 +330,10 @@ beforeEach(() => {
   h.deleted = [];
   h.measPushed = [];
   h.measUpdated = [];
+  h.curePushed = [];
+  h.cureUpdated = [];
+  h.cureDeleted = [];
+  h.curePushFails = false;
   h.measDeleted = [];
   h.childPushed = [];
   h.childUpdated = [];
@@ -851,7 +871,7 @@ describe('medication tracking', () => {
   });
 });
 
-describe('cures (local-only medication regimens)', () => {
+describe('cures (medication regimens)', () => {
   const DAY = 86400000;
   const cure = (over: Partial<Cure> = {}): Cure => ({
     id: 'cure-1',
@@ -879,12 +899,105 @@ describe('cures (local-only medication regimens)', () => {
     expect(s().cures.map((c) => c.id)).toEqual(['cure-1']);
   });
 
-  it('mutating cures persists them via the subscribe (never uploads)', async () => {
+  it('mutating cures persists them via the subscribe', async () => {
     s().addCure(cure());
     await flush();
     expect((h.cures as { id: string }[]).map((c) => c.id)).toEqual(['cure-1']);
-    // Local-only: nothing was pushed to the server.
-    expect(h.pushed).toHaveLength(0);
+  });
+
+  it('makes no server call in local mode', async () => {
+    useAppStore.setState({ connection: { mode: 'local' }, children: [SYNCED_C1] });
+    s().addCure(cure());
+    s().updateCure(cure({ name: 'Ibuprofen' }));
+    s().deleteCure('cure-1');
+    await flush();
+    expect(h.curePushed).toHaveLength(0);
+    expect(h.cureUpdated).toHaveLength(0);
+    expect(h.cureDeleted).toHaveLength(0);
+  });
+
+  describe('server mirror', () => {
+    beforeEach(() => {
+      useAppStore.setState({
+        connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+        children: [SYNCED_C1],
+        offline: false,
+      });
+    });
+
+    it('addCure pushes the cure and stamps the returned serverId', async () => {
+      s().addCure(cure());
+      await flush();
+      expect((h.curePushed[0] as Cure).id).toBe('cure-1');
+      expect(s().cures[0].serverId).toBe(555);
+    });
+
+    it('addCure leaves the cure unstamped when the push fails, for flushUnsynced to retry', async () => {
+      h.curePushFails = true;
+      s().addCure(cure());
+      await flush();
+      expect(s().cures[0].serverId).toBeUndefined();
+      // The local write still stands: offline-first never rolls back on a
+      // failed mirror.
+      expect(s().cures).toHaveLength(1);
+    });
+
+    it('addCure does not push when the child has no server id yet', async () => {
+      useAppStore.setState({ children: [{ ...SYNCED_C1, serverId: undefined }] });
+      s().addCure(cure());
+      await flush();
+      expect(h.curePushed).toHaveLength(0);
+      expect(s().cures[0].serverId).toBeUndefined();
+    });
+
+    it('updateCure PATCHes an already-synced cure', async () => {
+      useAppStore.setState({ cures: [cure({ serverId: 88 })] });
+      s().updateCure(cure({ serverId: 88, name: 'Ibuprofen' }));
+      await flush();
+      expect((h.cureUpdated[0] as Cure).name).toBe('Ibuprofen');
+    });
+
+    it('updateCure makes no call for a cure that never reached the server', async () => {
+      useAppStore.setState({ cures: [cure()] });
+      s().updateCure(cure({ name: 'Ibuprofen' }));
+      await flush();
+      expect(h.cureUpdated).toHaveLength(0);
+    });
+
+    it('deleteCure DELETEs the backing note', async () => {
+      useAppStore.setState({ cures: [cure({ serverId: 88 })] });
+      s().deleteCure('cure-1');
+      await flush();
+      expect(h.cureDeleted).toEqual([88]);
+    });
+
+    it('deleteCure makes no call for a cure that never reached the server', async () => {
+      useAppStore.setState({ cures: [cure()] });
+      s().deleteCure('cure-1');
+      await flush();
+      expect(h.cureDeleted).toHaveLength(0);
+    });
+
+    it('queues an offline edit / delete of a synced cure as a pending op', async () => {
+      useAppStore.setState({ cures: [cure({ serverId: 88 })], offline: true });
+      s().updateCure(cure({ serverId: 88, name: 'Ibuprofen' }));
+      await flush();
+      expect(h.pendingOps).toContainEqual({ op: 'update', entity: 'cure', payload: expect.objectContaining({ name: 'Ibuprofen' }) });
+      expect(h.cureUpdated).toHaveLength(0);
+
+      s().deleteCure('cure-1');
+      await flush();
+      expect(h.pendingOps).toContainEqual({ op: 'delete', entity: 'cure', serverId: 88 });
+      expect(h.cureDeleted).toHaveLength(0);
+    });
+
+    it('records NO pending op for a cure created offline (its create is still pending)', async () => {
+      useAppStore.setState({ offline: true });
+      s().addCure(cure());
+      await flush();
+      expect(h.pendingOps).toHaveLength(0);
+      expect(h.curePushed).toHaveLength(0);
+    });
   });
 
   it('deleteCure closes the editor when it is open on that cure', () => {
@@ -1423,7 +1536,7 @@ describe('timer server sync', () => {
       connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1',
       timers: [syncedTimer({ id: 't5', serverId: 5 }), { id: 't-local', activity: 'feeding', saveAs: 'feeding', name: 'Feeding', start: NOW, childId: 'c1' }],
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
       lastFeed: { feedType: 'breast', method: 'left' },
       timers: [{ id: 'tsrv6', serverId: 6, childId: 'c1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
@@ -1436,7 +1549,7 @@ describe('timer server sync', () => {
 
   it('refresh remaps a server-loaded timer\'s childId from the server id to the local child id', async () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
       lastFeed: { feedType: 'breast', method: 'left' },
       // `loadFromServer` has no local state to translate with, so the timer's
@@ -1453,7 +1566,7 @@ describe('timer server sync', () => {
 
   it('stopping a server-loaded timer writes an entry under the LOCAL child id, not the server id', async () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
       lastFeed: { feedType: 'breast', method: 'left' },
       timers: [{ id: 'tsrv10', serverId: 10, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 10 * M }],
@@ -1651,7 +1764,7 @@ describe('queued entries survive killing the app', () => {
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
     h.q = [queuedEntry('e1')];
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [
         { id: 'srv-1', serverId: 5, childId: 'c1', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
@@ -1781,7 +1894,7 @@ describe('queued entries survive killing the app', () => {
   it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
     h.q = [queuedEntry('e3')];
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [],
       timers: [],
@@ -1801,7 +1914,7 @@ describe('queued entries survive killing the app', () => {
 
     // the next refresh sees the entry server-side (in server shape/id) — the
     // full `...data` replace in refresh() swaps the local copy for it.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [{ id: 'diaper-9', serverId: 9, childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
       timers: [],
@@ -1828,7 +1941,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       selectedChildId: 'localY',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [],
       timers: [],
@@ -1853,7 +1966,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       selectedChildId: 'localY',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [],
       timers: [],
@@ -1877,7 +1990,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       selectedChildId: 'c1',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [],
       timers: [],
@@ -1912,7 +2025,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       selectedChildId: '',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [mira],
       entries: [],
       timers: [],
@@ -3020,7 +3133,7 @@ describe('refresh / reconnect', () => {
   });
 
   it('keeps the selected child when it still exists after refresh', async () => {
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [
         { id: 'c0', first: 'A', last: '', birth: NOW, color: '#fff' },
         { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
@@ -3042,7 +3155,7 @@ describe('refresh / reconnect', () => {
     // refresh() replaces `children` wholesale with the server's list (merged
     // with any still-unsynced locals), so the synced child the queued flush
     // needs has to come back from loadFromServer, not from local setState.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [SYNCED_C1],
       entries: [],
       timers: [],
@@ -3108,7 +3221,7 @@ describe('refresh / reconnect', () => {
     // selected would get silently deselected back to the server's first child.
     const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3124,7 +3237,7 @@ describe('refresh / reconnect', () => {
   it('keeps an in-memory serverId==null child (created offline) across a refresh whose server data omits it', async () => {
     const localChild: Child = { id: 'localX', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3139,7 +3252,7 @@ describe('refresh / reconnect', () => {
   it('keeps an in-memory serverId==null measurement (created offline) across a refresh whose server data omits it', async () => {
     const localMeasurement: Measurement = { id: 'localM', childId: 'c1', kind: 'weight', value: 4.2, date: NOW };
     useAppStore.setState({ measurements: [localMeasurement] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3178,7 +3291,7 @@ describe('refresh / reconnect', () => {
     // A real server load never knows the local id: it writes the SERVER child
     // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
     // `selectedChildId` below.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
       entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [],
@@ -3219,7 +3332,7 @@ describe('refresh / reconnect', () => {
     // A real server load never knows the local id: it writes the SERVER
     // child id verbatim (see `listMeasurements` in src/api/client.ts), same
     // as the entries/timers case above.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3260,7 +3373,7 @@ describe('refresh / reconnect', () => {
 
     await flush();
 
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3288,7 +3401,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     const childAAA: Child = { id: 'childAAA', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' };
     const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState({ children: [childAAA, childBBB], selectedChildId: 'childBBB' });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }], // childBBB gone
       entries: [],
       timers: [],
@@ -3315,7 +3428,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       selectedChildId: 'childBBB',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3346,7 +3459,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       entries: state.entries,
       measurements: state.measurements,
     }));
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -3378,7 +3491,7 @@ describe('history is scoped to the selected child', () => {
 
   it('refresh asks the server for the SELECTED child, not the server\'s first', async () => {
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo' });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [],
       timers: [],
@@ -3404,7 +3517,7 @@ describe('history is scoped to the selected child', () => {
       selectedChildId: 'localTheo',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [],
       timers: [],
@@ -3430,7 +3543,7 @@ describe('history is scoped to the selected child', () => {
       selectedChildId: 'localBean',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [],
       timers: [],
@@ -3452,7 +3565,7 @@ describe('history is scoped to the selected child', () => {
     // being shown under the expecting child, which is what every history
     // surface reads via `entriesForChild`.
     useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localBean', entries: [] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [miraFeed],
       timers: [],
@@ -3476,7 +3589,7 @@ describe('history is scoped to the selected child', () => {
     // The same bug with no expecting child involved: the demo seed owns all
     // entries under c1, so selecting c2 used to render c1's history verbatim.
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo', entries: [] });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [miraFeed],
       timers: [],
@@ -3508,7 +3621,7 @@ describe('switching child refetches that child\'s records (server mode)', () => 
     // sibling shows "Nothing logged yet" until the user pulls to refresh.
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
     vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [theoFeed],
       timers: [],
@@ -3561,7 +3674,7 @@ describe('switching child refetches that child\'s records (server mode)', () => 
     // filter is what keeps the sibling's records off the expecting screen.
     useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localMira', entries: [] });
     vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: serverChildren,
       entries: [],
       timers: [],
@@ -4321,7 +4434,7 @@ describe('insights slice', () => {
     // fixture. The shared default mock reports an EMPTY server, which
     // reconcileChildren correctly reads as "both children deleted server-side"
     // and drops them, which is not the situation under test here.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [
         { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
         { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
@@ -4826,7 +4939,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // The post-success reload: the server now knows this child (serverId 501,
     // matching the describe block's default `uploadUnsynced` stamp), returned
     // under its own server-derived id/fields.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW, color: '#eee' }],
       entries: [], timers: [], selectedChildId: '501',
       lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
@@ -4884,11 +4997,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     vi.mocked(serverHasData).mockResolvedValueOnce(true);
     const serverChild: Child = { id: '900', serverId: 900, first: 'Ben', last: '', birth: NOW, color: '#eee' };
     vi.mocked(loadFromServer)
-      .mockResolvedValueOnce({ // the dedup fetch
+      .mockResolvedValueOnce({ cures: [], // the dedup fetch
         children: [serverChild], entries: [], timers: [], selectedChildId: '900',
         lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
       })
-      .mockResolvedValueOnce({ // the post-success reload
+      .mockResolvedValueOnce({ cures: [], // the post-success reload
         children: [serverChild], entries: [], timers: [], selectedChildId: '900',
         lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
       });
@@ -4995,7 +5108,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // Post-success reload: the server only knows about the born (now-synced)
     // child. The expecting child was never uploaded, so it's absent here too,
     // exactly the case that must not wipe it from `children`.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -5043,7 +5156,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     }));
     // Post-success reload: the server only knows about the born child and has
     // no entries at all (the note was never uploaded).
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
       entries: [],
       timers: [],
@@ -5599,7 +5712,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
       children: [...s().children, expectingChild],
       entries: [note],
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [bornOnServer],
       entries: [],
       timers: [],
@@ -5629,7 +5742,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
       selectedChildId: 'localDue',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [bornOnServer],
       entries: [],
       timers: [],
@@ -5676,7 +5789,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
 
     // The server now knows the child (by the serverId confirmBirth just
     // stamped) but not yet the note: nothing has pushed it there.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth, color: '#eee' }],
       entries: [],
       timers: [],
@@ -5730,7 +5843,7 @@ describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
     // note must not let it fall out of `entries`: `flushUnsynced` no longer
     // owns it if heldBack was dropped, and the persistence subscription would
     // write the shortened array straight over durable storage.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [],
       entries: [],
       timers: [],
@@ -5781,7 +5894,7 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
 
     // Baby Buddy has no record of the note (it was never pushed): a refresh
     // must not let the server's blank slate silently drop it.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth, color: useAppStore.getState().children[0].color }],
       entries: [],
       timers: [],
@@ -5816,7 +5929,7 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     await flush();
     const noteId = useAppStore.getState().entries[0].id;
 
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [],
       entries: [],
       timers: [],
@@ -5899,7 +6012,7 @@ describe('heldBack migration (entries written before the field existed)', () => 
       selectedChildId: 'localDue',
       lastFeed: { feedType: 'breast', method: 'left' },
     });
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [],
       entries: [],
       timers: [],
@@ -5915,7 +6028,7 @@ describe('heldBack migration (entries written before the field existed)', () => 
 
     // Prove it actually protects the note across a LATER refresh too, not
     // just the load that backfilled it.
-    vi.mocked(loadFromServer).mockResolvedValueOnce({
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ cures: [],
       children: [],
       entries: [],
       timers: [],
