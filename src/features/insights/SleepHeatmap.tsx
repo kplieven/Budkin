@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
@@ -36,6 +36,12 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   // fraction 0..1); another tap moves it, the ✕ on its label clears it. Declared
   // before the early return so hook order stays stable.
   const [scrubX, setScrubX] = useState<number | null>(null);
+  // Ref on the plot so a tap can be located from the pointer's page X minus the
+  // plot's measured page-left. RN-web does NOT populate nativeEvent.locationX on
+  // mobile touch (it's fine with a desktop mouse), so relying on it put the line
+  // at x=0 with a NaN clock. pageX is populated on both, and there is no
+  // horizontal scroll here, so page and viewport X agree.
+  const plotRef = useRef<View>(null);
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;
@@ -86,10 +92,15 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   return (
     <View>
       <Pressable
+        ref={plotRef}
         onPress={(e) => {
-          const lx = e.nativeEvent.locationX;
-          if (lx < gx || lx > gx + gw) return; // ignore taps in the day-label gutter
-          setScrubX((lx - gx) / gw);
+          const pageX = e.nativeEvent.pageX;
+          if (!Number.isFinite(pageX)) return;
+          plotRef.current?.measureInWindow((mx) => {
+            const lx = pageX - mx; // pointer X within the plot
+            if (!Number.isFinite(lx) || lx < gx || lx > gx + gw) return; // ignore the day-label gutter
+            setScrubX((lx - gx) / gw);
+          });
         }}
       >
       <Svg width={width} height={height}>
