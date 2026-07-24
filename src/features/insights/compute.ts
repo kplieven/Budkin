@@ -31,12 +31,15 @@ export type TrendMetric = 'totalSleep' | 'longestStretch' | 'wakeWindow' | 'feed
 export interface TrendPoint { t: number; value: number }
 
 export interface HeatSegment { x0: number; x1: number; nap: boolean }
+/** A drawable interval in [0,1) origin coordinates (a feeding block). */
+export interface HeatBar { x0: number; x1: number }
 export interface HeatRow {
   offsetFromToday: number;
+  /** sleep intervals (night vs nap) */
   segments: HeatSegment[];
-  /** feed / diaper event x-positions in [0,1) (noon-origin, like segments), for
-   *  the marker lanes above and below the sleep band. */
-  feeds: number[];
+  /** completed feeding intervals, drawn over sleep so feeding wins any overlap */
+  feeds: HeatBar[];
+  /** diaper event x-positions in [0,1), drawn as full-height vertical bars */
   diapers: number[];
 }
 
@@ -77,20 +80,34 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
   }
   if (oldest < 0) return [];
 
-  // Feed (by start) and diaper (by time) event positions, bucketed into the same
-  // windows as the sleep band. Only rows that already exist (0..oldest) get
-  // markers — the heatmap stays anchored on sleep.
-  const feedsByOffset = new Map<number, number[]>();
+  // Feeding intervals (split across the origin seam like sleep) and diaper points,
+  // bucketed into the same windows as the sleep band. Only rows that already exist
+  // (0..oldest) get markers — the heatmap stays anchored on sleep. An in-progress
+  // feed (end == null) is left out here; it's drawn as the live feeding bar.
+  const feedsByOffset = new Map<number, HeatBar[]>();
   const diapersByOffset = new Map<number, number[]>();
   for (const e of entries) {
-    let ts: number, bucket: Map<number, number[]>;
-    if (e.type === 'feeding') { ts = e.start; bucket = feedsByOffset; }
-    else if (e.type === 'diaper') { ts = e.time; bucket = diapersByOffset; }
-    else continue;
-    const win = windowStart(ts, originHour);
-    const offset = Math.round((todayWin - win) / DAY);
-    if (offset < 0 || offset > oldest) continue;
-    (bucket.get(offset) ?? bucket.set(offset, []).get(offset)!).push((ts - win) / DAY);
+    if (e.type === 'feeding') {
+      if (e.end == null) continue;
+      let start = e.start;
+      const end = e.end;
+      while (start < end) {
+        const win = windowStart(start, originHour);
+        const segEnd = Math.min(end, win + DAY);
+        const offset = Math.round((todayWin - win) / DAY);
+        if (offset >= 0 && offset <= oldest) {
+          const x0 = (start - win) / DAY;
+          const x1 = (segEnd - win) / DAY;
+          if (x1 - x0 > 0.001) (feedsByOffset.get(offset) ?? feedsByOffset.set(offset, []).get(offset)!).push({ x0, x1 });
+        }
+        start = segEnd;
+      }
+    } else if (e.type === 'diaper') {
+      const win = windowStart(e.time, originHour);
+      const offset = Math.round((todayWin - win) / DAY);
+      if (offset < 0 || offset > oldest) continue;
+      (diapersByOffset.get(offset) ?? diapersByOffset.set(offset, []).get(offset)!).push((e.time - win) / DAY);
+    }
   }
 
   const out: HeatRow[] = [];

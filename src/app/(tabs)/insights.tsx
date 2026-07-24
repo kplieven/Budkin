@@ -70,6 +70,9 @@ export default function Insights() {
   // Start of a currently-running sleep timer (epoch ms), else null. Drives the
   // live breathing bar on the heatmap's Today row.
   const runningSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'sleep')?.start ?? null);
+  // Start of a currently-running feeding timer, for the live feeding bar (drawn
+  // on top of a live sleep bar so feeding takes precedence).
+  const runningFeedSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'feeding')?.start ?? null);
   // The Rhythm graph's day boundary. It drives the heatmap AND every per-window
   // trend below, so the graph and the numbers share one "day" (a persisted pref).
   const originHour = useAppStore((s) => s.rhythmOriginHour);
@@ -177,7 +180,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginTop: 6, marginBottom: 12 }}>Applies to the graph and the trend numbers</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.
