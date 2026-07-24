@@ -10,6 +10,7 @@ import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { buildDiaperSeries, buildSleepHeatmap, buildTrend, DAY, type TrendPoint } from '@/features/insights/compute';
 import { bandStatus, NORMS } from '@/features/insights/norms';
 import { DiaperBars } from '@/features/insights/DiaperBars';
+import { phaseNoteFor } from '@/features/insights/phase';
 import { detectSafetyFlags } from '@/features/insights/safety';
 import { SafetyNote } from '@/features/insights/SafetyNote';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
@@ -85,6 +86,9 @@ export default function Insights() {
   // The narrow safety net: at most a wet-nappy and a newborn low-feed nudge,
   // only when the signal is real and current (see safety.ts). Range-independent.
   const safetyFlags = useMemo(() => detectSafetyFlags(entries, birth, nowH), [entries, birth, nowH]);
+  // A gentle, age-based "what's happening now" note for the Sleep section
+  // (currently just the ~4-month sleep change). null outside its age window.
+  const phaseNote = useMemo(() => phaseNoteFor(birth, nowH), [birth, nowH]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
   // The big number is the current (partial) window's value — only call it
   // "today so far" when that last point really is today's window.
@@ -158,6 +162,17 @@ export default function Insights() {
         )}
       </View>
 
+      {phaseNote ? (
+        <View style={{ flexDirection: 'row', gap: 12, backgroundColor: t.chip, borderRadius: 18, padding: 15, marginTop: 12 }}>
+          <View style={{ width: 30, height: 30, borderRadius: 10, backgroundColor: hexA(t.activity.sleep, 0.2), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="moon" size={16} color={t.activity.sleep} />
+          </View>
+          <View style={{ flex: 1, gap: 3 }}>
+            <Txt weight={700} size={14}>{phaseNote.title}</Txt>
+            <Txt weight={500} size={12.5} color={t.dim} style={{ lineHeight: 18 }}>{phaseNote.body}</Txt>
+          </View>
+        </View>
+      ) : null}
       {gated(totalSleep, 'total sleep', (
         <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
           caption="Typical for age" status={sleepStatus} norm={NORMS.totalSleep} birth={birth} points={totalSleep}
