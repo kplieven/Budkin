@@ -42,6 +42,9 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   // at x=0 with a NaN clock. pageX is populated on both, and there is no
   // horizontal scroll here, so page and viewport X agree.
   const plotRef = useRef<View>(null);
+  // Cached page-left of the plot, measured on gesture start so each drag move can
+  // convert pageX synchronously without re-measuring.
+  const plotLeftRef = useRef(0);
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;
@@ -89,19 +92,29 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const scrubClock = scrubX == null ? '' : fmtClock(originHour * 60 + scrubX * 1440);
   const labelLeft = scrubX == null ? 0 : Math.min(Math.max(gx, scrubLineX - 28), Math.max(gx, width - 66));
 
+  // Drag-to-scrub: place/move the guide from the pointer's page X. Measure the
+  // plot's page-left once per gesture (grant), then track moves synchronously.
+  // Clamped to [0,1] so dragging into the gutter or off the edge sticks there.
+  const scrubToPageX = (pageX: number) => {
+    const lx = pageX - plotLeftRef.current;
+    if (!Number.isFinite(lx)) return;
+    setScrubX(Math.min(1, Math.max(0, (lx - gx) / gw)));
+  };
+  const measureThenScrub = (pageX: number) => {
+    plotRef.current?.measureInWindow((mx) => {
+      plotLeftRef.current = mx;
+      scrubToPageX(pageX);
+    });
+  };
+
   return (
     <View>
-      <Pressable
+      <View
         ref={plotRef}
-        onPress={(e) => {
-          const pageX = e.nativeEvent.pageX;
-          if (!Number.isFinite(pageX)) return;
-          plotRef.current?.measureInWindow((mx) => {
-            const lx = pageX - mx; // pointer X within the plot
-            if (!Number.isFinite(lx) || lx < gx || lx > gx + gw) return; // ignore the day-label gutter
-            setScrubX((lx - gx) / gw);
-          });
-        }}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={(e) => measureThenScrub(e.nativeEvent.pageX)}
+        onResponderMove={(e) => scrubToPageX(e.nativeEvent.pageX)}
       >
       <Svg width={width} height={height}>
         {TICK_HS.map((h) => (
@@ -153,10 +166,10 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
           </SvgText>
         ) : null}
         {scrubX != null ? (
-          <Line x1={scrubLineX} y1={top} x2={scrubLineX} y2={top + gh} stroke={t.primary} strokeWidth={1.5} />
+          <Line x1={scrubLineX} y1={top} x2={scrubLineX} y2={top + gh} stroke={t.text} strokeWidth={1.75} />
         ) : null}
       </Svg>
-      </Pressable>
+      </View>
       {liveSleep ? (
         <Animated.View
           style={[
