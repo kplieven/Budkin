@@ -79,7 +79,7 @@ export default function Insights() {
   const originHour = useAppStore((s) => s.rhythmOriginHour);
   const setRhythmOriginHour = useAppStore((s) => s.setRhythmOriginHour);
   const [width, setWidth] = useState(0);
-  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
+  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 14, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
@@ -173,7 +173,7 @@ export default function Insights() {
             );
           })}
         </View>
-        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 10 }}>Last 4 weeks, {originPhrase}</Txt>
+        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 10 }}>Last 2 weeks, {originPhrase}</Txt>
         <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3 }}>
           {ORIGINS.map(([lbl, h]) => (
             <Pressable key={h} onPress={() => setRhythmOriginHour(h)} accessibilityRole="button" accessibilityState={{ selected: originHour === h }} style={{ flex: 1, paddingVertical: 7, borderRadius: 10, backgroundColor: originHour === h ? t.surface : 'transparent', alignItems: 'center' }}>

@@ -10,7 +10,7 @@ import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import { DAY, windowStart, type HeatRow } from './compute';
 
-const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
+const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 13: '2w' };
 const TICK_HS = [0, 6, 12, 18, 24];
 const fmtHour = (hr: number) => `${String(hr).padStart(2, '0')}:00`;
 /** A minutes-since-midnight value as a 24h "HH:MM" clock (wraps past 1440). */
