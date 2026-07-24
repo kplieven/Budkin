@@ -30,7 +30,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Dimensions, Platform, Pressable, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -46,6 +46,33 @@ import Animated, {
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useTheme } from '@/theme/useTheme';
 
+// On mobile web the on-screen keyboard shrinks the *visual* viewport but leaves
+// the layout viewport (window.innerHeight) unchanged, so a bottom:0 sheet stays
+// pinned behind the keyboard. Track how much the keyboard covers via the
+// VisualViewport API so the phone sheet can lift itself above it. Web only:
+// returns 0 on native and when there's no visualViewport (SSR / older browsers).
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => {
+      const covered = window.innerHeight - vv.height - vv.offsetTop;
+      // Ignore small shifts (mobile URL-bar show/hide is ~50-100px); only a real
+      // keyboard (~250px+) should lift the sheet.
+      setInset(covered > 120 ? covered : 0);
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+  return inset;
+}
+
 interface BottomSheetProps {
   onClose: () => void;
   children: ReactNode;
@@ -59,6 +86,9 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
   const t = useTheme();
   const { width, height } = useWindowDimensions();
   const dialog = useDesktopShell();
+  // How much of the viewport the mobile-web keyboard covers (0 elsewhere). The
+  // phone sheet lifts by this and caps its height to the visible area above it.
+  const keyboardInset = useKeyboardInset();
   // `enter` is the bottom-sheet slide-in offset (off-screen -> 0). `pop` is the
   // dialog entrance progress (0 -> 1, mapped to opacity+scale). `dragY` is the
   // sheet's drag-to-dismiss offset. Kept as separate shared values so no value
@@ -110,8 +140,11 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
     });
 
   const scrimStyle = useAnimatedStyle(() => ({ opacity: scrim.value }));
+  // Lift the panel above the keyboard by subtracting the inset. It composes with
+  // the slide-in (enter) and drag-to-dismiss (dragY); the visualViewport resize
+  // fires progressively as the keyboard slides, so the lift tracks it smoothly.
   const sheetPanelStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: enter.value + dragY.value }],
+    transform: [{ translateY: enter.value + dragY.value - keyboardInset }],
   }));
   const dialogPanelStyle = useAnimatedStyle(() => ({
     opacity: pop.value,
@@ -183,7 +216,10 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
         <Animated.View
           style={[
             {
-              maxHeight: height * maxHeightRatio,
+              // Cap to the area left above the keyboard so lifting the panel never
+              // pushes its top off-screen; the child ScrollView then scrolls the
+              // rest into reach.
+              maxHeight: (height - keyboardInset) * maxHeightRatio,
               backgroundColor: t.bg,
               borderTopLeftRadius: 28,
               borderTopRightRadius: 28,
