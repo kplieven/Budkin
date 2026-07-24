@@ -490,7 +490,7 @@ export default function Settings() {
       {selectedChild && (
         <>
           <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-            Cures for {selectedChild.first}
+            Treatments for {selectedChild.first}
           </Txt>
           <View style={group}>
             {childCures.map((c, i) => (
@@ -528,18 +528,18 @@ export default function Settings() {
             <Pressable
               onPress={() => openCureEditor()}
               accessibilityRole="button"
-              accessibilityLabel="Add a cure"
+              accessibilityLabel="Add a treatment"
               style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
             >
               <Icon name="plus" color={t.primary} size={18} />
               <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
-                Add a cure
+                Add a treatment
               </Txt>
             </Pressable>
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
-            Cures stay on this device and are never sent to Baby Buddy. Logging a dose from a cure
-            still saves the dose the usual way.
+            Treatments stay on this device and are never sent to Baby Buddy. Logging a dose from a
+            treatment still saves the dose the usual way.
           </Txt>
         </>
       )}
