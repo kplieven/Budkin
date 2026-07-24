@@ -1,7 +1,7 @@
 import { Fragment, useEffect } from 'react';
 import { View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
-import Svg, { Line, Rect, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, Line, Rect, Text as SvgText } from 'react-native-svg';
 
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
@@ -12,7 +12,10 @@ const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: 
 const TICK_HS = [0, 6, 12, 18, 24];
 const fmtHour = (hr: number) => `${String(hr).padStart(2, '0')}:00`;
 
-export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12 }: { rows: HeatRow[]; width: number; now: number; runningSince?: number | null; originHour?: number }) {
+export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true }: {
+  rows: HeatRow[]; width: number; now: number; runningSince?: number | null; originHour?: number;
+  showSleep?: boolean; showFeeds?: boolean; showDiapers?: boolean;
+}) {
   const t = useTheme();
   // Breathing pulse for the live "asleep now" bar. Declared before the early
   // return below so the hook order stays stable across renders (matches
@@ -26,9 +29,13 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12 }
 
   const night = t.activity.sleep;
   const nap = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);
-  // Wider gutter than the trend charts so the full "Today" row label fits
-  // without clipping past the SVG's left edge.
-  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8, rowH = 6.4;
+  const feedColor = t.activity.feeding;
+  const diaperColor = t.activity.diaper;
+  // Wider gutter than the trend charts so the full "Today" row label fits. Each
+  // row stacks a feed marker lane, the sleep band, then a diaper marker lane
+  // within `pitch`; `bandDy` offsets the band down to leave room for the top lane.
+  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 12;
+  const bandDy = 3.5, rowH = 5, feedDy = 1.6, diaperDy = 9.8, dotR = 1.8;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
@@ -65,18 +72,25 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12 }
         ) : null}
         {rows.map((r, idx) => {
           const y = top + idx * pitch;
+          const by = y + bandDy;
           const isToday = r.offsetFromToday === 0;
           return (
             <Fragment key={idx}>
-              <Rect x={gx} y={y} width={gw} height={rowH} rx={1.5} fill={t.chip} />
-              {r.segments.map((s, j) => (
-                <Rect key={j} x={gx + s.x0 * gw} y={y} width={Math.max(0, (s.x1 - s.x0) * gw)} height={rowH} rx={1.6} fill={s.nap ? nap : night} />
-              ))}
+              <Rect x={gx} y={by} width={gw} height={rowH} rx={1.5} fill={t.chip} />
+              {showSleep ? r.segments.map((s, j) => (
+                <Rect key={`s${j}`} x={gx + s.x0 * gw} y={by} width={Math.max(0, (s.x1 - s.x0) * gw)} height={rowH} rx={1.6} fill={s.nap ? nap : night} />
+              )) : null}
               {isToday && todayFrac < 1 ? (
-                <Rect x={gx + todayFrac * gw} y={y} width={Math.max(0, (1 - todayFrac) * gw)} height={rowH} rx={1.5} fill={future} />
+                <Rect x={gx + todayFrac * gw} y={by} width={Math.max(0, (1 - todayFrac) * gw)} height={rowH} rx={1.5} fill={future} />
               ) : null}
+              {showFeeds ? r.feeds.map((x, j) => (
+                <Circle key={`f${j}`} cx={gx + x * gw} cy={y + feedDy} r={dotR} fill={feedColor} />
+              )) : null}
+              {showDiapers ? r.diapers.map((x, j) => (
+                <Circle key={`d${j}`} cx={gx + x * gw} cy={y + diaperDy} r={dotR} fill={diaperColor} />
+              )) : null}
               {DAY_LABELS[r.offsetFromToday] ? (
-                <SvgText x={gx - 8} y={y + rowH} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">
+                <SvgText x={gx - 8} y={by + rowH} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">
                   {DAY_LABELS[r.offsetFromToday]}
                 </SvgText>
               ) : null}
@@ -104,7 +118,7 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12 }
             {
               position: 'absolute',
               left: gx + liveX0 * gw,
-              top: top + todayIdx * pitch,
+              top: top + todayIdx * pitch + bandDy,
               width: (liveX1 - liveX0) * gw,
               height: rowH,
               borderRadius: 1.6,
