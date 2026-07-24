@@ -467,7 +467,7 @@ export function LogSheet() {
   // read-only treatment summary + the time picker only; "Edit" expands it into
   // the full form. `sheet` is non-null here (guarded above).
   const confirmMode = type === 'medication' && !!sheet.confirm;
-  const medDoseLabel = [te.medDosage != null ? String(te.medDosage) : '', te.medUnit].filter(Boolean).join(' ');
+  const medDoseLabel = te.medDosage != null ? [String(te.medDosage), te.medUnit].filter(Boolean).join(' ') : '';
   const shortcut = DURATION_SHORTCUTS[type];
   // Exact complements by construction: a feeding shows the volume stepper or
   // the intake scale, never both, and never neither.
@@ -791,9 +791,10 @@ export function LogSheet() {
           <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
         )}
 
-        {/* medication field — a required name + optional amount and unit. Notes
-            come from the shared secondary-notes block below (medication isn't
-            excluded from it, like temperature). */}
+        {/* medication field: in confirm mode, a read-only treatment summary
+            (name and, if present, dose) with notes and tags hidden below. In
+            normal mode, the full editable field, with notes and tags shown
+            as usual. */}
         {type === 'medication' &&
           (confirmMode ? (
             <>
@@ -866,8 +867,9 @@ export function LogSheet() {
         <TimeEntry key={type} type={type} color={color} />
 
         {/* notes — the secondary per-entry annotation. Shown for the 5 real
-            activities; NOT for bath (structural note body) and NOT for a general
-            note (its body IS its primary text — a note doesn't annotate itself). */}
+            activities; NOT for bath (structural note body), NOT for a general
+            note (its body IS its primary text), and NOT for medication in
+            confirm mode (read-only summary only). */}
         {type !== 'bath' && type !== 'note' && !confirmMode && (
           <>
             <FieldLabel>Notes (optional)</FieldLabel>
