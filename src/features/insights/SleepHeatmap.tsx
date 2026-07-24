@@ -1,8 +1,10 @@
-import { Fragment, useEffect } from 'react';
-import { View } from 'react-native';
+import { Fragment, useEffect, useState } from 'react';
+import { Pressable, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Line, Rect, Text as SvgText } from 'react-native-svg';
 
+import { Icon } from '@/components/Icon';
+import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
@@ -11,6 +13,11 @@ import { DAY, windowStart, type HeatRow } from './compute';
 const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
 const TICK_HS = [0, 6, 12, 18, 24];
 const fmtHour = (hr: number) => `${String(hr).padStart(2, '0')}:00`;
+/** A minutes-since-midnight value as a 24h "HH:MM" clock (wraps past 1440). */
+const fmtClock = (min: number) => {
+  const m = ((Math.round(min) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+};
 
 export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true }: {
   rows: HeatRow[]; width: number; now: number; runningSince?: number | null; originHour?: number;
@@ -25,6 +32,10 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
     pulse.value = withRepeat(withTiming(0.45, { duration: 800 }), -1, true);
   }, [pulse]);
   const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+  // Sticky scrub marker: a tap drops a vertical guide at that x (as a window
+  // fraction 0..1); another tap moves it, the ✕ on its label clears it. Declared
+  // before the early return so hook order stays stable.
+  const [scrubX, setScrubX] = useState<number | null>(null);
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;
@@ -61,8 +72,21 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
   const liveX1 = todayFrac;
   const showLive = runningSince != null && runningSince < now && todayIdx >= 0 && liveX1 > liveX0;
 
+  // Scrub guide geometry: its x, the clock time it points at (origin + fraction
+  // of the 24h window), and a clamped left for the floating time label.
+  const scrubLineX = scrubX == null ? 0 : xAt(scrubX * 24);
+  const scrubClock = scrubX == null ? '' : fmtClock(originHour * 60 + scrubX * 1440);
+  const labelLeft = scrubX == null ? 0 : Math.min(Math.max(gx, scrubLineX - 28), Math.max(gx, width - 66));
+
   return (
     <View>
+      <Pressable
+        onPress={(e) => {
+          const lx = e.nativeEvent.locationX;
+          if (lx < gx || lx > gx + gw) return; // ignore taps in the day-label gutter
+          setScrubX((lx - gx) / gw);
+        }}
+      >
       <Svg width={width} height={height}>
         {TICK_HS.map((h) => (
           <Line key={`g${h}`} x1={xAt(h)} y1={top} x2={xAt(h)} y2={top + gh} stroke={t.line} strokeWidth={1} opacity={clockAt(h) === 0 ? 1 : 0.5} />
@@ -111,7 +135,11 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
             00:00
           </SvgText>
         ) : null}
+        {scrubX != null ? (
+          <Line x1={scrubLineX} y1={top} x2={scrubLineX} y2={top + gh} stroke={t.primary} strokeWidth={1.5} />
+        ) : null}
       </Svg>
+      </Pressable>
       {showLive ? (
         <Animated.View
           style={[
@@ -127,6 +155,14 @@ export function SleepHeatmap({ rows, width, now, runningSince, originHour = 12, 
             pulseStyle,
           ]}
         />
+      ) : null}
+      {scrubX != null ? (
+        <View style={{ position: 'absolute', top: top + 2, left: labelLeft, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: t.elevated, borderWidth: 1, borderColor: t.line2, borderRadius: 8, paddingVertical: 3, paddingHorizontal: 7 }}>
+          <Txt weight={700} size={11} color={t.text}>{scrubClock}</Txt>
+          <Pressable onPress={() => setScrubX(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Clear time marker">
+            <Icon name="close" size={11} color={t.dim} />
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
