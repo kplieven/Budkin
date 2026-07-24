@@ -168,7 +168,7 @@ interface AppState {
   confirmBirthFor: string | null;
   /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
   adoptSheet: boolean;
-  sheet: { type: ActivityType } | null;
+  sheet: { type: ActivityType; confirm?: boolean } | null;
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
   /** id of the running timer being stopped+edited via the log sheet, or null */
@@ -336,10 +336,14 @@ interface AppActions {
   /** Medication tile tap: open the cure picker when the selected child has an
    *  active cure covering today, otherwise open the plain manual log form. */
   openMedicationLog: () => void;
-  /** Instant-log a dose from a saved cure: record the medication entry right away
-   *  (name/dosage/unit, plus the next-dose interval for an interval cure) and
-   *  close the picker, with no form to confirm. */
+  /** Tapping a saved cure: seed the medication draft from it (name/dosage/unit,
+   *  plus the next-dose interval for an interval cure) and open the medication
+   *  sheet in confirm mode (a read-only summary + the time picker), closing the
+   *  picker. No dose is written here; save() commits it once the user confirms. */
   logMedicationFromCure: (cureId: string) => void;
+  /** Reveal the full editable medication form from the confirm modal: drop the
+   *  `confirm` flag on the medication sheet, keeping the seeded draft. */
+  expandMedicationLog: () => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
   /** One press of the amount stepper: +1 or -1 step in the user's display
    *  units (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
@@ -2587,36 +2591,28 @@ export const useAppStore = create<AppStore>((set, get) => ({
     else get().openSheet('medication');
   },
   logMedicationFromCure: (cureId) => {
-    const s = get();
-    const cure = s.cures.find((c) => c.id === cureId);
+    const cure = get().cures.find((c) => c.id === cureId);
     if (!cure) return;
     // A cure always carries a name (the editor requires one), but gate on it the
-    // same way save() gates a manual dose so a nameless record can never slip in.
-    const name = cure.name.trim();
-    if (!name) return;
-    // Instant-log: tapping a saved cure records the dose immediately, with no
-    // form to confirm. Build the same medication Entry save() would for a fresh
-    // dose (time = now, dosage/unit/interval taken from the cure) and commit it
-    // directly, then close the picker.
-    const entry: Entry = {
-      id: 'e' + Date.now(),
-      childId: cure.childId,
-      type: 'medication',
-      time: s.now,
-      name,
-      dosage: cure.dosage,
-      dosageUnit: cure.dosageUnit?.trim() || undefined,
-      // Only an interval cure carries a next-dose interval onto the synced dose;
-      // a times-of-day cure leaves it unset.
-      nextDoseIntervalSec:
+    // same way save() gates a manual dose so a nameless record can never be seeded.
+    if (!cure.name.trim()) return;
+    // Confirm-before-log: seed a fresh point medication draft from the cure and
+    // open the sheet in confirm mode (read-only summary + time picker). No entry
+    // is written here; save() commits it once the user confirms. openSheet resets
+    // the draft to a blank point medication form, so seed it afterwards.
+    get().openSheet('medication');
+    const patch: Partial<TimeEntryState> = {
+      medName: cure.name,
+      medDosage: cure.dosage,
+      medUnit: cure.dosageUnit,
+      // Only an interval cure carries a next-dose interval onto the dose; a
+      // times-of-day cure leaves it unset.
+      medNextDoseIntervalSec:
         cure.scheduleMode === 'everyHours' && cure.everyHours != null ? cure.everyHours * 3600 : undefined,
-      tags: [],
     };
-    set({ curePicker: null, entries: [entry, ...s.entries] });
-    get().commitWrite(entry);
-    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
-    get().showToast(queued ? 'Saved · queued offline' : 'Saved');
+    set((s) => ({ curePicker: null, sheet: { type: 'medication', confirm: true }, te: { ...s.te, ...patch } }));
   },
+  expandMedicationLog: () => set({ sheet: { type: 'medication' } }),
 
   setTE: (patch) =>
     set((s) => {
