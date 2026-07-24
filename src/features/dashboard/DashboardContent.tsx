@@ -146,12 +146,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       value: diaperAgo != null ? fmtAgoShort(diaperAgo) : '—',
       sub: dia ? (dia.solid ? 'ago · solid' : 'ago · wet') : 'none',
     },
-    {
-      label: 'Bath',
-      color: t.activity.bath,
-      value: washedToday ? 'Done' : 'Due',
-      sub: washedToday ? 'washed today' : washKind === 'big' ? 'big wash' : 'small wash',
-    },
   ];
 
   return (
