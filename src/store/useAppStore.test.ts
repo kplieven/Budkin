@@ -4440,6 +4440,42 @@ describe('unit-system persistence', () => {
   });
 });
 
+describe('rhythm-layer persistence', () => {
+  it('setRhythmLayer toggles one layer and persists all three', () => {
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+    s().setRhythmLayer('diapers', false);
+    expect(s().rhythmShowDiapers).toBe(false);
+    expect(s().rhythmShowSleep).toBe(true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: false });
+  });
+
+  it('setRhythmLayer can turn a layer back on', () => {
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: false, rhythmShowDiapers: true });
+    s().setRhythmLayer('feeds', true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+  });
+
+  it('hydrate restores a persisted false layer (the state worth remembering)', async () => {
+    h.prefs = { rhythmShowDiapers: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ rhythmShowDiapers: true });
+    await s().hydrate();
+    expect(s().rhythmShowDiapers).toBe(false);
+  });
+
+  it('hydrate leaves layers on by default when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+    await s().hydrate();
+    expect(s().rhythmShowSleep).toBe(true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(s().rhythmShowDiapers).toBe(true);
+  });
+});
+
 describe('wash-rhythm persistence', () => {
   it('setSmallWashesPerBig updates state and persists via savePrefs', () => {
     s().setSmallWashesPerBig(5);

@@ -88,14 +88,18 @@ export default function Insights() {
   // Layer toggles for the Rhythm graph. Sleep is the band; feeds/diapers are the
   // marker lanes. The legend chips double as the on/off toggles.
   const napColor = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);
-  const [showSleep, setShowSleep] = useState(true);
-  const [showFeeds, setShowFeeds] = useState(true);
-  const [showDiapers, setShowDiapers] = useState(true);
+  // Persisted per the store (global, all default on) so a hidden layer stays
+  // hidden across restarts. Three scalar selectors, not one object selector, to
+  // avoid returning a fresh reference every render (zustand v5).
+  const showSleep = useAppStore((s) => s.rhythmShowSleep);
+  const showFeeds = useAppStore((s) => s.rhythmShowFeeds);
+  const showDiapers = useAppStore((s) => s.rhythmShowDiapers);
+  const setRhythmLayer = useAppStore((s) => s.setRhythmLayer);
   const LAYERS = [
-    { key: 'sleep', label: 'Sleep', on: showSleep, set: setShowSleep },
-    { key: 'feeds', label: 'Feeds', on: showFeeds, set: setShowFeeds },
-    { key: 'diapers', label: 'Diapers', on: showDiapers, set: setShowDiapers },
-  ];
+    { key: 'sleep', label: 'Sleep', on: showSleep },
+    { key: 'feeds', label: 'Feeds', on: showFeeds },
+    { key: 'diapers', label: 'Diapers', on: showDiapers },
+  ] as const;
 
   const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
   const longest = useMemo(() => buildTrend(entries, 'longestStretch', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
@@ -155,7 +159,7 @@ export default function Insights() {
           {LAYERS.map((L) => {
             const color = L.key === 'feeds' ? t.activity.feeding : L.key === 'diapers' ? t.activity.diaper : t.activity.sleep;
             return (
-              <Pressable key={L.key} onPress={() => L.set(!L.on)} accessibilityRole="button" accessibilityState={{ selected: L.on }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: L.on ? 1 : 0.4, backgroundColor: t.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
+              <Pressable key={L.key} onPress={() => setRhythmLayer(L.key, !L.on)} accessibilityRole="button" accessibilityState={{ selected: L.on }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: L.on ? 1 : 0.4, backgroundColor: t.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
                 {L.key === 'sleep' ? (
                   <View style={{ flexDirection: 'row', width: 14, height: 9, borderRadius: 3, overflow: 'hidden' }}>
                     <View style={{ flex: 1, backgroundColor: t.activity.sleep }} />

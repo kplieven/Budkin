@@ -43,6 +43,14 @@ export interface Prefs {
    * agree. A whole hour (not a timestamp) so it means the same on every date.
    */
   rhythmOriginHour: number;
+  /**
+   * Insights "Rhythm" graph layer toggles: which series the heatmap draws.
+   * Remembered so a user who hides, say, diapers keeps them hidden across app
+   * restarts. Global (like every other pref); all default to visible.
+   */
+  rhythmShowSleep: boolean;
+  rhythmShowFeeds: boolean;
+  rhythmShowDiapers: boolean;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */
