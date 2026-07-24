@@ -451,6 +451,7 @@ export function LogSheet() {
   const save = useAppStore((s) => s.save);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
+  const expandMedicationLog = useAppStore((s) => s.expandMedicationLog);
 
   // Lazy-load the server tag list on first sheet open (cached in the store;
   // subsequent opens no-op). Mirrors how Settings lazy-loads the profile.
@@ -462,6 +463,11 @@ export function LogSheet() {
   const type = sheet.type;
   const color = t.activity[type];
   const label = ACTIVITY_LABEL[type];
+  // Confirm mode: the medication sheet opened from a saved treatment. It shows a
+  // read-only treatment summary + the time picker only; "Edit" expands it into
+  // the full form. `sheet` is non-null here (guarded above).
+  const confirmMode = type === 'medication' && !!sheet.confirm;
+  const medDoseLabel = te.medDosage != null ? [String(te.medDosage), te.medUnit].filter(Boolean).join(' ') : '';
   const shortcut = DURATION_SHORTCUTS[type];
   // Exact complements by construction: a feeding shows the volume stepper or
   // the intake scale, never both, and never neither.
@@ -785,20 +791,46 @@ export function LogSheet() {
           <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
         )}
 
-        {/* medication field — a required name + optional amount and unit. Notes
-            come from the shared secondary-notes block below (medication isn't
-            excluded from it, like temperature). */}
-        {type === 'medication' && (
-          <MedicationField
-            name={te.medName}
-            dosage={te.medDosage}
-            unit={te.medUnit}
-            color={color}
-            onName={(v) => setTE({ medName: v })}
-            onDosage={(v) => setTE({ medDosage: v })}
-            onUnit={(v) => setTE({ medUnit: v })}
-          />
-        )}
+        {/* medication field: in confirm mode, a read-only treatment summary
+            (name and, if present, dose) with notes and tags hidden below. In
+            normal mode, the full editable field, with notes and tags shown
+            as usual. */}
+        {type === 'medication' &&
+          (confirmMode ? (
+            <>
+              <FieldLabel>Treatment</FieldLabel>
+              <View
+                style={{
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 16,
+                  paddingHorizontal: 16,
+                  paddingVertical: 14,
+                  marginBottom: 16,
+                }}
+              >
+                <Txt weight={700} size={16.5}>
+                  {te.medName}
+                </Txt>
+                {medDoseLabel ? (
+                  <Txt weight={500} size={13.5} color={t.dim} style={{ marginTop: 2 }}>
+                    {medDoseLabel}
+                  </Txt>
+                ) : null}
+              </View>
+            </>
+          ) : (
+            <MedicationField
+              name={te.medName}
+              dosage={te.medDosage}
+              unit={te.medUnit}
+              color={color}
+              onName={(v) => setTE({ medName: v })}
+              onDosage={(v) => setTE({ medDosage: v })}
+              onUnit={(v) => setTE({ medUnit: v })}
+            />
+          ))}
 
         {/* note field — the PRIMARY multiline body (taller than the secondary
             per-entry notes input, which is suppressed for a note below) */}
@@ -835,9 +867,10 @@ export function LogSheet() {
         <TimeEntry key={type} type={type} color={color} />
 
         {/* notes — the secondary per-entry annotation. Shown for the 5 real
-            activities; NOT for bath (structural note body) and NOT for a general
-            note (its body IS its primary text — a note doesn't annotate itself). */}
-        {type !== 'bath' && type !== 'note' && (
+            activities; NOT for bath (structural note body), NOT for a general
+            note (its body IS its primary text), and NOT for medication in
+            confirm mode (read-only summary only). */}
+        {type !== 'bath' && type !== 'note' && !confirmMode && (
           <>
             <FieldLabel>Notes (optional)</FieldLabel>
             <TextInput
@@ -868,7 +901,9 @@ export function LogSheet() {
         {/* tags — the server list ∪ the entry's own tags, minus the structural
             ones (bath/small/big, breastfeeding left/right). Server colors render
             via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
-        <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
+        {!confirmMode && (
+          <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
+        )}
       </ScrollView>
 
       {/* save bar */}
@@ -884,6 +919,21 @@ export function LogSheet() {
           >
             <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
+            </Txt>
+          </Pressable>
+        )}
+        {confirmMode && (
+          <Pressable
+            onPress={expandMedicationLog}
+            accessibilityRole="button"
+            accessibilityLabel="Edit the dose details"
+            style={(s) => [
+              { height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
+          >
+            <Txt unselectable weight={800} size={16} color={t.text}>
+              Edit
             </Txt>
           </Pressable>
         )}
