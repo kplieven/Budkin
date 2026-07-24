@@ -12,12 +12,23 @@ export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
 export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
+/**
+ * A child's gender. Optional everywhere: absent means "not recorded", which is
+ * why there is no "unspecified" member — nothing has to be chosen.
+ */
+export type ChildGender = 'girl' | 'boy' | 'other';
+
 export interface Child {
   id: string;
   /** server numeric id; present once created on / loaded from a server */
   serverId?: number;
   first: string;
   last: string;
+  /** the child's gender, when recorded. Baby Buddy's own `Child` model has no
+   *  gender field, so this syncs as a `gender`-tagged note against the child
+   *  (see `genderToNoteBody` in src/api/client.ts) rather than on the child
+   *  record itself. */
+  gender?: ChildGender;
   /** birth date, epoch ms */
   birth: number;
   /** true while the baby is not yet born; `birth` then holds the DUE date */

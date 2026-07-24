@@ -26,6 +26,7 @@ import {
   loadTagsFromServer,
   pushChildToServer,
   pushCureToServer,
+  setChildGenderOnServer,
   pushEntryToServer,
   pushMeasurementToServer,
   pushTimerToServer,
@@ -96,6 +97,7 @@ import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
   Child,
+  ChildGender,
   Cure,
   Entry,
   FeedMethod,
@@ -285,7 +287,16 @@ interface AppActions {
   closeChildSheet: () => void;
   openConfirmBirth: (id: string) => void;
   closeConfirmBirth: () => void;
-  saveChild: (fields: { first: string; last: string; birth: number; expected?: boolean; photo?: PhotoChange }) => void;
+  saveChild: (fields: {
+    first: string;
+    last: string;
+    birth: number;
+    expected?: boolean;
+    photo?: PhotoChange;
+    /** the child's gender, or undefined for "not recorded". Synced as a
+     *  `gender`-tagged note, since Baby Buddy's Child has no such field. */
+    gender?: ChildGender;
+  }) => void;
   /** Turn an expected child into a born one: clear the flag, set the real birth
    *  date, and release it for sync. The single implementation of that
    *  transition, shared by Home's confirm sheet and the child sheet's toggle. */
@@ -1647,6 +1658,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
               children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
             }));
           }
+          // Gender lives in its own `gender`-tagged note, not on the child
+          // record, so replay it as a second write. Deliberately AFTER the slug
+          // re-stamp above and deliberately NOT caught: a failure here re-queues
+          // the whole op, and replaying the child PATCH is idempotent, so the
+          // gender change gets retried instead of being silently dropped.
+          if (payload.serverId != null) {
+            await setChildGenderOnServer(conn, payload.serverId, payload.gender, Date.now());
+          }
         } else if (op.op === 'update' && op.entity === 'measurement') {
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           // Child not on the server (edge case: the entity was synced but the
@@ -1876,8 +1895,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         first: fields.first,
         last: fields.last,
         birth: fields.birth,
+        gender: fields.gender,
         picture: change.kind === 'none' ? existing.picture : pending,
       };
+      const genderChanged = existing.gender !== child.gender;
       set({
         children: s.children.map((c) => (c.id === child.id ? child : c)),
         childSheet: false,
@@ -1886,6 +1907,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast('Updated');
       const conn = s.connection;
       if (conn && conn.mode === 'server' && !s.offline) {
+        // Gender lives in its own `gender`-tagged note, not on the child record,
+        // so it is a separate write. Fired only on an actual change: it costs a
+        // read before its write, and a plain rename should not pay for that.
+        if (genderChanged && child.serverId != null) {
+          void setChildGenderOnServer(conn, child.serverId, child.gender, Date.now()).catch(() => {});
+        }
         void updateChildOnServer(conn, child, change)
           .then((res) => {
             if (!res) return;
@@ -1923,6 +1950,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       last: fields.last,
       birth: fields.birth,
       expected: fields.expected,
+      gender: fields.gender,
       color: childColor(s.children.length),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
@@ -1958,6 +1986,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 : c,
             ),
           }));
+          // The gender note references the child by SERVER id, so it can only be
+          // written once the POST above has produced one.
+          if (child.gender != null) {
+            void setChildGenderOnServer(conn, res.id, child.gender, Date.now()).catch(() => {});
+          }
         })
         .catch(() => {});
     }

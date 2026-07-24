@@ -6,9 +6,12 @@ import {
   childBody,
   cureToNoteBody,
   durationToSec,
+  genderFromNote,
+  genderToNoteBody,
   HIDDEN_TAGS,
   isBathNote,
   isCureNote,
+  isGenderNote,
   isHiddenTag,
   isMilestoneNote,
   mapProfile,
@@ -1405,5 +1408,144 @@ describe('cure endpoints', () => {
     await new BabybuddyClient('https://example.com', 'tok').deleteCure(88);
     expect(fetchMock.mock.calls[0][0]).toContain('/notes/88/');
     expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  });
+});
+
+describe('gender <-> note serialization', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const AT = new Date(2026, 2, 4, 10, 0).getTime();
+
+  it('encodes gender as a tagged note with readable body', () => {
+    const body = genderToNoteBody('girl', 5, AT) as any;
+    expect(body.child).toBe(5);
+    expect(body.tags).toEqual(['gender', 'g:girl']);
+    expect(body.note).toBe('Gender: girl');
+    expect(new Date(body.time).getTime()).toBe(AT);
+  });
+
+  it('round-trips every supported gender', () => {
+    for (const g of ['girl', 'boy', 'other'] as const) {
+      expect(genderFromNote(genderToNoteBody(g, 5, AT))).toBe(g);
+    }
+  });
+
+  it('reads an unknown or missing g: tag as not recorded', () => {
+    expect(genderFromNote({ tags: ['gender'] })).toBeUndefined();
+    expect(genderFromNote({ tags: ['gender', 'g:martian'] })).toBeUndefined();
+    expect(genderFromNote({})).toBeUndefined();
+  });
+
+  it('isGenderNote keys off the gender tag only', () => {
+    expect(isGenderNote({ tags: ['gender'] })).toBe(true);
+    expect(isGenderNote({ tags: ['g:girl'] })).toBe(false);
+    expect(isGenderNote({ tags: [] })).toBe(false);
+  });
+
+  it('hides the gender structural tags from the tag picker', () => {
+    expect(isHiddenTag('gender')).toBe(true);
+    expect(isHiddenTag('g:girl')).toBe(true);
+    expect(isHiddenTag('gendered')).toBe(false);
+  });
+
+  it('listChildNotes drops gender notes instead of showing them in the Notes tab', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+          { id: 2, time: '2026-03-04T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { notes } = await new BabybuddyClient('https://example.com', 'tok').listChildNotes('5');
+    expect(notes.map((n) => n.text)).toEqual(['plain note']);
+  });
+
+  it('listGenders keys the whole account by child server id in one request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 3,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, child: 5, time: '2026-03-04T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+          { id: 2, child: 7, time: '2026-03-03T10:00:00.000Z', note: 'Gender: boy', tags: ['gender', 'g:boy'] },
+          { id: 3, child: 9, time: '2026-03-02T10:00:00.000Z', note: 'plain', tags: [] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listGenders();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('tags=gender');
+    expect(map.get(5)).toBe('girl');
+    expect(map.get(7)).toBe('boy');
+    expect(map.has(9)).toBe(false);
+  });
+
+  it('listGenders lets the newest note win when a child has a stale duplicate', async () => {
+    // Results come back newest-first, so the first one seen per child wins.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 2, child: 5, time: '2026-03-04T10:00:00.000Z', note: 'Gender: boy', tags: ['gender', 'g:boy'] },
+          { id: 1, child: 5, time: '2026-03-01T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listGenders();
+    expect(map.get(5)).toBe('boy');
+  });
+
+  it('setChildGender PATCHes the existing note rather than adding a second one', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 44, child: 5, tags: ['gender', 'g:girl'] }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, 'boy', AT);
+    expect(fetchMock.mock.calls[1][0]).toContain('/notes/44/');
+    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+  });
+
+  it('setChildGender POSTs when the child has no gender note yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 99 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, 'girl', AT);
+    expect(fetchMock.mock.calls[1][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).tags).toEqual(['gender', 'g:girl']);
+  });
+
+  it('setChildGender DELETEs the note when the gender is cleared', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 44, child: 5, tags: ['gender', 'g:girl'] }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 204));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, undefined, AT);
+    expect(fetchMock.mock.calls[1][0]).toContain('/notes/44/');
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE');
+  });
+
+  it('setChildGender writes nothing when clearing a gender that was never set', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, undefined, AT);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,6 +10,7 @@ import {
   entryTimestamp,
   type ActivityType,
   type Child,
+  type ChildGender,
   type Cure,
   type Entry,
   type FeedMethod,
@@ -71,7 +72,15 @@ export async function loadFromServer(
   // ApiError(401/403) on a bad token. We deliberately do NOT use /api/profile/
   // as the gate: it can return 500 on some instances (e.g. a user without a
   // settings row), which would wrongly reject a valid token.
-  const children = await client.listChildren();
+  const rawChildren = await client.listChildren();
+  // Baby Buddy's Child model has no gender field, so it arrives as one extra
+  // request over the `gender`-tagged notes for the WHOLE account (not per
+  // child), keyed by server id. A failure degrades to "not recorded" rather
+  // than failing the load.
+  const genders = await client.listGenders().catch(() => new Map<number, ChildGender>());
+  const children = rawChildren.map((c) =>
+    c.serverId != null && genders.has(c.serverId) ? { ...c, gender: genders.get(c.serverId) } : c,
+  );
   const preferred =
     preferredChildServerId != null
       ? children.find((c) => c.serverId === preferredChildServerId)?.id
@@ -223,6 +232,19 @@ export async function deleteMeasurementFromServer(
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteMeasurement(kind, serverId);
+}
+
+/** Write a child's gender as a `gender`-tagged note (or delete the note when
+ *  the gender is cleared). No-op in local mode. */
+export async function setChildGenderOnServer(
+  conn: Connection,
+  childServerId: number,
+  gender: ChildGender | undefined,
+  atMs: number,
+): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.setChildGender(childServerId, gender, atMs);
 }
 
 /** Push a newly created cure (a `cure`-tagged note); returns its new server id. */
