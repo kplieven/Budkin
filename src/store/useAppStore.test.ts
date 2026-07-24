@@ -923,43 +923,51 @@ describe('cures (local-only medication regimens)', () => {
     expect(s().sheet).toEqual({ type: 'medication' });
   });
 
-  it('logMedicationFromCure instantly logs a dose from an interval cure (no form to confirm)', () => {
+  it('logMedicationFromCure from an interval cure seeds the draft and opens the confirm sheet (nothing committed yet)', () => {
     useAppStore.setState({ cures: [cure()], curePicker: { open: true } });
     s().logMedicationFromCure('cure-1');
-    // No manual form opens and the picker closes.
-    expect(s().sheet).toBeNull();
+    // Opens the medication sheet in confirm mode and closes the picker.
+    expect(s().sheet).toEqual({ type: 'medication', confirm: true });
     expect(s().curePicker).toBeNull();
-    // The dose is recorded immediately, at `now`, for the cure's child.
-    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
-    expect(e.type).toBe('medication');
-    expect(e.childId).toBe('c1');
-    expect(e.time).toBe(NOW);
-    expect(e.name).toBe('Paracetamol');
-    expect(e.dosage).toBe(2.5);
-    expect(e.dosageUnit).toBe('mL');
-    expect(e.nextDoseIntervalSec).toBe(6 * 3600); // everyHours * 3600
+    // A point (time-only) draft, seeded from the cure. Nothing is written until save().
+    expect(s().te.shape).toBe('point');
+    expect(s().te.medName).toBe('Paracetamol');
+    expect(s().te.medDosage).toBe(2.5);
+    expect(s().te.medUnit).toBe('mL');
+    expect(s().te.medNextDoseIntervalSec).toBe(6 * 3600); // everyHours * 3600
+    expect(s().entries).toEqual([]);
   });
 
-  it('logMedicationFromCure from a times-of-day cure logs a dose with no next-dose interval', () => {
+  it('logMedicationFromCure from a times-of-day cure seeds no next-dose interval', () => {
     useAppStore.setState({
       cures: [cure({ scheduleMode: 'timesOfDay', timesOfDay: ['morning', 'evening'], everyHours: undefined })],
     });
     s().logMedicationFromCure('cure-1');
-    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
-    expect(e.name).toBe('Paracetamol');
-    expect(e.nextDoseIntervalSec).toBeUndefined();
+    expect(s().te.medName).toBe('Paracetamol');
+    expect(s().te.medNextDoseIntervalSec).toBeUndefined();
   });
 
-  it('logMedicationFromCure logs the dose directly without seeding the manual draft', () => {
+  it('saving from the confirm sheet writes a dose carrying nextDoseIntervalSec', () => {
     useAppStore.setState({ cures: [cure({ everyHours: 8 })] });
-    const draftBefore = s().te;
     s().logMedicationFromCure('cure-1');
-    // The old flow seeded medName/medDosage into the draft and opened the sheet;
-    // now the draft is untouched and no sheet opens.
-    expect(s().sheet).toBeNull();
-    expect(s().te).toBe(draftBefore);
+    s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.type).toBe('medication');
+    expect(e.childId).toBe('c1');
+    expect(e.time).toBe(NOW); // point draft, agoMin 0
+    expect(e.name).toBe('Paracetamol');
+    expect(e.dosage).toBe(2.5);
+    expect(e.dosageUnit).toBe('mL');
     expect(e.nextDoseIntervalSec).toBe(8 * 3600);
+  });
+
+  it('expandMedicationLog drops the confirm flag but keeps the seeded draft', () => {
+    useAppStore.setState({ cures: [cure()], curePicker: { open: true } });
+    s().logMedicationFromCure('cure-1');
+    const seeded = s().te;
+    s().expandMedicationLog();
+    expect(s().sheet).toEqual({ type: 'medication' });
+    expect(s().te).toBe(seeded); // same draft reference, untouched
   });
 
   it('survive disconnect (user data, unlike the synced entity store)', () => {
