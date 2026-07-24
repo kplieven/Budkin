@@ -10,7 +10,7 @@ import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
-import { DAY, windowStart } from '@/features/insights/compute';
+import { windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { bathGivenToday, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
@@ -97,7 +97,12 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const dayStartMs = windowStart(now, originHour);
   const todaySleepMin = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
-    .filter((e) => (e.end as number) >= dayStartMs && (e.end as number) < dayStartMs + DAY)
+    // Bucket by nap START, matching the Insights Rhythm graph and its trends
+    // (compute.ts groups sleep by windowStart(e.start, ...)). Bucketing by end
+    // here made Home disagree with the graph for naps that straddle the day
+    // boundary; anchoring both to the start keeps the "today" total in sync and
+    // stays correct across DST since windowStart rebuilds from calendar fields.
+    .filter((e) => windowStart(e.start, originHour) === dayStartMs)
     .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
 
   const dia = lastDiaper(childEntries);
