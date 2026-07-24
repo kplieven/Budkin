@@ -324,7 +324,6 @@ function MedicationField({
         onChangeText={onName}
         placeholder="e.g. Paracetamol, vitamin D…"
         placeholderTextColor={t.faint}
-        autoFocus
         style={{
           minHeight: 48,
           borderRadius: 14,
