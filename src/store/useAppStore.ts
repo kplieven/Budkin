@@ -16,6 +16,7 @@ import {
 import {
   type Connection,
   deleteChildFromServer,
+  deleteCureFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   deleteTimerFromServer,
@@ -24,11 +25,13 @@ import {
   loadProfileFromServer,
   loadTagsFromServer,
   pushChildToServer,
+  pushCureToServer,
   pushEntryToServer,
   pushMeasurementToServer,
   pushTimerToServer,
   serverHasData,
   updateChildOnServer,
+  updateCureOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
   updateTimerOnServer,
@@ -196,9 +199,10 @@ interface AppState {
   entries: Entry[];
   timers: Timer[];
   measurements: Measurement[];
-  /** Per-child medication regimens ("cures"). LOCAL ONLY, never synced (no push
-   *  plumbing, like timers/prefs). Persisted via src/data/cures; survives
-   *  disconnect (user data, not the synced entity store). */
+  /** Per-child medication regimens ("cures"). Synced to Baby Buddy as
+   *  `cure`-tagged notes. Persisted via src/data/cures, which is the local-mode
+   *  store and the offline cache when connected; survives disconnect (user
+   *  data, not the synced entity store). */
   cures: Cure[];
   lastFeed: { feedType: FeedType; method: FeedMethod };
   insightsEntries: Entry[];
@@ -321,7 +325,7 @@ interface AppActions {
   saveMeasurement: (value: number, date: number, notes?: string) => void;
   deleteMeasurement: (id: string) => void;
 
-  // cures (local-only medication regimens; never synced)
+  // cures (medication regimens; synced as `cure`-tagged notes)
   /** Add a fully-formed cure (the editor stamps id + childId). */
   addCure: (cure: Cure) => void;
   /** Replace a cure by id with an updated copy. */
@@ -463,6 +467,18 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   const serverIds = new Set(serverList.map((r) => r.id));
   const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
   return [...unsynced, ...serverList];
+}
+
+/**
+ * Merge server-loaded cures with the on-device copy. The local list is BOTH the
+ * offline cache and the only home of cures created offline (serverId == null),
+ * so a wholesale refresh must not replace it outright, and incoming cures carry
+ * the server's child id until `remapChildIds` rewrites it. Same shape as the
+ * measurement merge one line up, kept as a named helper because all three load
+ * paths (hydrate / refresh / adopt) need the identical pair of steps.
+ */
+export function mergeCures(serverCures: Cure[], localCures: Cure[], children: Child[]): Cure[] {
+  return mergeUnsynced(remapChildIds(serverCures, children), localCures);
 }
 
 /**
@@ -649,6 +665,7 @@ function buildUploadDeps(conn: Connection): UploadDeps {
     pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
+    pushCure: (c, childServerId) => pushCureToServer(conn, c, childServerId),
   };
 }
 
@@ -1064,9 +1081,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
-    // Cures are local-only user data (the server has no regimen record), so load
-    // them unconditionally here too, exactly like timers below. They survive
-    // disconnect, so this is the only path that restores them.
+    // Cures are user data that survives disconnect, so load the on-device copy
+    // unconditionally here, exactly like timers below. In server mode this is
+    // the offline cache the freshly-loaded server list merges on top of (see
+    // `mergeCures`); in local mode it is the only copy.
     set({ cures: await loadCures() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
@@ -1167,6 +1185,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // via `mergeHeldBackEntries`, on top of the normal queue merge.
         entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
         timers: reconcileTimers(savedTimers, remappedTimers),
+        // `get().cures` was filled from on-device storage a few lines up, so it
+        // is the offline cache the server list merges on top of.
+        cures: mergeCures(data.cures, get().cures, reconciledChildren),
         selectedChildId,
       });
       void get().flushQueue();
@@ -1290,6 +1311,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // warm reload, not a cold restart), never on the server, so merge
         // them back the same way `hydrate()` does from the entity store.
         entries: mergeHeldBackEntries(remappedEntries, s.entries, reconciledChildren),
+        cures: mergeCures(data.cures, s.cures, reconciledChildren),
         selectedChildId,
         timers: reconcileTimers(localTimers, remappedTimers),
       });
@@ -1372,6 +1394,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: st.children.map((c) => ({ ...c, serverId: undefined })),
         entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
         measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
+        cures: st.cures.map((c) => ({ ...c, serverId: undefined })),
         timers: st.timers.map((t) => ({ ...t, serverId: undefined })),
       }));
     }
@@ -1391,7 +1414,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     const s = get();
-    let state = { children: s.children, entries: s.entries, measurements: s.measurements };
+    let state = { children: s.children, entries: s.entries, measurements: s.measurements, cures: s.cures };
     if (hasData && opts?.uploadAnyway) {
       // Dedup: attach each not-yet-synced local child to a matching existing
       // server child (by name + birth date) instead of duplicating it.
@@ -1421,6 +1444,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: result.children,
       entries: result.entries.map((e) => (e.heldBack && e.serverId != null ? { ...e, heldBack: false } : e)),
       measurements: result.measurements,
+      cures: result.cures ?? s.cures,
     });
 
     // An expected child is deliberately held back from the server (its
@@ -1432,7 +1456,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const stillUnsynced =
       result.children.some((c) => c.serverId == null && !c.expected) ||
       result.entries.some((e) => e.serverId == null && !expectingChildIds.has(e.childId)) ||
-      result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId));
+      result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId)) ||
+      (result.cures ?? []).some((c) => c.serverId == null && !expectingChildIds.has(c.childId));
     if (stillUnsynced) {
       // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
       // retry against the SAME server doesn't wrongly reset the ids we just stamped.
@@ -1497,6 +1522,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: reconciledChildren,
       entries: mergedEntries,
       measurements: mergedMeasurements,
+      cures: mergeCures(data.cures, get().cures, reconciledChildren),
       timers: remappedTimers,
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
@@ -1632,7 +1658,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           if (childServerId == null) throw new Error('child not synced');
           await updateEntryOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        } else if (op.op === 'update' && op.entity === 'cure') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          if (childServerId == null) throw new Error('child not synced');
+          await updateCureOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'delete' && op.entity === 'cure') await deleteCureFromServer(conn, op.serverId);
+        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
         else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
         else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
@@ -1667,12 +1698,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const hasUnsynced =
         s.children.some((c) => c.serverId == null) ||
         s.measurements.some((m) => m.serverId == null) ||
+        s.cures.some((c) => c.serverId == null) ||
         heldBackEntries.length > 0;
       const hasUnsyncedTimer = s.timers.some((t) => t.serverId == null);
       if (!hasUnsynced && !hasUnsyncedTimer) return;
       if (hasUnsynced) {
         const result = await uploadUnsynced(
-          { children: s.children, entries: heldBackEntries, measurements: s.measurements },
+          { children: s.children, entries: heldBackEntries, measurements: s.measurements, cures: s.cures },
           buildUploadDeps(conn),
         );
         // Count only records that WERE serverId==null in the pre-upload snapshot
@@ -1685,7 +1717,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           s.measurements.filter(
             (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
           ).length +
-          heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length;
+          heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length +
+          s.cures.filter(
+            (c) => c.serverId == null && (result.cures ?? []).find((r) => r.id === c.id)?.serverId != null,
+          ).length;
         // Functional merge-by-id (reads the CURRENT state via `st`, not the
         // pre-await snapshot `s`) that only stamps serverIds, so a create that
         // landed during the await isn't dropped by a wholesale replace.
@@ -1697,6 +1732,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           measurements: st.measurements.map((m) => {
             const u = result.measurements.find((r) => r.id === m.id);
             return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
+          }),
+          cures: st.cures.map((c) => {
+            const u = (result.cures ?? []).find((r) => r.id === c.id);
+            return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
           }),
           entries: st.entries.map((e) => {
             const u = result.entries.find((r) => r.id === e.id);
@@ -2565,18 +2604,61 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  // --- cures (local-only medication regimens) ---
-  // No server calls anywhere here: cures never sync. The `cures` subscribe at
-  // the bottom of this file persists every change to on-device storage, the same
-  // single-path way running timers are persisted.
-  addCure: (cure) => set((s) => ({ cures: [cure, ...s.cures] })),
-  updateCure: (cure) => set((s) => ({ cures: s.cures.map((c) => (c.id === cure.id ? cure : c)) })),
-  deleteCure: (id) =>
-    set((s) => ({
+  // --- cures (medication regimens) ---
+  // Offline-first, exactly like measurements: the local write lands first and
+  // the server mirror is fire-and-forget, with an offline edit/delete recorded
+  // as a pending op so it replays on reconnect. A cure rides on the server as a
+  // `cure`-tagged note (see `cureToNoteBody`). The `cures` subscribe at the
+  // bottom of this file persists every change to on-device storage, which is
+  // both the local-mode store and the offline cache when connected.
+  addCure: (cure) => {
+    const s = get();
+    set({ cures: [cure, ...s.cures] });
+    const conn = s.connection;
+    if (conn && conn.mode === 'server' && !s.offline) {
+      const childServerId = childServerIdFor(s.children, cure.childId);
+      // No server id for the child yet (an expecting child, say): leave the cure
+      // unstamped and let flushUnsynced push it once the child lands.
+      if (childServerId != null) {
+        void pushCureToServer(conn, cure, childServerId)
+          .then((serverId) => {
+            if (serverId != null) {
+              set((st) => ({ cures: st.cures.map((c) => (c.id === cure.id ? { ...c, serverId } : c)) }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+    // A cure created offline needs no pending op: its create is still pending,
+    // and flushUnsynced picks it up by serverId == null.
+  },
+  updateCure: (cure) => {
+    const s = get();
+    set({ cures: s.cures.map((c) => (c.id === cure.id ? cure : c)) });
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server') return;
+    const childServerId = childServerIdFor(s.children, cure.childId);
+    if (!s.offline) {
+      if (childServerId != null && cure.serverId != null) {
+        void updateCureOnServer(conn, cure, childServerId).catch(() => {});
+      }
+    } else if (cure.serverId != null) {
+      void addPendingOp({ op: 'update', entity: 'cure', payload: cure });
+    }
+  },
+  deleteCure: (id) => {
+    const s = get();
+    const cure = s.cures.find((c) => c.id === id);
+    set({
       cures: s.cures.filter((c) => c.id !== id),
       // If the sheet is open on the cure being deleted, close it.
       cureEditor: s.cureEditor?.editingId === id ? null : s.cureEditor,
-    })),
+    });
+    const conn = s.connection;
+    if (!cure || cure.serverId == null || !conn || conn.mode !== 'server') return;
+    if (!s.offline) void deleteCureFromServer(conn, cure.serverId).catch(() => {});
+    else void addPendingOp({ op: 'delete', entity: 'cure', serverId: cure.serverId });
+  },
   openCureEditor: (id) => set({ cureEditor: { editingId: id ?? null } }),
   closeCureEditor: () => set({ cureEditor: null }),
   openCurePicker: () => set({ curePicker: { open: true } }),
@@ -3153,9 +3235,11 @@ useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
 });
 
-// Persist cures the same single-path way as timers: local-only user data, so a
-// reference change (add/update/delete replaces the array) writes it, and nothing
-// ever uploads it. Deliberately NOT cleared on disconnect (see `disconnect`).
+// Persist cures the same single-path way as timers: a reference change
+// (add/update/delete replaces the array) writes the whole list to on-device
+// storage. This is persistence ONLY — the server mirror is the cure actions'
+// job, so a serverId stamped by a push lands here through the same subscribe.
+// Deliberately NOT cleared on disconnect (see `disconnect`).
 useAppStore.subscribe((state, prev) => {
   if (state.cures !== prev.cures) void saveCures(state.cures);
 });

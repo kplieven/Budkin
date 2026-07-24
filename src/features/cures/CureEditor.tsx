@@ -107,6 +107,10 @@ function Inner({ editingId }: { editingId: string | null }) {
     const parsedHours = Math.max(1, Math.round(parseInt(everyHours, 10) || 1));
     const cure: Cure = {
       id: editing?.id ?? 'cure' + Date.now(),
+      // Carry the backing note's server id through an edit. Dropping it would
+      // make `updateCure` skip the PATCH and leave the cure looking unsynced,
+      // so `flushUnsynced` would POST a second note for the same treatment.
+      serverId: editing?.serverId,
       childId: editing?.childId ?? selectedChildId,
       name: name.trim(),
       scheduleMode,

@@ -8,7 +8,7 @@
  * flows.
  */
 
-import type { Child, Entry, Measurement } from '@/types/models';
+import type { Child, Cure, Entry, Measurement } from '@/types/models';
 
 export interface UploadDeps {
   /** POST a child, return its new server id (or undefined on failure). */
@@ -20,12 +20,19 @@ export interface UploadDeps {
   /** POST a measurement, given the server id of its owning child, return its
    *  new server id. */
   pushMeasurement: (m: Measurement, childServerId: number) => Promise<number | undefined>;
+  /** POST a cure (as a `cure`-tagged note), given the server id of its owning
+   *  child, return its new server id. */
+  pushCure: (cure: Cure, childServerId: number) => Promise<number | undefined>;
 }
 
 export interface UploadState {
   children: Child[];
   entries: Entry[];
   measurements: Measurement[];
+  /** Optional: callers pass only the slice they want uploaded (`flushUnsynced`
+   *  hands over just the held-back entries, for instance), so an absent `cures`
+   *  means "no cures to push here", not "this state has none". */
+  cures?: Cure[];
 }
 
 async function tryPush<T, A extends unknown[]>(
@@ -42,7 +49,7 @@ async function tryPush<T, A extends unknown[]>(
 
 /**
  * Upload every serverId==null record in dependency order (children first, then
- * their entries/measurements), stamping serverId on each success. Idempotent &
+ * their entries/measurements/cures), stamping serverId on each success. Idempotent &
  * resumable: records that already have a serverId are skipped; a push that
  * returns undefined / throws leaves that record serverId==null and does not
  * abort the rest. onProgress(done,total) is called after each attempted push.
@@ -59,11 +66,13 @@ export async function uploadUnsynced(
   const children = state.children.map((c) => ({ ...c }));
   const entries = state.entries.map((e) => ({ ...e }));
   const measurements = state.measurements.map((m) => ({ ...m }));
+  const cures = (state.cures ?? []).map((c) => ({ ...c }));
 
   const total =
     children.filter((c) => c.serverId == null && !c.expected).length +
     entries.filter((e) => e.serverId == null).length +
-    measurements.filter((m) => m.serverId == null).length;
+    measurements.filter((m) => m.serverId == null).length +
+    cures.filter((c) => c.serverId == null).length;
   let done = 0;
 
   // 1. Children first.
@@ -115,7 +124,23 @@ export async function uploadUnsynced(
     onProgress?.(done, total);
   }
 
-  return { children, entries, measurements };
+  // 5. Cures: same as entries. A cure belonging to an unsynced child (an
+  //    expected one, say) stays local until that child reaches the server.
+  for (const c of cures) {
+    if (c.serverId != null) continue;
+    const serverChildId = childIdMap.get(c.childId);
+    if (serverChildId == null) {
+      done++;
+      onProgress?.(done, total);
+      continue;
+    }
+    const id = await tryPush(deps.pushCure, c, serverChildId);
+    if (id != null) c.serverId = id;
+    done++;
+    onProgress?.(done, total);
+  }
+
+  return { children, entries, measurements, cures };
 }
 
 /** Find a server child that matches a local child by first name (case-insensitive,
