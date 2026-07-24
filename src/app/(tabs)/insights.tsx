@@ -74,19 +74,15 @@ export default function Insights() {
   // Start of a currently-running feeding timer, for the live feeding bar (drawn
   // on top of a live sleep bar so feeding takes precedence).
   const runningFeedSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'feeding')?.start ?? null);
-  // The Rhythm graph's day boundary. It drives the heatmap AND every per-window
-  // trend below, so the graph and the numbers share one "day" (a persisted pref).
+  // The day boundary (set on the Settings page). Drives the heatmap and every
+  // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
-  const setRhythmOriginHour = useAppStore((s) => s.setRhythmOriginHour);
   const [width, setWidth] = useState(0);
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 14, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
   const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
-  // Window presets: the hour each 24h window starts at. Noon-to-noon (12) is the
-  // default and keeps a normal night as one contiguous block in the middle.
-  const ORIGINS: [string, number][] = [['7 PM', 19], ['Noon', 12], ['7 AM', 7], ['12 AM', 0]];
   const clockLabel = (h: number) => (h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`);
   const originPhrase = `${clockLabel(originHour)} to ${clockLabel(originHour)}`;
   // Layer toggles for the Rhythm graph. Sleep is the band; feeds/diapers are the
@@ -173,15 +169,7 @@ export default function Insights() {
             );
           })}
         </View>
-        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 10 }}>Last 2 weeks, {originPhrase}</Txt>
-        <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3 }}>
-          {ORIGINS.map(([lbl, h]) => (
-            <Pressable key={h} onPress={() => setRhythmOriginHour(h)} accessibilityRole="button" accessibilityState={{ selected: originHour === h }} style={{ flex: 1, paddingVertical: 7, borderRadius: 10, backgroundColor: originHour === h ? t.surface : 'transparent', alignItems: 'center' }}>
-              <Txt weight={originHour === h ? 700 : 600} size={12.5} color={originHour === h ? t.text : t.dim}>{lbl}</Txt>
-            </Pressable>
-          ))}
-        </View>
-        <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginTop: 6, marginBottom: 12 }}>Applies to the graph and the trend numbers</Txt>
+        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 12 }}>Last 2 weeks, {originPhrase}</Txt>
         {daysWithSleep >= 7 ? (
           <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
         ) : (
