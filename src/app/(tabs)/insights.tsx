@@ -10,6 +10,8 @@ import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { buildDiaperSeries, buildSleepHeatmap, buildTrend, DAY, type TrendPoint } from '@/features/insights/compute';
 import { bandStatus, NORMS } from '@/features/insights/norms';
 import { DiaperBars } from '@/features/insights/DiaperBars';
+import { detectSafetyFlags } from '@/features/insights/safety';
+import { SafetyNote } from '@/features/insights/SafetyNote';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
 import { TrendCard } from '@/features/insights/TrendCard';
 import { hexA } from '@/lib/color';
@@ -80,6 +82,9 @@ export default function Insights() {
   const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', nowH, rangeDays), [entries, nowH, rangeDays]);
   const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays), [entries, nowH, rangeDays]);
   const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays), [entries, nowH, rangeDays]);
+  // The narrow safety net: at most a wet-nappy and a newborn low-feed nudge,
+  // only when the signal is real and current (see safety.ts). Range-independent.
+  const safetyFlags = useMemo(() => detectSafetyFlags(entries, birth, nowH), [entries, birth, nowH]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
   // The big number is the current (partial) window's value — only call it
   // "today so far" when that last point really is today's window.
@@ -170,6 +175,11 @@ export default function Insights() {
           caption="Rule of thumb" norm={NORMS.wakeWindow} birth={birth} points={wake}
           yTicks={[0, 60, 120, 180, 240]} fmtY={(v) => `${v}`} width={width} />
       ))}
+      {safetyFlags.length ? (
+        <View style={{ marginTop: 24, marginBottom: 4 }}>
+          <SafetyNote flags={safetyFlags} />
+        </View>
+      ) : null}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 2, textTransform: 'uppercase' }}>
         Feeding
       </Txt>
