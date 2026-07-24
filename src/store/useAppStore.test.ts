@@ -923,35 +923,42 @@ describe('cures (local-only medication regimens)', () => {
     expect(s().sheet).toEqual({ type: 'medication' });
   });
 
-  it('logMedicationFromCure seeds name/dosage/unit + interval and opens the medication form', () => {
+  it('logMedicationFromCure instantly logs a dose from an interval cure (no form to confirm)', () => {
     useAppStore.setState({ cures: [cure()], curePicker: { open: true } });
     s().logMedicationFromCure('cure-1');
-    expect(s().sheet).toEqual({ type: 'medication' });
+    // No manual form opens and the picker closes.
+    expect(s().sheet).toBeNull();
     expect(s().curePicker).toBeNull();
-    expect(s().te.medName).toBe('Paracetamol');
-    expect(s().te.medDosage).toBe(2.5);
-    expect(s().te.medUnit).toBe('mL');
-    expect(s().te.medNextDoseIntervalSec).toBe(6 * 3600); // everyHours * 3600
+    // The dose is recorded immediately, at `now`, for the cure's child.
+    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.type).toBe('medication');
+    expect(e.childId).toBe('c1');
+    expect(e.time).toBe(NOW);
+    expect(e.name).toBe('Paracetamol');
+    expect(e.dosage).toBe(2.5);
+    expect(e.dosageUnit).toBe('mL');
+    expect(e.nextDoseIntervalSec).toBe(6 * 3600); // everyHours * 3600
   });
 
-  it('logMedicationFromCure from a times-of-day cure leaves the interval unset', () => {
+  it('logMedicationFromCure from a times-of-day cure logs a dose with no next-dose interval', () => {
     useAppStore.setState({
       cures: [cure({ scheduleMode: 'timesOfDay', timesOfDay: ['morning', 'evening'], everyHours: undefined })],
     });
     s().logMedicationFromCure('cure-1');
-    expect(s().te.medName).toBe('Paracetamol');
-    expect(s().te.medNextDoseIntervalSec).toBeUndefined();
+    const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
+    expect(e.name).toBe('Paracetamol');
+    expect(e.nextDoseIntervalSec).toBeUndefined();
   });
 
-  it('a dose logged from an interval cure saves an entry carrying nextDoseIntervalSec', () => {
+  it('logMedicationFromCure logs the dose directly without seeding the manual draft', () => {
     useAppStore.setState({ cures: [cure({ everyHours: 8 })] });
+    const draftBefore = s().te;
     s().logMedicationFromCure('cure-1');
-    s().save();
+    // The old flow seeded medName/medDosage into the draft and opened the sheet;
+    // now the draft is untouched and no sheet opens.
+    expect(s().sheet).toBeNull();
+    expect(s().te).toBe(draftBefore);
     const e = s().entries[0] as Extract<Entry, { type: 'medication' }>;
-    expect(e.type).toBe('medication');
-    expect(e.name).toBe('Paracetamol');
-    expect(e.dosage).toBe(2.5);
-    expect(e.dosageUnit).toBe('mL');
     expect(e.nextDoseIntervalSec).toBe(8 * 3600);
   });
 
@@ -4430,6 +4437,42 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     await s().hydrate();
     expect(s().unitSystem).toBe('metric');
+  });
+});
+
+describe('rhythm-layer persistence', () => {
+  it('setRhythmLayer toggles one layer and persists all three', () => {
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+    s().setRhythmLayer('diapers', false);
+    expect(s().rhythmShowDiapers).toBe(false);
+    expect(s().rhythmShowSleep).toBe(true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: false });
+  });
+
+  it('setRhythmLayer can turn a layer back on', () => {
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: false, rhythmShowDiapers: true });
+    s().setRhythmLayer('feeds', true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+  });
+
+  it('hydrate restores a persisted false layer (the state worth remembering)', async () => {
+    h.prefs = { rhythmShowDiapers: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ rhythmShowDiapers: true });
+    await s().hydrate();
+    expect(s().rhythmShowDiapers).toBe(false);
+  });
+
+  it('hydrate leaves layers on by default when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });
+    await s().hydrate();
+    expect(s().rhythmShowSleep).toBe(true);
+    expect(s().rhythmShowFeeds).toBe(true);
+    expect(s().rhythmShowDiapers).toBe(true);
   });
 });
 

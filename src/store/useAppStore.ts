@@ -72,6 +72,7 @@ import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import {
   activeCuresForChildToday,
+  clampHourOfDay,
   clampMinuteOfDay,
   clampSmallWashesPerBig,
   entriesForChild,
@@ -82,6 +83,7 @@ import {
   nextWashKind,
   overruleLasted,
   reorder,
+  RHYTHM_ORIGIN_DEFAULT,
   SMALL_WASHES_PER_BIG_DEFAULT,
   startOfDay,
   teEnd,
@@ -136,6 +138,17 @@ interface AppState {
    *  boolean, so changing the window never re-classifies history. */
   napWindowStartMin: number;
   napWindowEndMin: number;
+  /** Insights "Rhythm" graph day boundary: the hour (0..23) the 24h window
+   *  starts at (default 12 = noon-to-noon). Drives both the heatmap and the
+   *  per-window trend bucketing on the tab, so the graph and the numbers agree.
+   *  Global, persisted, like every other pref. */
+  rhythmOriginHour: number;
+  /** Insights "Rhythm" graph layer toggles: which series the heatmap draws.
+   *  Persisted so a hidden layer stays hidden across restarts. Global, all
+   *  default to visible. */
+  rhythmShowSleep: boolean;
+  rhythmShowFeeds: boolean;
+  rhythmShowDiapers: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -230,6 +243,9 @@ interface AppActions {
   toggleUnitSystem: () => void;
   setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
+  setRhythmOriginHour: (hour: number) => void;
+  /** Toggle one Insights "Rhythm" graph layer on/off and persist the choice. */
+  setRhythmLayer: (layer: 'sleep' | 'feeds' | 'diapers', on: boolean) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -320,8 +336,9 @@ interface AppActions {
   /** Medication tile tap: open the cure picker when the selected child has an
    *  active cure covering today, otherwise open the plain manual log form. */
   openMedicationLog: () => void;
-  /** Seed the medication draft from a cure (name/dosage/unit, plus the next-dose
-   *  interval for an interval cure) and open the log form to confirm and save. */
+  /** Instant-log a dose from a saved cure: record the medication entry right away
+   *  (name/dosage/unit, plus the next-dose interval for an interval cure) and
+   *  close the picker, with no form to confirm. */
   logMedicationFromCure: (cureId: string) => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
   /** One press of the amount stepper: +1 or -1 step in the user's display
@@ -873,6 +890,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
+  rhythmOriginHour: RHYTHM_ORIGIN_DEFAULT,
+  rhythmShowSleep: true,
+  rhythmShowFeeds: true,
+  rhythmShowDiapers: true,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -958,6 +979,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ napWindowStartMin: start, napWindowEndMin: end });
     void savePrefs({ napWindowStartMin: start, napWindowEndMin: end });
   },
+  setRhythmOriginHour: (hour) => {
+    const h = clampHourOfDay(hour, RHYTHM_ORIGIN_DEFAULT);
+    set({ rhythmOriginHour: h });
+    void savePrefs({ rhythmOriginHour: h });
+  },
+  setRhythmLayer: (layer, on) => {
+    set((s) => ({
+      rhythmShowSleep: layer === 'sleep' ? on : s.rhythmShowSleep,
+      rhythmShowFeeds: layer === 'feeds' ? on : s.rhythmShowFeeds,
+      rhythmShowDiapers: layer === 'diapers' ? on : s.rhythmShowDiapers,
+    }));
+    const s = get();
+    void savePrefs({
+      rhythmShowSleep: s.rhythmShowSleep,
+      rhythmShowFeeds: s.rhythmShowFeeds,
+      rhythmShowDiapers: s.rhythmShowDiapers,
+    });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -1010,6 +1049,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.napWindowEndMin != null) {
       set({ napWindowEndMin: clampMinuteOfDay(prefs.napWindowEndMin, NAP_WINDOW_END_DEFAULT) });
     }
+    if (prefs.rhythmOriginHour != null) {
+      set({ rhythmOriginHour: clampHourOfDay(prefs.rhythmOriginHour, RHYTHM_ORIGIN_DEFAULT) });
+    }
+    // `!= null`, not truthy: these are booleans and `false` (a hidden layer) is
+    // exactly the state worth remembering, which a truthy guard would drop.
+    if (prefs.rhythmShowSleep != null) set({ rhythmShowSleep: prefs.rhythmShowSleep });
+    if (prefs.rhythmShowFeeds != null) set({ rhythmShowFeeds: prefs.rhythmShowFeeds });
+    if (prefs.rhythmShowDiapers != null) set({ rhythmShowDiapers: prefs.rhythmShowDiapers });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
@@ -2540,21 +2587,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     else get().openSheet('medication');
   },
   logMedicationFromCure: (cureId) => {
-    const cure = get().cures.find((c) => c.id === cureId);
+    const s = get();
+    const cure = s.cures.find((c) => c.id === cureId);
     if (!cure) return;
-    // openSheet resets the draft to a blank medication form; seed it afterwards.
-    get().openSheet('medication');
-    const patch: Partial<TimeEntryState> = {
-      medName: cure.name,
-      medDosage: cure.dosage,
-      medUnit: cure.dosageUnit,
+    // A cure always carries a name (the editor requires one), but gate on it the
+    // same way save() gates a manual dose so a nameless record can never slip in.
+    const name = cure.name.trim();
+    if (!name) return;
+    // Instant-log: tapping a saved cure records the dose immediately, with no
+    // form to confirm. Build the same medication Entry save() would for a fresh
+    // dose (time = now, dosage/unit/interval taken from the cure) and commit it
+    // directly, then close the picker.
+    const entry: Entry = {
+      id: 'e' + Date.now(),
+      childId: cure.childId,
+      type: 'medication',
+      time: s.now,
+      name,
+      dosage: cure.dosage,
+      dosageUnit: cure.dosageUnit?.trim() || undefined,
+      // Only an interval cure carries a next-dose interval onto the synced dose;
+      // a times-of-day cure leaves it unset.
+      nextDoseIntervalSec:
+        cure.scheduleMode === 'everyHours' && cure.everyHours != null ? cure.everyHours * 3600 : undefined,
+      tags: [],
     };
-    // Only an interval cure carries a next-dose interval onto the synced dose;
-    // a times-of-day cure leaves it unset.
-    if (cure.scheduleMode === 'everyHours' && cure.everyHours != null) {
-      patch.medNextDoseIntervalSec = cure.everyHours * 3600;
-    }
-    set((s) => ({ curePicker: null, te: { ...s.te, ...patch } }));
+    set({ curePicker: null, entries: [entry, ...s.entries] });
+    get().commitWrite(entry);
+    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
+    get().showToast(queued ? 'Saved · queued offline' : 'Saved');
   },
 
   setTE: (patch) =>

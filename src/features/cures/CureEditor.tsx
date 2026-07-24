@@ -152,7 +152,7 @@ function Inner({ editingId }: { editingId: string | null }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 20, paddingTop: 6, paddingBottom: 14, flexShrink: 0 }}>
         <View style={{ flex: 1 }}>
           <Txt weight={800} size={20} tracking={-0.3}>
-            {editing ? 'Edit cure' : 'New cure'}
+            {editing ? 'Edit treatment' : 'New treatment'}
           </Txt>
         </View>
         <IconButton name="close" onPress={close} size={20} accessibilityLabel="Close" />
@@ -378,7 +378,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           ))}
         </View>
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 4 }}>
-          A paused cure is kept but drops out of the log picker.
+          A paused treatment is kept but drops out of the log picker.
         </Txt>
 
         {editing ? (
@@ -402,7 +402,7 @@ function Inner({ editingId }: { editingId: string | null }) {
               ]}
             >
               <Txt unselectable weight={800} size={15} color={REMOVE_COLOR}>
-                {confirmDelete ? 'Tap again to delete' : 'Delete cure'}
+                {confirmDelete ? 'Tap again to delete' : 'Delete treatment'}
               </Txt>
             </Pressable>
           </View>
@@ -430,7 +430,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           ]}
         >
           <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-            {editing ? 'Save changes' : 'Add cure'}
+            {editing ? 'Save changes' : 'Add treatment'}
           </Txt>
         </Pressable>
       </View>

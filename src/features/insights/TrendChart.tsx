@@ -13,13 +13,15 @@ import type { Band } from './norms';
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
 const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtHoverDate, calendarBands = false, dashGaps = false }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
   xTicks?: number[]; fmtX?: (t: number) => string; dots?: 'all' | 'last';
   /** Web-only: hovering a data point reveals a value+date tooltip. */
   hover?: boolean; unit?: string; fmtHoverDate?: (t: number) => string;
+  /** Formats the hovered value; overrides the default `numLabel + unit`. */
+  fmtValue?: (v: number) => string;
   /** Time mode: shade weekends (short spans) or alternating months (long spans) behind the plot. */
   calendarBands?: boolean;
   /** Time mode: solid line for consecutive days, dashed across missed-day gaps. */
@@ -187,7 +189,7 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
           pointerEvents="none"
           style={{ position: 'absolute', left: tipLeft, ...tipV, width: TIP_W, alignItems: 'center', backgroundColor: t.elevated, borderWidth: 1, borderColor: t.line, borderRadius: 10, paddingVertical: 7, paddingHorizontal: 10, boxShadow: t.shadow }}
         >
-          <Txt weight={700} size={13}>{numLabel(ap.value)}{unit ? ` ${unit}` : ''}</Txt>
+          <Txt weight={700} size={13}>{fmtValue ? fmtValue(ap.value) : `${numLabel(ap.value)}${unit ? ` ${unit}` : ''}`}</Txt>
           {fmtHoverDate ? <Txt weight={500} size={11.5} color={t.faint} style={{ marginTop: 1 }}>{fmtHoverDate(ap.t)}</Txt> : null}
         </View>
       ) : null}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Cure, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -443,6 +443,22 @@ describe('fmtMinuteOfDay', () => {
     expect(fmtMinuteOfDay(1140)).toBe('19:00');
     expect(fmtMinuteOfDay(1230)).toBe('20:30');
     expect(fmtMinuteOfDay(1439)).toBe('23:59');
+  });
+});
+
+describe('fmtDayStartHour', () => {
+  it('renders a 24-hour day-boundary label with word forms for noon/midnight', () => {
+    expect(fmtDayStartHour(0)).toBe('midnight');
+    expect(fmtDayStartHour(7)).toBe('7:00');
+    expect(fmtDayStartHour(12)).toBe('noon');
+    expect(fmtDayStartHour(19)).toBe('19:00');
+    expect(fmtDayStartHour(23)).toBe('23:00');
+  });
+
+  it('coerces out-of-range hours before labelling', () => {
+    expect(fmtDayStartHour(24)).toBe('23:00');
+    expect(fmtDayStartHour(-3)).toBe('midnight');
+    expect(fmtDayStartHour(NaN)).toBe('noon'); // falls back to RHYTHM_ORIGIN_DEFAULT (12)
   });
 });
 
