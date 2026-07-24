@@ -36,6 +36,21 @@ export interface Prefs {
    */
   napWindowStartMin: number;
   napWindowEndMin: number;
+  /**
+   * Insights "Rhythm" graph: the hour of day the 24h window starts at (0..23,
+   * default 12 = noon-to-noon). This is the tab's day boundary — it anchors the
+   * heatmap AND the per-window trend bucketing so the graph and the numbers
+   * agree. A whole hour (not a timestamp) so it means the same on every date.
+   */
+  rhythmOriginHour: number;
+  /**
+   * Insights "Rhythm" graph layer toggles: which series the heatmap draws.
+   * Remembered so a user who hides, say, diapers keeps them hidden across app
+   * restarts. Global (like every other pref); all default to visible.
+   */
+  rhythmShowSleep: boolean;
+  rhythmShowFeeds: boolean;
+  rhythmShowDiapers: boolean;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */

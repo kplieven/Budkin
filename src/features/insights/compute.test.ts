@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart, windowStart } from './compute';
 import type { Entry } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
@@ -59,6 +59,18 @@ describe('buildSleepHeatmap', () => {
 it('noonWindowStart bins a pre-noon time into the previous noon', () => {
   const w = noonWindowStart(at(2026, 6, 5, 3)); // 3am 5 Jul → noon 4 Jul
   expect(new Date(w).getDate()).toBe(4);
+});
+
+it('windowStart anchors the 24h window at the given origin hour', () => {
+  // origin 19 (7pm): 3pm is before 7pm → previous day's 7pm
+  const before = windowStart(at(2026, 6, 5, 15), 19);
+  expect(new Date(before).getDate()).toBe(4);
+  expect(new Date(before).getHours()).toBe(19);
+  // 8pm is after 7pm → same day's 7pm
+  const after = windowStart(at(2026, 6, 5, 20), 19);
+  expect(new Date(after).getDate()).toBe(5);
+  // origin 12 matches noonWindowStart
+  expect(windowStart(at(2026, 6, 5, 3), 12)).toBe(noonWindowStart(at(2026, 6, 5, 3)));
 });
 
 const feeding = (start: number): Entry => ({
@@ -131,6 +143,37 @@ describe('buildTrend', () => {
 
 const diaper = (time: number, wet: boolean, solid: boolean): Entry => ({
   id: `d-${time}`, childId: 'c1', type: 'diaper', time, wet, solid, color: null, tags: [],
+});
+
+describe('buildSleepHeatmap markers', () => {
+  const now = at(2026, 6, 5, 15);
+
+  it('attaches feed segments and diaper marks to the sleep window rows', () => {
+    const rows = buildSleepHeatmap([
+      sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), // night in the Jul4-noon window
+      feeding(at(2026, 6, 4, 18)),                          // 6pm, 15min → segment
+      diaper(at(2026, 6, 4, 22), true, false),              // 10pm → point
+    ], now);
+    const row = rows.find((r) => r.offsetFromToday === 1)!;
+    expect(row.feeds).toHaveLength(1);
+    expect(row.feeds[0].x0).toBeCloseTo(6 / 24, 2); // 6pm = 6h after the noon origin
+    expect(row.feeds[0].x1).toBeGreaterThan(row.feeds[0].x0);
+    expect(row.diapers).toHaveLength(1);
+    expect(row.diapers[0]).toBeCloseTo(10 / 24, 2); // 10pm = 10h after the noon origin
+  });
+
+  it('leaves an in-progress feed out of the static feed segments', () => {
+    const ongoing: Entry = {
+      id: 'f-ongoing', childId: 'c1', type: 'feeding', start: at(2026, 6, 4, 18), end: null,
+      feedType: 'breast', method: 'left', amount: null, tags: [],
+    };
+    const rows = buildSleepHeatmap([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), ongoing], now);
+    expect(rows.find((r) => r.offsetFromToday === 1)!.feeds).toHaveLength(0);
+  });
+
+  it('drops markers on days with no sleep row (stays sleep-anchored)', () => {
+    expect(buildSleepHeatmap([feeding(at(2026, 6, 4, 18))], now)).toEqual([]);
+  });
 });
 
 describe('buildDiaperSeries', () => {

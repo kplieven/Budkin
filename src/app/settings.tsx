@@ -12,6 +12,7 @@ import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels'
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
+  fmtDayStartHour,
   fmtMinuteOfDay,
   parseMinuteOfDay,
   SMALL_WASHES_PER_BIG_MAX,
@@ -265,6 +266,8 @@ export default function Settings() {
   const napWindowStartMin = useAppStore((s) => s.napWindowStartMin);
   const napWindowEndMin = useAppStore((s) => s.napWindowEndMin);
   const setNapWindow = useAppStore((s) => s.setNapWindow);
+  const rhythmOriginHour = useAppStore((s) => s.rhythmOriginHour);
+  const setRhythmOriginHour = useAppStore((s) => s.setRhythmOriginHour);
   const toggleOffline = useAppStore((s) => s.toggleOffline);
   const disconnect = useAppStore((s) => s.disconnect);
   const profile = useAppStore((s) => s.profile);
@@ -427,7 +430,7 @@ export default function Settings() {
             manual override. Start inclusive, end exclusive, and a start later
             than the end wraps midnight, so an "inverted" pair still means
             something rather than matching nothing. */}
-        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
+        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}>
           <View>
             <Txt weight={600} size={16}>
               Naps
@@ -455,12 +458,39 @@ export default function Settings() {
             already logged keeps whatever it was saved as.
           </Txt>
         </View>
+
+        {/* Day boundary: the hour the 24h "day" starts at. Drives the Insights
+            Rhythm graph + its trends and Home's daily sleep total. Persisted. */}
+        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
+          <View>
+            <Txt weight={600} size={16}>
+              Day starts at
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              The 24-hour window for the Rhythm graph, its trends, and the daily sleep total on Home
+            </Txt>
+          </View>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            {[19, 12, 7, 0].map((h) => (
+              <Chip
+                key={h}
+                label={fmtDayStartHour(h)}
+                color={t.primary}
+                selected={rhythmOriginHour === h}
+                onPress={() => setRhythmOriginHour(h)}
+                padH={13}
+                padV={7}
+                fontSize={13.5}
+              />
+            ))}
+          </View>
+        </View>
       </View>
 
       {selectedChild && (
         <>
           <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-            Cures for {selectedChild.first}
+            Treatments for {selectedChild.first}
           </Txt>
           <View style={group}>
             {childCures.map((c, i) => (
@@ -498,18 +528,18 @@ export default function Settings() {
             <Pressable
               onPress={() => openCureEditor()}
               accessibilityRole="button"
-              accessibilityLabel="Add a cure"
+              accessibilityLabel="Add a treatment"
               style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
             >
               <Icon name="plus" color={t.primary} size={18} />
               <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
-                Add a cure
+                Add a treatment
               </Txt>
             </Pressable>
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
-            Cures stay on this device and are never sent to Baby Buddy. Logging a dose from a cure
-            still saves the dose the usual way.
+            Treatments stay on this device and are never sent to Baby Buddy. Logging a dose from a
+            treatment still saves the dose the usual way.
           </Txt>
         </>
       )}

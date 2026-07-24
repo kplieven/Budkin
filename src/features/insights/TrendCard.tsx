@@ -2,26 +2,35 @@ import { openBrowserAsync } from 'expo-web-browser';
 import { useState } from 'react';
 import { Modal, Pressable, View } from 'react-native';
 
+import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
 import { xTicksFor } from '@/features/measurements/growthChart';
 import type { TrendPoint } from './compute';
-import { bandForRange, type Norm } from './norms';
+import { bandForRange, type BandStatus, type Norm } from './norms';
 import { TrendChart } from './TrendChart';
 
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNote, caption, norm, birth, points, yTicks, fmtY, width, todaySoFar = false }: {
+export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNote, caption, status, norm, birth, points, yTicks, fmtY, fmtValue, width, todaySoFar = false }: {
   label: string; color: string; unit: string; value: string;
-  delta?: string; deltaGood?: boolean; deltaNote?: string; caption?: string; todaySoFar?: boolean;
+  delta?: string; deltaGood?: boolean; deltaNote?: string; caption?: string; status?: BandStatus; todaySoFar?: boolean;
   norm: Norm; birth: number; points: TrendPoint[];
-  yTicks: number[]; fmtY: (v: number) => string; width: number;
+  yTicks: number[]; fmtY: (v: number) => string; fmtValue?: (v: number) => string; width: number;
 }) {
   const t = useTheme();
   // Delta pill color is sign-driven: green when the trend improved, red when it
   // regressed. The theme has no danger/negative token, so fall back to a warm red.
   const deltaColor = deltaGood ? '#3E9E6E' : '#C7583F';
+  // The "in typical range" chip replaces the static caption when the caller
+  // resolves the baby's position against a solid band. "In range" reads as calm
+  // reassurance (green + check); out-of-range stays neutral grey, never alarming
+  // — a population band is not a target (the ⓘ sheet says so).
+  const statusLabel = status === 'in' ? 'In typical range'
+    : status === 'below' ? 'Below typical range'
+    : status === 'above' ? 'Above typical range' : null;
+  const statusColor = status === 'in' ? '#3E9E6E' : t.dim;
   const [info, setInfo] = useState(false);
   const band = bandForRange(norm, birth, points);
   const ruleOfThumb = norm.kind === 'ruleOfThumb';
@@ -37,9 +46,16 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
           <View style={{ width: 7, height: 7, borderRadius: 7, backgroundColor: color }} />
           <Txt weight={700} size={11} color={t.dim} style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}>{label}</Txt>
         </View>
-        {caption ? (
+        {statusLabel || caption ? (
           <Pressable onPress={() => setInfo(true)} accessibilityRole="button" accessibilityLabel={`${label} typical range info`} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Txt weight={600} size={11} color={ruleOfThumb ? t.faint : color}>{caption}</Txt>
+            {statusLabel ? (
+              <>
+                {status === 'in' ? <Icon name="check" size={12} color={statusColor} /> : null}
+                <Txt weight={700} size={11} color={statusColor}>{statusLabel}</Txt>
+              </>
+            ) : (
+              <Txt weight={600} size={11} color={ruleOfThumb ? t.faint : color}>{caption}</Txt>
+            )}
             <View style={{ width: 15, height: 15, borderRadius: 15, borderWidth: 1.2, borderColor: t.faint, alignItems: 'center', justifyContent: 'center' }}>
               <Txt weight={700} size={9.5} color={t.faint}>i</Txt>
             </View>
@@ -57,7 +73,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
         ) : null}
         {delta && deltaNote ? <Txt weight={500} size={12.5} color={t.faint}>{deltaNote}</Txt> : null}
       </View>
-      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} calendarBands dashGaps />
+      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtValue={fmtValue} fmtHoverDate={fmtDate} calendarBands dashGaps />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
