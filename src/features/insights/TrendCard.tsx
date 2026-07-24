@@ -13,11 +13,11 @@ import { TrendChart } from './TrendChart';
 
 const fmtDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNote, caption, status, norm, birth, points, yTicks, fmtY, width, todaySoFar = false }: {
+export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNote, caption, status, norm, birth, points, yTicks, fmtY, fmtValue, width, todaySoFar = false }: {
   label: string; color: string; unit: string; value: string;
   delta?: string; deltaGood?: boolean; deltaNote?: string; caption?: string; status?: BandStatus; todaySoFar?: boolean;
   norm: Norm; birth: number; points: TrendPoint[];
-  yTicks: number[]; fmtY: (v: number) => string; width: number;
+  yTicks: number[]; fmtY: (v: number) => string; fmtValue?: (v: number) => string; width: number;
 }) {
   const t = useTheme();
   // Delta pill color is sign-driven: green when the trend improved, red when it
@@ -73,7 +73,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
         ) : null}
         {delta && deltaNote ? <Txt weight={500} size={12.5} color={t.faint}>{deltaNote}</Txt> : null}
       </View>
-      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtHoverDate={fmtDate} calendarBands dashGaps />
+      <TrendChart points={points} band={band} color={color} ruleOfThumb={ruleOfThumb} yTicks={yTicks} fmtY={fmtY} width={chartW} xMode="time" xTicks={xTicks} fmtX={fmtX} dots="all" hover unit={unit} fmtValue={fmtValue} fmtHoverDate={fmtDate} calendarBands dashGaps />
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
