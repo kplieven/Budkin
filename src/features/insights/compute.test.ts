@@ -145,6 +145,26 @@ const diaper = (time: number, wet: boolean, solid: boolean): Entry => ({
   id: `d-${time}`, childId: 'c1', type: 'diaper', time, wet, solid, color: null, tags: [],
 });
 
+describe('buildSleepHeatmap markers', () => {
+  const now = at(2026, 6, 5, 15);
+
+  it('attaches feed and diaper markers to the sleep window rows', () => {
+    const rows = buildSleepHeatmap([
+      sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), // night in the Jul4-noon window
+      feeding(at(2026, 6, 4, 18)),
+      diaper(at(2026, 6, 4, 22), true, false),
+    ], now);
+    const row = rows.find((r) => r.offsetFromToday === 1)!;
+    expect(row.feeds).toHaveLength(1);
+    expect(row.diapers).toHaveLength(1);
+    expect(row.feeds[0]).toBeCloseTo(6 / 24, 2); // 6pm = 6h after the noon origin
+  });
+
+  it('drops markers on days with no sleep row (stays sleep-anchored)', () => {
+    expect(buildSleepHeatmap([feeding(at(2026, 6, 4, 18))], now)).toEqual([]);
+  });
+});
+
 describe('buildDiaperSeries', () => {
   const now = at(2026, 6, 5, 15);
   const day = at(2026, 6, 5, 9);

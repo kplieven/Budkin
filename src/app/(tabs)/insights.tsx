@@ -85,6 +85,17 @@ export default function Insights() {
   const ORIGINS: [string, number][] = [['7 PM', 19], ['Noon', 12], ['7 AM', 7], ['12 AM', 0]];
   const clockLabel = (h: number) => (h === 0 ? '12 AM' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`);
   const originPhrase = `${clockLabel(originHour)} to ${clockLabel(originHour)}`;
+  // Layer toggles for the Rhythm graph. Sleep is the band; feeds/diapers are the
+  // marker lanes. The legend chips double as the on/off toggles.
+  const napColor = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);
+  const [showSleep, setShowSleep] = useState(true);
+  const [showFeeds, setShowFeeds] = useState(true);
+  const [showDiapers, setShowDiapers] = useState(true);
+  const LAYERS = [
+    { key: 'sleep', label: 'Sleep', on: showSleep, set: setShowSleep },
+    { key: 'feeds', label: 'Feeds', on: showFeeds, set: setShowFeeds },
+    { key: 'diapers', label: 'Diapers', on: showDiapers, set: setShowDiapers },
+  ];
 
   const totalSleep = useMemo(() => buildTrend(entries, 'totalSleep', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
   const longest = useMemo(() => buildTrend(entries, 'longestStretch', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
@@ -137,18 +148,24 @@ export default function Insights() {
   const body = (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       <View style={{ backgroundColor: t.surface, borderWidth: 1.4, borderColor: t.line, borderRadius: 20, padding: 15, marginBottom: 18 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <Txt weight={700} size={16}>Rhythm</Txt>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <View style={{ width: 9, height: 9, borderRadius: 9, backgroundColor: t.activity.sleep }} />
-              <Txt weight={600} size={11} color={t.dim}>Night</Txt>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <View style={{ width: 9, height: 9, borderRadius: 9, backgroundColor: hexA(t.activity.sleep, t.dark ? 0.5 : 0.42) }} />
-              <Txt weight={600} size={11} color={t.dim}>Nap</Txt>
-            </View>
-          </View>
+        <Txt weight={700} size={16} style={{ marginBottom: 8 }}>Rhythm</Txt>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+          {LAYERS.map((L) => {
+            const color = L.key === 'feeds' ? t.activity.feeding : L.key === 'diapers' ? t.activity.diaper : t.activity.sleep;
+            return (
+              <Pressable key={L.key} onPress={() => L.set(!L.on)} accessibilityRole="button" accessibilityState={{ selected: L.on }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: L.on ? 1 : 0.4, backgroundColor: t.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
+                {L.key === 'sleep' ? (
+                  <View style={{ flexDirection: 'row', width: 14, height: 9, borderRadius: 3, overflow: 'hidden' }}>
+                    <View style={{ flex: 1, backgroundColor: t.activity.sleep }} />
+                    <View style={{ flex: 1, backgroundColor: napColor }} />
+                  </View>
+                ) : (
+                  <View style={{ width: 9, height: 9, borderRadius: 9, backgroundColor: color }} />
+                )}
+                <Txt weight={600} size={11.5} color={t.dim}>{L.label}</Txt>
+              </Pressable>
+            );
+          })}
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 10 }}>Last 4 weeks, {originPhrase}</Txt>
         <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3 }}>
@@ -160,7 +177,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginTop: 6, marginBottom: 12 }}>Applies to the graph and the trend numbers</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} originHour={originHour} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.

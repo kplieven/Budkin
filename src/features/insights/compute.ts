@@ -31,7 +31,14 @@ export type TrendMetric = 'totalSleep' | 'longestStretch' | 'wakeWindow' | 'feed
 export interface TrendPoint { t: number; value: number }
 
 export interface HeatSegment { x0: number; x1: number; nap: boolean }
-export interface HeatRow { offsetFromToday: number; segments: HeatSegment[] }
+export interface HeatRow {
+  offsetFromToday: number;
+  segments: HeatSegment[];
+  /** feed / diaper event x-positions in [0,1) (noon-origin, like segments), for
+   *  the marker lanes above and below the sleep band. */
+  feeds: number[];
+  diapers: number[];
+}
 
 /**
  * One row per noon-to-noon window, newest last. x is noon-origin in [0,1):
@@ -69,9 +76,31 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
     }
   }
   if (oldest < 0) return [];
+
+  // Feed (by start) and diaper (by time) event positions, bucketed into the same
+  // windows as the sleep band. Only rows that already exist (0..oldest) get
+  // markers — the heatmap stays anchored on sleep.
+  const feedsByOffset = new Map<number, number[]>();
+  const diapersByOffset = new Map<number, number[]>();
+  for (const e of entries) {
+    let ts: number, bucket: Map<number, number[]>;
+    if (e.type === 'feeding') { ts = e.start; bucket = feedsByOffset; }
+    else if (e.type === 'diaper') { ts = e.time; bucket = diapersByOffset; }
+    else continue;
+    const win = windowStart(ts, originHour);
+    const offset = Math.round((todayWin - win) / DAY);
+    if (offset < 0 || offset > oldest) continue;
+    (bucket.get(offset) ?? bucket.set(offset, []).get(offset)!).push((ts - win) / DAY);
+  }
+
   const out: HeatRow[] = [];
   for (let offset = oldest; offset >= 0; offset--) {
-    out.push({ offsetFromToday: offset, segments: rows.get(offset) ?? [] });
+    out.push({
+      offsetFromToday: offset,
+      segments: rows.get(offset) ?? [],
+      feeds: feedsByOffset.get(offset) ?? [],
+      diapers: diapersByOffset.get(offset) ?? [],
+    });
   }
   return out;
 }
