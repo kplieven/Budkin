@@ -78,7 +78,7 @@ export default function Insights() {
   // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
   const [width, setWidth] = useState(0);
-  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 14, originHour), [entries, nowH, originHour]);
+  const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
   const [rangeDays, setRangeDays] = useState(30);
@@ -169,7 +169,7 @@ export default function Insights() {
             );
           })}
         </View>
-        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 12 }}>Last 2 weeks, {originPhrase}</Txt>
+        <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 12 }}>Last 4 weeks, {originPhrase}</Txt>
         {daysWithSleep >= 7 ? (
           <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
         ) : (

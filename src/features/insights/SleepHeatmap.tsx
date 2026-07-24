@@ -10,7 +10,7 @@ import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 import { DAY, windowStart, type HeatRow } from './compute';
 
-const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 13: '2w' };
+const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
 const TICK_HS = [0, 6, 12, 18, 24];
 const fmtHour = (hr: number) => `${String(hr).padStart(2, '0')}:00`;
 /** A minutes-since-midnight value as a 24h "HH:MM" clock (wraps past 1440). */
@@ -53,10 +53,8 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const diaperColor = t.activity.diaper;
   // Wider gutter than the trend charts so the full "Today" row label fits. Each
   // row is one band: sleep shaded in, feeding blocks drawn over it (feeding wins
-  // any overlap), and diapers as full-height vertical bars. Rows are tall (a
-  // 2-week window has half the rows of the old 4-week one, so thicker bars keep
-  // the block its original height and read far less crowded).
-  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 17, rowH = 13;
+  // any overlap), and diapers as full-height vertical bars.
+  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8.5, rowH = 6.6;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
