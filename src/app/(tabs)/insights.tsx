@@ -16,6 +16,7 @@ import { SafetyNote } from '@/features/insights/SafetyNote';
 import { SleepHeatmap } from '@/features/insights/SleepHeatmap';
 import { TrendCard } from '@/features/insights/TrendCard';
 import { hexA } from '@/lib/color';
+import { fmtDur } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -135,8 +136,10 @@ export default function Insights() {
   // maturation, and a red "-1.2h" pill framed it as a regression to worry about.
   const stretchDelta = longest.length >= 2 ? longest[longest.length - 1].value - longest[0].value : 0;
   const stretchDeltaShown = stretchDelta >= 0.5;
-  const stretchDeltaText = stretchDelta > 0 ? `+${stretchDelta.toFixed(1)}h` : `${stretchDelta.toFixed(1)}h`;
+  const stretchDeltaText = `${stretchDelta < 0 ? '-' : '+'}${fmtDur(Math.abs(stretchDelta) * 60)}`;
   const stretchNote = rangeDays === 14 ? 'vs 2 wks ago' : rangeDays === 90 ? 'vs 3 mo ago' : 'vs 1 mo ago';
+  // Decimal hours read oddly ("6.2h"); show sleep/interval values as h+m instead.
+  const hmValue = (v: number) => fmtDur(v * 60);
   const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
     enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
@@ -211,14 +214,14 @@ export default function Insights() {
         </View>
       ) : null}
       {gated(totalSleep, 'total sleep', (
-        <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="h" value={lastVal(totalSleep).toFixed(1)}
+        <TrendCard label="Total sleep / day" color={t.activity.sleep} unit="" value={hmValue(lastVal(totalSleep))}
           caption="Typical for age" status={sleepStatus} norm={NORMS.totalSleep} birth={birth} points={totalSleep}
-          yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} width={width} todaySoFar={isToday(totalSleep)} />
+          yTicks={[10, 12, 14, 16, 18]} fmtY={(v) => `${v}h`} fmtValue={hmValue} width={width} todaySoFar={isToday(totalSleep)} />
       ))}
       {gated(longest, 'longest stretch', (
-        <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="h" value={lastVal(longest).toFixed(1)}
+        <TrendCard label="Longest stretch / night" color={t.activity.sleep} unit="" value={hmValue(lastVal(longest))}
           caption="Rule of thumb" norm={NORMS.longestStretch} birth={birth} points={longest}
-          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} width={width} todaySoFar={isToday(longest)}
+          yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}h`} fmtValue={hmValue} width={width} todaySoFar={isToday(longest)}
           delta={stretchDeltaShown ? stretchDeltaText : undefined} deltaGood={stretchDelta > 0}
           deltaNote={stretchDeltaShown ? stretchNote : undefined} />
       ))}
@@ -241,9 +244,9 @@ export default function Insights() {
           yTicks={[0, 3, 6, 9, 12]} fmtY={(v) => `${v}`} width={width} todaySoFar={isToday(feeds)} />
       ))}
       {gated(interval, 'feed interval', (
-        <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="h" value={lastVal(interval).toFixed(1)}
+        <TrendCard label="Avg interval between feeds" color={t.activity.feeding} unit="" value={hmValue(lastVal(interval))}
           norm={NORMS.feedInterval} birth={birth} points={interval}
-          yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} width={width} />
+          yTicks={[0, 1, 2, 3, 4]} fmtY={(v) => `${v}h`} fmtValue={hmValue} width={width} />
       ))}
       <Txt weight={800} size={12} color={t.faint} tracking={1.4} style={{ marginHorizontal: 2, marginTop: 24, marginBottom: 12, textTransform: 'uppercase' }}>
         Diapers
