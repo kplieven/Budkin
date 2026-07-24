@@ -294,7 +294,12 @@ interface AppActions {
     expected?: boolean;
     photo?: PhotoChange;
     /** the child's gender, or undefined for "not recorded". Synced as a
-     *  `gender`-tagged note, since Baby Buddy's Child has no such field. */
+     *  `gender`-tagged note, since Baby Buddy's Child has no such field.
+     *
+     *  AUTHORITATIVE on edit, exactly like `first`/`last`/`birth`: passing
+     *  undefined CLEARS a recorded gender (which is how the picker's "Not set"
+     *  works), so an edit caller must always pass the current value. Only the
+     *  create-path callers may omit it. */
     gender?: ChildGender;
   }) => void;
   /** Turn an expected child into a born one: clear the flag, set the real birth
