@@ -50,6 +50,8 @@ const h = vi.hoisted(() => ({
   cureUpdated: [] as unknown[],
   cureDeleted: [] as unknown[],
   curePushFails: false,
+  genderWritten: [] as unknown[],
+  genderWriteFails: false,
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
   childDeleted: [] as unknown[],
@@ -199,6 +201,10 @@ vi.mock('@/data/repository', () => ({
   deleteMeasurementFromServer: vi.fn(async (_c: unknown, kind: unknown, id: unknown) => {
     h.measDeleted.push({ kind, id });
   }),
+  setChildGenderOnServer: vi.fn(async (_c: unknown, childServerId: unknown, gender: unknown) => {
+    if (h.genderWriteFails) throw new Error('net');
+    h.genderWritten.push({ childServerId, gender });
+  }),
   pushCureToServer: vi.fn(async (_c: unknown, cure: unknown) => {
     if (h.curePushFails) throw new Error('net');
     h.curePushed.push(cure);
@@ -334,6 +340,8 @@ beforeEach(() => {
   h.cureUpdated = [];
   h.cureDeleted = [];
   h.curePushFails = false;
+  h.genderWritten = [];
+  h.genderWriteFails = false;
   h.measDeleted = [];
   h.childPushed = [];
   h.childUpdated = [];
@@ -2606,6 +2614,92 @@ describe('children', () => {
     await flush();
     expect(h.childUpdated).toHaveLength(1);
     expect(h.childPushed).toHaveLength(0);
+  });
+
+  describe('gender (a `gender`-tagged note, since Baby Buddy Child has no such field)', () => {
+    it('stores the gender on the child and writes the note when it changes', async () => {
+      useAppStore.setState({ children: [SYNCED_C1] });
+      s().openEditChild('c1');
+      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'girl' });
+      expect(s().children[0].gender).toBe('girl');
+      await flush();
+      expect(h.genderWritten).toEqual([{ childServerId: 501, gender: 'girl' }]);
+    });
+
+    it('writes nothing when the gender is unchanged by an edit', async () => {
+      useAppStore.setState({ children: [{ ...SYNCED_C1, gender: 'girl' }] });
+      s().openEditChild('c1');
+      s().saveChild({ first: 'Mira', last: 'Renamed', birth: NOW - 90 * 86400000, gender: 'girl' });
+      await flush();
+      expect(h.genderWritten).toHaveLength(0);
+      // The rename itself still goes out.
+      expect(h.childUpdated).toHaveLength(1);
+    });
+
+    it('clears the gender, which deletes the note server-side', async () => {
+      useAppStore.setState({ children: [{ ...SYNCED_C1, gender: 'girl' }] });
+      s().openEditChild('c1');
+      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 });
+      expect(s().children[0].gender).toBeUndefined();
+      await flush();
+      expect(h.genderWritten).toEqual([{ childServerId: 501, gender: undefined }]);
+    });
+
+    it('writes a new child\'s gender only once the POST has produced a server id', async () => {
+      s().saveChild({ first: 'Nova', last: 'O', birth: NOW - 30 * 86400000, gender: 'boy' });
+      const created = s().children[s().children.length - 1];
+      expect(created.gender).toBe('boy');
+      // The note references the child by SERVER id, so nothing is written until
+      // pushChildToServer resolves with one (777 in the repository mock).
+      await flush();
+      expect(h.genderWritten).toEqual([{ childServerId: 777, gender: 'boy' }]);
+    });
+
+    it('does not write a gender note for a child created with no gender', async () => {
+      s().saveChild({ first: 'Nova', last: 'O', birth: NOW - 30 * 86400000 });
+      await flush();
+      expect(h.genderWritten).toHaveLength(0);
+    });
+
+    it('a failed gender write leaves the local value in place (offline-first)', async () => {
+      h.genderWriteFails = true;
+      useAppStore.setState({ children: [SYNCED_C1] });
+      s().openEditChild('c1');
+      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'girl' });
+      await flush();
+      expect(s().children[0].gender).toBe('girl');
+    });
+
+    it('replays a queued offline gender change through the child update op', async () => {
+      useAppStore.setState({
+        offline: true,
+        children: [{ ...SYNCED_C1, gender: undefined }],
+      });
+      s().openEditChild('c1');
+      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'other' });
+      await flush();
+      // Offline: one child-update op carrying the gender, no direct write.
+      expect(h.genderWritten).toHaveLength(0);
+      expect(h.pendingOps).toContainEqual({
+        op: 'update',
+        entity: 'child',
+        payload: expect.objectContaining({ gender: 'other' }),
+      });
+
+      useAppStore.setState({ offline: false });
+      await s().flushPendingOps();
+      expect(h.genderWritten).toEqual([{ childServerId: 501, gender: 'other' }]);
+    });
+
+    it('re-queues the child op when the gender write fails, so the change is retried', async () => {
+      h.pendingOps = [
+        { op: 'update', entity: 'child', payload: { ...SYNCED_C1, gender: 'girl' } },
+      ];
+      h.genderWriteFails = true;
+      await s().flushPendingOps();
+      // savePendingOps writes the survivors back to h.pendingOps.
+      expect(h.pendingOps).toHaveLength(1);
+    });
   });
 
   it('offline edit of a synced child records an update pending op instead of pushing', async () => {

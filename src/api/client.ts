@@ -14,6 +14,7 @@ import type {
   ActivityType,
   BathEntry,
   Child,
+  ChildGender,
   Cure,
   CureTimeOfDay,
   DiaperColor,
@@ -251,11 +252,28 @@ const CURE_PAUSED_TAG = 'cure:paused';
 
 const isStructuralCureTag = (t: string): boolean => t === CURE_TAG || t.startsWith('cure:');
 
+// --- gender structural tags ---
+// Baby Buddy's `Child` model carries only first_name / last_name / birth_date /
+// birth_time / slug / picture — there is no gender field, and DRF drops unknown
+// keys silently, so a `gender` sent to /api/children/ would vanish without an
+// error. A child's gender therefore rides as a `gender`-tagged note against that
+// child, the same channel baths, milestones and cures use.
+const GENDER_TAG = 'gender';
+const GENDER_PREFIX = 'g:';
+
+const isStructuralGenderTag = (t: string): boolean => t === GENDER_TAG || t.startsWith(GENDER_PREFIX);
+
 /** True for any tag the picker must never surface or let the user create: the
  *  bath/side structural tags plus the milestone marker, mk:<key>, intake level
  *  and cure schedule tags. */
 export function isHiddenTag(name: string): boolean {
-  return HIDDEN_TAGS.has(name) || isStructuralMilestoneTag(name) || isIntakeTag(name) || isStructuralCureTag(name);
+  return (
+    HIDDEN_TAGS.has(name) ||
+    isStructuralMilestoneTag(name) ||
+    isIntakeTag(name) ||
+    isStructuralCureTag(name) ||
+    isStructuralGenderTag(name)
+  );
 }
 
 /**
@@ -481,6 +499,38 @@ export function noteToCure(n: any, childId: string): Cure {
     notes: asString(payload.notes),
     active: !tags.includes(CURE_PAUSED_TAG),
   };
+}
+
+// --- gender <-> Baby Buddy Note (tagged-note) serialization ---
+// One note per child, tagged `gender` + `g:<value>`. An attribute rather than an
+// event, so unlike a bath its `time` carries no meaning beyond recency: the
+// NEWEST gender note for a child wins, which is what lets a re-write that failed
+// to find the old note still resolve to the right answer.
+
+const CHILD_GENDERS: ChildGender[] = ['girl', 'boy', 'other'];
+
+/** The single discriminator: a gender note carries the `gender` tag. */
+export function isGenderNote(n: any): boolean {
+  return tagNames(n?.tags).includes(GENDER_TAG);
+}
+
+/** Encode a child's gender as the body for a Baby Buddy Note (create/update). */
+export function genderToNoteBody(gender: ChildGender, childServerId: number, atMs: number): Record<string, unknown> {
+  return {
+    child: childServerId,
+    time: toISO(atMs),
+    note: `Gender: ${gender}`,
+    tags: [GENDER_TAG, `${GENDER_PREFIX}${gender}`],
+  };
+}
+
+/** The gender a `gender`-tagged note records, or undefined when its `g:` tag is
+ *  missing or holds a value this build doesn't know. */
+export function genderFromNote(n: any): ChildGender | undefined {
+  const tags = tagNames(n?.tags);
+  const tag = tags.find((t) => t.startsWith(GENDER_PREFIX));
+  const value = tag?.slice(GENDER_PREFIX.length);
+  return CHILD_GENDERS.find((g) => g === value);
 }
 
 /** Local midnight of the day containing `ms`. Cure dates are stored at local
@@ -890,7 +940,7 @@ export class BabybuddyClient {
     for (const n of data.results) {
       if (isMilestoneNote(n)) milestones.push(noteToMilestoneEntry(n, childId));
       else if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
-      else if (isCureNote(n)) continue;
+      else if (isCureNote(n) || isGenderNote(n)) continue;
       else notes.push(noteToNoteEntry(n, childId));
     }
     return { baths, milestones, notes };
@@ -911,6 +961,53 @@ export class BabybuddyClient {
     // locally: an instance that ignores the filter would otherwise turn every
     // note into a cure.
     return data.results.filter((n: any) => isCureNote(n)).map((n: any) => noteToCure(n, childId));
+  }
+
+  /**
+   * Every child's gender in ONE request, keyed by the child's SERVER id. Notes
+   * come back newest-first, so the first note seen per child wins and an older
+   * duplicate (left behind by a write that couldn't find the previous note)
+   * loses without needing a cleanup pass.
+   *
+   * Unfiltered by child on purpose: one request covers the whole account, where
+   * per-child fetches would be one request per child on every load.
+   */
+  async listGenders(limit = 200): Promise<Map<number, ChildGender>> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?tags=${GENDER_TAG}&ordering=-time&limit=${limit}`,
+    );
+    const out = new Map<number, ChildGender>();
+    for (const n of data.results) {
+      // Re-check the tag locally: an instance that ignored the filter would
+      // otherwise read a plain note's absent `g:` tag as a real answer.
+      if (!isGenderNote(n)) continue;
+      const childServerId = typeof n.child === 'number' ? n.child : Number(n.child);
+      const gender = genderFromNote(n);
+      if (!Number.isFinite(childServerId) || !gender || out.has(childServerId)) continue;
+      out.set(childServerId, gender);
+    }
+    return out;
+  }
+
+  /**
+   * Write a child's gender, overwriting the existing `gender` note when there is
+   * one and deleting it when `gender` is undefined ("not recorded"). Reads
+   * before writing rather than caching the note id locally: the id would be one
+   * more thing to keep in sync across devices, and a gender is written rarely
+   * enough that the extra GET costs nothing.
+   */
+  async setChildGender(childServerId: number, gender: ChildGender | undefined, atMs: number): Promise<void> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?child=${childServerId}&tags=${GENDER_TAG}&ordering=-time&limit=1`,
+    );
+    const existing = data.results.find((n: any) => isGenderNote(n));
+    if (gender == null) {
+      if (existing) await this.request(`/notes/${existing.id}/`, { method: 'DELETE' });
+      return;
+    }
+    const body = JSON.stringify(genderToNoteBody(gender, childServerId, atMs));
+    if (existing) await this.request(`/notes/${existing.id}/`, { method: 'PATCH', body });
+    else await this.request('/notes/', { method: 'POST', body });
   }
 
   /** Create a cure on the server as a tagged note; returns its new server id. */
