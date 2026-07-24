@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
 import { DateFields } from '@/components/DateFields';
+import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
@@ -73,6 +74,7 @@ function Inner({ editingId }: { editingId: string | null }) {
   const [times, setTimes] = useState<CureTimeOfDay[]>(editing?.timesOfDay ?? ['morning']);
   const [everyHours, setEveryHours] = useState(String(editing?.everyHours ?? 6));
   const [dosage, setDosage] = useState(editing?.dosage != null ? String(editing.dosage) : '');
+  const [dosageFocused, setDosageFocused] = useState(false);
   const isCustomUnit = !!editing?.dosageUnit && !MED_UNITS.includes(editing.dosageUnit);
   const [unit, setUnit] = useState<string | undefined>(editing?.dosageUnit);
   const [otherOpen, setOtherOpen] = useState(isCustomUnit);
@@ -252,15 +254,17 @@ function Inner({ editingId }: { editingId: string | null }) {
         <Txt weight={700} size={13} color={t.dim} style={label}>
           Dose per intake (optional)
         </Txt>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14, paddingHorizontal: 14, marginBottom: 12 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: dosageFocused ? t.primary : t.line, borderRadius: 14, paddingHorizontal: 14, marginBottom: 12 }}>
           <TextInput
             value={dosage}
             onChangeText={setDosage}
+            onFocus={() => setDosageFocused(true)}
+            onBlur={() => setDosageFocused(false)}
             keyboardType="decimal-pad"
             placeholder="5"
             placeholderTextColor={t.faint}
             accessibilityLabel="Dose amount"
-            style={{ flex: 1, height: 52, fontSize: 22, fontFamily: fontFamily(800), color: t.text }}
+            style={{ flex: 1, height: 52, fontSize: 22, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
           />
           {unit ? (
             <Txt weight={600} size={15} color={t.dim}>
