@@ -90,10 +90,12 @@ export default function Insights() {
   const daysWithSleep = heatRows.filter((r) => r.segments.length > 0).length;
   const enoughForChart = (pts: unknown[]) => pts.length >= 3;
   // delta for longest stretch: last minus first in range, when there's a span.
-  // Shown for both gains and losses (>= 0.5h), sign-colored, and labeled with
-  // what it compares against so it reads honestly ("vs 2 wks ago", etc.).
+  // Only a *gain* (>= 0.5h) is surfaced, labeled with what it compares against
+  // ("vs 2 wks ago", etc.). A decrease is deliberately not shown: night sleep
+  // fragmenting for a stretch (most notably the ~4-month sleep change) is normal
+  // maturation, and a red "-1.2h" pill framed it as a regression to worry about.
   const stretchDelta = longest.length >= 2 ? longest[longest.length - 1].value - longest[0].value : 0;
-  const stretchDeltaShown = Math.abs(stretchDelta) >= 0.5;
+  const stretchDeltaShown = stretchDelta >= 0.5;
   const stretchDeltaText = stretchDelta > 0 ? `+${stretchDelta.toFixed(1)}h` : `${stretchDelta.toFixed(1)}h`;
   const stretchNote = rangeDays === 14 ? 'vs 2 wks ago' : rangeDays === 90 ? 'vs 3 mo ago' : 'vs 1 mo ago';
   const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
