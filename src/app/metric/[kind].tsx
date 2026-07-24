@@ -11,6 +11,7 @@ import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measure
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { backOr } from '@/lib/nav';
 import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -167,7 +168,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
     return (
       <DesktopPage maxWidth={640}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
+          <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/growth')} accessibilityLabel="Back" />
           <Txt weight={800} size={24} tracking={-0.5}>{meta.label}</Txt>
         </View>
         {body}
@@ -181,7 +182,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
+        <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/growth')} accessibilityLabel="Back" />
         <Txt weight={800} size={27} tracking={-0.6} style={{ flex: 1 }}>{meta.label}</Txt>
         <Pressable
           onPress={openSwitcher}
