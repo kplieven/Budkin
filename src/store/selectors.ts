@@ -4,7 +4,7 @@
  */
 
 import { parseClockInput } from '@/lib/timeParse';
-import type { Cure, Entry, Measurement, Timer } from '@/types/models';
+import type { Cure, CureTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -424,4 +424,137 @@ export function isCureActiveToday(cure: Cure, todayMidnight: number, childId: st
 export function activeCuresForChildToday(cures: Cure[], childId: string, todayMidnight: number): Cure[] {
   if (!childId) return [];
   return cures.filter((c) => isCureActiveToday(c, todayMidnight, childId));
+}
+
+/**
+ * The wall-clock hour each coarse time of day is dosed at. Fixed rather than a
+ * setting: the four labels only need to be ordered and roughly right for a dose
+ * to read as due at the expected part of the day, and a wrong-by-an-hour slot
+ * costs nothing (the dose stays due until it is given, it never lapses).
+ */
+export const CURE_TIME_OF_DAY_HOUR: Record<CureTimeOfDay, number> = {
+  morning: 8,
+  noon: 12,
+  evening: 18,
+  night: 22,
+};
+
+/** Today's wall-clock ms for one time-of-day slot. Built with setHours off the
+ *  day's midnight rather than by adding hours, so it stays on the intended hour
+ *  across a DST boundary. */
+function timeOfDaySlotMs(todayMidnight: number, tod: CureTimeOfDay): number {
+  const d = new Date(todayMidnight);
+  d.setHours(CURE_TIME_OF_DAY_HOUR[tod], 0, 0, 0);
+  return d.getTime();
+}
+
+/**
+ * A dose is attributed to a cure BY NAME (trimmed, case-insensitive), because a
+ * `MedicationEntry` carries no reference back to the cure it came from and
+ * cannot be given one: Baby Buddy has no such field, so a `cureId` would be
+ * dropped the moment the dose round-trips through the server and a dose logged
+ * on another device would stop counting. Name matching is the only rule that
+ * survives sync. Same normalisation as `matchServerChild`.
+ */
+const normName = (s: string) => s.trim().toLowerCase();
+
+function dosesForCure(entries: Entry[], cure: Cure): Extract<Entry, { type: 'medication' }>[] {
+  const name = normName(cure.name);
+  return entries.filter(
+    (e): e is Extract<Entry, { type: 'medication' }> => e.type === 'medication' && normName(e.name) === name,
+  );
+}
+
+/** How a cure stands right now: how many of its doses are owed, and how many
+ *  today expected at all (which is what separates "nothing due yet" from
+ *  "everything given" for the done badge). */
+export interface CureDue {
+  cure: Cure;
+  /** doses that are owed now: their moment has passed and none was logged for it */
+  due: number;
+  /** doses today's schedule called for at all, given or not */
+  expected: number;
+}
+
+/**
+ * Whether a cure owes a dose right now, and how many doses today asked for.
+ *
+ * Times-of-day cures count rather than match slot-to-dose: `due` is the number
+ * of slots already reached today minus the doses logged today, floored at zero.
+ * Counting is what makes a late dose behave: dosing once at 19:00 on a
+ * morning+evening cure settles one of the two owed doses and leaves the other
+ * owed, where a per-slot "any dose after this slot clears it" rule would let
+ * that single evening dose silently clear the skipped morning one too.
+ *
+ * Interval cures owe at most ONE dose at a time (the app shows a single due
+ * state, so counting missed intervals would only inflate the number without
+ * telling the user anything new). An interval cure that has never been dosed is
+ * owed immediately: `isCureActiveToday` has already established that its
+ * `fromDate` has passed, so the regimen has started and the first dose is late.
+ *
+ * Pure and `now`-parametrised. Scope `entries` to the child first.
+ */
+export function cureDueState(cure: Cure, entries: Entry[], now: number): CureDue {
+  const doses = dosesForCure(entries, cure);
+  const todayMidnight = startOfDay(now);
+  const dosesToday = doses.filter((e) => e.time >= todayMidnight && e.time <= now).length;
+
+  if (cure.scheduleMode === 'everyHours') {
+    // An interval with no hours set has no schedule to be late against.
+    if (cure.everyHours == null) return { cure, due: 0, expected: dosesToday };
+    const last = doses.reduce<number | null>((max, e) => (e.time <= now && (max == null || e.time > max) ? e.time : max), null);
+    const due = last == null || now >= last + cure.everyHours * 3600000 ? 1 : 0;
+    return { cure, due, expected: dosesToday + due };
+  }
+
+  const reached = (cure.timesOfDay ?? []).filter((tod) => now >= timeOfDaySlotMs(todayMidnight, tod)).length;
+  return { cure, due: Math.max(0, reached - dosesToday), expected: reached };
+}
+
+/**
+ * The due state of every cure active for one child today, due ones FIRST (the
+ * log picker lists them in this order, and the order is stable within each group
+ * so an undue cure never jumps around as `now` ticks).
+ *
+ * Pure, so call it in a render body over raw-selected arrays, NEVER inside a
+ * `useAppStore` selector: returning a fresh array from a selector makes zustand
+ * v5 loop forever.
+ */
+export function cureDueList(cures: Cure[], childId: string | undefined, entries: Entry[], now: number): CureDue[] {
+  if (!childId) return [];
+  return activeCuresForChildToday(cures, childId, startOfDay(now))
+    .map((c) => cureDueState(c, entries, now))
+    .sort((a, b) => (a.due > 0 ? 0 : 1) - (b.due > 0 ? 0 : 1));
+}
+
+/** Total doses owed across a child's active cures. */
+export function totalCureDue(list: CureDue[]): number {
+  return list.reduce((sum, d) => sum + d.due, 0);
+}
+
+/**
+ * The Medication tile's hint, mirroring how the Bath tile phrases its wash. One
+ * owed dose names its treatment ("Omeprazol due") because that is the whole
+ * answer at a glance; more than one can't be named, so it counts instead.
+ * `null` means the tile has nothing to say and should keep its default copy.
+ */
+export function cureDueHint(list: CureDue[]): string | null {
+  if (list.length === 0) return null;
+  const due = totalCureDue(list);
+  if (due === 1) {
+    const owed = list.find((d) => d.due > 0);
+    return owed ? `${owed.cure.name.trim()} due` : null;
+  }
+  if (due > 1) return `${due} doses due`;
+  // Nothing owed: distinguish a day whose doses are all given from one whose
+  // first dose simply isn't due yet, exactly as the Bath tile separates
+  // "Washed today" from a forward-looking hint.
+  return list.some((d) => d.expected > 0) ? 'All doses given' : 'Nothing due';
+}
+
+/** Whether the Medication tile shows the "done for today" check: doses were
+ *  called for today and every one of them is logged. A child with no cures, or
+ *  one whose first dose is still ahead, gets no check. */
+export function curesAllGiven(list: CureDue[]): boolean {
+  return list.length > 0 && totalCureDue(list) === 0 && list.some((d) => d.expected > 0);
 }
