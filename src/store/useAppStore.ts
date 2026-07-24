@@ -328,8 +328,9 @@ interface AppActions {
   /** Medication tile tap: open the cure picker when the selected child has an
    *  active cure covering today, otherwise open the plain manual log form. */
   openMedicationLog: () => void;
-  /** Seed the medication draft from a cure (name/dosage/unit, plus the next-dose
-   *  interval for an interval cure) and open the log form to confirm and save. */
+  /** Instant-log a dose from a saved cure: record the medication entry right away
+   *  (name/dosage/unit, plus the next-dose interval for an interval cure) and
+   *  close the picker, with no form to confirm. */
   logMedicationFromCure: (cureId: string) => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
   /** One press of the amount stepper: +1 or -1 step in the user's display
@@ -2557,21 +2558,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     else get().openSheet('medication');
   },
   logMedicationFromCure: (cureId) => {
-    const cure = get().cures.find((c) => c.id === cureId);
+    const s = get();
+    const cure = s.cures.find((c) => c.id === cureId);
     if (!cure) return;
-    // openSheet resets the draft to a blank medication form; seed it afterwards.
-    get().openSheet('medication');
-    const patch: Partial<TimeEntryState> = {
-      medName: cure.name,
-      medDosage: cure.dosage,
-      medUnit: cure.dosageUnit,
+    // A cure always carries a name (the editor requires one), but gate on it the
+    // same way save() gates a manual dose so a nameless record can never slip in.
+    const name = cure.name.trim();
+    if (!name) return;
+    // Instant-log: tapping a saved cure records the dose immediately, with no
+    // form to confirm. Build the same medication Entry save() would for a fresh
+    // dose (time = now, dosage/unit/interval taken from the cure) and commit it
+    // directly, then close the picker.
+    const entry: Entry = {
+      id: 'e' + Date.now(),
+      childId: cure.childId,
+      type: 'medication',
+      time: s.now,
+      name,
+      dosage: cure.dosage,
+      dosageUnit: cure.dosageUnit?.trim() || undefined,
+      // Only an interval cure carries a next-dose interval onto the synced dose;
+      // a times-of-day cure leaves it unset.
+      nextDoseIntervalSec:
+        cure.scheduleMode === 'everyHours' && cure.everyHours != null ? cure.everyHours * 3600 : undefined,
+      tags: [],
     };
-    // Only an interval cure carries a next-dose interval onto the synced dose;
-    // a times-of-day cure leaves it unset.
-    if (cure.scheduleMode === 'everyHours' && cure.everyHours != null) {
-      patch.medNextDoseIntervalSec = cure.everyHours * 3600;
-    }
-    set((s) => ({ curePicker: null, te: { ...s.te, ...patch } }));
+    set({ curePicker: null, entries: [entry, ...s.entries] });
+    get().commitWrite(entry);
+    const queued = s.offline && !!s.connection && s.connection.mode === 'server';
+    get().showToast(queued ? 'Saved · queued offline' : 'Saved');
   },
 
   setTE: (patch) =>

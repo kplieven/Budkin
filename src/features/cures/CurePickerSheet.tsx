@@ -14,10 +14,11 @@ import { useTheme } from '@/theme/useTheme';
 /**
  * Cure picker: opened from the Medication tile when the selected child has at
  * least one active cure covering today (the tile decides via `openMedicationLog`,
- * so this sheet is never shown empty). Picking a cure pre-fills the dose form;
- * "Log manually" opens the plain form. The active-today list is derived HERE in
- * render (a pure helper over raw-selected `cures`), never from a store selector,
- * per the zustand v5 rule against returning a fresh filtered array.
+ * so this sheet is never shown empty). Tapping a cure logs a dose from it right
+ * away (no form to confirm); "Log manually" opens the plain form instead. The
+ * active-today list is derived HERE in render (a pure helper over raw-selected
+ * `cures`), never from a store selector, per the zustand v5 rule against
+ * returning a fresh filtered array.
  */
 export function CurePickerSheet() {
   const t = useTheme();
@@ -47,7 +48,7 @@ export function CurePickerSheet() {
           Log a dose
         </Txt>
         <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-          Pick a cure to pre-fill, or log manually
+          Tap a cure to log it now, or log manually
         </Txt>
       </View>
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 10, gap: 8 }}>
