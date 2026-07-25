@@ -3,10 +3,10 @@ import { describe, it, expect } from 'vitest';
 import { valueAtZ, hasWhoAgeOverlap, MONTH_MS } from './whoReference';
 
 describe('valueAtZ (WHO LMS formula)', () => {
-  // WHO girls weight-for-age, month 0: L=0.3487, M=3.2322, S=0.14171.
+  // WHO girls weight-for-age, month 0: L=0.3809, M=3.2322, S=0.14171.
   // Median (z=0) is exactly M; P3 (z=-1.88079) and P97 (z=+1.88079) match
   // WHO's published 3rd/97th centiles (2.4 / 4.2 kg to one decimal).
-  const lms = { L: 0.3487, M: 3.2322, S: 0.14171 };
+  const lms = { L: 0.3809, M: 3.2322, S: 0.14171 };
   it('returns M at z=0', () => {
     expect(valueAtZ(lms, 0)).toBeCloseTo(3.2322, 3);
   });
