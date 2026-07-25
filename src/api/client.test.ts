@@ -1425,7 +1425,7 @@ describe('gender <-> note serialization', () => {
   });
 
   it('round-trips every supported gender', () => {
-    for (const g of ['girl', 'boy', 'other'] as const) {
+    for (const g of ['girl', 'boy'] as const) {
       expect(genderFromNote(genderToNoteBody(g, 5, AT))).toBe(g);
     }
   });
@@ -1433,6 +1433,9 @@ describe('gender <-> note serialization', () => {
   it('reads an unknown or missing g: tag as not recorded', () => {
     expect(genderFromNote({ tags: ['gender'] })).toBeUndefined();
     expect(genderFromNote({ tags: ['gender', 'g:martian'] })).toBeUndefined();
+    // A legacy `g:other` note (a value this build no longer supports) also
+    // reads as not recorded, so a retired gender degrades to "Not set".
+    expect(genderFromNote({ tags: ['gender', 'g:other'] })).toBeUndefined();
     expect(genderFromNote({})).toBeUndefined();
   });
 

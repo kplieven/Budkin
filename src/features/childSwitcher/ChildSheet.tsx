@@ -22,7 +22,6 @@ const GENDER_OPTIONS: readonly (readonly [string, ChildGender | undefined])[] = 
   ['Not set', undefined],
   ['Girl', 'girl'],
   ['Boy', 'boy'],
-  ['Other', 'other'],
 ];
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the LogSheet Delete button

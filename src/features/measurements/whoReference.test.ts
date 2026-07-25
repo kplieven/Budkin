@@ -38,8 +38,7 @@ describe('referenceCurves', () => {
   const tMin = birth + 1 * MONTH_MS;
   const tMax = birth + 6 * MONTH_MS;
 
-  it('returns null for non-girl/boy genders', () => {
-    expect(referenceCurves('weight', 'other', birth, tMin, tMax, 'metric')).toBeNull();
+  it('returns null for an unset gender', () => {
     expect(referenceCurves('weight', undefined, birth, tMin, tMax, 'metric')).toBeNull();
   });
 
