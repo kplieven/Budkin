@@ -176,11 +176,6 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             {points.length === 1 ? 'Add another measurement to see a trend.' : 'No measurements yet.'}
           </Txt>
         )}
-        {child?.gender === 'other' && overlap ? (
-          <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 10 }}>
-            WHO growth curves compare girls and boys only.
-          </Txt>
-        ) : null}
       </View>
 
       <Modal visible={refInfo} transparent animationType="fade" onRequestClose={() => setRefInfo(false)}>

@@ -2676,19 +2676,19 @@ describe('children', () => {
         children: [{ ...SYNCED_C1, gender: undefined }],
       });
       s().openEditChild('c1');
-      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'other' });
+      s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'boy' });
       await flush();
       // Offline: one child-update op carrying the gender, no direct write.
       expect(h.genderWritten).toHaveLength(0);
       expect(h.pendingOps).toContainEqual({
         op: 'update',
         entity: 'child',
-        payload: expect.objectContaining({ gender: 'other' }),
+        payload: expect.objectContaining({ gender: 'boy' }),
       });
 
       useAppStore.setState({ offline: false });
       await s().flushPendingOps();
-      expect(h.genderWritten).toEqual([{ childServerId: 501, gender: 'other' }]);
+      expect(h.genderWritten).toEqual([{ childServerId: 501, gender: 'boy' }]);
     });
 
     it('re-queues the child op when the gender write fails, so the change is retried', async () => {

@@ -507,7 +507,7 @@ export function noteToCure(n: any, childId: string): Cure {
 // NEWEST gender note for a child wins, which is what lets a re-write that failed
 // to find the old note still resolve to the right answer.
 
-const CHILD_GENDERS: ChildGender[] = ['girl', 'boy', 'other'];
+const CHILD_GENDERS: ChildGender[] = ['girl', 'boy'];
 
 /** The single discriminator: a gender note carries the `gender` tag. */
 export function isGenderNote(n: any): boolean {

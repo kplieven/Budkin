@@ -16,7 +16,7 @@ export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
  * A child's gender. Optional everywhere: absent means "not recorded", which is
  * why there is no "unspecified" member — nothing has to be chosen.
  */
-export type ChildGender = 'girl' | 'boy' | 'other';
+export type ChildGender = 'girl' | 'boy';
 
 export interface Child {
   id: string;
