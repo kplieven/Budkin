@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { valueAtZ, hasWhoAgeOverlap, MONTH_MS } from './whoReference';
+import { valueAtZ, hasWhoAgeOverlap, MONTH_MS, referenceCurves } from './whoReference';
 
 describe('valueAtZ (WHO LMS formula)', () => {
   // WHO girls weight-for-age, month 0: L=0.3809, M=3.2322, S=0.14171.
@@ -30,5 +30,47 @@ describe('hasWhoAgeOverlap', () => {
   });
   it('true when the range straddles birth (age 0)', () => {
     expect(hasWhoAgeOverlap(birth, birth - 5 * MONTH_MS, birth + 3 * MONTH_MS)).toBe(true);
+  });
+});
+
+describe('referenceCurves', () => {
+  const birth = 1_700_000_000_000;
+  const tMin = birth + 1 * MONTH_MS;
+  const tMax = birth + 6 * MONTH_MS;
+
+  it('returns null for non-girl/boy genders', () => {
+    expect(referenceCurves('weight', 'other', birth, tMin, tMax, 'metric')).toBeNull();
+    expect(referenceCurves('weight', undefined, birth, tMin, tMax, 'metric')).toBeNull();
+  });
+
+  it('returns null when the whole range is past 60 months', () => {
+    const late = birth + 61 * MONTH_MS;
+    expect(referenceCurves('weight', 'girl', birth, late, late + MONTH_MS, 'metric')).toBeNull();
+  });
+
+  it('produces five curves with endpoints at tMin and tMax', () => {
+    const curves = referenceCurves('weight', 'girl', birth, tMin, tMax, 'metric');
+    expect(curves).not.toBeNull();
+    expect(curves!.map((c) => c.p)).toEqual([3, 15, 50, 85, 97]);
+    for (const c of curves!) {
+      expect(c.points[0].t).toBe(tMin);
+      expect(c.points[c.points.length - 1].t).toBe(tMax);
+      expect(c.points.every((p, i, a) => i === 0 || p.t >= a[i - 1].t)).toBe(true);
+    }
+  });
+
+  it('clamps the last sample to age 60 months when the range straddles it', () => {
+    const t60 = birth + 60 * MONTH_MS;
+    const curves = referenceCurves('weight', 'boy', birth, birth + 58 * MONTH_MS, birth + 64 * MONTH_MS, 'metric');
+    expect(curves).not.toBeNull();
+    for (const c of curves!) expect(c.points[c.points.length - 1].t).toBe(t60);
+  });
+
+  it('converts to imperial (weight in lb > metric kg)', () => {
+    const metric = referenceCurves('weight', 'girl', birth, tMin, tMax, 'metric')!;
+    const imperial = referenceCurves('weight', 'girl', birth, tMin, tMax, 'imperial')!;
+    const m50 = metric.find((c) => c.p === 50)!.points[0].value;
+    const i50 = imperial.find((c) => c.p === 50)!.points[0].value;
+    expect(i50).toBeGreaterThan(m50 * 2); // ~2.2 lb per kg
   });
 });
