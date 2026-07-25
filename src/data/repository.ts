@@ -10,6 +10,8 @@ import {
   entryTimestamp,
   type ActivityType,
   type Child,
+  type ChildGender,
+  type Cure,
   type Entry,
   type FeedMethod,
   type FeedType,
@@ -32,6 +34,9 @@ export interface LoadResult {
   selectedChildId: string;
   lastFeed: { feedType: FeedType; method: FeedMethod };
   measurements: Measurement[];
+  /** The selected child's treatment regimens, read from their `cure`-tagged
+   *  notes. Empty in local mode and whenever the fetch fails. */
+  cures: Cure[];
 }
 
 /** Validate the connection and load children + recent entries from the server.
@@ -59,6 +64,7 @@ export async function loadFromServer(
       selectedChildId: '',
       lastFeed: { feedType: 'breast', method: 'left' },
       measurements: [],
+      cures: [],
     };
   }
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
@@ -66,7 +72,15 @@ export async function loadFromServer(
   // ApiError(401/403) on a bad token. We deliberately do NOT use /api/profile/
   // as the gate: it can return 500 on some instances (e.g. a user without a
   // settings row), which would wrongly reject a valid token.
-  const children = await client.listChildren();
+  const rawChildren = await client.listChildren();
+  // Baby Buddy's Child model has no gender field, so it arrives as one extra
+  // request over the `gender`-tagged notes for the WHOLE account (not per
+  // child), keyed by server id. A failure degrades to "not recorded" rather
+  // than failing the load.
+  const genders = await client.listGenders().catch(() => new Map<number, ChildGender>());
+  const children = rawChildren.map((c) =>
+    c.serverId != null && genders.has(c.serverId) ? { ...c, gender: genders.get(c.serverId) } : c,
+  );
   const preferred =
     preferredChildServerId != null
       ? children.find((c) => c.serverId === preferredChildServerId)?.id
@@ -74,8 +88,9 @@ export async function loadFromServer(
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
   let entries: Entry[] = [];
+  let cures: Cure[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt, notesData, temp, med] = await Promise.all([
+    const [f, s, d, p, tt, notesData, temp, med, cureList] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
@@ -85,8 +100,13 @@ export async function loadFromServer(
       client.listChildNotes(selectedChildId).catch(() => ({ baths: [], milestones: [], notes: [] })),
       client.listTemperature(selectedChildId).catch(() => []),
       client.listMedication(selectedChildId).catch(() => []),
+      // Cures come from a SECOND /api/notes/ request filtered by the `cure` tag,
+      // not out of `listChildNotes`: a cure note is dated at the regimen's start,
+      // so a long-running treatment would drop out of the recent-notes window.
+      client.listChildCures(selectedChildId).catch(() => [] as Cure[]),
     ]);
     entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp, ...med];
+    cures = cureList;
   }
 
   const lastFeeding = entries
@@ -122,7 +142,7 @@ export async function loadFromServer(
     timers = [];
   }
 
-  return { children, entries, timers, selectedChildId, lastFeed, measurements };
+  return { children, entries, timers, selectedChildId, lastFeed, measurements, cures };
 }
 
 /**
@@ -212,6 +232,42 @@ export async function deleteMeasurementFromServer(
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.deleteMeasurement(kind, serverId);
+}
+
+/** Write a child's gender as a `gender`-tagged note (or delete the note when
+ *  the gender is cleared). No-op in local mode. */
+export async function setChildGenderOnServer(
+  conn: Connection,
+  childServerId: number,
+  gender: ChildGender | undefined,
+  atMs: number,
+): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.setChildGender(childServerId, gender, atMs);
+}
+
+/** Push a newly created cure (a `cure`-tagged note); returns its new server id. */
+export async function pushCureToServer(
+  conn: Connection,
+  cure: Cure,
+  childServerId: number,
+): Promise<number | undefined> {
+  if (conn.mode !== 'server') return undefined;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  return client.createCure(cure, childServerId);
+}
+
+export async function updateCureOnServer(conn: Connection, cure: Cure, childServerId: number): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.updateCure(cure, childServerId);
+}
+
+export async function deleteCureFromServer(conn: Connection, serverId: number): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.deleteCure(serverId);
 }
 
 /** Push a newly created child (with an optional photo); returns the new server

@@ -4,21 +4,27 @@ import {
   BabybuddyClient,
   bathToNoteBody,
   childBody,
+  cureToNoteBody,
   durationToSec,
+  genderFromNote,
+  genderToNoteBody,
   HIDDEN_TAGS,
   isBathNote,
+  isCureNote,
+  isGenderNote,
   isHiddenTag,
   isMilestoneNote,
   mapProfile,
   milestoneToNoteBody,
   nativePicturePart,
   noteToBathEntry,
+  noteToCure,
   noteToMilestoneEntry,
   noteToNoteBody,
   noteToNoteEntry,
   secToDuration,
 } from '@/api/client';
-import type { BathEntry, Child, Entry, MilestoneEntry, NoteEntry, PickedPhoto } from '@/types/models';
+import type { BathEntry, Child, Cure, Entry, MilestoneEntry, NoteEntry, PickedPhoto } from '@/types/models';
 
 /** Minimal Fetch `Response` stand-in for stubbing `global.fetch` around a
  *  `BabybuddyClient` instance — the client's `request()` is private, so the
@@ -1196,5 +1202,353 @@ describe('timers', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('https://bb.test/api/timers/11/');
     expect(init.method).toBe('DELETE');
+  });
+});
+
+describe('cure <-> note serialization', () => {
+  const baseCure: Cure = {
+    id: 'cu1',
+    childId: 'c1',
+    name: 'Omeprazol',
+    scheduleMode: 'timesOfDay',
+    timesOfDay: ['morning', 'evening'],
+    dosage: 2.5,
+    dosageUnit: 'mL',
+    fromDate: new Date(2026, 2, 1).getTime(),
+    toDate: new Date(2026, 2, 20).getTime(),
+    condition: 'reflux',
+    notes: 'with food',
+    active: true,
+  };
+
+  /** Round-trip helper: encode, then decode as the server would hand it back. */
+  const roundTrip = (cure: Cure, id = 77): Cure => {
+    const body = cureToNoteBody(cure, 5) as any;
+    return noteToCure({ id, time: body.time, note: body.note, tags: body.tags }, cure.childId);
+  };
+
+  it('round-trips every field of a times-of-day cure', () => {
+    const out = roundTrip(baseCure);
+    expect(out).toMatchObject({
+      id: 'cure-77',
+      serverId: 77,
+      childId: 'c1',
+      name: 'Omeprazol',
+      scheduleMode: 'timesOfDay',
+      timesOfDay: ['morning', 'evening'],
+      dosage: 2.5,
+      dosageUnit: 'mL',
+      fromDate: baseCure.fromDate,
+      toDate: baseCure.toDate,
+      condition: 'reflux',
+      notes: 'with food',
+      active: true,
+    });
+  });
+
+  it('round-trips an interval cure', () => {
+    const out = roundTrip({ ...baseCure, scheduleMode: 'everyHours', everyHours: 6, timesOfDay: undefined });
+    expect(out.scheduleMode).toBe('everyHours');
+    expect(out.everyHours).toBe(6);
+  });
+
+  it('round-trips a paused cure', () => {
+    expect(roundTrip({ ...baseCure, active: false }).active).toBe(false);
+    expect(roundTrip(baseCure).active).toBe(true);
+  });
+
+  it('round-trips an open-ended cure (no to date) and one with no dose', () => {
+    const out = roundTrip({ ...baseCure, toDate: undefined, dosage: undefined, dosageUnit: undefined });
+    expect(out.toDate).toBeUndefined();
+    expect(out.dosage).toBeUndefined();
+    expect(out.dosageUnit).toBeUndefined();
+  });
+
+  it('carries the schedule in tags and marks the note with the `cure` tag', () => {
+    const body = cureToNoteBody(baseCure, 5) as any;
+    expect(body.tags).toEqual(['cure', 'cure:tod:morning', 'cure:tod:evening']);
+    expect(body.child).toBe(5);
+    expect(cureToNoteBody({ ...baseCure, scheduleMode: 'everyHours', everyHours: 8, timesOfDay: undefined }, 5) as any)
+      .toMatchObject({ tags: ['cure', 'cure:every:8'] });
+    expect((cureToNoteBody({ ...baseCure, active: false }, 5) as any).tags).toContain('cure:paused');
+  });
+
+  it('keeps NO free text in tags, so a treatment cannot pollute the server tag list', () => {
+    // Baby Buddy tag names are globally unique and shared by every record, so a
+    // medication name or unit in a tag would mint a new tag per treatment.
+    const body = cureToNoteBody(baseCure, 5) as any;
+    for (const tag of body.tags) {
+      expect(tag === 'cure' || tag.startsWith('cure:')).toBe(true);
+      expect(tag).not.toContain('Omeprazol');
+      expect(tag).not.toContain('mL');
+      expect(tag).not.toContain('reflux');
+    }
+  });
+
+  it('writes a body whose first line reads as plain English for other clients', () => {
+    const body = cureToNoteBody(baseCure, 5) as any;
+    expect(String(body.note).split('\n')[0]).toBe('Omeprazol, 2.5 mL, morning, evening');
+  });
+
+  it('dates the note at the regimen start', () => {
+    const body = cureToNoteBody(baseCure, 5) as any;
+    expect(new Date(body.time).getTime()).toBe(baseCure.fromDate);
+  });
+
+  it('degrades to the tag-borne schedule when the body was hand-edited away', () => {
+    // A user editing the note in Baby Buddy's own UI must not destroy the cure.
+    const out = noteToCure(
+      { id: 9, time: '2026-03-01T00:00:00.000Z', note: 'Omeprazol for reflux', tags: ['cure', 'cure:tod:noon', 'cure:paused'] },
+      'c1',
+    );
+    expect(out.name).toBe('Omeprazol for reflux');
+    expect(out.timesOfDay).toEqual(['noon']);
+    expect(out.active).toBe(false);
+    expect(out.dosage).toBeUndefined();
+  });
+
+  it('degrades the same way when the payload line is not valid JSON', () => {
+    const out = noteToCure(
+      { id: 9, time: '2026-03-01T00:00:00.000Z', note: 'Omeprazol\nbudkin-cure-v1:{oops', tags: ['cure', 'cure:every:6'] },
+      'c1',
+    );
+    expect(out.name).toBe('Omeprazol');
+    expect(out.everyHours).toBe(6);
+  });
+
+  it('falls back to the note time (floored to local midnight) for a missing start date', () => {
+    const noon = new Date(2026, 2, 1, 12, 30).getTime();
+    const out = noteToCure({ id: 9, time: new Date(noon).toISOString(), note: 'x', tags: ['cure'] }, 'c1');
+    expect(out.fromDate).toBe(new Date(2026, 2, 1).getTime());
+  });
+
+  it('isCureNote keys off the cure tag only', () => {
+    expect(isCureNote({ tags: ['cure'] })).toBe(true);
+    expect(isCureNote({ tags: ['cure:tod:noon'] })).toBe(false);
+    expect(isCureNote({ tags: [] })).toBe(false);
+    expect(isCureNote({})).toBe(false);
+  });
+
+  it('hides every cure structural tag from the tag picker', () => {
+    for (const t of ['cure', 'cure:tod:morning', 'cure:every:6', 'cure:paused']) {
+      expect(isHiddenTag(t)).toBe(true);
+    }
+    expect(isHiddenTag('curewash')).toBe(false);
+  });
+});
+
+describe('cure endpoints', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('listChildNotes drops cure notes instead of leaking them into general notes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+          { id: 2, time: '2026-03-01T00:00:00.000Z', note: 'Omeprazol', tags: ['cure', 'cure:tod:morning'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const { notes, baths, milestones } = await client.listChildNotes('5');
+    expect(notes.map((n) => n.text)).toEqual(['plain note']);
+    expect(baths).toHaveLength(0);
+    expect(milestones).toHaveLength(0);
+  });
+
+  it('listChildCures filters server-side by tag and re-checks locally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 2, time: '2026-03-01T00:00:00.000Z', note: 'Omeprazol', tags: ['cure', 'cure:tod:morning'] },
+          // An instance that ignored the tag filter must not turn this into a cure.
+          { id: 3, time: '2026-03-01T00:00:00.000Z', note: 'plain note', tags: [] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const cures = await client.listChildCures('5');
+    expect(fetchMock.mock.calls[0][0]).toContain('tags=cure');
+    expect(cures.map((c) => c.name)).toEqual(['Omeprazol']);
+  });
+
+  it('createCure POSTs a note and returns its id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ id: 321 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const cure: Cure = { id: 'cu1', childId: 'c1', name: 'Nurofen', scheduleMode: 'everyHours', everyHours: 6, fromDate: new Date(2026, 2, 1).getTime(), active: true };
+    expect(await client.createCure(cure, 5)).toBe(321);
+    expect(fetchMock.mock.calls[0][0]).toContain('/notes/');
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST');
+  });
+
+  it('updateCure PATCHes the backing note, and no-ops with no server id', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+    const cure: Cure = { id: 'cu1', childId: 'c1', name: 'Nurofen', scheduleMode: 'everyHours', everyHours: 6, fromDate: new Date(2026, 2, 1).getTime(), active: true };
+    await client.updateCure(cure, 5);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await client.updateCure({ ...cure, serverId: 88 }, 5);
+    expect(fetchMock.mock.calls[0][0]).toContain('/notes/88/');
+    expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+  });
+
+  it('deleteCure DELETEs the backing note', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({}, 204));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').deleteCure(88);
+    expect(fetchMock.mock.calls[0][0]).toContain('/notes/88/');
+    expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  });
+});
+
+describe('gender <-> note serialization', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const AT = new Date(2026, 2, 4, 10, 0).getTime();
+
+  it('encodes gender as a tagged note with readable body', () => {
+    const body = genderToNoteBody('girl', 5, AT) as any;
+    expect(body.child).toBe(5);
+    expect(body.tags).toEqual(['gender', 'g:girl']);
+    expect(body.note).toBe('Gender: girl');
+    expect(new Date(body.time).getTime()).toBe(AT);
+  });
+
+  it('round-trips every supported gender', () => {
+    for (const g of ['girl', 'boy'] as const) {
+      expect(genderFromNote(genderToNoteBody(g, 5, AT))).toBe(g);
+    }
+  });
+
+  it('reads an unknown or missing g: tag as not recorded', () => {
+    expect(genderFromNote({ tags: ['gender'] })).toBeUndefined();
+    expect(genderFromNote({ tags: ['gender', 'g:martian'] })).toBeUndefined();
+    // A legacy `g:other` note (a value this build no longer supports) also
+    // reads as not recorded, so a retired gender degrades to "Not set".
+    expect(genderFromNote({ tags: ['gender', 'g:other'] })).toBeUndefined();
+    expect(genderFromNote({})).toBeUndefined();
+  });
+
+  it('isGenderNote keys off the gender tag only', () => {
+    expect(isGenderNote({ tags: ['gender'] })).toBe(true);
+    expect(isGenderNote({ tags: ['g:girl'] })).toBe(false);
+    expect(isGenderNote({ tags: [] })).toBe(false);
+  });
+
+  it('hides the gender structural tags from the tag picker', () => {
+    expect(isHiddenTag('gender')).toBe(true);
+    expect(isHiddenTag('g:girl')).toBe(true);
+    expect(isHiddenTag('gendered')).toBe(false);
+  });
+
+  it('listChildNotes drops gender notes instead of showing them in the Notes tab', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+          { id: 2, time: '2026-03-04T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { notes } = await new BabybuddyClient('https://example.com', 'tok').listChildNotes('5');
+    expect(notes.map((n) => n.text)).toEqual(['plain note']);
+  });
+
+  it('listGenders keys the whole account by child server id in one request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 3,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, child: 5, time: '2026-03-04T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+          { id: 2, child: 7, time: '2026-03-03T10:00:00.000Z', note: 'Gender: boy', tags: ['gender', 'g:boy'] },
+          { id: 3, child: 9, time: '2026-03-02T10:00:00.000Z', note: 'plain', tags: [] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listGenders();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('tags=gender');
+    expect(map.get(5)).toBe('girl');
+    expect(map.get(7)).toBe('boy');
+    expect(map.has(9)).toBe(false);
+  });
+
+  it('listGenders lets the newest note win when a child has a stale duplicate', async () => {
+    // Results come back newest-first, so the first one seen per child wins.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 2, child: 5, time: '2026-03-04T10:00:00.000Z', note: 'Gender: boy', tags: ['gender', 'g:boy'] },
+          { id: 1, child: 5, time: '2026-03-01T10:00:00.000Z', note: 'Gender: girl', tags: ['gender', 'g:girl'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listGenders();
+    expect(map.get(5)).toBe('boy');
+  });
+
+  it('setChildGender PATCHes the existing note rather than adding a second one', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 44, child: 5, tags: ['gender', 'g:girl'] }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, 'boy', AT);
+    expect(fetchMock.mock.calls[1][0]).toContain('/notes/44/');
+    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+  });
+
+  it('setChildGender POSTs when the child has no gender note yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 99 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, 'girl', AT);
+    expect(fetchMock.mock.calls[1][1].method).toBe('POST');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).tags).toEqual(['gender', 'g:girl']);
+  });
+
+  it('setChildGender DELETEs the note when the gender is cleared', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 44, child: 5, tags: ['gender', 'g:girl'] }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}, 204));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, undefined, AT);
+    expect(fetchMock.mock.calls[1][0]).toContain('/notes/44/');
+    expect(fetchMock.mock.calls[1][1].method).toBe('DELETE');
+  });
+
+  it('setChildGender writes nothing when clearing a gender that was never set', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, undefined, AT);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

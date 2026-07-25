@@ -62,6 +62,16 @@ describe('yTicksFor', () => {
     expect(ticks.every((v) => Number.isFinite(v))).toBe(true);
     for (let i = 1; i < ticks.length; i++) expect(ticks[i]).toBeGreaterThan(ticks[i - 1]);
   });
+
+  it('widens the axis to include extra values', () => {
+    const pts = [{ t: 1, value: 5 }, { t: 2, value: 6 }];
+    const base = yTicksFor(pts);
+    const wide = yTicksFor(pts, [0.5, 30]);
+    expect(Math.max(...wide.ticks)).toBeGreaterThanOrEqual(30);
+    expect(Math.min(...wide.ticks)).toBeLessThanOrEqual(0.5);
+    // No extra values -> identical to the single-arg call.
+    expect(yTicksFor(pts, []).ticks).toEqual(base.ticks);
+  });
 });
 
 describe('xTicksFor', () => {

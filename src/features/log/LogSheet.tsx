@@ -356,22 +356,28 @@ function MedicationField({
           marginBottom: 12,
         }}
       >
-        <TextInput
-          value={amountText}
-          onFocus={() => setAmountFocused(true)}
-          onBlur={() => setAmountFocused(false)}
-          onChangeText={(v) => {
-            setAmountText(v);
-            const n = parseFloat(v.replace(',', '.'));
-            onDosage(Number.isNaN(n) ? undefined : n);
-          }}
-          placeholder="5"
-          placeholderTextColor={t.faint}
-          keyboardType="decimal-pad"
-          style={{ flex: 1, height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
-        />
+        {/* The input is wrapped in a flex:1/minWidth:0 View so it SHRINKS to make
+            room for the unit. A bare flex:1 TextInput keeps min-width:auto on web
+            and won't shrink, pushing a long unit ("puffs", "drops") past the right
+            edge. See src/components/DateFields.tsx for the same pattern. */}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            value={amountText}
+            onFocus={() => setAmountFocused(true)}
+            onBlur={() => setAmountFocused(false)}
+            onChangeText={(v) => {
+              setAmountText(v);
+              const n = parseFloat(v.replace(',', '.'));
+              onDosage(Number.isNaN(n) ? undefined : n);
+            }}
+            placeholder="5"
+            placeholderTextColor={t.faint}
+            keyboardType="decimal-pad"
+            style={{ width: '100%', height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
+          />
+        </View>
         {unit ? (
-          <Txt weight={600} size={16} color={t.dim}>
+          <Txt weight={600} size={16} color={t.dim} numberOfLines={1} style={{ flexShrink: 0 }}>
             {unit}
           </Txt>
         ) : null}

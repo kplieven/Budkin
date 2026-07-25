@@ -84,6 +84,11 @@ describe('prefs persistence', () => {
     });
   });
 
+  it('round-trips showGrowthReference', async () => {
+    await savePrefs({ showGrowthReference: false });
+    expect(await loadPrefs()).toEqual({ showGrowthReference: false });
+  });
+
   it('a later save overwrites the same field but keeps the others', async () => {
     await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
     await savePrefs({ unitSystem: 'metric' });

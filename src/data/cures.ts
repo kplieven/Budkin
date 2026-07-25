@@ -1,11 +1,14 @@
 /**
  * Persisted medication regimens ("cures"), backed by AsyncStorage.
  *
- * Cures are a purely local concept (an on-device template the user logs a dose
- * from): the Baby Buddy server has no matching record, so nothing here ever
- * uploads. This on-device copy is the only thing that brings a child's cures
- * back after the app is closed and reopened, mirroring src/data/timers.ts. They
- * are user data, so they survive disconnect() (unlike the synced entity store).
+ * This on-device copy is what brings a child's cures back after the app is
+ * closed and reopened, mirroring src/data/timers.ts. In local mode it is the
+ * only copy; when connected it is the OFFLINE CACHE in front of the server,
+ * which stores each cure as a `cure`-tagged note (see `cureToNoteBody` in
+ * src/api/client.ts) because Baby Buddy has no regimen resource of its own.
+ *
+ * Nothing here talks to the network: the store owns the mirror. Cures are user
+ * data, so they survive disconnect() (unlike the synced entity store).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
