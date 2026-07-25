@@ -9,7 +9,7 @@ import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
-import { referenceCurves, hasWhoAgeOverlap } from '@/features/measurements/whoReference';
+import { referenceCurves, hasWhoAgeOverlap, MONTH_MS } from '@/features/measurements/whoReference';
 import { DISCLAIMER } from '@/features/insights/norms';
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
@@ -28,6 +28,9 @@ const rowDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { wee
 const tipDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const GOOD = '#3E9E6E';
 const WHO_URL = 'https://www.who.int/tools/child-growth-standards/standards';
+// With the reference on, extend the x-axis past the last measurement by this
+// fraction of the visible span, so the bands show where the child is heading.
+const REF_X_HEADROOM = 0.15;
 
 export default function MetricDetailRoute() {
   const { kind } = useLocalSearchParams<{ kind: string }>();
@@ -76,21 +79,30 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const change = changeSince(points);
   // WHO growth-standard percentile reference: available only for a recorded
   // girl/boy gender whose visible age range overlaps WHO's 0..60 month window,
-  // and drawn only while the toggle is on. When available, the chart's y-axis
-  // widens to keep the visible band from clipping.
+  // and drawn only while the toggle is on. When shown, the y-axis widens to keep
+  // the band from clipping, and the x-axis runs a little past the last datum.
   const tMin = points.length ? points[0].t : 0;
   const tMax = points.length ? points[points.length - 1].t : 0;
   const overlap = !!child && points.length >= 2 && hasWhoAgeOverlap(child.birth, tMin, tMax);
   const isSexed = child?.gender === 'girl' || child?.gender === 'boy';
-  const refAll = overlap && isSexed && child
-    ? referenceCurves(kind, child.gender, child.birth, tMin, tMax, unitSystem)
+  const refAvailable = overlap && isSexed && !!child;
+  // Extend the right edge only when the reference is actually drawn; cap it at
+  // WHO's 60-month limit so the curves never run past where the standard ends.
+  const refXMax = refAvailable && showRef && child
+    ? Math.max(tMax, Math.min(tMax + (tMax - tMin) * REF_X_HEADROOM, child.birth + 60 * MONTH_MS))
+    : tMax;
+  const refAll = refAvailable && child
+    ? referenceCurves(kind, child.gender, child.birth, tMin, refXMax, unitSystem)
     : null;
   const curves = showRef ? refAll : null;
+  const extended = curves != null && refXMax > tMax;
   const refValues = curves?.flatMap((c) => c.points.map((p) => p.value)) ?? [];
   const { ticks, fmtY } = yTicksFor(points, refValues);
   const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
   const maxXTicks = Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)); // ~56px per label; 36 = svg gutter+right
-  const { ticks: xTicks, fmtX } = xTicksFor(points, maxXTicks);
+  // With the axis extended, add the far edge to the tick domain so a label lands there.
+  const xTickPoints = extended ? [...points, { t: refXMax, value: points[points.length - 1].value }] : points;
+  const { ticks: xTicks, fmtX } = xTicksFor(xTickPoints, maxXTicks);
   const history = childMeasurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
 
   const body = (
@@ -157,6 +169,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             points={points}
             band={null}
             curves={curves ?? undefined}
+            xMax={extended ? refXMax : undefined}
             color={meta.color}
             yTicks={ticks}
             fmtY={fmtY}
