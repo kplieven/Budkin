@@ -13,7 +13,7 @@ import type { Band } from './norms';
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
 const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false, curves }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false, curves, xMax }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
@@ -28,6 +28,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   dashGaps?: boolean;
   /** Time mode only: WHO-style reference percentile lines drawn behind the data. */
   curves?: { points: { t: number; value: number }[]; emphasis?: boolean; label?: string }[];
+  /** Time mode only: override the right edge of the time domain (defaults to the
+   *  last point's t) so the plot can extend past the last datum. */
+  xMax?: number;
 }) {
   const t = useTheme();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -41,7 +44,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   const yMin = Math.min(...yTicks), yMax = Math.max(...yTicks);
   const yv = (v: number) => top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
   const tMin = points.length ? points[0].t : 0;
-  const tMax = points.length ? points[points.length - 1].t : 1;
+  // xMax (time mode) lets the caller run the domain past the last datum; without
+  // it the right edge is the last point, as before.
+  const tMax = xMax != null ? xMax : (points.length ? points[points.length - 1].t : 1);
   const xFrac = (i: number) => {
     if (points.length <= 1) return 0.5;
     if (xMode === 'time' && tMax > tMin) return (points[i].t - tMin) / (tMax - tMin);
