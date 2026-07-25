@@ -4655,6 +4655,23 @@ describe('unit-system persistence', () => {
   });
 });
 
+describe('growth-reference persistence', () => {
+  it('setGrowthReference toggles the flag and persists it', () => {
+    useAppStore.setState({ showGrowthReference: true });
+    s().setGrowthReference(false);
+    expect(s().showGrowthReference).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ showGrowthReference: false });
+  });
+
+  it('hydrate restores a persisted false (the state worth remembering)', async () => {
+    h.prefs = { showGrowthReference: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ showGrowthReference: true });
+    await s().hydrate();
+    expect(s().showGrowthReference).toBe(false);
+  });
+});
+
 describe('rhythm-layer persistence', () => {
   it('setRhythmLayer toggles one layer and persists all three', () => {
     useAppStore.setState({ rhythmShowSleep: true, rhythmShowFeeds: true, rhythmShowDiapers: true });

@@ -51,6 +51,11 @@ export interface Prefs {
   rhythmShowSleep: boolean;
   rhythmShowFeeds: boolean;
   rhythmShowDiapers: boolean;
+  /**
+   * Growth charts: whether the WHO growth-standard percentile curves are drawn
+   * behind a metric's own line. Global (like every other pref), default on.
+   */
+  showGrowthReference: boolean;
 }
 
 /** A persisted file may predate a field, so callers get a Partial back. */
