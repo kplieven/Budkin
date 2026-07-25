@@ -43,6 +43,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { keyboardInset, raisesKeyboard } from '@/components/keyboardInset';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useTheme } from '@/theme/useTheme';
 
@@ -52,16 +53,19 @@ import { useTheme } from '@/theme/useTheme';
 // keyboard simply covers its bottom edge; only the VISUAL viewport shrinks,
 // and the browser may additionally pan it (visualViewport.offsetTop > 0, e.g.
 // iOS Safari auto-revealing a focused input). So a bottom:0 sheet stays pinned
-// behind the keyboard. The gap between the layout viewport's bottom edge and
-// the *visible* bottom edge (= the top of the keyboard) is
-//   innerHeight - (visualViewport.offsetTop + visualViewport.height)
-// and that is exactly how far the sheet must be raised to sit on the keyboard.
-// Recomputed on both `resize` and `scroll` so the sheet stays glued while the
-// browser pans the visual viewport around; no keyboard-vs-URL-bar threshold,
-// since URL-bar show/hide produces small genuine insets that are correct to apply.
-// (A previous version gated on `covered > 120`, which fought Safari's auto-pan:
-// once offsetTop grows toward the keyboard height the expression drops under
-// any threshold and the lift snapped back to 0 with the keyboard still open.)
+// behind the keyboard, and it must be raised by exactly the covered height (see
+// keyboardInset() for the geometry).
+//
+// The lift is gated on an actually-focused text field, NOT on the size of the
+// gap. iOS Safari's innerHeight and visualViewport.height differ AT REST (the
+// large address bar, overscroll offsetTop, a keyboard caught mid-dismiss as the
+// modal opens): with no gate that gap lifted the sheet ~a keyboard height with
+// no keyboard on screen. The keyboard cannot exist without a focused text field,
+// so `raisesKeyboard(document.activeElement)` is the honest signal. It also
+// avoids the old `covered > 120` threshold, which fought Safari's focus auto-pan
+// (offsetTop grows, the value drops under the threshold, the lift snapped back
+// mid-keyboard). Recomputed on `resize` and `scroll` so the sheet stays glued
+// while the browser pans the visual viewport around.
 //
 // Note `useWindowDimensions().height` cannot stand in for any of this:
 // react-native-web 0.21 feeds it visualViewport.height (updated on
@@ -78,7 +82,8 @@ function useKeyboardInset() {
     if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.visualViewport) return;
     const vv = window.visualViewport;
     const update = () => {
-      const covered = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      const focused = raisesKeyboard(document.activeElement);
+      const covered = keyboardInset(window.innerHeight, vv.height, vv.offsetTop, focused);
       setInset(covered);
       // The browser's own focus-reveal scroll ran BEFORE the sheet moved, so
       // re-reveal the focused field inside the sheet's own ScrollView once the
