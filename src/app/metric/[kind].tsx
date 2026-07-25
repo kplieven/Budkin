@@ -29,8 +29,10 @@ const tipDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { yea
 const GOOD = '#3E9E6E';
 const WHO_URL = 'https://www.who.int/tools/child-growth-standards/standards';
 // With the reference on, extend the x-axis past the last measurement by this
-// fraction of the visible span, so the bands show where the child is heading.
-const REF_X_HEADROOM = 0.15;
+// fraction of the visible span (a full span, so the child's line sits in the
+// left half and the WHO curves fan out across the right), so the bands show
+// well where the child is heading. Still capped at WHO's 60-month limit.
+const REF_X_HEADROOM = 1;
 
 export default function MetricDetailRoute() {
   const { kind } = useLocalSearchParams<{ kind: string }>();
