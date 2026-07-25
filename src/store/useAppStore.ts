@@ -132,6 +132,8 @@ interface AppState {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Growth charts: whether the WHO percentile reference is drawn (default true). */
+  showGrowthReference: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
    *  range 1..30). Global rather than per-child, like every other pref. Local
    *  only: it drives the wash pre-selection, never anything sent to the server. */
@@ -252,6 +254,8 @@ interface AppActions {
   setRhythmOriginHour: (hour: number) => void;
   /** Toggle one Insights "Rhythm" graph layer on/off and persist the choice. */
   setRhythmLayer: (layer: 'sleep' | 'feeds' | 'diapers', on: boolean) => void;
+  /** Toggle the WHO growth-reference overlay on the metric charts, and persist it. */
+  setGrowthReference: (on: boolean) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -923,6 +927,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   themeMode: 'dark',
   unitSystem: 'metric',
+  showGrowthReference: true,
   tutorialSeen: false,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
@@ -1034,6 +1039,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       rhythmShowDiapers: s.rhythmShowDiapers,
     });
   },
+  setGrowthReference: (on) => {
+    set({ showGrowthReference: on });
+    void savePrefs({ showGrowthReference: on });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -1072,6 +1081,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
     // `!= null`, not a truthy guard: this one is a number, and a truthy check
     // would silently discard a legitimately stored value at the low end.
