@@ -21,8 +21,8 @@ function niceNum(range: number, round: boolean): number {
 }
 
 /** Ascending "nice" y-axis ticks spanning the data, with headroom. */
-export function yTicksFor(points: TrendPoint[]): { ticks: number[]; fmtY: (v: number) => string } {
-  const vals = points.map((p) => p.value);
+export function yTicksFor(points: TrendPoint[], extraValues: number[] = []): { ticks: number[]; fmtY: (v: number) => string } {
+  const vals = points.map((p) => p.value).concat(extraValues);
   let lo = vals.length ? Math.min(...vals) : 0;
   let hi = vals.length ? Math.max(...vals) : 1;
   if (lo === hi) {
