@@ -13,7 +13,7 @@ import type { Band } from './norms';
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
 const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false, curves }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
@@ -26,12 +26,16 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   calendarBands?: boolean;
   /** Time mode: solid line for consecutive days, dashed across missed-day gaps. */
   dashGaps?: boolean;
+  /** Time mode only: WHO-style reference percentile lines drawn behind the data. */
+  curves?: { points: { t: number; value: number }[]; emphasis?: boolean; label?: string }[];
 }) {
   const t = useTheme();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const canHover = !!hover && Platform.OS === 'web';
   if (width <= 0) return null;
-  const gutter = 30, right = 6, top = 8, plotH = 96, axisH = 18;
+  const gutter = 30, top = 8, plotH = 96, axisH = 18;
+  // Reference curves label their percentile at the right edge; give them room.
+  const right = curves && curves.length ? 22 : 6;
   const gx = gutter, gw = Math.max(0, width - gutter - right);
   const height = top + plotH + axisH;
   const yMin = Math.min(...yTicks), yMax = Math.max(...yTicks);
@@ -117,6 +121,16 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
           opacity={ruleOfThumb ? 0.9 : 1}
         />
       ) : null}
+      {xMode === 'time' && curves?.map((c, ci) => (
+        <Path
+          key={`rc${ci}`}
+          d={c.points.map((p, i) => `${i ? 'L' : 'M'} ${xAtT(p.t).toFixed(1)} ${yv(p.value).toFixed(1)}`).join(' ')}
+          fill="none"
+          stroke={c.emphasis ? t.dim : t.faint}
+          strokeWidth={c.emphasis ? 1.6 : 1.1}
+          opacity={c.emphasis ? 0.9 : 0.7}
+        />
+      ))}
       {yTicks.map((v, i) => (
         <Line key={i} x1={gx} y1={yv(v)} x2={gx + gw} y2={yv(v)} stroke={t.line} strokeWidth={1} opacity={0.6} />
       ))}
@@ -156,6 +170,13 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
           <SvgText x={gx + gw} y={top + plotH + 14} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">{xEndLabel}</SvgText>
         </>
       )}
+      {xMode === 'time' && curves?.map((c, ci) => {
+        const last = c.points[c.points.length - 1];
+        if (!last || c.label == null) return null;
+        return (
+          <SvgText key={`rl${ci}`} x={gx + gw + 3} y={yv(last.value) + 3} fontSize={8} fontWeight="700" fontFamily={fontFamily(700)} fill={t.faint} textAnchor="start">{c.label}</SvgText>
+        );
+      })}
     </Svg>
   );
 
