@@ -98,7 +98,7 @@ export function CurePickerSheet() {
                   {isDue ? (
                     <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: t.activity.medication }}>
                       <Txt unselectable weight={800} size={11} tracking={0.2} color={t.onActivity}>
-                        {due > 1 ? `${due} DUE` : 'DUE'}
+                        DUE
                       </Txt>
                     </View>
                   ) : null}
