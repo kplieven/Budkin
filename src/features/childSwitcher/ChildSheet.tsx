@@ -14,7 +14,15 @@ import { pickChildPhoto } from '@/lib/photo';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-import type { Child, PhotoChange } from '@/types/models';
+import type { Child, ChildGender, PhotoChange } from '@/types/models';
+
+/** The gender picker's options. `undefined` is a first-class choice ("Not set"),
+ *  not a disabled state, so a gender recorded by mistake can be taken back off. */
+const GENDER_OPTIONS: readonly (readonly [string, ChildGender | undefined])[] = [
+  ['Not set', undefined],
+  ['Girl', 'girl'],
+  ['Boy', 'boy'],
+];
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the LogSheet Delete button
 
@@ -91,6 +99,7 @@ function Inner({ editingId }: { editingId: string | null }) {
   const [photo, setPhoto] = useState<string | null>(editing?.picture ?? null);
   const [photoChange, setPhotoChange] = useState<PhotoChange>({ kind: 'none' });
   const [expecting, setExpecting] = useState(!!editing?.expected);
+  const [gender, setGender] = useState<ChildGender | undefined>(editing?.gender);
   const [picking, setPicking] = useState(false);
   const [confirmName, setConfirmName] = useState('');
 
@@ -154,14 +163,14 @@ function Inner({ editingId }: { editingId: string | null }) {
     // photo edits made in the same session are not lost, and it closes the
     // sheet; confirmBirth then reads fresh state and flips the flag.
     if (editing?.expected && !expecting) {
-      saveChild({ first: first.trim(), last: last.trim(), birth: date, photo: photoChange });
+      saveChild({ first: first.trim(), last: last.trim(), birth: date, photo: photoChange, gender });
       confirmBirth(editing.id, date);
       return;
     }
     // `expected` only takes effect when creating. saveChild's edit branch spreads
     // the existing child and ignores it, which is safe here because the toggle is
     // hidden for a born child, so an edit can only ever re-assert what is already set.
-    saveChild({ first: first.trim(), last: last.trim(), birth: date, expected: stillExpecting, photo: photoChange });
+    saveChild({ first: first.trim(), last: last.trim(), birth: date, expected: stillExpecting, photo: photoChange, gender });
   };
 
   const inputStyle = {
@@ -277,6 +286,40 @@ function Inner({ editingId }: { editingId: string | null }) {
             </View>
           </>
         )}
+        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
+          Gender
+        </Txt>
+        <View style={{ flexDirection: 'row', gap: 7, marginBottom: 18 }}>
+          {GENDER_OPTIONS.map(([label, value]) => {
+            const selected = gender === value;
+            return (
+              <Pressable
+                key={label}
+                onPress={() => setGender(value)}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                style={(s) => [
+                  {
+                    flex: 1,
+                    height: 44,
+                    borderRadius: 13,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderWidth: 1.5,
+                    borderColor: selected ? t.primary : t.line,
+                    backgroundColor: selected ? hexA(t.primary, t.dark ? 0.16 : 0.1) : t.surface,
+                    cursor: 'pointer',
+                  },
+                  isHovered(s) && !selected && { borderColor: t.line2 },
+                ]}
+              >
+                <Txt unselectable weight={700} size={13} color={selected ? t.primary : t.text}>
+                  {label}
+                </Txt>
+              </Pressable>
+            );
+          })}
+        </View>
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
           {stillExpecting ? 'Due date' : 'Birth date'}
         </Txt>

@@ -107,6 +107,10 @@ function Inner({ editingId }: { editingId: string | null }) {
     const parsedHours = Math.max(1, Math.round(parseInt(everyHours, 10) || 1));
     const cure: Cure = {
       id: editing?.id ?? 'cure' + Date.now(),
+      // Carry the backing note's server id through an edit. Dropping it would
+      // make `updateCure` skip the PATCH and leave the cure looking unsynced,
+      // so `flushUnsynced` would POST a second note for the same treatment.
+      serverId: editing?.serverId,
       childId: editing?.childId ?? selectedChildId,
       name: name.trim(),
       scheduleMode,
@@ -255,19 +259,24 @@ function Inner({ editingId }: { editingId: string | null }) {
           Dose per intake (optional)
         </Txt>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: dosageFocused ? t.primary : t.line, borderRadius: 14, paddingHorizontal: 14, marginBottom: 12 }}>
-          <TextInput
-            value={dosage}
-            onChangeText={setDosage}
-            onFocus={() => setDosageFocused(true)}
-            onBlur={() => setDosageFocused(false)}
-            keyboardType="decimal-pad"
-            placeholder="5"
-            placeholderTextColor={t.faint}
-            accessibilityLabel="Dose amount"
-            style={{ flex: 1, height: 52, fontSize: 22, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
-          />
+          {/* flex:1/minWidth:0 wrapper so the input SHRINKS to fit the unit; a
+              bare flex:1 TextInput keeps min-width:auto on web and pushes a long
+              unit ("puffs", "drops") past the right edge. Matches LogSheet. */}
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <TextInput
+              value={dosage}
+              onChangeText={setDosage}
+              onFocus={() => setDosageFocused(true)}
+              onBlur={() => setDosageFocused(false)}
+              keyboardType="decimal-pad"
+              placeholder="5"
+              placeholderTextColor={t.faint}
+              accessibilityLabel="Dose amount"
+              style={{ width: '100%', height: 52, fontSize: 22, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
+            />
+          </View>
           {unit ? (
-            <Txt weight={600} size={15} color={t.dim}>
+            <Txt weight={600} size={15} color={t.dim} numberOfLines={1} style={{ flexShrink: 0 }}>
               {unit}
             </Txt>
           ) : null}

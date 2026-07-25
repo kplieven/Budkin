@@ -12,12 +12,23 @@ export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
 export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self';
 export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
+/**
+ * A child's gender. Optional everywhere: absent means "not recorded", which is
+ * why there is no "unspecified" member — nothing has to be chosen.
+ */
+export type ChildGender = 'girl' | 'boy';
+
 export interface Child {
   id: string;
   /** server numeric id; present once created on / loaded from a server */
   serverId?: number;
   first: string;
   last: string;
+  /** the child's gender, when recorded. Baby Buddy's own `Child` model has no
+   *  gender field, so this syncs as a `gender`-tagged note against the child
+   *  (see `genderToNoteBody` in src/api/client.ts) rather than on the child
+   *  record itself. */
+  gender?: ChildGender;
   /** birth date, epoch ms */
   birth: number;
   /** true while the baby is not yet born; `birth` then holds the DUE date */
@@ -298,15 +309,25 @@ export type CureTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
 export type CureScheduleMode = 'timesOfDay' | 'everyHours';
 
 /**
- * A medication regimen ("cure"): a per-child, on-device TEMPLATE the user fills
- * a medication dose from. This is LOCAL ONLY and never syncs to Baby Buddy,
- * which has no regimen resource (only individual doses via `MedicationEntry`).
- * It stays local simply because it has no push plumbing, exactly like running
- * timers and prefs. A dose logged from a cure is an ordinary `MedicationEntry`
- * that syncs like any other.
+ * A medication regimen ("cure"): a per-child TEMPLATE the user fills a
+ * medication dose from.
+ *
+ * Baby Buddy has no regimen resource (only individual doses via
+ * `MedicationEntry`), so a cure syncs as a `cure`-tagged Note, the same
+ * tagged-note channel baths and milestones ride on. See `cureToNoteBody` in
+ * src/api/client.ts for the encoding. In local mode it lives only in
+ * src/data/cures.ts, which doubles as the offline cache when connected.
+ *
+ * A dose logged from a cure is an ordinary `MedicationEntry` that syncs like any
+ * other, and carries no reference back to the cure it came from: Baby Buddy has
+ * no field for one, so the app attributes doses to cures BY NAME (see
+ * `cureDueState` in src/store/selectors.ts).
  */
 export interface Cure {
   id: string;
+  /** server numeric id of the backing `cure`-tagged note; present once created
+   *  on / loaded from a server, absent for a cure made in local mode or offline */
+  serverId?: number;
   /** the child this cure belongs to (the selected child at creation) */
   childId: string;
   /** medication name (required) */
