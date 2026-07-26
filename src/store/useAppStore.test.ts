@@ -4578,6 +4578,101 @@ describe('insights slice', () => {
     expect(useAppStore.getState().insightsLoaded).toBe(true);
     expect(useAppStore.getState().insightsError).toBe(false);
   });
+
+  it('reloadInsights re-fetches from the server even when already loaded, and swaps in the result', async () => {
+    vi.mocked(loadInsightsHistory).mockClear();
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      children: [SYNCED_C1],
+      insightsLoaded: true, insightsLoading: false,
+      insightsEntries: [{ id: 'old', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any],
+      insightsError: false,
+    });
+    vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
+      { id: 'fresh', type: 'sleep', childId: 'c1', start: 3, end: 4, nap: false, tags: [] } as any,
+    ]);
+    await useAppStore.getState().reloadInsights();
+    expect(loadInsightsHistory).toHaveBeenCalledTimes(1);
+    const s = useAppStore.getState();
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['fresh']);
+    expect(s.insightsLoaded).toBe(true);
+    expect(s.insightsLoading).toBe(false);
+  });
+
+  it('reloadInsights keeps existing entries and does not set insightsError when the fetch fails', async () => {
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      children: [SYNCED_C1],
+      insightsLoaded: true, insightsLoading: false,
+      insightsEntries: [{ id: 'keep', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any],
+      insightsError: false,
+    });
+    vi.mocked(loadInsightsHistory).mockRejectedValueOnce(new Error('network'));
+    await useAppStore.getState().reloadInsights();
+    const s = useAppStore.getState();
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['keep']); // charts intact
+    expect(s.insightsError).toBe(false); // good screen not replaced by the error state
+    expect(s.insightsLoading).toBe(false);
+    expect(s.insightsLoaded).toBe(true);
+  });
+
+  it('reloadInsights discards its result when the child switches mid-flight', async () => {
+    vi.mocked(loadInsightsHistory).mockClear();
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      children: [
+        { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: 'c2', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+      ],
+      insightsLoaded: true, insightsLoading: false,
+      insightsEntries: [{ id: 'c2keep', type: 'sleep', childId: 'c2', start: 1, end: 2, nap: false, tags: [] } as any],
+      insightsError: false,
+    });
+    let resolveC1!: (v: Entry[]) => void;
+    vi.mocked(loadInsightsHistory).mockImplementationOnce(
+      () => new Promise<Entry[]>((r) => { resolveC1 = r; }),
+    );
+    const inFlight = useAppStore.getState().reloadInsights(); // c1 fetch starts
+    useAppStore.setState({ selectedChildId: 'c2' }); // switch lands mid-flight
+    resolveC1([{ id: 'c1stale', type: 'sleep', childId: 'c1', start: 9, end: 10, nap: false, tags: [] } as any]);
+    await inFlight;
+    const st = useAppStore.getState();
+    expect(st.insightsEntries.map((e) => e.id)).toEqual(['c2keep']); // untouched, c1's result dropped
+    expect(st.insightsLoading).toBe(false);
+  });
+
+  it('reloadInsights in demo mode re-scopes insightsEntries from local entries', async () => {
+    useAppStore.setState({
+      connection: { mode: 'local' } as any,
+      selectedChildId: 'c1',
+      entries: [
+        { id: 'l1', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
+        { id: 'l2', type: 'sleep', childId: 'c2', start: 3, end: 4, nap: false, tags: [] } as any,
+      ],
+      insightsLoaded: true, insightsLoading: false,
+      insightsEntries: [], insightsError: false,
+    });
+    await useAppStore.getState().reloadInsights();
+    const s = useAppStore.getState();
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['l1']); // c2 excluded
+    expect(s.insightsLoaded).toBe(true);
+  });
+
+  it('reloadInsights no-ops while an initial load is already in flight', async () => {
+    vi.mocked(loadInsightsHistory).mockClear();
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
+      selectedChildId: 'c1',
+      children: [SYNCED_C1],
+      insightsLoaded: false, insightsLoading: true, // a load is running
+      insightsEntries: [], insightsError: false,
+    });
+    await useAppStore.getState().reloadInsights();
+    expect(loadInsightsHistory).not.toHaveBeenCalled();
+  });
 });
 
 describe('theme persistence', () => {
