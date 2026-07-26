@@ -106,7 +106,6 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             placeholder="0"
             placeholderTextColor={t.faint}
             keyboardType="decimal-pad"
-            autoFocus={!editing}
             style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
           />
           {unit ? (

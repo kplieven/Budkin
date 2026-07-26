@@ -414,7 +414,7 @@ function MedicationField({
       </View>
       {otherOpen && (
         <TextInput
-          autoFocus
+          autoFocus={!isCustom}
           value={otherText}
           onChangeText={(v) => {
             setOtherText(v);
@@ -856,7 +856,6 @@ export function LogSheet() {
               placeholder="Write a note…"
               placeholderTextColor={t.faint}
               multiline
-              autoFocus
               style={{
                 minHeight: 132,
                 borderRadius: 14,

@@ -1552,3 +1552,47 @@ describe('gender <-> note serialization', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+// A write fired from `commitWrite` right before an installed PWA's webview is
+// frozen (locking the phone the moment after Save) is a normal fetch that the OS
+// cancels, dropping the entry to the offline queue with no "offline" signal —
+// it only re-sends on the next foreground refresh. `keepalive` tells the browser
+// to complete the request regardless. Web only, writes only, never FormData
+// (photo uploads can exceed keepalive's 64KB body budget).
+describe('write requests survive a page freeze (keepalive)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const client = () => new BabybuddyClient('https://x', 't');
+  const entry: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount: null, tags: [] };
+
+  // Captures the RequestInit handed to fetch; returns a canned OK response.
+  function captureInit(response: unknown) {
+    const calls: RequestInit[] = [];
+    const fn = vi.fn(async (_url: string, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return { ok: true, status: 200, json: async () => response, text: async () => JSON.stringify(response) } as Response;
+    });
+    vi.stubGlobal('fetch', fn);
+    return calls;
+  }
+
+  it('sets keepalive on a write when running on web (document present)', async () => {
+    vi.stubGlobal('document', {}); // stand in for a browser/PWA environment
+    const calls = captureInit({ id: 1 });
+    await client().createEntry(entry, 1);
+    expect(calls[0].keepalive).toBe(true);
+  });
+
+  it('does NOT set keepalive on a read, even on web', async () => {
+    vi.stubGlobal('document', {});
+    const calls = captureInit({ count: 0, next: null, previous: null, results: [] });
+    await client().listChildren();
+    expect(calls[0].keepalive).toBeFalsy();
+  });
+
+  it('does NOT set keepalive off web (native has no such freeze, and no document)', async () => {
+    const calls = captureInit({ id: 1 }); // no document stub -> typeof document === 'undefined'
+    await client().createEntry(entry, 1);
+    expect(calls[0].keepalive).toBeFalsy();
+  });
+});

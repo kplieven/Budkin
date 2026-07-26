@@ -173,7 +173,6 @@ function Inner({ editingId }: { editingId: string | null }) {
           onChangeText={setName}
           placeholder="e.g. Paracetamol, vitamin D…"
           placeholderTextColor={t.faint}
-          autoFocus={!editing}
           style={inputStyle}
         />
 
@@ -303,7 +302,7 @@ function Inner({ editingId }: { editingId: string | null }) {
         </View>
         {otherOpen && (
           <TextInput
-            autoFocus
+            autoFocus={!isCustomUnit}
             value={otherText}
             onChangeText={(v) => {
               setOtherText(v);
