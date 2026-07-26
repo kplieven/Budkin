@@ -122,6 +122,23 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
   return out;
 }
 
+/**
+ * Milliseconds of completed sleep falling inside the single window
+ * [winStart, winStart + DAY). A sleep straddling either boundary contributes
+ * only its overlapping part, so the portion before the window counts to the
+ * previous day and the portion after to the next — the same seam the heatmap
+ * and the totalSleep trend use. In-progress sleeps (end == null) are ignored.
+ */
+export function sleepMsInWindow(entries: Entry[], winStart: number): number {
+  const winEnd = winStart + DAY;
+  let ms = 0;
+  for (const e of entries) {
+    if (e.type !== 'sleep' || e.end == null) continue;
+    ms += Math.max(0, Math.min(e.end, winEnd) - Math.max(e.start, winStart));
+  }
+  return ms;
+}
+
 export interface DiaperDay { t: number; wet: number; dirty: number }
 
 export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: number, originHour = 12): DiaperDay[] {
@@ -162,6 +179,28 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
     return out;
   }
 
+  if (metric === 'totalSleep') {
+    // Split each sleep at the window boundaries so the part before a boundary
+    // counts to the previous window and the part after to the next — the same
+    // seam the heatmap draws, so the graph and this number agree on a straddler.
+    const msByWin = new Map<number, number>();
+    for (const e of entries) {
+      if (e.type !== 'sleep' || e.end == null || e.end < cutoff) continue;
+      let start = e.start;
+      const end = e.end;
+      while (start < end) {
+        const win = windowStart(start, originHour);
+        const segEnd = Math.min(end, win + DAY);
+        msByWin.set(win, (msByWin.get(win) ?? 0) + (segEnd - start));
+        start = segEnd;
+      }
+    }
+    return [...msByWin.entries()].sort((a, b) => a[0] - b[0]).map(([t, ms]) => ({ t, value: ms / HOUR }));
+  }
+
+  // longestStretch and wakeWindow stay bucketed by the window a sleep STARTS in:
+  // a continuous stretch and the awake gaps around it are single things, not
+  // durations to apportion, so splitting them at a boundary would distort them.
   const byWin = new Map<number, { start: number; end: number }[]>();
   for (const e of entries) {
     if (e.type !== 'sleep' || e.end == null || e.end < cutoff) continue;
@@ -171,9 +210,7 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
   const out: TrendPoint[] = [];
   for (const [w, sleeps] of [...byWin.entries()].sort((a, b) => a[0] - b[0])) {
     sleeps.sort((a, b) => a.start - b.start);
-    if (metric === 'totalSleep') {
-      out.push({ t: w, value: sleeps.reduce((s, x) => s + (x.end - x.start), 0) / HOUR });
-    } else if (metric === 'longestStretch') {
+    if (metric === 'longestStretch') {
       out.push({ t: w, value: Math.max(...sleeps.map((x) => x.end - x.start)) / HOUR });
     } else {
       const gaps: number[] = [];

@@ -637,8 +637,21 @@ export class BabybuddyClient {
     let res: Response;
     try {
       const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData;
+      // On web, let a mutating request outlive the page. An installed PWA freezes
+      // its webview the instant it is backgrounded — locking the phone right after
+      // a log is saved is the common case — which cancels a normal in-flight fetch
+      // and drops the write to the offline queue, where it sits (with no "offline"
+      // signal, since the app never actually went offline) until the next
+      // foreground refresh replays it. `keepalive` tells the browser to complete
+      // the request regardless. Web only (native fetch has no such freeze and does
+      // not support the flag); never for FormData (a photo upload can exceed
+      // keepalive's 64KB body budget); writes only (a GET has no side effect to
+      // lose).
+      const method = init?.method ?? 'GET';
+      const keepalive = typeof document !== 'undefined' && !isForm && method !== 'GET';
       res = await fetch(`${this.apiBase}${path}`, {
         ...init,
+        keepalive,
         headers: {
           Authorization: `Token ${this.token}`,
           // A FormData body must keep its auto-generated multipart boundary header.
