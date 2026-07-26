@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -7,6 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
+import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { buildDiaperSeries, buildSleepHeatmap, buildTrend, DAY, type TrendPoint } from '@/features/insights/compute';
 import { bandStatus, NORMS } from '@/features/insights/norms';
 import { DiaperBars } from '@/features/insights/DiaperBars';
@@ -62,6 +64,7 @@ export default function Insights() {
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const loadInsights = useAppStore((s) => s.loadInsights);
+  const reloadInsights = useAppStore((s) => s.reloadInsights);
   // Insights is retrospective: hour-quantized `now` keeps memos stable between
   // ticks, and quantizing inside the selector means the per-second store tick
   // doesn't re-render this screen at all. The heatmap's Today-window anchor
@@ -79,6 +82,16 @@ export default function Insights() {
   // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
   const [width, setWidth] = useState(0);
+  // Pull-to-refresh, mirroring History: native uses the platform RefreshControl,
+  // touch-web the custom gesture, mouse-web nothing. Reloads insights history only.
+  const canPullToRefresh = Platform.OS !== 'web';
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    reloadInsights().finally(() => setRefreshing(false));
+  }, [reloadInsights]);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const webPull = useWebPullToRefresh(scrollRef, reloadInsights);
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
@@ -279,10 +292,46 @@ export default function Insights() {
     desktop ? (
       <DesktopPage maxWidth={640}>{inner}</DesktopPage>
     ) : (
-      <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}>
-        {head}
-        {inner}
-      </ScrollView>
+      <View style={{ flex: 1, backgroundColor: t.bg }}>
+        {webPull.enabled && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              { position: 'absolute', top: insets.top - 6, left: 0, right: 0, alignItems: 'center', zIndex: 25 },
+              webPull.style,
+            ]}
+          >
+            <View style={{ width: 44, height: 44, borderRadius: 99, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1, borderColor: t.line, boxShadow: t.shadow }}>
+              {webPull.refreshing ? (
+                <ActivityIndicator color={t.dim} />
+              ) : (
+                <Animated.View style={webPull.glyphStyle}>
+                  <Icon name="chevron-down" color={t.dim} size={22} />
+                </Animated.View>
+              )}
+            </View>
+          </Animated.View>
+        )}
+        <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1, backgroundColor: t.bg }}
+          refreshControl={
+            canPullToRefresh ? (
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor={t.dim}
+                colors={['#E2B554']}
+                progressViewOffset={insets.top}
+              />
+            ) : undefined
+          }
+          contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+        >
+          {head}
+          {inner}
+        </ScrollView>
+      </View>
     );
 
   // Before the load guards on purpose: an expected child has nothing to load,
