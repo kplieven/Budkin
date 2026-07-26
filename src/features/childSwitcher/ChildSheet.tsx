@@ -233,7 +233,6 @@ function Inner({ editingId }: { editingId: string | null }) {
           onChangeText={setFirst}
           placeholder="First name"
           placeholderTextColor={t.faint}
-          autoFocus={!editing}
           style={inputStyle}
         />
 
