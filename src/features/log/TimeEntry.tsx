@@ -1,11 +1,15 @@
 /**
  * The reusable Time-Entry component, the app's signature feature.
  *
- * One focused panel at a time. The readout pills (Start -> End, and Lasted) are
- * the always-visible summary AND the selector: tapping a pill focuses that
- * quantity and reveals its single panel (kept chips + smart anchors + the
- * precise editor); the other quantities' controls stay hidden. Three parallel
- * chip rows became one panel. The derived (computed) quantity is dimmed.
+ * Zero or one focused panel at a time. INTERVAL logs open with nothing focused:
+ * no pill is preselected and no adjuster is shown until the user taps a pill, so
+ * it is always their deliberate choice which time (Start, End, Lasted) they are
+ * adjusting. A POINT log has a single "When" time, so there is no such ambiguity
+ * and its panel opens straight away. The readout pills (Start -> End, and Lasted)
+ * are the always-visible summary AND the selector: tapping a pill focuses that
+ * quantity and reveals its single panel (kept chips + smart anchors + the precise
+ * editor); the other quantities' controls stay hidden. Three parallel chip rows
+ * became one panel. The derived (computed) quantity is dimmed.
  * INTERVAL keeps the last two of Start/End/Lasted; POINT (diaper and the other
  * single-moment activities) is a single
  * "When" panel. Focusing a pill only reveals its panel, it does not pin: pinning
@@ -146,9 +150,10 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const setStartedAt = useAppStore((s) => s.setStartedAt);
 
   const isInterval = te.shape === 'interval';
-  const [editing, setEditing] = useState<EditField>(
-    !isInterval ? 'when' : timerEdit ? 'start' : 'end',
-  );
+  // Intervals (Start/End/Lasted) open with nothing focused, so the user always
+  // taps to choose WHICH time they mean to adjust. A point log has only one time
+  // ("When"), so there is no ambiguity: open it straight away.
+  const [editing, setEditing] = useState<EditField | null>(isInterval ? null : 'when');
 
   const start = teStart(te, now);
   const end = teEnd(te, now);
