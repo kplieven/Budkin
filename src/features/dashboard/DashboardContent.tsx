@@ -10,7 +10,7 @@ import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
-import { windowStart } from '@/features/insights/compute';
+import { sleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { bathGivenToday, cureDueHint, cureDueList, curesAllGiven, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
@@ -98,15 +98,12 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     .sort((a, b) => (b.end as number) - (a.end as number))[0];
 
   const dayStartMs = windowStart(now, originHour);
-  const todaySleepMin = childEntries
-    .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
-    // Bucket by nap START, matching the Insights Rhythm graph and its trends
-    // (compute.ts groups sleep by windowStart(e.start, ...)). Bucketing by end
-    // here made Home disagree with the graph for naps that straddle the day
-    // boundary; anchoring both to the start keeps the "today" total in sync and
-    // stays correct across DST since windowStart rebuilds from calendar fields.
-    .filter((e) => windowStart(e.start, originHour) === dayStartMs)
-    .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
+  // Apportion sleep at the window boundary: a sleep straddling it counts here
+  // only for the part inside today's window (the rest lands in the neighbouring
+  // day). Matches the Insights Rhythm graph and its totalSleep trend, which
+  // split sleep on the same seam; windowStart rebuilds from calendar fields so
+  // the boundary stays correct across DST.
+  const todaySleepMin = sleepMsInWindow(childEntries, dayStartMs) / 60000;
 
   const dia = lastDiaper(childEntries);
   const diaperAgo = dia ? Math.round((now - dia.time) / 60000) : null;
