@@ -214,6 +214,10 @@ interface AppState {
   insightsLoading: boolean;
   insightsError: boolean;
   loadInsights: () => Promise<void>;
+  /** Force a re-fetch of the insights history, keeping current charts on screen
+   *  during the load (pull-to-refresh). Unlike loadInsights it ignores the
+   *  loaded guard, and on failure it neither clears data nor sets an error. */
+  reloadInsights: () => Promise<void>;
 
   // read-only Baby Buddy server settings (Settings screen "Baby Buddy" group)
   profile: Profile | null;
@@ -658,6 +662,19 @@ export function remapChildIds<T extends { childId?: string }>(records: T[], chil
  *  the child exists server-side. */
 function childServerIdFor(children: Child[], childId: string): number | null {
   return children.find((c) => c.id === childId)?.serverId ?? null;
+}
+
+// 90-day insights history for a child: local seed rows in demo mode, the server
+// history otherwise (empty for a child that has never been pushed). Shared by
+// loadInsights (first fill) and reloadInsights (manual refresh). Callers guard
+// `connection` and `selectedChildId` before calling.
+async function fetchInsightsEntries(s: AppState, childId: string): Promise<Entry[]> {
+  const conn = s.connection!;
+  if (conn.mode === 'local') return s.entries.filter((e) => e.childId === childId);
+  const childServerId = childServerIdFor(s.children, childId);
+  return childServerId == null
+    ? []
+    : loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
 }
 
 /** Resolve `loadFromServer`'s `selectedChildId` (see repository.ts) into the
@@ -2176,32 +2193,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- insights (lazy deep-history load) ----
+  // Demo mode scopes the local seed history to the child; server mode fetches
+  // the child's SERVER-id-keyed 90-day history (empty, not an error, for a child
+  // never pushed). See `fetchInsightsEntries`.
   loadInsights: async () => {
     const s = get();
     if (s.insightsLoaded || s.insightsLoading) return;
-    const conn = s.connection;
+    if (!s.connection || !s.selectedChildId) return;
     const childId = s.selectedChildId;
-    if (!conn || !childId) return;
     set({ insightsLoading: true, insightsError: false });
     try {
-      // Demo: the store's `entries` hold the local seed history for ALL
-      // children — scope to the selected child, matching the per-child fetch.
-      // Server mode: the API takes the child's SERVER id (see
-      // `childServerIdFor`), not Budkin's local id, which is what
-      // `selectedChildId` is post-reconciliation. A child that has never been
-      // pushed has no server id yet, so there is nothing to fetch: that is
-      // not an error, just an empty result until the child syncs.
-      let entries: Entry[];
-      if (conn.mode === 'local') {
-        entries = s.entries.filter((e) => e.childId === childId);
-      } else {
-        const childServerId = childServerIdFor(s.children, childId);
-        entries = childServerId == null
-          ? []
-          : await loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
-      }
+      const entries = await fetchInsightsEntries(s, childId);
       if (get().selectedChildId !== childId) {
-        // A child switch landed while this fetch was in flight — discard the
+        // A child switch landed while this fetch was in flight: discard the
         // stale result and load for the now-selected child instead.
         set({ insightsLoading: false });
         get().loadInsights();
@@ -2210,6 +2214,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
+    }
+  },
+
+  reloadInsights: async () => {
+    const s = get();
+    // Do NOT gate on insightsLoaded: forcing a re-fetch is the whole point.
+    // Still bail if an initial load is already running, or there is nothing to fetch.
+    if (s.insightsLoading) return;
+    if (!s.connection || !s.selectedChildId) return;
+    const childId = s.selectedChildId;
+    // Leave insightsEntries / insightsLoaded in place so the charts stay on
+    // screen while the fetch runs (no flash to the full-screen loading state).
+    set({ insightsLoading: true });
+    try {
+      const entries = await fetchInsightsEntries(s, childId);
+      if (get().selectedChildId !== childId) {
+        // Child switch landed mid-flight; that child's mount effect will load it.
+        set({ insightsLoading: false });
+        return;
+      }
+      set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false, insightsError: false });
+    } catch {
+      // Manual refresh failed: keep the existing charts, drop the spinner, and
+      // leave insightsError untouched so a good screen is not replaced by the
+      // error state (and a pre-existing error stays put for its own retry button).
+      set({ insightsLoading: false });
     }
   },
 
