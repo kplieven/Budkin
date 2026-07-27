@@ -236,13 +236,18 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
                 {fmtDur((now - tm.start) / 60000)}
               </Txt>
-              {isServer && <SyncBadge synced={tm.serverId != null} />}
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <Txt unselectable weight={600} size={13.5} color={t.dim}>
-                View
-              </Txt>
-              <Icon name="chevron-right" color={t.dim} size={16} />
+            {/* Right column: the "View" affordance with the per-timer sync badge
+                stacked beneath it, so the middle column is just label + duration
+                and the card sits shorter. */}
+            <View style={{ alignItems: 'flex-end' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Txt unselectable weight={600} size={13.5} color={t.dim}>
+                  View
+                </Txt>
+                <Icon name="chevron-right" color={t.dim} size={16} />
+              </View>
+              {isServer && <SyncBadge synced={tm.serverId != null} />}
             </View>
           </Pressable>
         ))}
