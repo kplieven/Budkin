@@ -4,14 +4,16 @@ import { Pressable, View, type ViewStyle } from 'react-native';
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { PulsingDot } from '@/components/PulsingDot';
+import { SyncBadge } from '@/components/SyncBadge';
 import { Txt } from '@/components/Txt';
 import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
+import { sleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
+import { bathGivenToday, cureDueHint, cureDueList, curesAllGiven, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -33,6 +35,7 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   tummy: 'tummy',
   bath: 'bath',
   temperature: 'temperature',
+  medication: 'medication',
   // Notes and milestones are never in ALL_ACTIVITIES, so these tiles never
   // render; present only to satisfy the Record<ActivityType, …> completeness check.
   note: 'note',
@@ -51,8 +54,19 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const entries = useAppStore((s) => s.entries);
   const timers = useAppStore((s) => s.timers);
   const now = useAppStore((s) => s.now);
+  // The client-wide day boundary (set in Settings); "today's sleep" below counts
+  // over this window, not calendar midnight.
+  const originHour = useAppStore((s) => s.rhythmOriginHour);
   const openSheet = useAppStore((s) => s.openSheet);
+  const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
+  // Raw select (stable reference); the due list is derived in the render body
+  // below, never in the selector, per the zustand v5 rule.
+  const cures = useAppStore((s) => s.cures);
+  // Sync badges only mean something when mirroring to a server; hidden in local
+  // mode, exactly as on the Timers screen. Primitive selector, stable reference.
+  const isServer = useAppStore((s) => s.connection?.mode === 'server');
   // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
   // Returns a store element, not a derived object, so the reference is stable.
@@ -83,10 +97,13 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .sort((a, b) => (b.end as number) - (a.end as number))[0];
 
-  const todaySleepMin = childEntries
-    .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
-    .filter((e) => new Date(e.end as number).toDateString() === new Date(now).toDateString())
-    .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
+  const dayStartMs = windowStart(now, originHour);
+  // Apportion sleep at the window boundary: a sleep straddling it counts here
+  // only for the part inside today's window (the rest lands in the neighbouring
+  // day). Matches the Insights Rhythm graph and its totalSleep trend, which
+  // split sleep on the same seam; windowStart rebuilds from calendar fields so
+  // the boundary stays correct across DST.
+  const todaySleepMin = sleepMsInWindow(childEntries, dayStartMs) / 60000;
 
   const dia = lastDiaper(childEntries);
   const diaperAgo = dia ? Math.round((now - dia.time) / 60000) : null;
@@ -99,7 +116,21 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
   const startSideLabel = nextStartSide(childEntries) === 'left' ? 'Left' : 'Right';
-  const washHint = nextWashKind(childEntries) === 'big' ? 'Big wash due today' : 'Small wash due';
+  // Today's-wash "checked" state: >=1 bath on today's local date. `now`-keyed, so
+  // it clears itself at local midnight without any reset logic.
+  const washedToday = bathGivenToday(childEntries, now);
+  const washKind = nextWashKind(childEntries, smallWashesPerBig);
+  // Once a wash is logged today the tile switches to the "done" copy; otherwise
+  // it keeps the forward-looking "due" hint.
+  const washHint = washedToday ? 'Washed today' : washKind === 'big' ? 'Big wash due today' : 'Small wash due';
+  // Treatments get the same treatment as washes: a forward-looking "due" hint
+  // and a done check once the day's doses are all logged. `null` means this
+  // child keeps no cures, so the tile falls back to the generic copy.
+  const cureDue = cureDueList(cures, selectedChild?.id, childEntries, now);
+  const medHint = cureDueHint(cureDue);
+  // `undefined`, not `false`, when this child keeps no cures: the tile then has
+  // no done state at all and must not announce itself as an unchecked one.
+  const dosesAllGiven = cureDue.length > 0 ? curesAllGiven(cureDue) : undefined;
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,
@@ -108,6 +139,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     tummy: 'Tap to log',
     bath: washHint,
     temperature: 'Tap to log',
+    medication: medHint ?? 'Tap to log',
     // never rendered (notes and milestones aren't on the Home grid), completeness only
     note: 'Tap to log',
     milestone: 'Tap to log',
@@ -133,9 +165,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       sub: dia ? (dia.solid ? 'ago · solid' : 'ago · wet') : 'none',
     },
   ];
-
-  // Newest timer (timers are appended to the end of the list).
-  const runningTimer = timers[timers.length - 1];
 
   return (
     <>
@@ -172,45 +201,96 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         ))}
       </View>
 
-      {/* live timer card */}
-      {runningTimer && (
+      {/* live-timer cards + start-timer card — one full-width card each, same
+          card style. Every running timer shows (global list, so a born
+          sibling's timer stays visible even while another child is selected),
+          then the Start-timer card sits below as the "start another" action. */}
+      <View style={{ gap: 9, marginTop: 4 }}>
+        {timers.map((tm) => (
+          <Pressable
+            key={tm.id}
+            onPress={() => router.navigate('/timers')}
+            accessibilityRole="button"
+            accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running${isServer ? (tm.serverId != null ? ', synced' : ', pending sync') : ''}, view timers`}
+            style={(s) => [
+              {
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: t.line,
+                borderRadius: 20,
+                paddingVertical: 15,
+                paddingHorizontal: 17,
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 11,
+                cursor: 'pointer',
+              },
+              isHovered(s) && { borderColor: t.line2 },
+            ]}
+          >
+            <PulsingDot color={t.activity[tm.saveAs]} />
+            <View style={{ flex: 1 }}>
+              <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
+                {ACTIVITY_LABEL[tm.saveAs]} running
+              </Txt>
+              <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
+                {fmtDur((now - tm.start) / 60000)}
+              </Txt>
+            </View>
+            {/* Right column: the "View" affordance with the per-timer sync badge
+                stacked beneath it, so the middle column is just label + duration
+                and the card sits shorter. */}
+            <View style={{ alignItems: 'flex-end' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Txt unselectable weight={600} size={13.5} color={t.dim}>
+                  View
+                </Txt>
+                <Icon name="chevron-right" color={t.dim} size={16} />
+              </View>
+              {isServer && <SyncBadge synced={tm.serverId != null} />}
+            </View>
+          </Pressable>
+        ))}
+
+        {/* Start-timer card */}
         <Pressable
-          onPress={() => router.navigate('/timers')}
+          onPress={() => {
+            startQuickTimer();
+            router.navigate('/timers');
+          }}
           accessibilityRole="button"
+          accessibilityLabel="Start timer, save as any activity"
           style={(s) => [
             {
-              backgroundColor: t.surface,
+              backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
               borderWidth: 1.5,
-              borderColor: t.line,
+              borderColor: hexA(t.primary, 0.5),
+              borderStyle: 'dashed',
               borderRadius: 20,
               paddingVertical: 15,
               paddingHorizontal: 17,
-              marginTop: 4,
               flexDirection: 'row',
               alignItems: 'center',
-              gap: 11,
+              gap: 13,
               cursor: 'pointer',
             },
-            isHovered(s) && { borderColor: t.line2 },
+            isHovered(s) && { borderColor: hexA(t.primary, 0.75), boxShadow: t.shadow },
           ]}
         >
-          <PulsingDot color={t.activity[runningTimer.saveAs]} />
+          <View style={{ width: 44, height: 44, borderRadius: 13, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="timer" color={t.primary} size={23} />
+          </View>
           <View style={{ flex: 1 }}>
-            <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
-              {ACTIVITY_LABEL[runningTimer.saveAs]} running
+            <Txt unselectable weight={700} size={17} tracking={-0.2}>
+              Start timer
             </Txt>
-            <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[runningTimer.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
-              {fmtDur((now - runningTimer.start) / 60000)}
+            <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 1 }}>
+              Save as any activity
             </Txt>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Txt unselectable weight={600} size={13.5} color={t.dim}>
-              View
-            </Txt>
-            <Icon name="chevron-right" color={t.dim} size={16} />
-          </View>
+          <Icon name="plus" color={t.primary} size={20} />
         </Pressable>
-      )}
+      </View>
 
       {/* section label */}
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 18, marginBottom: 12, marginHorizontal: 4 }}>
@@ -238,43 +318,13 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             icon={ICON_FOR[a]}
             hint={activityHint[a]}
             widthStyle={tileStyle}
-            onPress={() => openSheet(a)}
+            // Medication routes through the cure picker (which falls back to the
+            // manual form when the child has no active cures today); every other
+            // tile opens its log sheet directly.
+            onPress={() => (a === 'medication' ? openMedicationLog() : openSheet(a))}
+            done={a === 'bath' ? washedToday : a === 'medication' ? dosesAllGiven : undefined}
           />
         ))}
-        {/* Start timer tile */}
-        <Pressable
-          onPress={() => {
-            startQuickTimer();
-            router.navigate('/timers');
-          }}
-          accessibilityRole="button"
-          style={(s) => [
-            {
-              backgroundColor: hexA(t.primary, t.dark ? 0.14 : 0.12),
-              borderWidth: 1.5,
-              borderColor: hexA(t.primary, 0.5),
-              borderStyle: 'dashed',
-              borderRadius: 22,
-              paddingVertical: 15,
-              paddingHorizontal: 15,
-              minHeight: 104,
-              gap: 3,
-              cursor: 'pointer',
-            },
-            tileStyle,
-            isHovered(s) && { borderColor: hexA(t.primary, 0.75), boxShadow: t.shadow },
-          ]}
-        >
-          <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(t.primary, 0.18), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
-            <Icon name="timer" color={t.text} size={24} />
-          </View>
-          <Txt unselectable weight={700} size={17} tracking={-0.2}>
-            Start timer
-          </Txt>
-          <Txt unselectable weight={500} size={12.5} color={t.dim}>
-            Save as any activity
-          </Txt>
-        </Pressable>
       </View>
     </>
   );
@@ -287,6 +337,7 @@ function ActivityTile({
   hint,
   widthStyle,
   onPress,
+  done,
 }: {
   label: string;
   color: string;
@@ -294,17 +345,22 @@ function ActivityTile({
   hint: string;
   widthStyle: ViewStyle;
   onPress: () => void;
+  /** Marks the tile "done for today" with a check-circle badge and an accent
+   *  border. `undefined` for tiles that have no done state, so only a
+   *  done-capable tile carries the checked accessibility semantics. */
+  done?: boolean;
 }) {
   const t = useTheme();
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityState={done === undefined ? undefined : { checked: done }}
       style={(s) => [
         {
           backgroundColor: t.surface,
           borderWidth: 1.5,
-          borderColor: t.line,
+          borderColor: done ? hexA(color, 0.4) : t.line,
           borderRadius: 22,
           paddingVertical: 15,
           paddingHorizontal: 15,
@@ -316,6 +372,23 @@ function ActivityTile({
         isHovered(s) && { borderColor: hexA(color, 0.55), boxShadow: t.shadow },
       ]}
     >
+      {done ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: 12,
+            right: 12,
+            width: 24,
+            height: 24,
+            borderRadius: 999,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: color,
+          }}
+        >
+          <Icon name="check" color={t.onActivity} size={15} />
+        </View>
+      ) : null}
       <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center', marginBottom: 6 }}>
         <Icon name={icon} color={color} size={25} />
       </View>

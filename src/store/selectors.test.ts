@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { endAnchorVisible, entriesForChild, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, teDurationMin, teEnd, teStart } from '@/store/selectors';
-import type { Entry, Measurement } from '@/types/models';
+import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, cureDueHint, cureDueList, cureDueState, curesAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import type { Cure, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -136,19 +136,41 @@ describe('nextWashKind', () => {
     tags: [],
   });
 
+  /** `n` consecutive small washes, oldest first, ending one minute ago. */
+  const smalls = (n: number): Entry[] => Array.from({ length: n }, (_, i) => bath(NOW - (n - i) * M, 'small'));
+
   it('defaults to small with no bath history', () => {
     expect(nextWashKind([])).toBe('small');
   });
-  it('is small with fewer than three washes', () => {
-    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'small')])).toBe('small');
+  it('an omitted interval means three smalls, matching the historical rule', () => {
+    expect(nextWashKind(smalls(2))).toBe('small');
+    expect(nextWashKind(smalls(3))).toBe('big');
   });
-  it('the three most recent all small => big is due', () => {
-    const entries: Entry[] = [
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
-    ];
-    expect(nextWashKind(entries)).toBe('big');
+  it('is small with fewer washes on record than the interval', () => {
+    expect(nextWashKind(smalls(2), 3)).toBe('small');
+    expect(nextWashKind(smalls(6), 7)).toBe('small');
+  });
+  it('flips to big exactly on the configured number of smalls', () => {
+    for (const n of [1, 2, 3, 4, 5, 6, 7, 30]) {
+      expect(nextWashKind(smalls(n - 1), n)).toBe('small');
+      expect(nextWashKind(smalls(n), n)).toBe('big');
+    }
+  });
+  it('an interval of 1 alternates small, big, small, big', () => {
+    expect(nextWashKind([], 1)).toBe('small');
+    expect(nextWashKind([bath(NOW - M, 'small')], 1)).toBe('big');
+    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'big')], 1)).toBe('small');
+  });
+  it('an interval of 7 needs seven smalls before a big is due', () => {
+    expect(nextWashKind(smalls(7), 7)).toBe('big');
+    expect(nextWashKind([bath(NOW - 8 * M, 'big'), ...smalls(6)], 7)).toBe('small');
+  });
+  it('raising the interval takes a big wash back off the schedule', () => {
+    // The same history reads differently under a different rhythm: derived from
+    // history every time, never from a stored counter.
+    const history = smalls(3);
+    expect(nextWashKind(history, 3)).toBe('big');
+    expect(nextWashKind(history, 5)).toBe('small');
   });
   it('a big as the most recent wash => back to small', () => {
     const entries: Entry[] = [
@@ -156,26 +178,105 @@ describe('nextWashKind', () => {
       bath(NOW - 2 * M, 'small'),
       bath(NOW - M, 'big'),
     ];
-    expect(nextWashKind(entries)).toBe('small');
+    expect(nextWashKind(entries, 3)).toBe('small');
   });
-  it('looks only at the three most recent, ignoring older washes', () => {
+  it('looks only at the most recent interval, ignoring older washes', () => {
     // three recent smalls => big, even though an older big precedes them
-    const entries: Entry[] = [
-      bath(NOW - 4 * M, 'big'),
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
-    ];
-    expect(nextWashKind(entries)).toBe('big');
+    const entries: Entry[] = [bath(NOW - 4 * M, 'big'), ...smalls(3)];
+    expect(nextWashKind(entries, 3)).toBe('big');
   });
   it('ignores non-bath entries when reading the rhythm', () => {
     const entries: Entry[] = [
       { id: 'f', childId: 'c1', type: 'feeding', start: NOW - M, end: NOW, feedType: 'breast', method: 'left', amount: null, tags: [] },
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'small'),
+      ...smalls(3),
     ];
-    expect(nextWashKind(entries)).toBe('big');
+    expect(nextWashKind(entries, 3)).toBe('big');
+  });
+  it('clamps a nonsense interval rather than reading an empty window as due', () => {
+    // slice(0, 0) would be an empty array, and [].every() is vacuously true —
+    // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
+    expect(nextWashKind([], 0)).toBe('small');
+    expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
+    expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
+    expect(nextWashKind(smalls(30), 99)).toBe('big');
+    expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
+  });
+});
+
+describe('bathGivenToday', () => {
+  const NOON = new Date(2026, 0, 15, 12, 0, 0).getTime(); // 2026-01-15, local noon
+  const bath = (time: number, childId = 'c1'): Entry => ({
+    id: `b-${time}`,
+    childId,
+    type: 'bath',
+    time,
+    wash: 'small',
+    tags: [],
+  });
+
+  it('is true when a wash is logged earlier the same local day', () => {
+    const morning = new Date(2026, 0, 15, 7, 30, 0).getTime();
+    expect(bathGivenToday([bath(morning)], NOON)).toBe(true);
+  });
+
+  it('is true even for a wash logged later the same day than now', () => {
+    // Same wall-clock day is what counts, not whether it is before `now`.
+    const evening = new Date(2026, 0, 15, 20, 0, 0).getTime();
+    expect(bathGivenToday([bath(evening)], NOON)).toBe(true);
+  });
+
+  it('is false with no washes at all', () => {
+    expect(bathGivenToday([], NOON)).toBe(false);
+  });
+
+  it('is false when the only wash was yesterday', () => {
+    const yesterday = new Date(2026, 0, 14, 8, 0, 0).getTime();
+    expect(bathGivenToday([bath(yesterday)], NOON)).toBe(false);
+  });
+
+  it('resets at local midnight: a wash one minute before midnight is not today', () => {
+    const justBeforeMidnight = new Date(2026, 0, 14, 23, 59, 0).getTime();
+    const justAfterMidnight = new Date(2026, 0, 15, 0, 1, 0).getTime();
+    expect(bathGivenToday([bath(justBeforeMidnight)], NOON)).toBe(false);
+    expect(bathGivenToday([bath(justAfterMidnight)], NOON)).toBe(true);
+  });
+
+  it('ignores non-bath entries logged today', () => {
+    const feed: Entry = { id: 'f', childId: 'c1', type: 'feeding', start: NOON, end: NOON + 1, feedType: 'breast', method: 'left', amount: null, tags: [] };
+    const diaper: Entry = { id: 'd', childId: 'c1', type: 'diaper', time: NOON, wet: true, solid: false, color: null, tags: [] };
+    expect(bathGivenToday([feed, diaper], NOON)).toBe(false);
+  });
+
+  it('respects child scoping when composed with entriesForChild', () => {
+    // The helper reads already-scoped entries; a sibling's wash today must not
+    // leak in once scoping is applied upstream.
+    const mine = bath(new Date(2026, 0, 15, 9, 0, 0).getTime(), 'c1');
+    const sibling = bath(new Date(2026, 0, 15, 9, 0, 0).getTime(), 'c2');
+    expect(bathGivenToday(entriesForChild([mine, sibling], 'c1'), NOON)).toBe(true);
+    expect(bathGivenToday(entriesForChild([sibling], 'c1'), NOON)).toBe(false);
+  });
+});
+
+describe('clampSmallWashesPerBig', () => {
+  it('passes every supported rhythm through untouched', () => {
+    for (let n = 1; n <= 30; n++) expect(clampSmallWashesPerBig(n)).toBe(n);
+  });
+  it('clamps to the 1..30 range', () => {
+    expect(clampSmallWashesPerBig(0)).toBe(1);
+    expect(clampSmallWashesPerBig(-4)).toBe(1);
+    expect(clampSmallWashesPerBig(31)).toBe(30);
+    expect(clampSmallWashesPerBig(1000)).toBe(30);
+  });
+  it('rounds a fractional rhythm', () => {
+    expect(clampSmallWashesPerBig(2.4)).toBe(2);
+    expect(clampSmallWashesPerBig(2.6)).toBe(3);
+  });
+  it('falls back to the default for a non-finite value', () => {
+    expect(clampSmallWashesPerBig(Number.NaN)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+    expect(clampSmallWashesPerBig(Number.POSITIVE_INFINITY)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
+  });
+  it('the default is 3 smalls between bigs, preserving the original rhythm', () => {
+    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
   });
 });
 
@@ -204,5 +305,454 @@ describe('entriesForChild / measurementsForChild', () => {
     expect(measurementsForChild([w1, w2], 'c1')).toEqual([w1]);
     expect(measurementsForChild([w1, w2], '')).toEqual([]);
     expect(measurementsForChild([w1, w2], undefined)).toEqual([]);
+  });
+});
+
+describe('timersForChild', () => {
+  const timer = (id: string, childId?: string): Timer => ({
+    id,
+    childId,
+    activity: 'sleep',
+    saveAs: 'sleep',
+    name: id,
+    start: NOW - 20 * M,
+  });
+
+  it('keeps only the timers owned by the given child', () => {
+    const mine = timer('t1', 'c1');
+    const sibling = timer('t2', 'c2');
+    expect(timersForChild([mine, sibling], 'c1')).toEqual([mine]);
+    expect(timersForChild([mine, sibling], 'c2')).toEqual([sibling]);
+  });
+
+  it('adopts an unowned timer, which the rest of the app already reads as the current child', () => {
+    const unowned = timer('t3');
+    const sibling = timer('t2', 'c2');
+    expect(timersForChild([unowned, sibling], 'c1')).toEqual([unowned]);
+  });
+
+  it('returns nothing when no child is selected, rather than everything', () => {
+    const mine = timer('t1', 'c1');
+    const unowned = timer('t3');
+    expect(timersForChild([mine, unowned], '')).toEqual([]);
+    expect(timersForChild([mine, unowned], undefined)).toEqual([]);
+  });
+
+  it('returns nothing but the unowned ones for a child running no timer', () => {
+    expect(timersForChild([timer('t1', 'c1'), timer('t2', 'c2')], 'c3')).toEqual([]);
+  });
+});
+
+describe('minuteOfDayIsNap', () => {
+  const W = { startMin: 420, endMin: 1140 }; // 07:00 to 19:00, the default
+
+  it('matches the old hardcoded 07:00-19:00 rule across the whole day', () => {
+    for (let m = 0; m < 1440; m++) {
+      expect(minuteOfDayIsNap(m, W)).toBe(m >= 420 && m < 1140);
+    }
+  });
+
+  it('treats start as inclusive and end as exclusive', () => {
+    expect(minuteOfDayIsNap(419, W)).toBe(false);
+    expect(minuteOfDayIsNap(420, W)).toBe(true); // start: in
+    expect(minuteOfDayIsNap(1139, W)).toBe(true);
+    expect(minuteOfDayIsNap(1140, W)).toBe(false); // end: out
+  });
+
+  it('wraps around midnight when start is later than end', () => {
+    // A night-shift household: "naps" run 20:00 to 04:00.
+    const w = { startMin: 1200, endMin: 240 };
+    expect(minuteOfDayIsNap(1200, w)).toBe(true); // 20:00, start inclusive
+    expect(minuteOfDayIsNap(1439, w)).toBe(true); // 23:59
+    expect(minuteOfDayIsNap(0, w)).toBe(true); // midnight, inside the wrap
+    expect(minuteOfDayIsNap(239, w)).toBe(true); // 03:59
+    expect(minuteOfDayIsNap(240, w)).toBe(false); // 04:00, end exclusive
+    expect(minuteOfDayIsNap(720, w)).toBe(false); // noon, outside
+    expect(minuteOfDayIsNap(1199, w)).toBe(false); // 19:59
+  });
+
+  it('reads start === end as an empty window, so nothing is a nap', () => {
+    // Half-open [s, s) is empty. That is the consistent reading of an
+    // inclusive start and an exclusive end, and it gives a usable state:
+    // an older child who no longer naps, so every sleep is night sleep.
+    const w = { startMin: 420, endMin: 420 };
+    for (let m = 0; m < 1440; m += 7) expect(minuteOfDayIsNap(m, w)).toBe(false);
+    expect(minuteOfDayIsNap(420, w)).toBe(false);
+  });
+
+  it('handles a full-day-minus-one-minute window', () => {
+    const w = { startMin: 0, endMin: 1439 };
+    expect(minuteOfDayIsNap(0, w)).toBe(true);
+    expect(minuteOfDayIsNap(1438, w)).toBe(true);
+    expect(minuteOfDayIsNap(1439, w)).toBe(false);
+  });
+
+  it('defaults to the 07:00-19:00 window when none is passed', () => {
+    expect(minuteOfDayIsNap(720)).toBe(true);
+    expect(minuteOfDayIsNap(120)).toBe(false);
+  });
+});
+
+describe('isNapStart', () => {
+  it('classifies on the local wall clock of the given instant', () => {
+    const noon = new Date(2026, 0, 1, 12, 0, 0).getTime();
+    const night = new Date(2026, 0, 1, 2, 0, 0).getTime();
+    expect(isNapStart(noon)).toBe(true);
+    expect(isNapStart(night)).toBe(false);
+  });
+
+  it('honours a custom window', () => {
+    const nine = new Date(2026, 0, 1, 9, 0, 0).getTime();
+    expect(isNapStart(nine, { startMin: 600, endMin: 1140 })).toBe(false); // window opens at 10:00
+    expect(isNapStart(nine, { startMin: 480, endMin: 1140 })).toBe(true); // window opens at 08:00
+  });
+
+  it('respects the minute, not just the hour', () => {
+    const w = { startMin: 450, endMin: 1140 }; // 07:30
+    expect(isNapStart(new Date(2026, 0, 1, 7, 29, 0).getTime(), w)).toBe(false);
+    expect(isNapStart(new Date(2026, 0, 1, 7, 30, 0).getTime(), w)).toBe(true);
+  });
+});
+
+describe('clampMinuteOfDay', () => {
+  it('keeps in-range values, including 0', () => {
+    expect(clampMinuteOfDay(0, 420)).toBe(0);
+    expect(clampMinuteOfDay(1439, 420)).toBe(1439);
+    expect(clampMinuteOfDay(630, 420)).toBe(630);
+  });
+
+  it('falls back for non-finite input rather than producing NaN', () => {
+    expect(clampMinuteOfDay(NaN, 420)).toBe(420);
+    expect(clampMinuteOfDay(Infinity, 1140)).toBe(1140);
+  });
+
+  it('clamps out-of-range values into the day', () => {
+    expect(clampMinuteOfDay(-30, 420)).toBe(0);
+    expect(clampMinuteOfDay(5000, 420)).toBe(1439);
+  });
+
+  it('rounds a fractional minute', () => {
+    expect(clampMinuteOfDay(420.6, 0)).toBe(421);
+  });
+});
+
+describe('fmtMinuteOfDay', () => {
+  it('renders a zero-padded 24-hour clock', () => {
+    expect(fmtMinuteOfDay(0)).toBe('00:00');
+    expect(fmtMinuteOfDay(420)).toBe('07:00');
+    expect(fmtMinuteOfDay(1140)).toBe('19:00');
+    expect(fmtMinuteOfDay(1230)).toBe('20:30');
+    expect(fmtMinuteOfDay(1439)).toBe('23:59');
+  });
+});
+
+describe('fmtDayStartHour', () => {
+  it('renders a 24-hour day-boundary label with word forms for noon/midnight', () => {
+    expect(fmtDayStartHour(0)).toBe('midnight');
+    expect(fmtDayStartHour(7)).toBe('7:00');
+    expect(fmtDayStartHour(12)).toBe('noon');
+    expect(fmtDayStartHour(19)).toBe('19:00');
+    expect(fmtDayStartHour(23)).toBe('23:00');
+  });
+
+  it('coerces out-of-range hours before labelling', () => {
+    expect(fmtDayStartHour(24)).toBe('23:00');
+    expect(fmtDayStartHour(-3)).toBe('midnight');
+    expect(fmtDayStartHour(NaN)).toBe('noon'); // falls back to RHYTHM_ORIGIN_DEFAULT (12)
+  });
+});
+
+describe('parseMinuteOfDay', () => {
+  it('parses a full clock string', () => {
+    expect(parseMinuteOfDay('07:00')).toBe(420);
+    expect(parseMinuteOfDay('19:00')).toBe(1140);
+    expect(parseMinuteOfDay('00:00')).toBe(0);
+    expect(parseMinuteOfDay('23:59')).toBe(1439);
+  });
+
+  it('parses digits-first shorthand', () => {
+    expect(parseMinuteOfDay('7')).toBe(420);
+    expect(parseMinuteOfDay('19')).toBe(1140);
+    expect(parseMinuteOfDay('730')).toBe(450);
+    expect(parseMinuteOfDay('1930')).toBe(1170);
+  });
+
+  it('reaches minute granularity the old half-hour grid could not', () => {
+    expect(parseMinuteOfDay('715')).toBe(435);
+    expect(parseMinuteOfDay('7:15')).toBe(435);
+  });
+
+  it('rejects text that is not a 24-hour time', () => {
+    expect(parseMinuteOfDay('')).toBeNull();
+    expect(parseMinuteOfDay('   ')).toBeNull();
+    expect(parseMinuteOfDay('7pm')).toBeNull();
+    expect(parseMinuteOfDay('24:00')).toBeNull();
+    expect(parseMinuteOfDay('7:75')).toBeNull();
+    expect(parseMinuteOfDay('99999')).toBeNull();
+  });
+
+  it('round-trips with fmtMinuteOfDay', () => {
+    for (const min of [0, 1, 435, 420, 1140, 1439]) {
+      expect(parseMinuteOfDay(fmtMinuteOfDay(min))).toBe(min);
+    }
+  });
+});
+
+describe('startOfDay', () => {
+  it('floors a timestamp to local midnight of its own day', () => {
+    const noonish = new Date(2026, 2, 4, 13, 45, 12, 500).getTime();
+    const midnight = new Date(2026, 2, 4, 0, 0, 0, 0).getTime();
+    expect(startOfDay(noonish)).toBe(midnight);
+  });
+  it('is idempotent on a value already at midnight', () => {
+    const midnight = new Date(2026, 2, 4, 0, 0, 0, 0).getTime();
+    expect(startOfDay(midnight)).toBe(midnight);
+  });
+});
+
+describe('isCureActiveToday / activeCuresForChildToday', () => {
+  // Local-midnight day anchors so the numeric range compare is exact.
+  const day = (y: number, m: number, d: number) => new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
+  const TODAY = day(2026, 3, 4);
+
+  const base: Cure = {
+    id: 'cure-1',
+    childId: 'c1',
+    name: 'Paracetamol',
+    scheduleMode: 'everyHours',
+    everyHours: 6,
+    fromDate: day(2026, 3, 1),
+    toDate: day(2026, 3, 10),
+    active: true,
+  };
+
+  it('is active inside the range for the matching child', () => {
+    expect(isCureActiveToday(base, TODAY, 'c1')).toBe(true);
+  });
+  it('is inactive when paused', () => {
+    expect(isCureActiveToday({ ...base, active: false }, TODAY, 'c1')).toBe(false);
+  });
+  it('is inactive for a different child (per-child scoping)', () => {
+    expect(isCureActiveToday(base, TODAY, 'c2')).toBe(false);
+    expect(isCureActiveToday({ ...base, childId: 'c2' }, TODAY, 'c1')).toBe(false);
+  });
+  it('is inactive before the from date and active exactly on it', () => {
+    expect(isCureActiveToday({ ...base, fromDate: day(2026, 3, 5) }, TODAY, 'c1')).toBe(false);
+    expect(isCureActiveToday({ ...base, fromDate: TODAY }, TODAY, 'c1')).toBe(true);
+  });
+  it('is inactive after the to date and active exactly on it (inclusive boundary)', () => {
+    expect(isCureActiveToday({ ...base, toDate: day(2026, 3, 3) }, TODAY, 'c1')).toBe(false);
+    expect(isCureActiveToday({ ...base, toDate: TODAY }, TODAY, 'c1')).toBe(true);
+  });
+  it('treats an undefined to date as open-ended', () => {
+    expect(isCureActiveToday({ ...base, toDate: undefined }, TODAY, 'c1')).toBe(true);
+  });
+
+  it('activeCuresForChildToday keeps only this child\'s active-today cures', () => {
+    const cures: Cure[] = [
+      base, // active, c1
+      { ...base, id: 'cure-2', childId: 'c2' }, // other child
+      { ...base, id: 'cure-3', active: false }, // paused
+      { ...base, id: 'cure-4', toDate: day(2026, 3, 3) }, // ended yesterday
+      { ...base, id: 'cure-5', toDate: undefined }, // open-ended, active
+    ];
+    expect(activeCuresForChildToday(cures, 'c1', TODAY).map((c) => c.id)).toEqual(['cure-1', 'cure-5']);
+  });
+  it('activeCuresForChildToday returns [] when no child is selected', () => {
+    expect(activeCuresForChildToday([base], '', TODAY)).toEqual([]);
+  });
+});
+
+describe('cureDueState / cureDueList / cureDueHint / curesAllGiven', () => {
+  // A fixed local day so every slot hour is exact.
+  const at = (h: number, min = 0) => new Date(2026, 2, 4, h, min, 0, 0).getTime();
+  const dayAt = (d: number, h: number) => new Date(2026, 2, d, h, 0, 0, 0).getTime();
+  const FROM = new Date(2026, 2, 1, 0, 0, 0, 0).getTime();
+
+  const cure = (over: Partial<Cure> = {}): Cure => ({
+    id: 'cure-1',
+    childId: 'c1',
+    name: 'Omeprazol',
+    scheduleMode: 'timesOfDay',
+    timesOfDay: ['morning', 'evening'],
+    fromDate: FROM,
+    active: true,
+    ...over,
+  });
+
+  const dose = (time: number, name = 'Omeprazol', childId = 'c1'): Entry => ({
+    id: `m-${time}-${name}`,
+    childId,
+    type: 'medication',
+    time,
+    name,
+    tags: [],
+  });
+
+  describe('times-of-day cures', () => {
+    it('owes nothing before the first slot is reached', () => {
+      // 07:00, ahead of the 08:00 morning slot: nothing is late yet.
+      expect(cureDueState(cure(), [], at(7))).toMatchObject({ due: 0, expected: 0 });
+    });
+
+    it('owes a dose once a slot is reached, exactly on the hour', () => {
+      expect(cureDueState(cure(), [], at(8))).toMatchObject({ due: 1, expected: 1 });
+      expect(cureDueState(cure(), [], at(7, 59))).toMatchObject({ due: 0, expected: 0 });
+    });
+
+    it('is settled by a dose logged for that slot', () => {
+      expect(cureDueState(cure(), [dose(at(8, 30))], at(9))).toMatchObject({ due: 0, expected: 1 });
+    });
+
+    it('owes the second slot once evening arrives', () => {
+      const doses = [dose(at(8, 30))];
+      expect(cureDueState(cure(), doses, at(17))).toMatchObject({ due: 0, expected: 1 });
+      expect(cureDueState(cure(), doses, at(18, 1))).toMatchObject({ due: 1, expected: 2 });
+    });
+
+    it('a single late dose settles ONE owed slot, not every earlier one', () => {
+      // Morning skipped, one dose at 19:00. Counting (not per-slot clearing) is
+      // what keeps the skipped morning dose owed.
+      expect(cureDueState(cure(), [dose(at(19))], at(19, 30))).toMatchObject({ due: 1, expected: 2 });
+    });
+
+    it('counts every slot of a four-times-a-day cure', () => {
+      const c = cure({ timesOfDay: ['morning', 'noon', 'evening', 'night'] });
+      expect(cureDueState(c, [], at(23))).toMatchObject({ due: 4, expected: 4 });
+      expect(cureDueState(c, [dose(at(8)), dose(at(12))], at(23))).toMatchObject({ due: 2, expected: 4 });
+    });
+
+    it('never goes negative when more doses are logged than slots called for', () => {
+      expect(cureDueState(cure(), [dose(at(8)), dose(at(9)), dose(at(10))], at(11))).toMatchObject({ due: 0 });
+    });
+
+    it('ignores yesterday\'s doses and yesterday\'s slots', () => {
+      // A dose given yesterday evening does not settle this morning's slot.
+      expect(cureDueState(cure(), [dose(dayAt(3, 19))], at(9))).toMatchObject({ due: 1, expected: 1 });
+    });
+
+    it('ignores a dose logged later today than now', () => {
+      // `now` is the clock; a future-stamped dose cannot settle a slot yet.
+      expect(cureDueState(cure(), [dose(at(20))], at(9))).toMatchObject({ due: 1, expected: 1 });
+    });
+
+    it('owes nothing when no times of day are chosen', () => {
+      expect(cureDueState(cure({ timesOfDay: undefined }), [], at(23))).toMatchObject({ due: 0, expected: 0 });
+    });
+  });
+
+  describe('dose-to-cure matching is by name', () => {
+    it('matches case-insensitively and ignores surrounding space', () => {
+      expect(cureDueState(cure(), [dose(at(8, 5), '  omeprazol ')], at(9))).toMatchObject({ due: 0 });
+    });
+    it('does not match a different medication', () => {
+      expect(cureDueState(cure(), [dose(at(8, 5), 'Nurofen')], at(9))).toMatchObject({ due: 1 });
+    });
+    it('reads already-scoped entries, so a sibling\'s dose cannot settle this cure', () => {
+      const mine = dose(at(8, 5));
+      const sibling = dose(at(8, 5), 'Omeprazol', 'c2');
+      expect(cureDueState(cure(), entriesForChild([sibling], 'c1'), at(9))).toMatchObject({ due: 1 });
+      expect(cureDueState(cure(), entriesForChild([mine, sibling], 'c1'), at(9))).toMatchObject({ due: 0 });
+    });
+    it('ignores non-medication entries', () => {
+      const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'small', tags: [] };
+      expect(cureDueState(cure(), [bath], at(9))).toMatchObject({ due: 1 });
+    });
+  });
+
+  describe('interval cures', () => {
+    const every6 = cure({ scheduleMode: 'everyHours', everyHours: 6, timesOfDay: undefined });
+
+    it('owes a dose immediately when none was ever logged', () => {
+      // fromDate has already passed, so the regimen has started and dose one is late.
+      expect(cureDueState(every6, [], at(1))).toMatchObject({ due: 1 });
+    });
+
+    it('is settled until the interval elapses, then owes again', () => {
+      const doses = [dose(at(8))];
+      expect(cureDueState(every6, doses, at(13, 59))).toMatchObject({ due: 0, expected: 1 });
+      expect(cureDueState(every6, doses, at(14))).toMatchObject({ due: 1, expected: 2 });
+    });
+
+    it('counts from the LATEST dose, not the first', () => {
+      expect(cureDueState(every6, [dose(at(8)), dose(at(11))], at(16))).toMatchObject({ due: 0 });
+      expect(cureDueState(every6, [dose(at(8)), dose(at(11))], at(17, 1))).toMatchObject({ due: 1 });
+    });
+
+    it('owes at most one dose no matter how many intervals were missed', () => {
+      // 08:00 yesterday, now 23:00 today: many intervals lapsed, still one state.
+      expect(cureDueState(every6, [dose(dayAt(3, 8))], at(23))).toMatchObject({ due: 1 });
+    });
+
+    it('owes nothing when the interval has not been set', () => {
+      expect(cureDueState(cure({ scheduleMode: 'everyHours', everyHours: undefined, timesOfDay: undefined }), [], at(12)))
+        .toMatchObject({ due: 0, expected: 0 });
+    });
+  });
+
+  describe('cureDueList', () => {
+    const owed = cure({ id: 'owed', name: 'Omeprazol', timesOfDay: ['morning'] });
+    const settled = cure({ id: 'settled', name: 'Nurofen', timesOfDay: ['morning'] });
+
+    it('sorts owed cures first, keeping stored order within each group', () => {
+      const cures = [settled, owed, cure({ id: 'later', name: 'Vitamin D', timesOfDay: ['night'] })];
+      const list = cureDueList(cures, 'c1', [dose(at(8, 5), 'Nurofen')], at(9));
+      expect(list.map((d) => d.cure.id)).toEqual(['owed', 'settled', 'later']);
+      expect(list.map((d) => d.due)).toEqual([1, 0, 0]);
+    });
+
+    it('drops cures that are not active for this child today', () => {
+      const cures = [owed, cure({ id: 'paused', active: false }), cure({ id: 'other', childId: 'c2' })];
+      expect(cureDueList(cures, 'c1', [], at(9)).map((d) => d.cure.id)).toEqual(['owed']);
+    });
+
+    it('returns [] when no child is selected', () => {
+      expect(cureDueList([owed], undefined, [], at(9))).toEqual([]);
+    });
+  });
+
+  describe('cureDueHint / curesAllGiven', () => {
+    const morning = cure({ id: 'a', name: 'Omeprazol', timesOfDay: ['morning'] });
+    const noon = cure({ id: 'b', name: 'Nurofen', timesOfDay: ['noon'] });
+
+    it('names the treatment when exactly one dose is owed', () => {
+      expect(cureDueHint(cureDueList([morning], 'c1', [], at(9)))).toBe('Omeprazol due');
+    });
+
+    it('trims the name it puts in the hint', () => {
+      const padded = cure({ id: 'a', name: '  Omeprazol  ', timesOfDay: ['morning'] });
+      expect(cureDueHint(cureDueList([padded], 'c1', [], at(9)))).toBe('Omeprazol due');
+    });
+
+    it('counts instead of naming once more than one dose is owed', () => {
+      expect(cureDueHint(cureDueList([morning, noon], 'c1', [], at(13)))).toBe('2 doses due');
+    });
+
+    it('counts multiple owed doses of the SAME treatment', () => {
+      const twice = cure({ timesOfDay: ['morning', 'noon'] });
+      expect(cureDueHint(cureDueList([twice], 'c1', [], at(13)))).toBe('2 doses due');
+    });
+
+    it('reports all given once every owed dose is logged, and shows the check', () => {
+      const list = cureDueList([morning], 'c1', [dose(at(8, 10))], at(9));
+      expect(cureDueHint(list)).toBe('All doses given');
+      expect(curesAllGiven(list)).toBe(true);
+    });
+
+    it('says nothing is due before the first slot, with no check', () => {
+      // Doses were never called for today yet, so "all given" would be a lie.
+      const list = cureDueList([morning], 'c1', [], at(7));
+      expect(cureDueHint(list)).toBe('Nothing due');
+      expect(curesAllGiven(list)).toBe(false);
+    });
+
+    it('gives no hint and no check when the child has no active cures', () => {
+      expect(cureDueHint([])).toBeNull();
+      expect(curesAllGiven([])).toBe(false);
+    });
+
+    it('shows no check while a dose is still owed', () => {
+      expect(curesAllGiven(cureDueList([morning], 'c1', [], at(9)))).toBe(false);
+    });
   });
 });

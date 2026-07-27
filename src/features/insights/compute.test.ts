@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart } from './compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart, sleepMsInWindow, windowStart } from './compute';
 import type { Entry } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
@@ -61,6 +61,18 @@ it('noonWindowStart bins a pre-noon time into the previous noon', () => {
   expect(new Date(w).getDate()).toBe(4);
 });
 
+it('windowStart anchors the 24h window at the given origin hour', () => {
+  // origin 19 (7pm): 3pm is before 7pm → previous day's 7pm
+  const before = windowStart(at(2026, 6, 5, 15), 19);
+  expect(new Date(before).getDate()).toBe(4);
+  expect(new Date(before).getHours()).toBe(19);
+  // 8pm is after 7pm → same day's 7pm
+  const after = windowStart(at(2026, 6, 5, 20), 19);
+  expect(new Date(after).getDate()).toBe(5);
+  // origin 12 matches noonWindowStart
+  expect(windowStart(at(2026, 6, 5, 3), 12)).toBe(noonWindowStart(at(2026, 6, 5, 3)));
+});
+
 const feeding = (start: number): Entry => ({
   id: `f-${start}`, childId: 'c1', type: 'feeding', start, end: start + 900000,
   feedType: 'breast', method: 'left', amount: null, tags: [],
@@ -76,6 +88,29 @@ describe('buildTrend', () => {
     );
     expect(pts).toHaveLength(1);
     expect(pts[0].value).toBeCloseTo(8, 1); // 3h + 5h in the same night window
+  });
+
+  it('totalSleep splits a sleep crossing the window boundary between the two windows', () => {
+    // 11am–1pm on 4 Jul straddles the noon origin → 1h to the Jul3-noon window,
+    // 1h to the Jul4-noon window, instead of the full 2h landing in the start window.
+    const pts = buildTrend([sleep(at(2026, 6, 4, 11), at(2026, 6, 4, 13), true)], 'totalSleep', now, 30);
+    expect(pts).toHaveLength(2);
+    expect(pts[0].value).toBeCloseTo(1, 2);
+    expect(pts[1].value).toBeCloseTo(1, 2);
+  });
+
+  it('totalSleep apportions an overnight sleep across days at the chosen origin (midnight)', () => {
+    // 10pm Jul4 – 6am Jul5 at origin 0 → 2h before midnight to Jul4, 6h after to Jul5.
+    const pts = buildTrend([sleep(at(2026, 6, 4, 22), at(2026, 6, 5, 6), false)], 'totalSleep', now, 30, 0);
+    expect(pts).toHaveLength(2);
+    expect(pts[0].value).toBeCloseTo(2, 2);
+    expect(pts[1].value).toBeCloseTo(6, 2);
+  });
+
+  it('longestStretch is not split at the window boundary (a stretch is one continuous thing)', () => {
+    const pts = buildTrend([sleep(at(2026, 6, 4, 11), at(2026, 6, 4, 13), true)], 'longestStretch', now, 30);
+    expect(pts).toHaveLength(1);
+    expect(pts[0].value).toBeCloseTo(2, 2);
   });
 
   it('longestStretch reports the single longest sleep of the night (hours)', () => {
@@ -131,6 +166,60 @@ describe('buildTrend', () => {
 
 const diaper = (time: number, wet: boolean, solid: boolean): Entry => ({
   id: `d-${time}`, childId: 'c1', type: 'diaper', time, wet, solid, color: null, tags: [],
+});
+
+describe('buildSleepHeatmap markers', () => {
+  const now = at(2026, 6, 5, 15);
+
+  it('attaches feed segments and diaper marks to the sleep window rows', () => {
+    const rows = buildSleepHeatmap([
+      sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), // night in the Jul4-noon window
+      feeding(at(2026, 6, 4, 18)),                          // 6pm, 15min → segment
+      diaper(at(2026, 6, 4, 22), true, false),              // 10pm → point
+    ], now);
+    const row = rows.find((r) => r.offsetFromToday === 1)!;
+    expect(row.feeds).toHaveLength(1);
+    expect(row.feeds[0].x0).toBeCloseTo(6 / 24, 2); // 6pm = 6h after the noon origin
+    expect(row.feeds[0].x1).toBeGreaterThan(row.feeds[0].x0);
+    expect(row.diapers).toHaveLength(1);
+    expect(row.diapers[0]).toBeCloseTo(10 / 24, 2); // 10pm = 10h after the noon origin
+  });
+
+  it('leaves an in-progress feed out of the static feed segments', () => {
+    const ongoing: Entry = {
+      id: 'f-ongoing', childId: 'c1', type: 'feeding', start: at(2026, 6, 4, 18), end: null,
+      feedType: 'breast', method: 'left', amount: null, tags: [],
+    };
+    const rows = buildSleepHeatmap([sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), ongoing], now);
+    expect(rows.find((r) => r.offsetFromToday === 1)!.feeds).toHaveLength(0);
+  });
+
+  it('drops markers on days with no sleep row (stays sleep-anchored)', () => {
+    expect(buildSleepHeatmap([feeding(at(2026, 6, 4, 18))], now)).toEqual([]);
+  });
+});
+
+describe('sleepMsInWindow', () => {
+  it('counts only the part of a boundary-crossing sleep that falls inside the window', () => {
+    // 11am–1pm crosses the Jul4 noon origin; only the noon–1pm hour is inside that window
+    const ms = sleepMsInWindow([sleep(at(2026, 6, 4, 11), at(2026, 6, 4, 13), true)], at(2026, 6, 4, 12));
+    expect(ms / 3600000).toBeCloseTo(1, 3);
+  });
+
+  it('counts the after-boundary part of the previous night into the new window', () => {
+    // 10pm Jul4 – 6am Jul5; the Jul5 midnight window gets the midnight–6am part
+    const ms = sleepMsInWindow([sleep(at(2026, 6, 4, 22), at(2026, 6, 5, 6), false)], at(2026, 6, 5, 0));
+    expect(ms / 3600000).toBeCloseTo(6, 3);
+  });
+
+  it('ignores in-progress sleeps and sums across multiple sleeps in the window', () => {
+    const ongoing: Entry = { id: 's-live', childId: 'c1', type: 'sleep', start: at(2026, 6, 5, 14), end: null, nap: true, tags: [] };
+    const ms = sleepMsInWindow(
+      [sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14), true), sleep(at(2026, 6, 5, 15), at(2026, 6, 5, 16), true), ongoing],
+      at(2026, 6, 5, 12),
+    );
+    expect(ms / 3600000).toBeCloseTo(2, 3);
+  });
 });
 
 describe('buildDiaperSeries', () => {

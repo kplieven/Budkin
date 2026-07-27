@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { matchServerChild, uploadUnsynced } from '@/data/sync';
 import type { UploadDeps, UploadState } from '@/data/sync';
-import type { Child, DiaperEntry, Entry, Measurement } from '@/types/models';
+import type { Child, Cure, DiaperEntry, Entry, Measurement } from '@/types/models';
 
 const child = (overrides: Partial<Child> = {}): Child => ({
   id: 'c1',
@@ -34,22 +34,35 @@ const measurement = (overrides: Partial<Measurement> = {}): Measurement => ({
   ...overrides,
 });
 
-const emptyState = (): UploadState => ({ children: [], entries: [], measurements: [] });
+const cure = (overrides: Partial<Cure> = {}): Cure => ({
+  id: 'cu1',
+  childId: 'c1',
+  name: 'Omeprazol',
+  scheduleMode: 'everyHours',
+  everyHours: 6,
+  fromDate: 0,
+  active: true,
+  ...overrides,
+});
+
+const emptyState = (): UploadState => ({ children: [], entries: [], measurements: [], cures: [] });
 
 const makeDeps = (overrides: Partial<UploadDeps> = {}): UploadDeps => ({
   pushChild: vi.fn(async () => 100),
   pushEntry: vi.fn(async () => 200),
   pushMeasurement: vi.fn(async () => 300),
+  pushCure: vi.fn(async () => 400),
   ...overrides,
 });
 
 describe('uploadUnsynced', () => {
-  it('uploads children before entries and measurements', async () => {
+  it('uploads children before entries, measurements and cures', async () => {
     const log: string[] = [];
     const state: UploadState = {
       children: [child({ id: 'c1' })],
       entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
       measurements: [measurement({ id: 'm1', childId: 'c1' })],
+      cures: [cure({ id: 'cu1', childId: 'c1' })],
     };
     const deps: UploadDeps = {
       pushChild: vi.fn(async (c) => {
@@ -64,11 +77,15 @@ describe('uploadUnsynced', () => {
         log.push(`measurement:${m.id}`);
         return 30;
       }),
+      pushCure: vi.fn(async (c) => {
+        log.push(`cure:${c.id}`);
+        return 40;
+      }),
     };
 
     await uploadUnsynced(state, deps);
 
-    expect(log).toEqual(['child:c1', 'entry:e1', 'measurement:m1']);
+    expect(log).toEqual(['child:c1', 'entry:e1', 'measurement:m1', 'cure:cu1']);
   });
 
   it('passes the newly-assigned server child id alongside the entry (childId stays local)', async () => {
@@ -83,6 +100,78 @@ describe('uploadUnsynced', () => {
     await uploadUnsynced(state, deps);
 
     expect(pushEntry).toHaveBeenCalledWith(expect.objectContaining({ id: 'e1', childId: 'child1' }), 10);
+  });
+
+  it('passes the newly-assigned server child id alongside the cure (childId stays local)', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'child1', serverId: undefined })],
+      entries: [],
+      measurements: [],
+      cures: [cure({ id: 'cu1', childId: 'child1' })],
+    };
+    const pushCure = vi.fn(async () => 400);
+    const deps = makeDeps({ pushChild: vi.fn(async () => 42), pushCure });
+
+    await uploadUnsynced(state, deps);
+
+    expect(pushCure).toHaveBeenCalledWith(expect.objectContaining({ id: 'cu1', childId: 'child1' }), 42);
+  });
+
+  it('does not push a cure that already has a serverId', async () => {
+    const pushCure = vi.fn(async () => 999);
+    const state: UploadState = {
+      ...emptyState(),
+      children: [child({ id: 'c1', serverId: 5 })],
+      cures: [cure({ id: 'cu1', childId: 'c1', serverId: 7 })],
+    };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushCure }));
+
+    expect(pushCure).not.toHaveBeenCalled();
+    expect(result.cures?.[0].serverId).toBe(7);
+  });
+
+  it('skips a cure whose child never reached the server, without aborting the rest', async () => {
+    const pushCure = vi.fn(async () => 400);
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: undefined })],
+      entries: [],
+      measurements: [],
+      cures: [cure({ id: 'cu1', childId: 'c1' }), cure({ id: 'cu2', childId: 'c-unknown' })],
+    };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushChild: vi.fn(async () => undefined), pushCure }));
+
+    expect(pushCure).not.toHaveBeenCalled();
+    expect(result.cures?.every((c) => c.serverId == null)).toBe(true);
+  });
+
+  it('leaves a cure unsynced when pushCure throws, and does not abort the rest', async () => {
+    const state: UploadState = {
+      children: [child({ id: 'c1', serverId: 1 })],
+      entries: [],
+      measurements: [],
+      cures: [cure({ id: 'cu1', childId: 'c1' }), cure({ id: 'cu2', childId: 'c1' })],
+    };
+    const pushCure = vi.fn(async (c: Cure) => {
+      if (c.id === 'cu1') throw new Error('network down');
+      return 41;
+    });
+
+    const result = await uploadUnsynced(state, makeDeps({ pushCure }));
+
+    expect(result.cures?.find((c) => c.id === 'cu1')?.serverId).toBeUndefined();
+    expect(result.cures?.find((c) => c.id === 'cu2')?.serverId).toBe(41);
+  });
+
+  it('treats an absent `cures` as none to push (callers pass only their slice)', async () => {
+    const pushCure = vi.fn(async () => 400);
+    const state: UploadState = { children: [child({ id: 'c1', serverId: 1 })], entries: [], measurements: [] };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushCure }));
+
+    expect(pushCure).not.toHaveBeenCalled();
+    expect(result.cures).toEqual([]);
   });
 
   it('passes the newly-assigned server child id alongside the measurement (childId stays local)', async () => {

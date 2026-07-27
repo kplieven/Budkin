@@ -24,7 +24,11 @@ const listChildren = vi.fn();
 const listPumping = vi.fn(async () => []);
 const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
+const listMedication = vi.fn(async () => []);
 const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
+const listChildCures = vi.fn(async () => [] as any[]);
+const listGenders = vi.fn(async () => new Map<number, string>());
+const setChildGender = vi.fn(async () => undefined);
 const listMeasurements = vi.fn(async () => []);
 const listTimers = vi.fn(async () => [] as any[]);
 const createTimer = vi.fn(async () => 11);
@@ -40,7 +44,11 @@ vi.mock('@/api/client', () => ({
     listPumping,
     listTummy,
     listTemperature,
+    listMedication,
     listChildNotes,
+    listChildCures,
+    listGenders,
+    setChildGender,
     listMeasurements,
     listTimers,
     createTimer,
@@ -109,6 +117,7 @@ describe('loadFromServer child selection', () => {
     listFeedings.mockReset().mockResolvedValue([]);
     listSleep.mockReset().mockResolvedValue([]);
     listChanges.mockReset().mockResolvedValue([]);
+    listMedication.mockReset().mockResolvedValue([]);
     listTimers.mockReset().mockResolvedValue([]);
   };
 
@@ -143,6 +152,19 @@ describe('loadFromServer child selection', () => {
 
     expect(result.selectedChildId).toBe('7');
     expect(listFeedings).toHaveBeenCalledWith('7');
+  });
+
+  it('fans out to listMedication and merges its rows into entries', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+    listMedication.mockResolvedValueOnce([
+      { id: 'medication-3', serverId: 3, childId: '9', type: 'medication', time: 1000, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', tags: [] },
+    ] as any);
+
+    const result = await loadFromServer(conn, 9);
+
+    expect(listMedication).toHaveBeenCalledWith('9');
+    expect(result.entries).toContainEqual(expect.objectContaining({ type: 'medication', name: 'Paracetamol' }));
   });
 
   it('fetches measurements for the preferred child too', async () => {

@@ -6,7 +6,7 @@
 
 export type ThemeMode = 'dark' | 'light';
 
-export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'note' | 'milestone';
+export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'medication' | 'note' | 'milestone';
 
 export interface Palette {
   /** true for Night mode */
@@ -85,6 +85,9 @@ const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
   bath: '#6FB2D8',
   // thermometer red — distinct from tummy's softer salmon coral
   temperature: '#E4675E',
+  // orchid violet — a pharmacy/medicine hue, distinct from sleep's cooler
+  // periwinkle lavender and warmer than the note grey
+  medication: '#C88AD6',
   // calm neutral stone-grey — a note is "paper", deliberately unsaturated so it
   // reads as neutral next to the vivid activity hues
   note: '#9AA0A6',
@@ -100,6 +103,7 @@ const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
   tummy: '#D06E62',
   bath: '#4E96C4',
   temperature: '#CB4A40',
+  medication: '#A85CB8',
   note: '#787E85',
   milestone: '#787E85',
 };

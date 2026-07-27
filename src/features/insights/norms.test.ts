@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NORMS, bandForRange, wakeWindowBand } from './norms';
+import { NORMS, bandForRange, bandStatus, wakeWindowBand } from './norms';
 
 const DAY = 86400000;
 
@@ -68,5 +68,32 @@ describe('wakeWindowBand', () => {
     // condition `NaN <= b.maxAgeDays` is always false and therefore returns the
     // LAST bucket instead of null.
     expect(wakeWindowBand(NaN)).toBeNull();
+  });
+});
+
+describe('bandStatus', () => {
+  const birth = new Date(2026, 0, 1).getTime();
+  const at = (days: number) => birth + days * DAY;
+  // ~1mo total-sleep band is 14–17h.
+  const sleepPts = (v: number) => [{ t: at(28), value: v }, { t: at(29), value: v }, { t: at(30), value: v }];
+
+  it('reports in / below / above against a solid band', () => {
+    expect(bandStatus(NORMS.totalSleep, birth, sleepPts(15))).toBe('in');
+    expect(bandStatus(NORMS.totalSleep, birth, sleepPts(11))).toBe('below');
+    expect(bandStatus(NORMS.totalSleep, birth, sleepPts(19))).toBe('above');
+  });
+
+  it('uses a rolling median so a single off day does not flip it', () => {
+    const pts = [{ t: at(28), value: 15 }, { t: at(29), value: 15 }, { t: at(30), value: 8 }];
+    expect(bandStatus(NORMS.totalSleep, birth, pts)).toBe('in'); // median of {8,15,15} = 15
+  });
+
+  it('returns null for non-solid-band norms', () => {
+    expect(bandStatus(NORMS.wakeWindow, birth, [{ t: at(30), value: 90 }, { t: at(31), value: 90 }])).toBeNull(); // ruleOfThumb
+    expect(bandStatus(NORMS.wet, birth, [{ t: at(30), value: 6 }, { t: at(31), value: 6 }])).toBeNull(); // floor
+  });
+
+  it('returns null with fewer than two complete windows', () => {
+    expect(bandStatus(NORMS.totalSleep, birth, [{ t: at(30), value: 15 }])).toBeNull();
   });
 });

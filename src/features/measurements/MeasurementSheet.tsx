@@ -3,6 +3,7 @@ import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
+import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -47,6 +48,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   // The stored value is canonical metric; show it in the user's chosen system
   // and (in onSave) convert what they type back to metric before persisting.
   const [value, setValue] = useState(editing ? fmtValue(kind, editing.value, unitSystem) : '');
+  const [valueFocused, setValueFocused] = useState(false);
   const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
   const [notes, setNotes] = useState(editing?.notes ?? '');
 
@@ -95,15 +97,16 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
           Value
         </Txt>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 16, paddingHorizontal: 16, marginBottom: 6 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: valueFocused ? meta.color : t.line, borderRadius: 16, paddingHorizontal: 16, marginBottom: 6 }}>
           <TextInput
             value={value}
             onChangeText={setValue}
+            onFocus={() => setValueFocused(true)}
+            onBlur={() => setValueFocused(false)}
             placeholder="0"
             placeholderTextColor={t.faint}
             keyboardType="decimal-pad"
-            autoFocus={!editing}
-            style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+            style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
           />
           {unit ? (
             <Txt weight={600} size={16} color={t.dim}>
