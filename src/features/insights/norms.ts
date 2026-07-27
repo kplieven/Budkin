@@ -14,7 +14,7 @@ export interface Norm {
   disclaimer: string;
 }
 
-const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so speak to your doctor or paediatrician.';
+export const DISCLAIMER = 'General guidance, not medical advice. Every baby is different, so speak to your doctor or paediatrician.';
 
 // Sources documented inline. Bands are population ranges, deliberately wide.
 export const NORMS: Record<TrendMetric | 'wet' | 'dirty', Norm> = {
@@ -74,6 +74,31 @@ export const WAKE_WINDOW_MAX_AGE_DAYS = 365;
 export function wakeWindowBand(ageDays: number): NormBucket | null {
   if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > WAKE_WINDOW_MAX_AGE_DAYS) return null;
   return bucketFor(NORMS.wakeWindow, ageDays);
+}
+
+export type BandStatus = 'in' | 'below' | 'above';
+
+/**
+ * Where the baby's recent value sits relative to its age band, for the
+ * at-a-glance "in typical range" chip. ONLY solid `band` norms qualify: floor
+ * and rule-of-thumb norms are lower-confidence and stay unlabelled (returns
+ * null). Uses a short rolling median of the last few windows so a single noisy
+ * day can't flip the chip; the caller passes points with the partial "today so
+ * far" window already dropped, so this only ever judges complete windows.
+ * Returns null when it isn't a solid band or there are fewer than two complete
+ * windows to judge.
+ */
+export function bandStatus(norm: Norm, birthMs: number, points: { t: number; value: number }[]): BandStatus | null {
+  if (norm.kind !== 'band' || points.length < 2) return null;
+  const recent = points.slice(-3);
+  const sorted = recent.map((p) => p.value).sort((a, b) => a - b);
+  const med = sorted[Math.floor(sorted.length / 2)];
+  const last = recent[recent.length - 1];
+  const b = bucketFor(norm, (last.t - birthMs) / DAY);
+  if (!b || b.hi == null) return null;
+  if (med < b.lo) return 'below';
+  if (med > b.hi) return 'above';
+  return 'in';
 }
 
 export interface Band { lo: number[]; hi: number[] }

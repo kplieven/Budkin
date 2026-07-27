@@ -28,6 +28,11 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   // paging ScrollView does not reliably stretch its children to full height on web).
   const [size, setSize] = useState({ w: 0, h: 0 });
   const scrollRef = useRef<ScrollView | null>(null);
+  // Gestures are heard over the whole screen, not just the narrow deck: on a
+  // laptop the slides are a 460px column in the middle of a wide window, and a
+  // pager you can only wheel or drag while the pointer is inside that strip
+  // reads as one that does not work at all.
+  const hostRef = useRef<View | null>(null);
 
   const last = index >= WALKTHROUGH_SLIDES.length - 1;
 
@@ -42,9 +47,17 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
     else goTo(index + 1);
   };
 
-  // Wheel, trackpad and touch all move one slide at a time, forwards or back.
-  // A 0 step is a gesture that fell short, which settles back onto `index`.
-  useWebPaging(scrollRef, WALKTHROUGH_SLIDES.length, (delta) => goTo(index + delta), size.w > 0);
+  // Wheel, trackpad, mouse drag, touch and the arrow keys all move one slide at a
+  // time, forwards or back. A 0 step is a gesture that fell short, which settles
+  // back onto `index`. The page width has to be handed over because the listener
+  // host is wider than a page.
+  useWebPaging({
+    deckRef: scrollRef,
+    hostRef,
+    count: WALKTHROUGH_SLIDES.length,
+    pageWidth: size.w,
+    onStep: (delta) => goTo(index + delta),
+  });
 
   // Native only: react-native-web never fires the momentum callbacks, so on web
   // `index` is authoritative and every gesture arrives through `useWebPaging`.
@@ -64,7 +77,10 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   }, [size.w]);
 
   return (
-    <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}>
+    <View
+      ref={hostRef}
+      style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}
+    >
       {/* Skip (hidden on the last slide, where the primary button dismisses) */}
       <View style={{ height: 48, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: 20 }}>
         {!last && (

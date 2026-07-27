@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
+import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -41,6 +42,10 @@ const COLORS: [DiaperColor, string][] = [
   ['green', SOLID_COLORS.green],
   ['yellow', SOLID_COLORS.yellow],
 ];
+// Quick-pick dosage units. Baby Buddy's `dosage_unit` is free text, so these are
+// just shortcuts; the "+ Other" field takes anything else. µg uses the real
+// micro sign so it reads correctly rather than an ASCII "u".
+const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 /**
  * Dashed "+ New tag" pill that sits at the end of the tag chip row. Tapping it
  * reveals TagInputRow below the chips. Styled lighter than a real Chip (dashed
@@ -236,10 +241,11 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
  * is conditionally rendered, so it remounts (re-seeding from the store) on every
  * temperature sheet open.
  */
-function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: number) => void }) {
+function TemperatureField({ value, color, onChange }: { value?: number; color: string; onChange: (v?: number) => void }) {
   const t = useTheme();
   const unitSystem = useAppStore((s) => s.unitSystem);
   const [text, setText] = useState(value != null ? fmtValue('temperature', value, unitSystem) : '');
+  const [focused, setFocused] = useState(false);
   return (
     <>
       <FieldLabel>Temperature</FieldLabel>
@@ -250,7 +256,7 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           gap: 10,
           backgroundColor: t.surface,
           borderWidth: 1.5,
-          borderColor: t.line,
+          borderColor: focused ? color : t.line,
           borderRadius: 16,
           paddingHorizontal: 16,
           marginBottom: 16,
@@ -258,6 +264,8 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
       >
         <TextInput
           value={text}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onChangeText={(v) => {
             setText(v);
             const n = parseFloat(v.replace(',', '.'));
@@ -266,12 +274,168 @@ function TemperatureField({ value, onChange }: { value?: number; onChange: (v?: 
           placeholder={unitSystem === 'imperial' ? '98.6' : '37.0'}
           placeholderTextColor={t.faint}
           keyboardType="decimal-pad"
-          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text }}
+          style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
         />
         <Txt weight={600} size={16} color={t.dim}>
           {unitLabel('temperature', unitSystem)}
         </Txt>
       </View>
+    </>
+  );
+}
+
+/**
+ * Medication field block: a required name, an optional amount paired with a unit,
+ * and a unit picker of quick-pick chips with a free-text "+ Other" fallback. The
+ * unit is Baby Buddy's free-text `dosage_unit`, so it is stored as a plain string
+ * and never routed through the units.ts converter. Conditionally rendered, so it
+ * remounts (re-seeding its local text state from the store draft) on every open.
+ */
+function MedicationField({
+  name,
+  dosage,
+  unit,
+  color,
+  onName,
+  onDosage,
+  onUnit,
+}: {
+  name?: string;
+  dosage?: number;
+  unit?: string;
+  color: string;
+  onName: (v: string) => void;
+  onDosage: (v?: number) => void;
+  onUnit: (v?: string) => void;
+}) {
+  const t = useTheme();
+  // A stored unit that is not one of the presets is a custom one; open the free
+  // text field on it so an edit doesn't silently drop it.
+  const isCustom = !!unit && !MED_UNITS.includes(unit);
+  const [amountText, setAmountText] = useState(dosage != null ? String(dosage) : '');
+  const [amountFocused, setAmountFocused] = useState(false);
+  const [otherOpen, setOtherOpen] = useState(isCustom);
+  const [otherText, setOtherText] = useState(isCustom ? (unit as string) : '');
+  const pickPreset = (u: string) => {
+    onUnit(unit === u ? undefined : u);
+    setOtherOpen(false);
+    setOtherText('');
+  };
+  return (
+    <>
+      <FieldLabel>Medication</FieldLabel>
+      <TextInput
+        value={name ?? ''}
+        onChangeText={onName}
+        placeholder="e.g. Paracetamol, vitamin D…"
+        placeholderTextColor={t.faint}
+        style={{
+          minHeight: 48,
+          borderRadius: 14,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: t.line,
+          paddingHorizontal: 14,
+          fontSize: 15.5,
+          fontFamily: fontFamily(600),
+          color: t.text,
+          marginBottom: 16,
+        }}
+      />
+      <FieldLabel>Amount (optional)</FieldLabel>
+      <View
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          backgroundColor: t.surface,
+          borderWidth: 1.5,
+          borderColor: amountFocused ? color : t.line,
+          borderRadius: 16,
+          paddingHorizontal: 16,
+          marginBottom: 12,
+        }}
+      >
+        {/* The input is wrapped in a flex:1/minWidth:0 View so it SHRINKS to make
+            room for the unit. A bare flex:1 TextInput keeps min-width:auto on web
+            and won't shrink, pushing a long unit ("puffs", "drops") past the right
+            edge. See src/components/DateFields.tsx for the same pattern. */}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <TextInput
+            value={amountText}
+            onFocus={() => setAmountFocused(true)}
+            onBlur={() => setAmountFocused(false)}
+            onChangeText={(v) => {
+              setAmountText(v);
+              const n = parseFloat(v.replace(',', '.'));
+              onDosage(Number.isNaN(n) ? undefined : n);
+            }}
+            placeholder="5"
+            placeholderTextColor={t.faint}
+            keyboardType="decimal-pad"
+            style={{ width: '100%', height: 56, fontSize: 26, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
+          />
+        </View>
+        {unit ? (
+          <Txt weight={600} size={16} color={t.dim} numberOfLines={1} style={{ flexShrink: 0 }}>
+            {unit}
+          </Txt>
+        ) : null}
+      </View>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: otherOpen ? 8 : 16 }}>
+        {MED_UNITS.map((u) => (
+          <Chip key={u} label={u} color={color} selected={unit === u} onPress={() => pickPreset(u)} padH={13} padV={8} fontSize={13.5} />
+        ))}
+        {!otherOpen && (
+          <Pressable
+            onPress={() => setOtherOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Enter a custom unit"
+            style={(s) => [
+              {
+                flexDirection: 'row',
+                alignItems: 'center',
+                paddingHorizontal: 13,
+                paddingVertical: 8,
+                borderRadius: 13,
+                borderWidth: 1.5,
+                borderStyle: 'dashed',
+                borderColor: t.line2,
+                cursor: 'pointer',
+              },
+              isHovered(s) && { borderColor: t.faint },
+            ]}
+          >
+            <Txt unselectable weight={700} size={13.5} color={t.faint}>
+              + Other
+            </Txt>
+          </Pressable>
+        )}
+      </View>
+      {otherOpen && (
+        <TextInput
+          autoFocus={!isCustom}
+          value={otherText}
+          onChangeText={(v) => {
+            setOtherText(v);
+            onUnit(v.trim() ? v : undefined);
+          }}
+          placeholder="Custom unit, e.g. ml/kg…"
+          placeholderTextColor={t.faint}
+          style={{
+            minHeight: 44,
+            borderRadius: 12,
+            backgroundColor: t.surface,
+            borderWidth: 1.5,
+            borderColor: t.line,
+            paddingHorizontal: 14,
+            fontSize: 14,
+            fontFamily: fontFamily(600),
+            color: t.text,
+            marginBottom: 16,
+          }}
+        />
+      )}
     </>
   );
 }
@@ -288,6 +452,7 @@ export function LogSheet() {
   const toggleWet = useAppStore((s) => s.toggleWet);
   const toggleSolid = useAppStore((s) => s.toggleSolid);
   const setWash = useAppStore((s) => s.setWash);
+  const setNap = useAppStore((s) => s.setNap);
   const toggleTag = useAppStore((s) => s.toggleTag);
   const createTag = useAppStore((s) => s.createTag);
   const tags = useAppStore((s) => s.tags);
@@ -299,6 +464,7 @@ export function LogSheet() {
   const save = useAppStore((s) => s.save);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
+  const expandMedicationLog = useAppStore((s) => s.expandMedicationLog);
 
   // Lazy-load the server tag list on first sheet open (cached in the store;
   // subsequent opens no-op). Mirrors how Settings lazy-loads the profile.
@@ -310,14 +476,23 @@ export function LogSheet() {
   const type = sheet.type;
   const color = t.activity[type];
   const label = ACTIVITY_LABEL[type];
+  // Confirm mode: the medication sheet opened from a saved treatment. It shows a
+  // read-only treatment summary + the time picker only; "Edit" expands it into
+  // the full form. `sheet` is non-null here (guarded above).
+  const confirmMode = type === 'medication' && !!sheet.confirm;
+  const medDoseLabel = te.medDosage != null ? [String(te.medDosage), te.medUnit].filter(Boolean).join(' ') : '';
   const shortcut = DURATION_SHORTCUTS[type];
   // Exact complements by construction: a feeding shows the volume stepper or
   // the intake scale, never both, and never neither.
   const showVolume = type === 'feeding' && feedAmountIsVolume(te.feedType, te.method);
   const showIntake = type === 'feeding' && !feedAmountIsVolume(te.feedType, te.method);
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
+  // Marking a logged entry as still ongoing does not save changes to it, it
+  // replaces it with a running timer, so the button must not promise an edit.
   const saveLabel = editingId
-    ? 'Save changes'
+    ? te.ongoing && te.shape === 'interval'
+      ? 'Start live timer'
+      : 'Save changes'
     : fromTimerId
       ? te.ongoing
         ? 'Save details'
@@ -525,6 +700,37 @@ export function LogSheet() {
           </>
         )}
 
+        {/* sleep fields — nap vs night sleep */}
+        {type === 'sleep' && (
+          <>
+            <FieldLabel hint="follows your rhythm">Kind</FieldLabel>
+            <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
+              {/* The sheet already seeded te.nap from the nap window on open,
+                  and save() writes whatever te.nap holds, so flipping this
+                  simply wins. No separate "user touched it" flag is needed. */}
+              {([true, false] as const).map((isNap) => {
+                const selected = (te.nap ?? true) === isNap;
+                return (
+                  <Pressable
+                    key={String(isNap)}
+                    onPress={() => setNap(isNap)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={(sh) => [
+                      { flex: 1, paddingVertical: 14, borderRadius: 16, alignItems: 'center', backgroundColor: selected ? hexA(color, 0.16) : t.chip, borderWidth: 2, borderColor: selected ? color : t.line, cursor: 'pointer' },
+                      !selected && isHovered(sh) && { borderColor: t.line2 },
+                    ]}
+                  >
+                    <Txt unselectable weight={700} size={14.5}>
+                      {isNap ? 'Nap' : 'Night sleep'}
+                    </Txt>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        )}
+
         {/* bath fields — small vs big wash */}
         {type === 'bath' && (
           <>
@@ -595,8 +801,49 @@ export function LogSheet() {
 
         {/* temperature field — a decimal reading with a °C unit */}
         {type === 'temperature' && (
-          <TemperatureField value={te.temperature} onChange={(v) => setTE({ temperature: v })} />
+          <TemperatureField value={te.temperature} color={color} onChange={(v) => setTE({ temperature: v })} />
         )}
+
+        {/* medication field: in confirm mode, a read-only treatment summary
+            (name and, if present, dose) with notes and tags hidden below. In
+            normal mode, the full editable field, with notes and tags shown
+            as usual. */}
+        {type === 'medication' &&
+          (confirmMode ? (
+            <>
+              <FieldLabel>Treatment</FieldLabel>
+              <View
+                style={{
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 16,
+                  paddingHorizontal: 16,
+                  paddingVertical: 14,
+                  marginBottom: 16,
+                }}
+              >
+                <Txt weight={700} size={16.5}>
+                  {te.medName}
+                </Txt>
+                {medDoseLabel ? (
+                  <Txt weight={500} size={13.5} color={t.dim} style={{ marginTop: 2 }}>
+                    {medDoseLabel}
+                  </Txt>
+                ) : null}
+              </View>
+            </>
+          ) : (
+            <MedicationField
+              name={te.medName}
+              dosage={te.medDosage}
+              unit={te.medUnit}
+              color={color}
+              onName={(v) => setTE({ medName: v })}
+              onDosage={(v) => setTE({ medDosage: v })}
+              onUnit={(v) => setTE({ medUnit: v })}
+            />
+          ))}
 
         {/* note field — the PRIMARY multiline body (taller than the secondary
             per-entry notes input, which is suppressed for a note below) */}
@@ -609,7 +856,6 @@ export function LogSheet() {
               placeholder="Write a note…"
               placeholderTextColor={t.faint}
               multiline
-              autoFocus
               style={{
                 minHeight: 132,
                 borderRadius: 14,
@@ -633,9 +879,10 @@ export function LogSheet() {
         <TimeEntry key={type} type={type} color={color} />
 
         {/* notes — the secondary per-entry annotation. Shown for the 5 real
-            activities; NOT for bath (structural note body) and NOT for a general
-            note (its body IS its primary text — a note doesn't annotate itself). */}
-        {type !== 'bath' && type !== 'note' && (
+            activities; NOT for bath (structural note body), NOT for a general
+            note (its body IS its primary text), and NOT for medication in
+            confirm mode (read-only summary only). */}
+        {type !== 'bath' && type !== 'note' && !confirmMode && (
           <>
             <FieldLabel>Notes (optional)</FieldLabel>
             <TextInput
@@ -666,7 +913,9 @@ export function LogSheet() {
         {/* tags — the server list ∪ the entry's own tags, minus the structural
             ones (bath/small/big, breastfeeding left/right). Server colors render
             via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
-        <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
+        {!confirmMode && (
+          <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
+        )}
       </ScrollView>
 
       {/* save bar */}
@@ -682,6 +931,21 @@ export function LogSheet() {
           >
             <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
+            </Txt>
+          </Pressable>
+        )}
+        {confirmMode && (
+          <Pressable
+            onPress={expandMedicationLog}
+            accessibilityRole="button"
+            accessibilityLabel="Edit the dose details"
+            style={(s) => [
+              { height: 58, paddingHorizontal: 20, borderRadius: 18, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
+          >
+            <Txt unselectable weight={800} size={16} color={t.text}>
+              Edit
             </Txt>
           </Pressable>
         )}

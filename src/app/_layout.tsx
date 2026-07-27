@@ -12,6 +12,8 @@ import { Toast } from '@/components/Toast';
 import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { AdoptSheet } from '@/features/connect/AdoptSheet';
+import { CureEditor } from '@/features/cures/CureEditor';
+import { CurePickerSheet } from '@/features/cures/CurePickerSheet';
 import { ConfirmBirthSheet } from '@/features/dashboard/ConfirmBirthSheet';
 import { LogSheet } from '@/features/log/LogSheet';
 import { MeasurementSheet } from '@/features/measurements/MeasurementSheet';
@@ -21,6 +23,7 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { FONTS_TO_LOAD } from '@/theme/fonts';
+import { requestPersistentStorage } from '@/lib/persistentStorage';
 import { initTimerNotificationSync } from '@/notifications/sync';
 import { initScheduledReminderSync, reconcileNow } from '@/notifications/scheduleSync';
 import { initWidgetSync } from '@/widgets/sync';
@@ -65,6 +68,9 @@ export default function RootLayout() {
     initWidgetSync();
     initTimerNotificationSync();
     initScheduledReminderSync();
+    // Web only (no-ops on native): keep the browser from evicting localStorage,
+    // which is where the entity store, the offline queue and the op-log all live.
+    void requestPersistentStorage();
   }, []);
 
   useEffect(() => {
@@ -124,6 +130,8 @@ function RootLayoutNav() {
             <LogSheet />
             <MeasurementSheet />
             <MilestoneSheet />
+            <CurePickerSheet />
+            <CureEditor />
             <Toast />
           </View>
           <StatusBar style={t.dark ? 'light' : 'dark'} />

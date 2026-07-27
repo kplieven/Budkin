@@ -16,6 +16,7 @@ import {
 import {
   type Connection,
   deleteChildFromServer,
+  deleteCureFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   deleteTimerFromServer,
@@ -24,11 +25,14 @@ import {
   loadProfileFromServer,
   loadTagsFromServer,
   pushChildToServer,
+  pushCureToServer,
+  setChildGenderOnServer,
   pushEntryToServer,
   pushMeasurementToServer,
   pushTimerToServer,
   serverHasData,
   updateChildOnServer,
+  updateCureOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
   updateTimerOnServer,
@@ -47,6 +51,7 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
+import { loadCures, saveCures } from '@/data/cures';
 import { loadMilestonePrompts, saveMilestonePrompts } from '@/data/milestonePrompts';
 import {
   addPendingOp,
@@ -56,7 +61,7 @@ import {
   type PendingOp,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, saveQueue } from '@/data/queue';
+import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, saveQueue } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -69,11 +74,31 @@ import {
 import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
-import { nextStartSide, nextWashKind, overruleLasted, reorder, teEnd, teStart } from '@/store/selectors';
+import {
+  activeCuresForChildToday,
+  clampHourOfDay,
+  clampMinuteOfDay,
+  clampSmallWashesPerBig,
+  entriesForChild,
+  isNapStart,
+  NAP_WINDOW_END_DEFAULT,
+  NAP_WINDOW_START_DEFAULT,
+  nextStartSide,
+  nextWashKind,
+  overruleLasted,
+  reorder,
+  RHYTHM_ORIGIN_DEFAULT,
+  SMALL_WASHES_PER_BIG_DEFAULT,
+  startOfDay,
+  teEnd,
+  teStart,
+} from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
   Child,
+  ChildGender,
+  Cure,
   Entry,
   FeedMethod,
   FeedType,
@@ -116,6 +141,30 @@ interface AppState {
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
   napSuggestions: boolean;
+  /** Growth charts: whether the WHO percentile reference is drawn (default true). */
+  showGrowthReference: boolean;
+  /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
+   *  range 1..30). Global rather than per-child, like every other pref. Local
+   *  only: it drives the wash pre-selection, never anything sent to the server. */
+  smallWashesPerBig: number;
+  /** Sleep rhythm: the window in which a sleep counts as a NAP, as minutes
+   *  since local midnight (default 420/1140 = 07:00 to 19:00). Start inclusive,
+   *  end exclusive; a start later than the end wraps midnight. Global, like
+   *  every other pref. It only seeds NEW entries: `SleepEntry.nap` is a stored
+   *  boolean, so changing the window never re-classifies history. */
+  napWindowStartMin: number;
+  napWindowEndMin: number;
+  /** Insights "Rhythm" graph day boundary: the hour (0..23) the 24h window
+   *  starts at (default 12 = noon-to-noon). Drives both the heatmap and the
+   *  per-window trend bucketing on the tab, so the graph and the numbers agree.
+   *  Global, persisted, like every other pref. */
+  rhythmOriginHour: number;
+  /** Insights "Rhythm" graph layer toggles: which series the heatmap draws.
+   *  Persisted so a hidden layer stays hidden across restarts. Global, all
+   *  default to visible. */
+  rhythmShowSleep: boolean;
+  rhythmShowFeeds: boolean;
+  rhythmShowDiapers: boolean;
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -135,7 +184,7 @@ interface AppState {
   confirmBirthFor: string | null;
   /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
   adoptSheet: boolean;
-  sheet: { type: ActivityType } | null;
+  sheet: { type: ActivityType; confirm?: boolean } | null;
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
   /** id of the running timer being stopped+edited via the log sheet, or null */
@@ -146,6 +195,12 @@ interface AppState {
    *  sheets, so its overlay anchors to the viewport, not the page). `log` names
    *  a catalog key to mark reached; `edit` names an existing milestone entry. */
   milestoneSheet: { mode: 'log'; key: string } | { mode: 'edit'; id: string } | null;
+  /** true while the cure-picker sheet is open (tapping the Medication tile when
+   *  the selected child has active cures today; picks a cure to pre-fill a dose). */
+  curePicker: { open: boolean } | null;
+  /** Cure create/edit sheet: `editingId` null = creating a new cure, otherwise
+   *  the id of the cure being edited. null (the field itself) = closed. */
+  cureEditor: { editingId: string | null } | null;
 
   // data
   selectedChildId: string;
@@ -157,12 +212,21 @@ interface AppState {
   entries: Entry[];
   timers: Timer[];
   measurements: Measurement[];
+  /** Per-child medication regimens ("cures"). Synced to Baby Buddy as
+   *  `cure`-tagged notes. Persisted via src/data/cures, which is the local-mode
+   *  store and the offline cache when connected; survives disconnect (user
+   *  data, not the synced entity store). */
+  cures: Cure[];
   lastFeed: { feedType: FeedType; method: FeedMethod };
   insightsEntries: Entry[];
   insightsLoaded: boolean;
   insightsLoading: boolean;
   insightsError: boolean;
   loadInsights: () => Promise<void>;
+  /** Force a re-fetch of the insights history, keeping current charts on screen
+   *  during the load (pull-to-refresh). Unlike loadInsights it ignores the
+   *  loaded guard, and on failure it neither clears data nor sets an error. */
+  reloadInsights: () => Promise<void>;
 
   // read-only Baby Buddy server settings (Settings screen "Baby Buddy" group)
   profile: Profile | null;
@@ -203,6 +267,13 @@ interface AppActions {
     value: boolean,
   ) => void;
   setPumpingInterval: (minutes: number) => void;
+  setSmallWashesPerBig: (n: number) => void;
+  setNapWindow: (startMin: number, endMin: number) => void;
+  setRhythmOriginHour: (hour: number) => void;
+  /** Toggle one Insights "Rhythm" graph layer on/off and persist the choice. */
+  setRhythmLayer: (layer: 'sleep' | 'feeds' | 'diapers', on: boolean) => void;
+  /** Toggle the WHO growth-reference overlay on the metric charts, and persist it. */
+  setGrowthReference: (on: boolean) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -238,7 +309,21 @@ interface AppActions {
   closeChildSheet: () => void;
   openConfirmBirth: (id: string) => void;
   closeConfirmBirth: () => void;
-  saveChild: (fields: { first: string; last: string; birth: number; expected?: boolean; photo?: PhotoChange }) => void;
+  saveChild: (fields: {
+    first: string;
+    last: string;
+    birth: number;
+    expected?: boolean;
+    photo?: PhotoChange;
+    /** the child's gender, or undefined for "not recorded". Synced as a
+     *  `gender`-tagged note, since Baby Buddy's Child has no such field.
+     *
+     *  AUTHORITATIVE on edit, exactly like `first`/`last`/`birth`: passing
+     *  undefined CLEARS a recorded gender (which is how the picker's "Not set"
+     *  works), so an edit caller must always pass the current value. Only the
+     *  create-path callers may omit it. */
+    gender?: ChildGender;
+  }) => void;
   /** Turn an expected child into a born one: clear the flag, set the real birth
    *  date, and release it for sync. The single implementation of that
    *  transition, shared by Home's confirm sheet and the child sheet's toggle. */
@@ -277,6 +362,30 @@ interface AppActions {
   closeMeasurementSheet: () => void;
   saveMeasurement: (value: number, date: number, notes?: string) => void;
   deleteMeasurement: (id: string) => void;
+
+  // cures (medication regimens; synced as `cure`-tagged notes)
+  /** Add a fully-formed cure (the editor stamps id + childId). */
+  addCure: (cure: Cure) => void;
+  /** Replace a cure by id with an updated copy. */
+  updateCure: (cure: Cure) => void;
+  /** Remove a cure by id. */
+  deleteCure: (id: string) => void;
+  /** Open the cure create/edit sheet: no id = create, an id = edit that cure. */
+  openCureEditor: (id?: string) => void;
+  closeCureEditor: () => void;
+  openCurePicker: () => void;
+  closeCurePicker: () => void;
+  /** Medication tile tap: open the cure picker when the selected child has an
+   *  active cure covering today, otherwise open the plain manual log form. */
+  openMedicationLog: () => void;
+  /** Tapping a saved cure: seed the medication draft from it (name/dosage/unit,
+   *  plus the next-dose interval for an interval cure) and open the medication
+   *  sheet in confirm mode (a read-only summary + the time picker), closing the
+   *  picker. No dose is written here; save() commits it once the user confirms. */
+  logMedicationFromCure: (cureId: string) => void;
+  /** Reveal the full editable medication form from the confirm modal: drop the
+   *  `confirm` flag on the medication sheet, keeping the seeded draft. */
+  expandMedicationLog: () => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
   /** One press of the amount stepper: +1 or -1 step in the user's display
    *  units (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
@@ -285,6 +394,7 @@ interface AppActions {
   toggleSolid: () => void;
   /** bath: pick the wash size (small/big) */
   setWash: (wash: 'small' | 'big') => void;
+  setNap: (nap: boolean) => void;
   toggleTag: (tag: string) => void;
   /** Add a brand-new free-form tag as selected. Trims, rejects blank / structural
    *  (HIDDEN_TAGS) names, and no-ops on a tag already selected. */
@@ -395,6 +505,18 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   const serverIds = new Set(serverList.map((r) => r.id));
   const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
   return [...unsynced, ...serverList];
+}
+
+/**
+ * Merge server-loaded cures with the on-device copy. The local list is BOTH the
+ * offline cache and the only home of cures created offline (serverId == null),
+ * so a wholesale refresh must not replace it outright, and incoming cures carry
+ * the server's child id until `remapChildIds` rewrites it. Same shape as the
+ * measurement merge one line up, kept as a named helper because all three load
+ * paths (hydrate / refresh / adopt) need the identical pair of steps.
+ */
+export function mergeCures(serverCures: Cure[], localCures: Cure[], children: Child[]): Cure[] {
+  return mergeUnsynced(remapChildIds(serverCures, children), localCures);
 }
 
 /**
@@ -556,6 +678,19 @@ function childServerIdFor(children: Child[], childId: string): number | null {
   return children.find((c) => c.id === childId)?.serverId ?? null;
 }
 
+// 90-day insights history for a child: local seed rows in demo mode, the server
+// history otherwise (empty for a child that has never been pushed). Shared by
+// loadInsights (first fill) and reloadInsights (manual refresh). Callers guard
+// `connection` and `selectedChildId` before calling.
+async function fetchInsightsEntries(s: AppState, childId: string): Promise<Entry[]> {
+  const conn = s.connection!;
+  if (conn.mode === 'local') return s.entries.filter((e) => e.childId === childId);
+  const childServerId = childServerIdFor(s.children, childId);
+  return childServerId == null
+    ? []
+    : loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
+}
+
 /** Resolve `loadFromServer`'s `selectedChildId` (see repository.ts) into the
  *  RECONCILED (local id) space. That value is `String(children[0]?.serverId)`,
  *  i.e. a SERVER-space id; it is only ever used as a fallback once a caller's
@@ -581,6 +716,7 @@ function buildUploadDeps(conn: Connection): UploadDeps {
     pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
+    pushCure: (c, childServerId) => pushCureToServer(conn, c, childServerId),
   };
 }
 
@@ -627,6 +763,81 @@ function mirrorTimerEdit(get: Get, timer: Timer): void {
       void addPendingOp({ op: 'update', entity: 'timer', payload: timer });
     });
   }
+}
+
+/**
+ * Where a "still ongoing" interval actually started.
+ *
+ * When the draft is an EDIT of an already-logged entry, that entry's own
+ * `start` is the only exact answer. `openEdit` pins the end plus a duration
+ * ROUNDED to whole minutes and leaves the start derived (`end − lasted`), so
+ * the resolved start drifts the moment the user nudges either of those, and the
+ * rounding alone can move it by half a minute. Only prefer the draft's own
+ * start once the user has actually set it (`startEdited`).
+ *
+ * Either way a start later than `now` is clamped to `now`, matching
+ * `adjustTimerStart`/`setTimerStart`: nothing can have started in the future. A
+ * start in the past is kept however old it is.
+ */
+function ongoingStartMs(
+  te: TimeEntryState,
+  entries: Entry[],
+  editingId: string | null,
+  now: number,
+): number {
+  if (!te.startEdited && editingId) {
+    const src = entries.find((e) => e.id === editingId);
+    if (src && 'start' in src) return Math.min(src.start, now);
+  }
+  return Math.min(teStart(te, now) ?? now, now);
+}
+
+/**
+ * Build a running Timer from the log sheet's draft.
+ *
+ * Shared by the two paths that turn a live interval into a timer: starting one
+ * from a fresh draft, and converting an already-logged entry back into one
+ * ("Still ongoing" while editing). Both used to create the timer bare, which
+ * silently dropped a note or an amount the user had just typed, so everything
+ * the draft carries rides along. The per-activity split mirrors
+ * `saveTimerDetails`, so a timer never carries another activity's metadata.
+ *
+ * `notes` and `tags` stay device-local: `encodeTimerName` deliberately keeps
+ * them out of the server timer's name (that grammar is a cross-device wire
+ * format, see serverTimers.ts), so another device picking this timer up sees
+ * the structural fields only.
+ */
+function buildTimerFromDraft(
+  id: string,
+  type: ActivityType,
+  te: TimeEntryState,
+  start: number,
+  childId: string,
+): Timer {
+  const timer: Timer = {
+    id,
+    activity: type,
+    name: ACTIVITY_LABEL[type],
+    start,
+    saveAs: type,
+    childId,
+    notes: te.notes?.trim() || undefined,
+    tags: te.tags,
+  };
+  if (type === 'feeding') {
+    timer.feedType = te.feedType;
+    timer.method = te.method;
+    timer.startSide = te.startSide;
+    timer.amount = te.amount;
+  } else if (type === 'pumping') {
+    timer.method = te.method;
+    timer.amount = te.amount;
+  } else if (type === 'sleep') {
+    timer.nap = te.nap;
+  } else if (type === 'tummy') {
+    timer.milestone = te.milestone;
+  }
+  return timer;
 }
 
 /** Mirror a stop/discard: delete the server timer (online) or queue the delete
@@ -678,10 +889,56 @@ function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSys
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
-// The most recently deleted entry, held so an "Undo" toast can restore it.
+// The most recently removed entry, held so an "Undo" toast can restore it.
 // `didServerDelete` records whether the delete actually reached the server, so
 // undo only re-creates it server-side when a server record was really removed.
-let lastDeleted: { entry: Entry; index: number; didServerDelete: boolean } | null = null;
+// `timerId` is set when the entry was REPLACED by a running timer ("Still
+// ongoing" on a logged entry): undo must discard that timer in the same step,
+// so the user can never end up holding both. `requeue` records that the entry
+// came off the offline write queue and has to go back on it.
+let lastDeleted: {
+  entry: Entry;
+  index: number;
+  didServerDelete: boolean;
+  timerId?: string;
+  requeue: boolean;
+} | null = null;
+
+/**
+ * Take an entry out of circulation everywhere it might still exist, and record
+ * what Undo needs to put it back. Shared by `deleteEntry` and by `save()`'s
+ * convert-to-timer path, which removes the entry for the same reason: it is not
+ * an entry any more.
+ *
+ * The write-queue scrub is the non-obvious half. An entry created offline sits
+ * on `babybuddy.queue.v1` until a reconnect, and `flushQueue` pushes whatever it
+ * finds there without consulting `entries`, so without this the deleted entry
+ * would be POSTed on reconnect anyway, resurrecting it (and, on the convert
+ * path, duplicating the timer that replaced it).
+ *
+ * Caller removes the entry from `entries`; this only handles what lives outside
+ * the store.
+ */
+function detachEntry(get: Get, set: Set, entry: Entry, index: number, timerId?: string): void {
+  const s = get();
+  const conn = s.connection;
+  const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
+  const record = { entry, index, didServerDelete, timerId, requeue: false };
+  lastDeleted = record;
+  if (didServerDelete) {
+    void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
+  } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
+    // Already on the server, removed while offline: record the delete so it
+    // replays on reconnect instead of the record resurrecting on the next refresh().
+    void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
+  }
+  void removeQueuedEntry(entry.id).then(({ removed, queue }) => {
+    if (!removed) return;
+    set({ queueCount: queue.length });
+    record.requeue = true;
+  });
+}
+
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
@@ -701,6 +958,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   themeMode: 'dark',
   unitSystem: 'metric',
+  showGrowthReference: true,
   tutorialSeen: false,
   dueDateReminders: true,
   staleTimerReminders: true,
@@ -709,6 +967,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pumpingIntervalMin: 180,
   pumpingEnabledAt: null,
   napSuggestions: false,
+  smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
+  napWindowStartMin: NAP_WINDOW_START_DEFAULT,
+  napWindowEndMin: NAP_WINDOW_END_DEFAULT,
+  rhythmOriginHour: RHYTHM_ORIGIN_DEFAULT,
+  rhythmShowSleep: true,
+  rhythmShowFeeds: true,
+  rhythmShowDiapers: true,
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -726,6 +991,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   measurementSheet: null,
   editingMeasurementId: null,
   milestoneSheet: null,
+  curePicker: null,
+  cureEditor: null,
   answeredMilestonePrompts: {},
 
   selectedChildId: '',
@@ -733,6 +1000,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   entries: [],
   timers: [],
   measurements: [],
+  cures: [],
   lastFeed: { feedType: 'breast', method: 'left' },
   insightsEntries: [],
   insightsLoaded: false,
@@ -792,6 +1060,44 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ pumpingIntervalMin: minutes });
     void savePrefs({ pumpingIntervalMin: minutes });
   },
+  setSmallWashesPerBig: (n) => {
+    // Clamp before storing so a bad value can never reach persistence, and so
+    // the number shown in Settings is the one the rhythm actually uses.
+    const v = clampSmallWashesPerBig(n);
+    set({ smallWashesPerBig: v });
+    void savePrefs({ smallWashesPerBig: v });
+  },
+  setNapWindow: (startMin, endMin) => {
+    // Both endpoints move together in one action, so the pair is always written
+    // as a unit. Two independent setters would each do a load-then-merge inside
+    // savePrefs, and back-to-back edits could interleave and drop one endpoint.
+    const start = clampMinuteOfDay(startMin, NAP_WINDOW_START_DEFAULT);
+    const end = clampMinuteOfDay(endMin, NAP_WINDOW_END_DEFAULT);
+    set({ napWindowStartMin: start, napWindowEndMin: end });
+    void savePrefs({ napWindowStartMin: start, napWindowEndMin: end });
+  },
+  setRhythmOriginHour: (hour) => {
+    const h = clampHourOfDay(hour, RHYTHM_ORIGIN_DEFAULT);
+    set({ rhythmOriginHour: h });
+    void savePrefs({ rhythmOriginHour: h });
+  },
+  setRhythmLayer: (layer, on) => {
+    set((s) => ({
+      rhythmShowSleep: layer === 'sleep' ? on : s.rhythmShowSleep,
+      rhythmShowFeeds: layer === 'feeds' ? on : s.rhythmShowFeeds,
+      rhythmShowDiapers: layer === 'diapers' ? on : s.rhythmShowDiapers,
+    }));
+    const s = get();
+    void savePrefs({
+      rhythmShowSleep: s.rhythmShowSleep,
+      rhythmShowFeeds: s.rhythmShowFeeds,
+      rhythmShowDiapers: s.rhythmShowDiapers,
+    });
+  },
+  setGrowthReference: (on) => {
+    set({ showGrowthReference: on });
+    void savePrefs({ showGrowthReference: on });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -830,6 +1136,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
     if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });
     if (prefs.staleTimerReminders != null) set({ staleTimerReminders: prefs.staleTimerReminders });
@@ -838,9 +1145,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
     if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
     if (prefs.napSuggestions != null) set({ napSuggestions: prefs.napSuggestions });
+    // `!= null`, not a truthy guard: this one is a number, and a truthy check
+    // would silently discard a legitimately stored value at the low end.
+    if (prefs.smallWashesPerBig != null) {
+      set({ smallWashesPerBig: clampSmallWashesPerBig(prefs.smallWashesPerBig) });
+    }
+    // Same `!= null` reasoning, and it bites harder here: 0 is midnight, a
+    // perfectly ordinary boundary, and a truthy guard would silently drop it.
+    if (prefs.napWindowStartMin != null) {
+      set({ napWindowStartMin: clampMinuteOfDay(prefs.napWindowStartMin, NAP_WINDOW_START_DEFAULT) });
+    }
+    if (prefs.napWindowEndMin != null) {
+      set({ napWindowEndMin: clampMinuteOfDay(prefs.napWindowEndMin, NAP_WINDOW_END_DEFAULT) });
+    }
+    if (prefs.rhythmOriginHour != null) {
+      set({ rhythmOriginHour: clampHourOfDay(prefs.rhythmOriginHour, RHYTHM_ORIGIN_DEFAULT) });
+    }
+    // `!= null`, not truthy: these are booleans and `false` (a hidden layer) is
+    // exactly the state worth remembering, which a truthy guard would drop.
+    if (prefs.rhythmShowSleep != null) set({ rhythmShowSleep: prefs.rhythmShowSleep });
+    if (prefs.rhythmShowFeeds != null) set({ rhythmShowFeeds: prefs.rhythmShowFeeds });
+    if (prefs.rhythmShowDiapers != null) set({ rhythmShowDiapers: prefs.rhythmShowDiapers });
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
+    // Cures are user data that survives disconnect, so load the on-device copy
+    // unconditionally here, exactly like timers below. In server mode this is
+    // the offline cache the freshly-loaded server list merges on top of (see
+    // `mergeCures`); in local mode it is the only copy.
+    set({ cures: await loadCures() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -940,6 +1273,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // via `mergeHeldBackEntries`, on top of the normal queue merge.
         entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
         timers: reconcileTimers(savedTimers, remappedTimers),
+        // `get().cures` was filled from on-device storage a few lines up, so it
+        // is the offline cache the server list merges on top of.
+        cures: mergeCures(data.cures, get().cures, reconciledChildren),
         selectedChildId,
       });
       void get().flushQueue();
@@ -1063,6 +1399,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // warm reload, not a cold restart), never on the server, so merge
         // them back the same way `hydrate()` does from the entity store.
         entries: mergeHeldBackEntries(remappedEntries, s.entries, reconciledChildren),
+        cures: mergeCures(data.cures, s.cures, reconciledChildren),
         selectedChildId,
         timers: reconcileTimers(localTimers, remappedTimers),
       });
@@ -1145,6 +1482,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: st.children.map((c) => ({ ...c, serverId: undefined })),
         entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
         measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
+        cures: st.cures.map((c) => ({ ...c, serverId: undefined })),
         timers: st.timers.map((t) => ({ ...t, serverId: undefined })),
       }));
     }
@@ -1164,7 +1502,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     const s = get();
-    let state = { children: s.children, entries: s.entries, measurements: s.measurements };
+    let state = { children: s.children, entries: s.entries, measurements: s.measurements, cures: s.cures };
     if (hasData && opts?.uploadAnyway) {
       // Dedup: attach each not-yet-synced local child to a matching existing
       // server child (by name + birth date) instead of duplicating it.
@@ -1194,6 +1532,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: result.children,
       entries: result.entries.map((e) => (e.heldBack && e.serverId != null ? { ...e, heldBack: false } : e)),
       measurements: result.measurements,
+      cures: result.cures ?? s.cures,
     });
 
     // An expected child is deliberately held back from the server (its
@@ -1205,7 +1544,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const stillUnsynced =
       result.children.some((c) => c.serverId == null && !c.expected) ||
       result.entries.some((e) => e.serverId == null && !expectingChildIds.has(e.childId)) ||
-      result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId));
+      result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId)) ||
+      (result.cures ?? []).some((c) => c.serverId == null && !expectingChildIds.has(c.childId));
     if (stillUnsynced) {
       // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
       // retry against the SAME server doesn't wrongly reset the ids we just stamped.
@@ -1270,6 +1610,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: reconciledChildren,
       entries: mergedEntries,
       measurements: mergedMeasurements,
+      cures: mergeCures(data.cures, get().cures, reconciledChildren),
       timers: remappedTimers,
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
@@ -1394,6 +1735,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
               children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
             }));
           }
+          // Gender lives in its own `gender`-tagged note, not on the child
+          // record, so replay it as a second write. Deliberately AFTER the slug
+          // re-stamp above and deliberately NOT caught: a failure here re-queues
+          // the whole op, and replaying the child PATCH is idempotent, so the
+          // gender change gets retried instead of being silently dropped.
+          if (payload.serverId != null) {
+            await setChildGenderOnServer(conn, payload.serverId, payload.gender, Date.now());
+          }
         } else if (op.op === 'update' && op.entity === 'measurement') {
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           // Child not on the server (edge case: the entity was synced but the
@@ -1405,7 +1754,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           if (childServerId == null) throw new Error('child not synced');
           await updateEntryOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+        } else if (op.op === 'update' && op.entity === 'cure') {
+          const childServerId = childServerIdFor(s.children, op.payload.childId);
+          if (childServerId == null) throw new Error('child not synced');
+          await updateCureOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'delete' && op.entity === 'cure') await deleteCureFromServer(conn, op.serverId);
+        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
         else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
         else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
@@ -1440,12 +1794,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const hasUnsynced =
         s.children.some((c) => c.serverId == null) ||
         s.measurements.some((m) => m.serverId == null) ||
+        s.cures.some((c) => c.serverId == null) ||
         heldBackEntries.length > 0;
       const hasUnsyncedTimer = s.timers.some((t) => t.serverId == null);
       if (!hasUnsynced && !hasUnsyncedTimer) return;
       if (hasUnsynced) {
         const result = await uploadUnsynced(
-          { children: s.children, entries: heldBackEntries, measurements: s.measurements },
+          { children: s.children, entries: heldBackEntries, measurements: s.measurements, cures: s.cures },
           buildUploadDeps(conn),
         );
         // Count only records that WERE serverId==null in the pre-upload snapshot
@@ -1458,7 +1813,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           s.measurements.filter(
             (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
           ).length +
-          heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length;
+          heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length +
+          s.cures.filter(
+            (c) => c.serverId == null && (result.cures ?? []).find((r) => r.id === c.id)?.serverId != null,
+          ).length;
         // Functional merge-by-id (reads the CURRENT state via `st`, not the
         // pre-await snapshot `s`) that only stamps serverIds, so a create that
         // landed during the await isn't dropped by a wholesale replace.
@@ -1470,6 +1828,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           measurements: st.measurements.map((m) => {
             const u = result.measurements.find((r) => r.id === m.id);
             return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
+          }),
+          cures: st.cures.map((c) => {
+            const u = (result.cures ?? []).find((r) => r.id === c.id);
+            return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
           }),
           entries: st.entries.map((e) => {
             const u = result.entries.find((r) => r.id === e.id);
@@ -1543,10 +1905,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
       } else {
         void pushEntryToServer(conn, entry, childServerId)
           .then((serverId) => {
-            if (serverId != null) {
+            if (serverId == null) return;
+            if (get().entries.some((e) => e.id === entry.id)) {
               set((st) => ({
                 entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
               }));
+            } else {
+              // Deleted, or replaced by a running timer, while the POST was in
+              // flight: the local record never got the serverId, so nothing
+              // else can ever remove the copy this call just created. Delete the
+              // orphan here, the same way `mirrorTimerCreate` does for timers.
+              void deleteEntryFromServer(conn, entry.type, serverId).catch(() => {});
             }
           })
           .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
@@ -1603,8 +1972,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         first: fields.first,
         last: fields.last,
         birth: fields.birth,
+        gender: fields.gender,
         picture: change.kind === 'none' ? existing.picture : pending,
       };
+      const genderChanged = existing.gender !== child.gender;
       set({
         children: s.children.map((c) => (c.id === child.id ? child : c)),
         childSheet: false,
@@ -1613,6 +1984,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
       get().showToast('Updated');
       const conn = s.connection;
       if (conn && conn.mode === 'server' && !s.offline) {
+        // Gender lives in its own `gender`-tagged note, not on the child record,
+        // so it is a separate write. Fired only on an actual change: it costs a
+        // read before its write, and a plain rename should not pay for that.
+        if (genderChanged && child.serverId != null) {
+          void setChildGenderOnServer(conn, child.serverId, child.gender, Date.now()).catch(() => {});
+        }
         void updateChildOnServer(conn, child, change)
           .then((res) => {
             if (!res) return;
@@ -1650,6 +2027,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       last: fields.last,
       birth: fields.birth,
       expected: fields.expected,
+      gender: fields.gender,
       color: childColor(s.children.length),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
@@ -1685,6 +2063,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 : c,
             ),
           }));
+          // The gender note references the child by SERVER id, so it can only be
+          // written once the POST above has produced one.
+          if (child.gender != null) {
+            void setChildGenderOnServer(conn, res.id, child.gender, Date.now()).catch(() => {});
+          }
         })
         .catch(() => {});
     }
@@ -1855,32 +2238,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- insights (lazy deep-history load) ----
+  // Demo mode scopes the local seed history to the child; server mode fetches
+  // the child's SERVER-id-keyed 90-day history (empty, not an error, for a child
+  // never pushed). See `fetchInsightsEntries`.
   loadInsights: async () => {
     const s = get();
     if (s.insightsLoaded || s.insightsLoading) return;
-    const conn = s.connection;
+    if (!s.connection || !s.selectedChildId) return;
     const childId = s.selectedChildId;
-    if (!conn || !childId) return;
     set({ insightsLoading: true, insightsError: false });
     try {
-      // Demo: the store's `entries` hold the local seed history for ALL
-      // children — scope to the selected child, matching the per-child fetch.
-      // Server mode: the API takes the child's SERVER id (see
-      // `childServerIdFor`), not Budkin's local id, which is what
-      // `selectedChildId` is post-reconciliation. A child that has never been
-      // pushed has no server id yet, so there is nothing to fetch: that is
-      // not an error, just an empty result until the child syncs.
-      let entries: Entry[];
-      if (conn.mode === 'local') {
-        entries = s.entries.filter((e) => e.childId === childId);
-      } else {
-        const childServerId = childServerIdFor(s.children, childId);
-        entries = childServerId == null
-          ? []
-          : await loadInsightsHistory(conn, String(childServerId), s.now - 90 * 86400000);
-      }
+      const entries = await fetchInsightsEntries(s, childId);
       if (get().selectedChildId !== childId) {
-        // A child switch landed while this fetch was in flight — discard the
+        // A child switch landed while this fetch was in flight: discard the
         // stale result and load for the now-selected child instead.
         set({ insightsLoading: false });
         get().loadInsights();
@@ -1889,6 +2259,32 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false });
     } catch {
       set({ insightsLoading: false, insightsError: true });
+    }
+  },
+
+  reloadInsights: async () => {
+    const s = get();
+    // Do NOT gate on insightsLoaded: forcing a re-fetch is the whole point.
+    // Still bail if an initial load is already running, or there is nothing to fetch.
+    if (s.insightsLoading) return;
+    if (!s.connection || !s.selectedChildId) return;
+    const childId = s.selectedChildId;
+    // Leave insightsEntries / insightsLoaded in place so the charts stay on
+    // screen while the fetch runs (no flash to the full-screen loading state).
+    set({ insightsLoading: true });
+    try {
+      const entries = await fetchInsightsEntries(s, childId);
+      if (get().selectedChildId !== childId) {
+        // Child switch landed mid-flight; that child's mount effect will load it.
+        set({ insightsLoading: false });
+        return;
+      }
+      set({ insightsEntries: entries, insightsLoaded: true, insightsLoading: false, insightsError: false });
+    } catch {
+      // Manual refresh failed: keep the existing charts, drop the spinner, and
+      // leave insightsError untouched so a good screen is not replaced by the
+      // error state (and a pre-existing error stays put for its own retry button).
+      set({ insightsLoading: false });
     }
   },
 
@@ -1976,16 +2372,33 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.color = 'yellow';
     }
     if (type === 'sleep') {
-      const hr = new Date().getHours();
-      te.nap = hr >= 7 && hr < 19;
+      // Seed from the nap window, classified on the draft's START. `te` opens
+      // as an interval ending now, so the start is `now - durationMin`; using
+      // `now` would misread a long sleep that began on the other side of the
+      // window boundary. The user can still override with the Nap/Night toggle,
+      // and whatever `te.nap` holds at save time is what gets saved.
+      // `s.now` rather than `Date.now()` so the seed is computed against the
+      // very clock `save()` will resolve the draft with.
+      const now = get().now;
+      te.nap = isNapStart(teStart(te, now) ?? now, {
+        startMin: get().napWindowStartMin,
+        endMin: get().napWindowEndMin,
+      });
     }
     if (type === 'bath') {
-      // Pre-select the wash that's due from the small/big rhythm.
-      te.wash = nextWashKind(get().entries);
+      // Pre-select the wash that's due from the small/big rhythm. Scoped to the
+      // selected child: `entries` holds every child's records, so an unscoped
+      // read would let a sibling's baths decide this child's next wash.
+      te.wash = nextWashKind(entriesForChild(get().entries, get().selectedChildId), get().smallWashesPerBig);
     }
     if (type === 'temperature') {
       // Seed a normal baseline so the decimal input opens on a sensible value.
       te.temperature = 37.0;
+    }
+    if (type === 'medication') {
+      // Blank name/amount — the medication inputs open empty; the unit is unset
+      // until the user picks a chip or types one.
+      te.medName = '';
     }
     if (type === 'note') {
       // Blank body — the multiline note input opens empty.
@@ -2007,6 +2420,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       entry.type === 'diaper' ||
       entry.type === 'bath' ||
       entry.type === 'temperature' ||
+      entry.type === 'medication' ||
       entry.type === 'note' ||
       entry.type === 'milestone';
     const te: TimeEntryState = {
@@ -2032,6 +2446,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
       te.temperature = entry.value;
+    } else if (entry.type === 'medication') {
+      // Notes are seeded above (medication isn't bath/note/milestone); hydrate
+      // the name + amount + free-text unit from the existing entry.
+      te.absTime = entry.time;
+      te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
+      te.medName = entry.name;
+      te.medDosage = entry.dosage;
+      te.medUnit = entry.dosageUnit;
+      // Carry any next-dose interval so re-saving an edit doesn't drop it.
+      te.medNextDoseIntervalSec = entry.nextDoseIntervalSec;
     } else if (entry.type === 'note') {
       te.absTime = entry.time;
       te.agoMin = Math.max(0, Math.round((now - entry.time) / 60000));
@@ -2106,8 +2530,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.method = tm.method ?? 'both';
     }
     if (type === 'sleep') {
-      const hr = new Date().getHours();
-      te.nap = tm.nap ?? (hr >= 7 && hr < 19);
+      // The timer's own start is the classifying instant, not "now": a nap
+      // begun at 13:00 and still running at 19:30 is a nap. An explicit
+      // `tm.nap` (the user already chose) always wins.
+      te.nap = tm.nap ?? isNapStart(tm.start, { startMin: s.napWindowStartMin, endMin: s.napWindowEndMin });
     }
     if (type === 'tummy' && tm.milestone != null) te.milestone = tm.milestone;
     if (tm.notes != null) te.notes = tm.notes;
@@ -2124,36 +2550,39 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const index = s.entries.findIndex((e) => e.id === id);
     if (index === -1) return;
     const entry = s.entries[index];
-    const conn = s.connection;
-    const didServerDelete = entry.serverId != null && !!conn && conn.mode === 'server' && !s.offline;
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
       editingId: s.editingId === id ? null : s.editingId,
     });
-    lastDeleted = { entry, index, didServerDelete };
-    if (didServerDelete) {
-      void deleteEntryFromServer(conn, entry.type, entry.serverId as number).catch(() => {});
-    } else if (entry.serverId != null && !!conn && conn.mode === 'server' && s.offline) {
-      // Already on the server, deleted while offline: record the delete so it
-      // replays on reconnect instead of the record resurrecting on the next refresh().
-      void addPendingOp({ op: 'delete', entity: 'entry', entryType: entry.type, serverId: entry.serverId });
-    }
+    detachEntry(get, set, entry, index);
     get().showToast('Deleted', { label: 'Undo', run: () => get().undoDelete() });
   },
   undoDelete: () => {
     const d = lastDeleted;
     if (!d) return;
     lastDeleted = null;
+    // The entry was replaced by a running timer: discard that timer in the same
+    // step, so undo can never leave the user holding the entry AND the timer.
+    const timer = d.timerId ? get().timers.find((t) => t.id === d.timerId) : undefined;
     set((s) => {
-      if (s.entries.some((e) => e.id === d.entry.id)) return {};
-      const next = s.entries.slice();
-      next.splice(Math.min(d.index, next.length), 0, d.entry);
-      return { entries: next };
+      const patch: Partial<AppState> = {};
+      if (!s.entries.some((e) => e.id === d.entry.id)) {
+        const next = s.entries.slice();
+        next.splice(Math.min(d.index, next.length), 0, d.entry);
+        patch.entries = next;
+      }
+      if (d.timerId) patch.timers = s.timers.filter((t) => t.id !== d.timerId);
+      return patch;
     });
-    // Only re-create server-side if the delete actually removed a server record;
-    // a local-only (offline/demo) delete leaves the server copy intact.
-    if (d.didServerDelete) get().commitWrite(d.entry);
+    // Drop the server mirror too. A timer whose create POST hasn't landed yet
+    // has no serverId to delete, but `mirrorTimerCreate` cleans that orphan up
+    // itself once the POST resolves and the timer is gone from the store.
+    if (timer) mirrorTimerDelete(get, timer);
+    // Re-create server-side only if the removal actually took something away:
+    // a real server record, or a place in the not-yet-flushed write queue. A
+    // local-only (offline/demo) delete leaves the server copy intact.
+    if (d.didServerDelete || d.requeue) get().commitWrite(d.entry);
     // Cancel any queued offline pending-delete op for this entry so it doesn't
     // replay on reconnect and delete the just-restored record out from under the
     // user. Harmless no-op if no such op was recorded (online delete, or a
@@ -2297,6 +2726,99 @@ export const useAppStore = create<AppStore>((set, get) => ({
       void addPendingOp({ op: 'delete', entity: 'measurement', kind: m.kind, serverId: m.serverId });
     }
   },
+
+  // --- cures (medication regimens) ---
+  // Offline-first, exactly like measurements: the local write lands first and
+  // the server mirror is fire-and-forget, with an offline edit/delete recorded
+  // as a pending op so it replays on reconnect. A cure rides on the server as a
+  // `cure`-tagged note (see `cureToNoteBody`). The `cures` subscribe at the
+  // bottom of this file persists every change to on-device storage, which is
+  // both the local-mode store and the offline cache when connected.
+  addCure: (cure) => {
+    const s = get();
+    set({ cures: [cure, ...s.cures] });
+    const conn = s.connection;
+    if (conn && conn.mode === 'server' && !s.offline) {
+      const childServerId = childServerIdFor(s.children, cure.childId);
+      // No server id for the child yet (an expecting child, say): leave the cure
+      // unstamped and let flushUnsynced push it once the child lands.
+      if (childServerId != null) {
+        void pushCureToServer(conn, cure, childServerId)
+          .then((serverId) => {
+            if (serverId != null) {
+              set((st) => ({ cures: st.cures.map((c) => (c.id === cure.id ? { ...c, serverId } : c)) }));
+            }
+          })
+          .catch(() => {});
+      }
+    }
+    // A cure created offline needs no pending op: its create is still pending,
+    // and flushUnsynced picks it up by serverId == null.
+  },
+  updateCure: (cure) => {
+    const s = get();
+    set({ cures: s.cures.map((c) => (c.id === cure.id ? cure : c)) });
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server') return;
+    const childServerId = childServerIdFor(s.children, cure.childId);
+    if (!s.offline) {
+      if (childServerId != null && cure.serverId != null) {
+        void updateCureOnServer(conn, cure, childServerId).catch(() => {});
+      }
+    } else if (cure.serverId != null) {
+      void addPendingOp({ op: 'update', entity: 'cure', payload: cure });
+    }
+  },
+  deleteCure: (id) => {
+    const s = get();
+    const cure = s.cures.find((c) => c.id === id);
+    set({
+      cures: s.cures.filter((c) => c.id !== id),
+      // If the sheet is open on the cure being deleted, close it.
+      cureEditor: s.cureEditor?.editingId === id ? null : s.cureEditor,
+    });
+    const conn = s.connection;
+    if (!cure || cure.serverId == null || !conn || conn.mode !== 'server') return;
+    if (!s.offline) void deleteCureFromServer(conn, cure.serverId).catch(() => {});
+    else void addPendingOp({ op: 'delete', entity: 'cure', serverId: cure.serverId });
+  },
+  openCureEditor: (id) => set({ cureEditor: { editingId: id ?? null } }),
+  closeCureEditor: () => set({ cureEditor: null }),
+  openCurePicker: () => set({ curePicker: { open: true } }),
+  closeCurePicker: () => set({ curePicker: null }),
+  openMedicationLog: () => {
+    const s = get();
+    // Scope to the selected child and to cures whose range covers today; if none,
+    // there is nothing to pick from, so skip straight to the manual form rather
+    // than opening an empty picker. `s.now` (not the wall clock) keys "today".
+    const active = activeCuresForChildToday(s.cures, s.selectedChildId, startOfDay(s.now));
+    if (active.length > 0) set({ curePicker: { open: true } });
+    else get().openSheet('medication');
+  },
+  logMedicationFromCure: (cureId) => {
+    const cure = get().cures.find((c) => c.id === cureId);
+    if (!cure) return;
+    // A cure always carries a name (the editor requires one), but gate on it the
+    // same way save() gates a manual dose so a nameless record can never be seeded.
+    if (!cure.name.trim()) return;
+    // Confirm-before-log: seed a fresh point medication draft from the cure and
+    // open the sheet in confirm mode (read-only summary + time picker). No entry
+    // is written here; save() commits it once the user confirms. openSheet resets
+    // the draft to a blank point medication form, so seed it afterwards.
+    get().openSheet('medication');
+    const patch: Partial<TimeEntryState> = {
+      medName: cure.name,
+      medDosage: cure.dosage,
+      medUnit: cure.dosageUnit,
+      // Only an interval cure carries a next-dose interval onto the dose; a
+      // times-of-day cure leaves it unset.
+      medNextDoseIntervalSec:
+        cure.scheduleMode === 'everyHours' && cure.everyHours != null ? cure.everyHours * 3600 : undefined,
+    };
+    set((s) => ({ curePicker: null, sheet: { type: 'medication', confirm: true }, te: { ...s.te, ...patch } }));
+  },
+  expandMedicationLog: () => set({ sheet: { type: 'medication' } }),
+
   setTE: (patch) =>
     set((s) => {
       const next = { ...s.te, ...patch };
@@ -2333,6 +2855,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
   setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),
+  // Manual Nap/Night override for the sleep sheet. No companion "user touched
+  // this" flag is needed: the sheet seeds `te.nap` from the window on open and
+  // saves whatever `te.nap` holds, so a flip here simply wins.
+  setNap: (nap) => set((s) => ({ te: { ...s.te, nap } })),
   toggleTag: (tag) =>
     set((s) => {
       const has = s.te.tags.includes(tag);
@@ -2373,9 +2899,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return { te: next };
     }),
+  // Going live pins the start, because the end becomes "now" and can no longer
+  // anchor it. Editing a logged entry, that pin must be the entry's OWN start,
+  // not the draft's derived one (see `ongoingStartMs`), so the sheet shows the
+  // same instant the resulting timer will carry.
   setOngoing: () =>
     set((s) => {
-      const startMs = teStart(s.te, s.now) ?? s.now;
+      const startMs = ongoingStartMs(s.te, s.entries, s.editingId, s.now);
       return { te: { ...s.te, ongoing: true, startAbs: startMs, order: ['end', 'start', 'lasted'] } };
     }),
   setLasted: (min) =>
@@ -2406,7 +2936,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setStartedAt: (ms, anchor) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'start');
-      const next = { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined };
+      const next = { ...s.te, startAbs: ms, startAnchor: anchor, startAgoMin: undefined, startEdited: true };
       if (ov) {
         next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
         next.endAgoMin = undefined;
@@ -2419,7 +2949,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setStartedAgo: (min) =>
     set((s) => {
       const ov = overruleLasted(s.te, s.now, 'start');
-      const next = { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined };
+      const next = { ...s.te, startAbs: undefined, startAgoMin: min, startAnchor: undefined, startEdited: true };
       if (ov) {
         next.endAbs = ov.frozen; // freeze the un-nudged end so lasted no longer drives it
         next.endAgoMin = undefined;
@@ -2448,6 +2978,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // A general note whose body trims to empty isn't worth saving — no-op and
     // leave the sheet open (the X closes it) so a stray tap can't create a blank.
     if (type === 'note' && !s.te.noteText?.trim()) return;
+    // A medication needs a name to be worth saving — same gate as a note's body
+    // (the amount + unit stay optional). No-op and leave the sheet open.
+    if (type === 'medication' && !s.te.medName?.trim()) return;
     const te = s.te;
     const now = s.now;
     const childId = s.selectedChildId;
@@ -2533,6 +3066,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
         notes: te.notes?.trim() || undefined,
         tags,
       };
+    } else if (type === 'medication') {
+      // medication (point) — a real Baby Buddy /api/medication/ resource. Name is
+      // guaranteed non-empty by the guard above; amount + free-text unit are
+      // optional. `nextDoseIntervalSec` is seeded from an interval cure when the
+      // dose was logged from one (else undefined), and is preserved across edits.
+      entry = {
+        id,
+        childId,
+        type: 'medication',
+        time: teEnd(te, now),
+        name: te.medName?.trim() ?? '',
+        dosage: te.medDosage,
+        dosageUnit: te.medUnit?.trim() || undefined,
+        nextDoseIntervalSec: te.medNextDoseIntervalSec,
+        notes: te.notes?.trim() || undefined,
+        tags,
+      };
     } else if (type === 'note') {
       // note (point) — the trimmed body is the primary content (guaranteed
       // non-empty by the blank-note guard above)
@@ -2569,22 +3119,44 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // this field replaced.
     entry.heldBack = existing?.heldBack;
 
-    // live interval => create a running timer instead of an entry (create only)
-    if (!existing && te.ongoing && te.shape === 'interval') {
-      const timer: Timer = {
-        id: 't' + Date.now(),
-        activity: type,
-        name: ACTIVITY_LABEL[type],
-        start: teStart(te, now) as number,
-        saveAs: type,
-        childId,
-      };
+    // A live interval is a running timer, never an entry.
+    //
+    // On a fresh draft that is the plain "start live timer" path. On an EDIT it
+    // is a conversion: the user has told us the activity never ended, so the
+    // finished entry is simply wrong and gets REPLACED. Patching it to
+    // `end: null` (what this used to fall through to) is not a timer at all,
+    // and the API client pushes such an entry as `end: entry.end ?? entry.start`,
+    // a zero-length record that the next refresh() then copies back over the
+    // local one. So the entry is deleted, on the server too, and a timer
+    // carrying the same settings and the same original start takes its place.
+    //
+    // Undo is transactional (see `undoDelete`): it restores the entry and
+    // discards the timer together, so the user can never hold both.
+    if (te.ongoing && te.shape === 'interval') {
+      // A timer belongs to whoever the record was about, not to whoever happens
+      // to be selected. Same rule `stopTimer` follows in reverse.
+      const timerChildId = existing?.childId ?? childId;
+      const timer = buildTimerFromDraft(
+        't' + Date.now(),
+        type,
+        te,
+        ongoingStartMs(te, s.entries, s.editingId, now),
+        timerChildId,
+      );
+      const index = existing ? s.entries.findIndex((e) => e.id === existing.id) : -1;
       set({
+        entries: existing ? s.entries.filter((e) => e.id !== existing.id) : s.entries,
         timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
         sheet: null,
+        editingId: null,
         fromTimerId: null,
       });
-      get().showToast('Live timer started');
+      if (existing) {
+        detachEntry(get, set, existing, index, timer.id);
+        get().showToast('Replaced with a live timer', { label: 'Undo', run: () => get().undoDelete() });
+      } else {
+        get().showToast('Live timer started');
+      }
       mirrorTimerCreate(get, set, timer.id);
       return;
     }
@@ -2653,6 +3225,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       patch.method = te.method;
       patch.amount = te.amount;
     } else if (tm.saveAs === 'sleep') {
+      // KNOWN LIMITATION: an explicit "Night sleep" choice on a RUNNING timer is
+      // device-local. The cross-device wire format in serverTimers.ts encodes
+      // the flag as a bare presence token (`nap` is pushed only when true), so
+      // `nap: false` round-trips back as `undefined` and another device
+      // re-derives it from its own nap window. Storing it locally is still
+      // right: this device honours the choice, and stopping the timer here
+      // produces the entry the user asked for. Adding a `night` token would fix
+      // it but would change a versioned format that is explicitly frozen, so
+      // the encoding is deliberately left alone.
       patch.nap = te.nap;
     } else if (tm.saveAs === 'tummy') {
       patch.milestone = te.milestone;
@@ -2721,7 +3302,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {
-      entry = buildSleepEntry(tm, resolvedEnd, childId);
+      entry = buildSleepEntry(tm, resolvedEnd, childId, {
+        startMin: s.napWindowStartMin,
+        endMin: s.napWindowEndMin,
+      });
     }
     set({ timers: s.timers.filter((t) => t.id !== id), entries: [entry, ...s.entries] });
     get().commitWrite(entry);
@@ -2772,6 +3356,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
 // updates keep the same reference, so this writes only on an actual change.
 useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
+});
+
+// Persist cures the same single-path way as timers: a reference change
+// (add/update/delete replaces the array) writes the whole list to on-device
+// storage. This is persistence ONLY — the server mirror is the cure actions'
+// job, so a serverId stamped by a push lands here through the same subscribe.
+// Deliberately NOT cleared on disconnect (see `disconnect`).
+useAppStore.subscribe((state, prev) => {
+  if (state.cures !== prev.cures) void saveCures(state.cures);
 });
 
 // Persist the durable local-mode entities to on-device storage whenever they

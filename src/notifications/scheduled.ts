@@ -151,6 +151,7 @@ export const STALE_AFTER_MIN: Record<ActivityType, number | null> = {
   diaper: null,
   bath: null,
   temperature: null,
+  medication: null,
   note: null,
   milestone: null,
 };

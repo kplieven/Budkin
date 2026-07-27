@@ -38,6 +38,14 @@ export interface TimeEntryState {
   /** start as "minutes ago" when set via a "Xm ago" chip (mirrors endAgoMin);
    *  resolved live so it stays that many minutes before now */
   startAgoMin?: number;
+  /**
+   * The user set the start THEMSELVES (a "Started" chip or the clock), as
+   * opposed to it being derived from `end − lasted` or frozen by a nudge to the
+   * other endpoint. Editing a logged entry leaves the start derived, so it
+   * slides whenever the end or the duration moves; "Still ongoing" consults
+   * this to decide whether the entry's own recorded start still stands.
+   */
+  startEdited?: boolean;
   /** duration in minutes (the "lasted" quantity) */
   durationMin?: number;
 
@@ -62,6 +70,15 @@ export interface TimeEntryState {
   wash?: 'small' | 'big';
   /** temperature (point): the numeric reading being entered (°C) */
   temperature?: number;
+  /** medication (point): the medication name being entered (required to save) */
+  medName?: string;
+  /** medication (point): the amount given (paired with `medUnit`) */
+  medDosage?: number;
+  /** medication (point): the free-text dosage unit (e.g. "mg", "mL") */
+  medUnit?: string;
+  /** medication (point): next-dose interval in whole seconds, seeded from an
+   *  interval cure so the saved dose carries Baby Buddy's `next_dose_interval` */
+  medNextDoseIntervalSec?: number;
   /** note (point): the note BODY being edited — the primary free-text field of a
    *  general note. Distinct from `notes` (the secondary per-entry annotation). */
   noteText?: string;

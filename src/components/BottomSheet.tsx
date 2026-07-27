@@ -30,7 +30,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Dimensions, Platform, Pressable, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -43,8 +43,74 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { keyboardInset, raisesKeyboard } from '@/components/keyboardInset';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useTheme } from '@/theme/useTheme';
+
+// On mobile web the on-screen keyboard does not resize the page. The LAYOUT
+// viewport (window.innerHeight, and with it the app's 100%-height root that
+// this sheet is absolutely positioned in) keeps its full height and the
+// keyboard simply covers its bottom edge; only the VISUAL viewport shrinks,
+// and the browser may additionally pan it (visualViewport.offsetTop > 0, e.g.
+// iOS Safari auto-revealing a focused input). So a bottom:0 sheet stays pinned
+// behind the keyboard, and it must be raised by exactly the covered height (see
+// keyboardInset() for the geometry).
+//
+// The lift is gated on an actually-focused text field, NOT on the size of the
+// gap. iOS Safari's innerHeight and visualViewport.height differ AT REST (the
+// large address bar, overscroll offsetTop, a keyboard caught mid-dismiss as the
+// modal opens): with no gate that gap lifted the sheet ~a keyboard height with
+// no keyboard on screen. The keyboard cannot exist without a focused text field,
+// so `raisesKeyboard(document.activeElement)` is the honest signal. It also
+// avoids the old `covered > 120` threshold, which fought Safari's focus auto-pan
+// (offsetTop grows, the value drops under the threshold, the lift snapped back
+// mid-keyboard). Recomputed on `resize` and `scroll` so the sheet stays glued
+// while the browser pans the visual viewport around.
+//
+// Note `useWindowDimensions().height` cannot stand in for any of this:
+// react-native-web 0.21 feeds it visualViewport.height (updated on
+// visualViewport resize), so it already shrinks by the keyboard. That makes it
+// the right value for capping the panel's HEIGHT, but it says nothing about
+// where the visible bottom edge sits inside the layout viewport, and
+// subtracting this inset from it double-counts the keyboard.
+//
+// Web only: returns 0 on native (keyboard out of scope there) and when there
+// is no visualViewport (SSR / older browsers).
+function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const update = () => {
+      const focused = raisesKeyboard(document.activeElement);
+      const covered = keyboardInset(window.innerHeight, vv.height, vv.offsetTop, focused);
+      setInset(covered);
+      // The browser's own focus-reveal scroll ran BEFORE the sheet moved, so
+      // re-reveal the focused field inside the sheet's own ScrollView once the
+      // lifted layout has committed (double rAF: after React's flush + a
+      // frame). The sheet is modal (scrim behind it), so any focused text
+      // field on the page is one of its own.
+      if (covered > 0) {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = document.activeElement;
+            if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
+              el.scrollIntoView({ block: 'nearest' });
+            }
+          }),
+        );
+      }
+    };
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+  return inset;
+}
 
 interface BottomSheetProps {
   onClose: () => void;
@@ -59,6 +125,13 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
   const t = useTheme();
   const { width, height } = useWindowDimensions();
   const dialog = useDesktopShell();
+  // How far the mobile-web keyboard (plus any browser pan of the visual
+  // viewport) covers the layout viewport's bottom edge; 0 elsewhere. Applied as
+  // the phone wrapper's layout `bottom`: plain layout, deliberately NOT via
+  // the animated transform, so the keyboard correction never depends on a
+  // React-state-in-worklet round trip and the transform stays single-purpose
+  // (entrance + drag).
+  const keyboardInset = useKeyboardInset();
   // `enter` is the bottom-sheet slide-in offset (off-screen -> 0). `pop` is the
   // dialog entrance progress (0 -> 1, mapped to opacity+scale). `dragY` is the
   // sheet's drag-to-dismiss offset. Kept as separate shared values so no value
@@ -179,10 +252,21 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 }}>
       {scrimNode}
 
-      <Animated.View exiting={SlideOutDown.duration(220)} style={{ position: 'absolute', left: 0, right: 0, bottom: 0 }}>
+      {/* bottom = keyboardInset pins the sheet's bottom edge to the VISIBLE
+          bottom edge (top of the mobile-web keyboard); 0 on native/desktop.
+          Recomputing on visualViewport scroll keeps it glued when the browser
+          pans the viewport to reveal the focused input, instead of fighting
+          that pan. */}
+      <Animated.View
+        exiting={SlideOutDown.duration(220)}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: keyboardInset }}
+      >
         <Animated.View
           style={[
             {
+              // Keyboard-aware for free: react-native-web derives `height` from
+              // visualViewport.height, which already excludes the keyboard. Do
+              // NOT also subtract keyboardInset here; that double-counts.
               maxHeight: height * maxHeightRatio,
               backgroundColor: t.bg,
               borderTopLeftRadius: 28,

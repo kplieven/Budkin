@@ -1,6 +1,7 @@
-import { Redirect, router, useLocalSearchParams } from 'expo-router';
+import { openBrowserAsync } from 'expo-web-browser';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { Modal, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -8,9 +9,12 @@ import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
+import { referenceCurves, hasWhoAgeOverlap, MONTH_MS } from '@/features/measurements/whoReference';
+import { DISCLAIMER } from '@/features/insights/norms';
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { backOr } from '@/lib/nav';
 import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -23,6 +27,12 @@ const shortDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { m
 const rowDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 const tipDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 const GOOD = '#3E9E6E';
+const WHO_URL = 'https://www.who.int/tools/child-growth-standards/standards';
+// With the reference on, extend the x-axis past the last measurement by this
+// fraction of the visible span (a full span, so the child's line sits in the
+// left half and the WHO curves fan out across the right), so the bands show
+// well where the child is heading. Still capped at WHO's 60-month limit.
+const REF_X_HEADROOM = 1;
 
 export default function MetricDetailRoute() {
   const { kind } = useLocalSearchParams<{ kind: string }>();
@@ -41,6 +51,9 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openMeasurement = useAppStore((s) => s.openMeasurement);
   const openEditMeasurement = useAppStore((s) => s.openEditMeasurement);
+  const showRef = useAppStore((s) => s.showGrowthReference);
+  const setRef = useAppStore((s) => s.setGrowthReference);
+  const [refInfo, setRefInfo] = useState(false);
 
   // Reached only via a typed or bookmarked /metric/<kind> URL: Growth's
   // guarded body means the cards that link here aren't rendered while the
@@ -66,10 +79,32 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const points = rawPoints.map((p) => ({ ...p, value: toDisplay(kind, p.value, unitSystem) }));
   const latest = rawPoints.length ? rawPoints[rawPoints.length - 1] : null;
   const change = changeSince(points);
-  const { ticks, fmtY } = yTicksFor(points);
+  // WHO growth-standard percentile reference: available only for a recorded
+  // girl/boy gender whose visible age range overlaps WHO's 0..60 month window,
+  // and drawn only while the toggle is on. When shown, the y-axis widens to keep
+  // the band from clipping, and the x-axis runs a little past the last datum.
+  const tMin = points.length ? points[0].t : 0;
+  const tMax = points.length ? points[points.length - 1].t : 0;
+  const overlap = !!child && points.length >= 2 && hasWhoAgeOverlap(child.birth, tMin, tMax);
+  const isSexed = child?.gender === 'girl' || child?.gender === 'boy';
+  const refAvailable = overlap && isSexed && !!child;
+  // Extend the right edge only when the reference is actually drawn; cap it at
+  // WHO's 60-month limit so the curves never run past where the standard ends.
+  const refXMax = refAvailable && showRef && child
+    ? Math.max(tMax, Math.min(tMax + (tMax - tMin) * REF_X_HEADROOM, child.birth + 60 * MONTH_MS))
+    : tMax;
+  const refAll = refAvailable && child
+    ? referenceCurves(kind, child.gender, child.birth, tMin, refXMax, unitSystem)
+    : null;
+  const curves = showRef ? refAll : null;
+  const extended = curves != null && refXMax > tMax;
+  const refValues = curves?.flatMap((c) => c.points.map((p) => p.value)) ?? [];
+  const { ticks, fmtY } = yTicksFor(points, refValues);
   const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
   const maxXTicks = Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)); // ~56px per label; 36 = svg gutter+right
-  const { ticks: xTicks, fmtX } = xTicksFor(points, maxXTicks);
+  // With the axis extended, add the far edge to the tick domain so a label lands there.
+  const xTickPoints = extended ? [...points, { t: refXMax, value: points[points.length - 1].value }] : points;
+  const { ticks: xTicks, fmtX } = xTicksFor(xTickPoints, maxXTicks);
   const history = childMeasurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
 
   const body = (
@@ -109,10 +144,34 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       ) : null}
 
       <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 22 }}>
+        {refAll ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
+            <Pressable
+              onPress={() => setRef(!showRef)}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: showRef }}
+              accessibilityLabel="WHO reference curves"
+              style={(s) => [
+                { flexDirection: 'row', alignItems: 'center', gap: 6, height: 30, paddingHorizontal: 10, borderRadius: 11, borderWidth: 1.5, borderColor: showRef ? hexA(t.dim, 0.5) : t.line, backgroundColor: showRef ? hexA(t.dim, 0.1) : t.chip, cursor: 'pointer' },
+                isHovered(s) && { borderColor: t.dim },
+              ]}
+            >
+              <View style={{ width: 16, height: 10, borderRadius: 5, backgroundColor: showRef ? t.dim : t.faint, justifyContent: 'center', paddingHorizontal: 1, alignItems: showRef ? 'flex-end' : 'flex-start' }}>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.surface }} />
+              </View>
+              <Txt unselectable weight={700} size={12} color={showRef ? t.text : t.dim}>WHO reference</Txt>
+            </Pressable>
+            <Pressable onPress={() => setRefInfo(true)} accessibilityRole="button" accessibilityLabel="About the WHO reference" style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.2, borderColor: t.faint, alignItems: 'center', justifyContent: 'center' }}>
+              <Txt weight={700} size={12} color={t.faint}>i</Txt>
+            </Pressable>
+          </View>
+        ) : null}
         {points.length >= 2 ? (
           <TrendChart
             points={points}
             band={null}
+            curves={curves ?? undefined}
+            xMax={extended ? refXMax : undefined}
             color={meta.color}
             yTicks={ticks}
             fmtY={fmtY}
@@ -133,6 +192,22 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
           </Txt>
         )}
       </View>
+
+      <Modal visible={refInfo} transparent animationType="fade" onRequestClose={() => setRefInfo(false)}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+          <Pressable onPress={() => setRefInfo(false)} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.35)' }} />
+          <View style={{ backgroundColor: t.surface, borderRadius: 18, padding: 20, gap: 8, width: '100%', maxWidth: 380 }}>
+            <Txt weight={700} size={15}>WHO growth reference</Txt>
+            <Txt weight={500} size={13} color={t.dim}>
+              Source:{' '}
+              <Txt weight={600} size={13} color={meta.color} style={{ textDecorationLine: 'underline' }} accessibilityRole="link" onPress={() => openBrowserAsync(WHO_URL)}>
+                WHO Child Growth Standards
+              </Txt>
+            </Txt>
+            <Txt weight={500} size={12.5} color={t.faint} style={{ lineHeight: 18 }}>{DISCLAIMER}</Txt>
+          </View>
+        </View>
+      </Modal>
 
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 4, marginBottom: 9, textTransform: 'uppercase' }}>
         History
@@ -167,7 +242,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
     return (
       <DesktopPage maxWidth={640}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-          <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
+          <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/growth')} accessibilityLabel="Back" />
           <Txt weight={800} size={24} tracking={-0.5}>{meta.label}</Txt>
         </View>
         {body}
@@ -181,7 +256,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => router.back()} accessibilityLabel="Back" />
+        <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/growth')} accessibilityLabel="Back" />
         <Txt weight={800} size={27} tracking={-0.6} style={{ flex: 1 }}>{meta.label}</Txt>
         <Pressable
           onPress={openSwitcher}
