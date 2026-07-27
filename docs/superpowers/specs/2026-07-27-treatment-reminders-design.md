@@ -27,6 +27,32 @@ Two consequences shape everything below:
    so a `cureId` would be dropped the moment the dose round-trips). Everything
    this feature knows about "was this dose given" inherits that constraint.
 
+## The tap contract
+
+**A notification tap opens something. It never writes.** It should land the
+parent one press from done, with that press theirs to make.
+
+This rule is not new. All five existing reminders already obey it: their targets
+are `/`, `/timers` and `/history`, none of which commit anything. It is written
+down here because this feature is the first to make the "one press from done"
+half of it real, and because the alternative was actively considered and
+rejected for the nap reminder.
+
+The rejected alternative was letting a nap tap start a sleep timer outright.
+There is precedent for it: `app/timer.tsx` is a deep link that starts a timer,
+and `widgets/napToggle.ts` starts one headlessly. Two things ruled it out. A
+notification body, unlike a widget button, is not labelled with what it does, so
+a write on tap would have to be spelled out in the copy to avoid being a
+surprise, and taps get made by accident on a locked phone. More specifically,
+the nap reminder fires `NAP_LEAD_MIN` (15 minutes) *before* the window closes,
+so the baby is not asleep when it arrives; a tap at 15:10 on a nudge that fired
+at 14:45 would stamp a sleep start 25 minutes late, and sleep start times feed
+the very wake-window calculation that produced the reminder. An accidental sleep
+timer is then quiet until `STALE_AFTER_MIN.sleep` trips 14 hours later.
+
+The confirm sheet is the shape that satisfies the rule: seeded, read-only, with
+a time picker, committing only on save.
+
 ## Mechanic
 
 One builder per `Cure.scheduleMode`, both pure and `now`-parametrised, in
@@ -168,16 +194,50 @@ actually move.
 | --- | --- |
 | Title | `${cure.name.trim()} due` |
 | Body | the dosage when the cure has one, else `Tap to log the dose.` |
-| `data.url` | `/log/medication` |
+| `data.url` | `/log/medication?cure={cure.id}` |
 
 The dosage comes from the existing `cureDosageLabel`, so the lock screen reads
 "5 mg" without the parent opening the app, which is the single most useful thing
 this notification can carry. When the cure has no dosage recorded there is
 nothing to say, so it falls back to the instruction.
 
-`/log/medication` is an existing deep-link target: `src/app/log/[type].tsx`
-opens the Quick-Log sheet for any member of `ALL_ACTIVITIES`, and `medication`
-is one. It needs no new route.
+### Where the tap lands
+
+`/log/medication` is already a deep-link target: `src/app/log/[type].tsx` opens
+the Quick-Log sheet for any member of `ALL_ACTIVITIES`, and `medication` is one.
+The only change is the new `cure` query parameter.
+
+With it present, the route calls the existing `logMedicationFromCure(cureId)`
+rather than the bare `openSheet('medication')`. That store action already does
+precisely what this feature wants and needs no modification: it seeds `medName`,
+`medDosage`, `medUnit` and (for interval cures) `medNextDoseIntervalSec` from
+the cure, then opens the sheet in **confirm mode**, a read-only summary plus a
+time picker. Its own comment records the contract this spec depends on: "No
+entry is written here; save() commits it once the user confirms."
+
+So tapping "Omeprazol due" lands on a sheet that already says Omeprazol, 5 mg,
+with only the time left to adjust and Log left to press. This is why the body
+copy needs no change: "Tap to log the dose" stays literally true.
+
+`logMedicationFromCure` returns early when the id matches no cure, and when the
+cure's name is blank. The route must therefore fall back to `openMedicationLog()`
+when the parameter is absent, unparseable, or names a cure that no longer
+exists, so a stale notification still opens a usable sheet rather than nothing.
+See the edge case below.
+
+### The other five
+
+No change. All five already land somewhere that writes nothing, which is the
+contract, and none of them has a cheap prefill available:
+
+- **Pumping** and **nap** both point at `/timers`, which is correct. Staging an
+  activity there is not currently possible without new UI: the screen offers one
+  `startQuickTimer` button and a set of save-as chips applied to an
+  already-running timer, so there is no per-activity start control to focus.
+- **Timer left running** also points at `/timers`. Landing on the specific timer
+  would be a genuine improvement, since the alert concerns exactly one, but the
+  Timers screen reads no route parameters today. Deferred rather than dismissed.
+- **Due date** and **age milestone** are informational and land correctly.
 
 One notification per treatment per due moment. Two treatments due at 08:00
 produce two notifications, each naming its own medication. Naming the drug is
@@ -210,6 +270,7 @@ itself, set in the cure editor.
 | `src/data/prefs.ts` | `treatmentReminders`, `treatmentRemindersEnabledAt` |
 | `src/store/useAppStore.ts` | both prefs in state, defaults, `hydrate`; `'treatmentReminders'` in the `setReminderPref` key union, stamping `treatmentRemindersEnabledAt` on switch-on and clearing it on switch-off exactly as `pumpingReminders` does |
 | `src/app/settings/notifications.tsx` | the Treatments row |
+| `src/app/log/[type].tsx` | read the `cure` query param; call `logMedicationFromCure` when it resolves, else fall back to `openMedicationLog()` |
 
 `scheduled.ts` stays ignorant of `Entry`. `ScheduleInput` receives derived
 scalars today (`lastPumpAt`, `lastSleepEndByChild`) rather than raw entries, and
@@ -252,6 +313,15 @@ testing in `scheduled.test.ts`:
 Plus pref persistence and the switch-on stamp in `useAppStore.test.ts`, and the
 `cures`/`cureDoses` projection and change gate in `scheduleSync.test.ts`.
 
+For the tap target, in the `log/[type].tsx` tests:
+
+- a `cure` param naming a live cure seeds the confirm sheet from it and writes
+  no entry
+- a missing, malformed, or unknown `cure` param falls back to
+  `openMedicationLog()` rather than opening nothing
+- a `cure` param naming a blank-named cure also falls back, since
+  `logMedicationFromCure` refuses it
+
 ## Edge cases
 
 - **Two active cures sharing a name for one child.** Each counts the other's
@@ -269,6 +339,13 @@ Plus pref persistence and the switch-on stamp in `useAppStore.test.ts`, and the
   `selectedChildId` is already in the `scheduleSync` change gate.
 - **`toDate` reached.** The day walk stops there, so no slot is scheduled past
   the end of the regimen.
+- **The cure is deleted, renamed to blank, or paused between the notification
+  being scheduled and being tapped.** The pending alert still carries its
+  `cure` id. `logMedicationFromCure` refuses an unknown id and a blank name, so
+  the route falls back to `openMedicationLog()`: the parent gets the normal
+  picker or manual form rather than a dead tap. Reconciliation cancels such
+  alerts on the next store write, so this only covers the window between the
+  cure changing and the app next reconciling.
 
 ## Out of scope
 
@@ -284,3 +361,12 @@ Plus pref persistence and the switch-on stamp in `useAppStore.test.ts`, and the
   be the wrong call.
 - A "treatment finished" notification when `toDate` passes.
 - Replacing name-based dose attribution with anything stronger.
+- Notification action buttons (Android categories plus response handling,
+  including the headless case). They would let a labelled button write while the
+  body stays passive, which is the one design that satisfies the tap contract
+  *and* gives one-tap timer starts. Worth revisiting if the "open, never write"
+  rule starts to feel like too many presses; not needed for this feature, whose
+  confirm sheet is already one press from done.
+- Staging an activity on the Timers screen, and focusing the stale-timer alert
+  on its specific timer. Both need UI or route-param work on a screen this
+  feature does not otherwise touch.
