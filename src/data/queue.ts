@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Entry } from '@/types/models';
 
-const KEY = 'babybuddy.queue.v1';
+const KEY = 'budkin.queue.v1';
 
 export async function loadQueue(): Promise<Entry[]> {
   try {

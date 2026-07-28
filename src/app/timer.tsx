@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 
 import { useAppStore } from '@/store/useAppStore';
 
-/** Deep-link target `babybuddy://timer` (widget "Timer" button): start a timer
+/** Deep-link target `budkin://timer` (widget "Timer" button): start a timer
  *  and open the Timers screen.
  *
  *  Navigation uses a declarative <Redirect> rather than an imperative

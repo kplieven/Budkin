@@ -97,12 +97,12 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flexDirection: 'column', width: 'match_parent' }}>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="feeding" label="Feed" color={FEED} uri="babybuddy://log/feeding" />
-          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri="babybuddy://log/diaper" />
+          <IconButton kind="feeding" label="Feed" color={FEED} uri="budkin://log/feeding" />
+          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri="budkin://log/diaper" />
         </FlexWidget>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri="babybuddy://log/sleep" />
-          <IconButton kind="timer" label="Timer" color={PRIMARY} uri="babybuddy://timer" />
+          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri="budkin://log/sleep" />
+          <IconButton kind="timer" label="Timer" color={PRIMARY} uri="budkin://timer" />
         </FlexWidget>
       </FlexWidget>
     </FlexWidget>

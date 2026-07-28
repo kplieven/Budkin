@@ -65,7 +65,7 @@ describe('pendingOps persistence', () => {
   });
 
   it('returns [] when the persisted JSON is corrupt', async () => {
-    mem.store.set('babybuddy.pendingOps.v1', '{not valid json');
+    mem.store.set('budkin.pendingOps.v1', '{not valid json');
     expect(await loadPendingOps()).toEqual([]);
   });
 

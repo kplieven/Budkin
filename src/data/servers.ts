@@ -20,7 +20,7 @@ export interface SavedServer {
   lastUsedAt: number;
 }
 
-const KEY = 'babybuddy.servers.v1';
+const KEY = 'budkin.servers.v1';
 
 /** Maximum number of servers kept in the history list. */
 export const MAX_SERVERS = 6;
