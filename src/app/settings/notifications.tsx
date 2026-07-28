@@ -22,7 +22,8 @@ type ReminderKey =
   | 'staleTimerReminders'
   | 'ageMilestones'
   | 'napSuggestions'
-  | 'pumpingReminders';
+  | 'pumpingReminders'
+  | 'treatmentReminders';
 
 export default function NotificationSettings() {
   const t = useTheme();
@@ -34,6 +35,7 @@ export default function NotificationSettings() {
   const napSuggestions = useAppStore((s) => s.napSuggestions);
   const pumpingReminders = useAppStore((s) => s.pumpingReminders);
   const pumpingIntervalMin = useAppStore((s) => s.pumpingIntervalMin);
+  const treatmentReminders = useAppStore((s) => s.treatmentReminders);
   const setReminderPref = useAppStore((s) => s.setReminderPref);
   const setPumpingInterval = useAppStore((s) => s.setPumpingInterval);
 
@@ -74,6 +76,12 @@ export default function NotificationSettings() {
       label: 'Pumping',
       hint: 'On a set interval from your last session.',
       on: pumpingReminders,
+    },
+    {
+      key: 'treatmentReminders',
+      label: 'Treatments',
+      hint: 'When a dose of a treatment is due.',
+      on: treatmentReminders,
     },
   ];
 
