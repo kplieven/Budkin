@@ -4933,6 +4933,17 @@ describe('reminder preference persistence', () => {
     expect(s().treatmentReminders).toBe(false);
     expect(s().treatmentRemindersEnabledAt).toBe(1234);
   });
+
+  // treatmentRemindersEnabledAt's own guard is `!== undefined` rather than
+  // `!= null`, because a persisted explicit `null` (treatments were turned
+  // off) must overwrite a stale non-null value already in memory.
+  it('hydrate restores a persisted null treatmentRemindersEnabledAt over a stale in-memory value', async () => {
+    h.prefs = { treatmentRemindersEnabledAt: null };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ treatmentRemindersEnabledAt: NOW });
+    await s().hydrate();
+    expect(s().treatmentRemindersEnabledAt).toBeNull();
+  });
 });
 
 describe('growth-reference persistence', () => {
