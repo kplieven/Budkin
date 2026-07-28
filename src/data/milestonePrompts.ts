@@ -8,7 +8,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'babybuddy.milestonePrompts.v1';
+const KEY = 'budkin.milestonePrompts.v1';
 
 export async function loadMilestonePrompts(): Promise<Record<string, string[]>> {
   try {

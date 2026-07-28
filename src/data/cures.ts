@@ -15,7 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Cure } from '@/types/models';
 
-const KEY = 'babybuddy.cures.v1';
+const KEY = 'budkin.cures.v1';
 
 export async function loadCures(): Promise<Cure[]> {
   try {

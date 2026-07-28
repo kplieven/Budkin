@@ -29,7 +29,7 @@ import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/
 // logging a start≈end 0-minute nap and leaving a phantom timer running. Ignore any
 // toggle that lands within this window of the last accepted one — long enough to
 // swallow duplicate delivery and fumbled double-taps, far shorter than any real nap.
-const TOGGLE_GUARD_KEY = 'babybuddy.napToggleAt.v1';
+const TOGGLE_GUARD_KEY = 'budkin.napToggleAt.v1';
 const TOGGLE_MIN_INTERVAL_MS = 1500;
 
 async function readLastToggleAt(): Promise<number | null> {

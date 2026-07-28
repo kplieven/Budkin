@@ -111,7 +111,7 @@ describe('entityStore persistence', () => {
 
   it('falls back to the field default on corrupt JSON instead of throwing', async () => {
     await saveChildren([child('a')]);
-    mem.store.set('babybuddy.entries.v1', '{not json');
+    mem.store.set('budkin.entries.v1', '{not json');
     const loaded = await loadEntities();
     expect(loaded?.children).toEqual([child('a')]);
     expect(loaded?.entries).toEqual([]);
@@ -119,7 +119,7 @@ describe('entityStore persistence', () => {
 
   it('does not mask real persisted data as null when one key rejects (native I/O error)', async () => {
     await saveChildren([child('a')]);
-    mem.rejectKeys.add('babybuddy.entries.v1');
+    mem.rejectKeys.add('budkin.entries.v1');
 
     const loaded = await loadEntities();
 

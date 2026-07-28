@@ -96,12 +96,12 @@ describe('prefs persistence', () => {
   });
 
   it('returns {} instead of throwing on corrupt persisted JSON', async () => {
-    mem.store.set('babybuddy.prefs.v1', '{not json');
+    mem.store.set('budkin.prefs.v1', '{not json');
     expect(await loadPrefs()).toEqual({});
   });
 
   it('tolerates a persisted file that predates a field (forward-compat Partial)', async () => {
-    mem.store.set('babybuddy.prefs.v1', JSON.stringify({}));
+    mem.store.set('budkin.prefs.v1', JSON.stringify({}));
     expect(await loadPrefs()).toEqual({});
   });
 });
