@@ -6,6 +6,7 @@ import {
   AGE_HORIZON_MONTHS,
   AGE_STEPS,
   atReminderHour,
+  CURE_AHEAD,
   desiredScheduled,
   diffScheduled,
   PUMP_AHEAD,
@@ -14,7 +15,7 @@ import {
   type ReminderPrefs,
   type ScheduleInput,
 } from '@/notifications/scheduled';
-import type { Child, Timer } from '@/types/models';
+import type { Child, Cure, Timer } from '@/types/models';
 
 /** Local-time construction, so the 09:00 assertions hold in any timezone. */
 const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
@@ -676,5 +677,177 @@ describe('nap suggestions', () => {
       }),
     );
     expect(out.map((n) => n.title)).toEqual(['Sam may be ready for a nap']);
+  });
+});
+
+describe('desiredScheduled: treatments, fixed times of day', () => {
+  const only = (over: Partial<ReminderPrefs>) =>
+    prefs({
+      dueDateReminders: false,
+      staleTimerReminders: false,
+      ageMilestones: false,
+      treatmentReminders: true,
+      ...over,
+    });
+
+  const cure = (over: Partial<Cure> = {}): Cure => ({
+    id: 'cure1',
+    childId: 'c1',
+    name: 'Omeprazol',
+    scheduleMode: 'timesOfDay',
+    timesOfDay: ['morning', 'evening'],
+    fromDate: at(2026, 9, 1),
+    active: true,
+    ...over,
+  });
+
+  const run = (over: Partial<ScheduleInput>, now: number) =>
+    desiredScheduled(input({ prefs: only({}), selectedChildId: 'c1', ...over }), now);
+
+  it('schedules each chosen slot at its mapped wall-clock hour', () => {
+    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
+    expect(out[1].fireAt).toBe(at(2026, 9, 2, 18));
+    expect(out[2].fireAt).toBe(at(2026, 9, 3, 8));
+  });
+
+  it('names the treatment and carries its dosage and cure-seeded tap target', () => {
+    const out = run({ cures: [cure({ dosage: 5, dosageUnit: 'mg' })] }, at(2026, 9, 2, 6));
+    expect(out[0].kind).toBe('cure');
+    expect(out[0].title).toBe('Omeprazol due');
+    expect(out[0].body).toBe('5 mg');
+    expect(out[0].data.url).toBe('/log/medication?cure=cure1');
+    expect(out[0].identifier).toBe(`${REMINDER_PREFIX}cure:cure1:${at(2026, 9, 2, 8)}`);
+  });
+
+  it('falls back to an instruction when the cure records no dosage', () => {
+    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
+    expect(out[0].body).toBe('Tap to log the dose.');
+  });
+
+  it('emits slots in chronological order regardless of the order they were picked', () => {
+    const out = run({ cures: [cure({ timesOfDay: ['night', 'morning', 'noon'] })] }, at(2026, 9, 2, 6));
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
+    expect(out[1].fireAt).toBe(at(2026, 9, 2, 12));
+    expect(out[2].fireAt).toBe(at(2026, 9, 2, 22));
+  });
+
+  it('keeps every occurrence on its mapped hour across an autumn-back boundary', () => {
+    // Built and asserted with calendar arithmetic on each day's own midnight,
+    // never by adding 86_400_000: a fixed millisecond day drifts by an hour
+    // across a DST change and would move the 08:00 dose to 07:00 or 09:00 for
+    // half the year. In a timezone without DST this is a tautology; in one with
+    // it, it is the whole point. The eight-day run from 24 October crosses the
+    // European clock change on the 25th.
+    const out = run({ cures: [cure({ timesOfDay: ['morning'], fromDate: at(2026, 10, 20) })] }, at(2026, 10, 24, 6));
+    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
+    expect(out[0].fireAt).toBe(at(2026, 10, 24, 8));
+    expect(out[4].fireAt).toBe(at(2026, 10, 28, 8));
+  });
+
+  it('keeps every occurrence on its mapped hour across a spring-forward boundary', () => {
+    // The other direction, which fails differently: a millisecond day walk
+    // lands at 09:00 here rather than 07:00. The eight-day run from 27 March
+    // crosses the European clock change on the 29th.
+    const out = run({ cures: [cure({ timesOfDay: ['morning'], fromDate: at(2026, 3, 20) })] }, at(2026, 3, 27, 6));
+    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
+    expect(out[0].fireAt).toBe(at(2026, 3, 27, 8));
+    expect(out[4].fireAt).toBe(at(2026, 3, 31, 8));
+  });
+
+  it("suppresses today's kth slot once k doses are logged today", () => {
+    // One dose given on a morning+evening cure. Counting, not slot matching:
+    // the dose settles the FIRST slot and leaves the second owed, so exactly
+    // one of today's two slots survives.
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 7) } } },
+      at(2026, 9, 2, 6),
+    );
+    const today = out.filter((n) => n.fireAt < at(2026, 9, 3));
+    expect(today).toHaveLength(1);
+    expect(today[0].fireAt).toBe(at(2026, 9, 2, 18));
+  });
+
+  it('counts k from the start of the day, not from now', () => {
+    // Morning and noon have already passed and two doses were logged, so the
+    // evening slot is k = 3 and survives. Numbering the remaining slots from
+    // now would make evening k = 1, see dosesToday >= 1, and wrongly drop it.
+    const out = run(
+      {
+        cures: [cure({ timesOfDay: ['morning', 'noon', 'evening'] })],
+        cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 12) } },
+      },
+      at(2026, 9, 2, 14),
+    );
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 18));
+  });
+
+  it('suppresses nothing on future days, whatever today looked like', () => {
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 18) } } },
+      at(2026, 9, 2, 20),
+    );
+    expect(out[0].fireAt).toBe(at(2026, 9, 3, 8));
+    expect(out[1].fireAt).toBe(at(2026, 9, 3, 18));
+  });
+
+  it('caps output at CURE_AHEAD occurrences per cure', () => {
+    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
+    expect(out).toHaveLength(CURE_AHEAD);
+  });
+
+  it('emits one notification per treatment when two are due at the same slot', () => {
+    const out = run(
+      {
+        cures: [
+          cure({ timesOfDay: ['morning'] }),
+          cure({ id: 'cure2', name: 'Amoxicilline', timesOfDay: ['morning'] }),
+        ],
+      },
+      at(2026, 9, 2, 6),
+    );
+    const first = out.filter((n) => n.fireAt === at(2026, 9, 2, 8));
+    expect(first.map((n) => n.title).sort()).toEqual(['Amoxicilline due', 'Omeprazol due']);
+  });
+
+  it('stops at toDate rather than scheduling past the end of the regimen', () => {
+    const out = run({ cures: [cure({ toDate: at(2026, 9, 3) })] }, at(2026, 9, 2, 6));
+    // toDate is inclusive, so 3 September's slots are the last ones.
+    expect(out.every((n) => n.fireAt < at(2026, 9, 4))).toBe(true);
+    expect(out.map((n) => n.fireAt)).toContain(at(2026, 9, 3, 18));
+  });
+
+  it('terminates on a cure with no times of day chosen', () => {
+    expect(run({ cures: [cure({ timesOfDay: [] })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ cures: [cure({ timesOfDay: undefined })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing for a paused cure', () => {
+    expect(run({ cures: [cure({ active: false })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing before fromDate or after toDate', () => {
+    expect(run({ cures: [cure({ fromDate: at(2026, 9, 10) })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ cures: [cure({ toDate: at(2026, 9, 1) })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing for a cure belonging to another child', () => {
+    expect(run({ cures: [cure({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing for a cure whose name is blank', () => {
+    // `logMedicationFromCure` refuses a blank name, so such a notification would
+    // dead-tap. It would also read as " due".
+    expect(run({ cures: [cure({ name: '   ' })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing while the pref is off', () => {
+    const out = desiredScheduled(
+      input({ prefs: only({ treatmentReminders: false }), cures: [cure()], selectedChildId: 'c1' }),
+      at(2026, 9, 2, 6),
+    );
+    expect(out).toEqual([]);
   });
 });
