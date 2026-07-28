@@ -4894,6 +4894,45 @@ describe('reminder preference persistence', () => {
     await s().hydrate();
     expect(s().napSuggestions).toBe(false);
   });
+
+  it('treatmentReminders defaults on', () => {
+    expect(useAppStore.getState().treatmentReminders).toBe(true);
+  });
+
+  it('switching treatmentReminders ON stamps treatmentRemindersEnabledAt with the current time', () => {
+    useAppStore.setState({ treatmentReminders: false, treatmentRemindersEnabledAt: null });
+    const before = Date.now();
+    s().setReminderPref('treatmentReminders', true);
+    const after = Date.now();
+    expect(s().treatmentReminders).toBe(true);
+    expect(s().treatmentRemindersEnabledAt).not.toBeNull();
+    expect(s().treatmentRemindersEnabledAt as number).toBeGreaterThanOrEqual(before);
+    expect(s().treatmentRemindersEnabledAt as number).toBeLessThanOrEqual(after);
+    expect(savePrefs).toHaveBeenCalledWith({
+      treatmentReminders: true,
+      treatmentRemindersEnabledAt: s().treatmentRemindersEnabledAt,
+    });
+  });
+
+  it('switching treatmentReminders OFF clears treatmentRemindersEnabledAt to null', () => {
+    useAppStore.setState({ treatmentReminders: true, treatmentRemindersEnabledAt: NOW });
+    s().setReminderPref('treatmentReminders', false);
+    expect(s().treatmentReminders).toBe(false);
+    expect(s().treatmentRemindersEnabledAt).toBeNull();
+    expect(savePrefs).toHaveBeenCalledWith({
+      treatmentReminders: false,
+      treatmentRemindersEnabledAt: null,
+    });
+  });
+
+  it('hydrate applies persisted treatment reminder prefs', async () => {
+    h.prefs = { treatmentReminders: false, treatmentRemindersEnabledAt: 1234 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ treatmentReminders: true, treatmentRemindersEnabledAt: null });
+    await s().hydrate();
+    expect(s().treatmentReminders).toBe(false);
+    expect(s().treatmentRemindersEnabledAt).toBe(1234);
+  });
 });
 
 describe('growth-reference persistence', () => {

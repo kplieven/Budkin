@@ -141,6 +141,9 @@ interface AppState {
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
   napSuggestions: boolean;
+  treatmentReminders: boolean;
+  /** when the treatments toggle was last switched on, epoch ms */
+  treatmentRemindersEnabledAt: number | null;
   /** Growth charts: whether the WHO percentile reference is drawn (default true). */
   showGrowthReference: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
@@ -263,7 +266,13 @@ interface AppActions {
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
   setReminderPref: (
-    key: 'dueDateReminders' | 'staleTimerReminders' | 'ageMilestones' | 'pumpingReminders' | 'napSuggestions',
+    key:
+      | 'dueDateReminders'
+      | 'staleTimerReminders'
+      | 'ageMilestones'
+      | 'pumpingReminders'
+      | 'napSuggestions'
+      | 'treatmentReminders',
     value: boolean,
   ) => void;
   setPumpingInterval: (minutes: number) => void;
@@ -967,6 +976,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   pumpingIntervalMin: 180,
   pumpingEnabledAt: null,
   napSuggestions: false,
+  treatmentReminders: true,
+  treatmentRemindersEnabledAt: null,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
@@ -1051,6 +1062,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const pumpingEnabledAt = value ? Date.now() : null;
       set({ pumpingReminders: value, pumpingEnabledAt });
       void savePrefs({ pumpingReminders: value, pumpingEnabledAt });
+      return;
+    }
+    if (key === 'treatmentReminders') {
+      // The same resync lever pumping has, for the same gap: a parent who gives
+      // a dose and forgets to log it gets a reminder that is early, with no way
+      // to nudge it. Toggling off and on rebases the phase to now.
+      //
+      // One deliberate difference from pumping. This stamp can only ever MOVE an
+      // existing interval grid, never bring one into being: `cureReminders`
+      // returns early when the cure has no logged dose, before it consults this
+      // value. It also does nothing at all to a times-of-day cure, whose instants
+      // come off the wall clock rather than a phase. See scheduled.ts.
+      const treatmentRemindersEnabledAt = value ? Date.now() : null;
+      set({ treatmentReminders: value, treatmentRemindersEnabledAt });
+      void savePrefs({ treatmentReminders: value, treatmentRemindersEnabledAt });
       return;
     }
     set({ [key]: value } as Pick<AppState, typeof key>);
@@ -1145,6 +1171,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
     if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
     if (prefs.napSuggestions != null) set({ napSuggestions: prefs.napSuggestions });
+    if (prefs.treatmentReminders != null) set({ treatmentReminders: prefs.treatmentReminders });
+    // `!== undefined`, not `!= null`: a persisted null is a real value here
+    // (the toggle is off) and must not be skipped. Matches pumpingEnabledAt.
+    if (prefs.treatmentRemindersEnabledAt !== undefined)
+      set({ treatmentRemindersEnabledAt: prefs.treatmentRemindersEnabledAt });
     // `!= null`, not a truthy guard: this one is a number, and a truthy check
     // would silently discard a legitimately stored value at the low end.
     if (prefs.smallWashesPerBig != null) {
