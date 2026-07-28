@@ -6,6 +6,7 @@
 
 import { applyScheduled } from '@/notifications/applySchedule';
 import { desiredScheduled, type ScheduleInput } from '@/notifications/scheduled';
+import { cureDoseScalars, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 
 let started = false;
@@ -21,7 +22,7 @@ type State = ReturnType<typeof useAppStore.getState>;
 // next diff then reads that as "no longer desired" and cancels that child's
 // already-pending nap reminder. Inherited from `lastPumpAt`'s existing shape;
 // fixing it (fetching sleep for every child) is out of scope here.
-function toInput(s: State): ScheduleInput {
+function toInput(s: State, now: number): ScheduleInput {
   let lastPumpAt: number | null = null;
   const lastSleepEndByChild: Record<string, number> = {};
   const asleepChildIds: Record<string, true> = {};
@@ -59,11 +60,23 @@ function toInput(s: State): ScheduleInput {
       pumpingIntervalMin: s.pumpingIntervalMin,
       pumpingEnabledAt: s.pumpingEnabledAt,
       napSuggestions: s.napSuggestions,
+      treatmentReminders: s.treatmentReminders,
+      treatmentRemindersEnabledAt: s.treatmentRemindersEnabledAt,
     },
     lastPumpAt,
     lastSleepEndByChild,
     asleepChildIds,
     selectedChildId: s.selectedChildId,
+    cures: s.cures,
+    // Scoped to the selected child on both sides, for the reason in the comment
+    // above this function: in server mode `s.entries` only ever holds one child,
+    // so counting doses for anyone else would silently read another child's
+    // history as empty.
+    cureDoses: cureDoseScalars(
+      s.cures.filter((c) => c.childId === s.selectedChildId),
+      entriesForChild(s.entries, s.selectedChildId),
+      now,
+    ),
   };
 }
 
@@ -94,7 +107,10 @@ function run(s: State): void {
   // desiredScheduled call) never latches `busy` true. Nothing set it, so the
   // next call is still free to run instead of queueing behind a flag that no
   // `finally` will ever clear.
-  const desired = desiredScheduled(toInput(s), Date.now());
+  // One `now` for both, so the dose scalars and the schedule cannot straddle a
+  // local midnight and disagree about what "today" means.
+  const now = Date.now();
+  const desired = desiredScheduled(toInput(s, now), now);
   busy = true;
   void applyScheduled(desired).finally(() => {
     busy = false;
@@ -164,6 +180,9 @@ export function initScheduledReminderSync(): void {
       state.pumpingIntervalMin === previous.pumpingIntervalMin &&
       state.pumpingEnabledAt === previous.pumpingEnabledAt &&
       state.napSuggestions === previous.napSuggestions &&
+      state.cures === previous.cures &&
+      state.treatmentReminders === previous.treatmentReminders &&
+      state.treatmentRemindersEnabledAt === previous.treatmentRemindersEnabledAt &&
       state.selectedChildId === previous.selectedChildId
     ) {
       return;
