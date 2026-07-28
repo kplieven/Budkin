@@ -510,6 +510,59 @@ function cureTimesOfDayReminders(
 }
 
 /**
+ * Every N hours: a grid of occurrences anchored to the last logged dose,
+ * structurally identical to `pumpReminders`.
+ *
+ * The grid re-anchors on every logged dose, because logging writes the store and
+ * the write triggers a reconcile, so the normal way to correct a drifting
+ * reminder is simply to log the dose, including after the fact with its real
+ * time. `treatmentRemindersEnabledAt` covers the one gap that leaves: a dose
+ * given but never logged. See setReminderPref in useAppStore.ts.
+ */
+function cureEveryHoursReminders(
+  cure: Cure,
+  input: ScheduleInput,
+  now: number,
+): ScheduledNotification[] {
+  // An interval with no hours set has no schedule to be late against.
+  if (cure.everyHours == null || cure.everyHours <= 0) return [];
+
+  const lastDoseAt = input.cureDoses[cure.id]?.lastAt ?? null;
+  // THE ORDER OF THE NEXT TWO STATEMENTS IS LOAD-BEARING. The null check must
+  // come first. A plain Math.max(lastDoseAt ?? 0, enabledAt ?? 0), which is what
+  // pumpReminders does, would manufacture a grid for a cure that has never been
+  // dosed. "Every 8 hours" means eight hours after the last dose; with no last
+  // dose there is no defined next instant, and any anchor invented for one is a
+  // guess the parent never made. The resync stamp may only ever MOVE an existing
+  // grid forward, never bring one into being.
+  //
+  // The parent is not left unaware: cureDueState returns due: 1 for exactly this
+  // case, so the Medication tile still reads "Amoxicilline due" in the app. They
+  // simply get no push for a time the app made up. Logging dose one starts the
+  // grid.
+  if (lastDoseAt == null) return [];
+  const anchor = Math.max(lastDoseAt, input.prefs.treatmentRemindersEnabledAt ?? 0);
+
+  const interval = cure.everyHours * 3_600_000;
+  // toDate is stored at local midnight and is inclusive, so the regimen runs to
+  // the end of that day. addDays keeps this correct across a DST boundary.
+  const endsAt = cure.toDate != null ? addDays(cure.toDate, 1) : null;
+  // Deriving the first occurrence from `now` rather than blindly from the anchor
+  // is what makes the grid self-healing: if every scheduled occurrence has
+  // already passed (the app sat closed for a day), it re-enters the grid on
+  // phase instead of scheduling nothing.
+  const first = Math.max(1, Math.ceil((now - anchor) / interval));
+  const out: ScheduledNotification[] = [];
+  for (let n = first; out.length < CURE_AHEAD && n < first + CURE_AHEAD + 1; n++) {
+    const fireAt = anchor + n * interval;
+    if (fireAt <= now) continue;
+    if (endsAt != null && fireAt >= endsAt) break;
+    out.push(cureNote(cure, fireAt));
+  }
+  return out;
+}
+
+/**
  * Reminders for the treatments a parent authored. Unlike the other five kinds,
  * which are derived from facts the app works out for itself, this one only ever
  * reports back a schedule the user typed in. That is why it ships on.
@@ -528,7 +581,11 @@ function cureReminders(input: ScheduleInput, now: number): ScheduledNotification
     // same way `logMedicationFromCure` does: an alert titled " due" whose tap
     // that action then refuses would be a dead tap.
     if (!cure.name.trim()) continue;
-    out.push(...cureTimesOfDayReminders(cure, input, now, todayMidnight));
+    out.push(
+      ...(cure.scheduleMode === 'everyHours'
+        ? cureEveryHoursReminders(cure, input, now)
+        : cureTimesOfDayReminders(cure, input, now, todayMidnight)),
+    );
   }
   return out;
 }
