@@ -897,7 +897,7 @@ let lastDeleted: {
  * an entry any more.
  *
  * The write-queue scrub is the non-obvious half. An entry created offline sits
- * on `babybuddy.queue.v1` until a reconnect, and `flushQueue` pushes whatever it
+ * on `budkin.queue.v1` until a reconnect, and `flushQueue` pushes whatever it
  * finds there without consulting `entries`, so without this the deleted entry
  * would be POSTed on reconnect anyway, resurrecting it (and, on the convert
  * path, duplicating the timer that replaced it).

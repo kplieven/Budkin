@@ -6,7 +6,7 @@ import { useAppStore } from '@/store/useAppStore';
 import type { ActivityType } from '@/types/models';
 
 /**
- * Deep-link target: `babybuddy://log/<type>` (e.g. from a home-screen widget).
+ * Deep-link target: `budkin://log/<type>` (e.g. from a home-screen widget).
  * Opens the matching Quick-Log sheet over Home, or routes to onboarding if the
  * app isn't connected yet.
  *

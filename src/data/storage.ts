@@ -6,7 +6,7 @@
 import type { Connection } from '@/data/repository';
 import { kvGet, kvRemove, kvSet } from '@/data/secureKv';
 
-const KEY = 'babybuddy.connection.v1';
+const KEY = 'budkin.connection.v1';
 
 export async function saveConnection(c: Connection): Promise<void> {
   await kvSet(KEY, JSON.stringify(c));

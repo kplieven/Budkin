@@ -12,11 +12,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Child, Entry, FeedMethod, FeedType, Measurement } from '@/types/models';
 
-const KEY_CHILDREN = 'babybuddy.children.v1';
-const KEY_ENTRIES = 'babybuddy.entries.v1';
-const KEY_MEASUREMENTS = 'babybuddy.measurements.v1';
-const KEY_SELECTED_CHILD = 'babybuddy.selectedChild.v1';
-const KEY_LAST_FEED = 'babybuddy.lastFeed.v1';
+const KEY_CHILDREN = 'budkin.children.v1';
+const KEY_ENTRIES = 'budkin.entries.v1';
+const KEY_MEASUREMENTS = 'budkin.measurements.v1';
+const KEY_SELECTED_CHILD = 'budkin.selectedChild.v1';
+const KEY_LAST_FEED = 'budkin.lastFeed.v1';
 
 const DEFAULT_LAST_FEED: { feedType: FeedType; method: FeedMethod } = {
   feedType: 'breast',

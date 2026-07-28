@@ -4,7 +4,7 @@ import { AppTabBar } from '@/components/TabBar';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 
 // Anchor the group's initial route to Home so a deep link that lands directly on
-// a non-default tab (e.g. babybuddy://timer -> /timers on a cold start) builds a
+// a non-default tab (e.g. budkin://timer -> /timers on a cold start) builds a
 // well-formed nested navigation state with a live target tab to jump to.
 export const unstable_settings = { initialRouteName: 'index' };
 

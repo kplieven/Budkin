@@ -20,7 +20,7 @@ export type PendingOp =
   | { op: 'delete'; entity: 'timer'; serverId: number }
   | { op: 'delete'; entity: 'cure'; serverId: number };
 
-const KEY = 'babybuddy.pendingOps.v1';
+const KEY = 'budkin.pendingOps.v1';
 
 export async function loadPendingOps(): Promise<PendingOp[]> {
   try {
