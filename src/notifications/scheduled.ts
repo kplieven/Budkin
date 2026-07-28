@@ -10,9 +10,11 @@
  * alert. So the reconcile reads the OS's pending set and diffs against THAT.
  */
 
+import { cureDosageLabel, TIME_OF_DAY_ORDER } from '@/features/cures/cureLabels';
 import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
+import { isCureActiveToday, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
 import type { ActivityType, Child, Cure, Timer } from '@/types/models';
 
 /** Every identifier we own starts with this. `diffScheduled` refuses to cancel
@@ -25,7 +27,7 @@ export const REMINDER_HOUR = 9;
 /** Days before the due date for the lead-up reminder. */
 export const DUE_LEAD_DAYS = 7;
 
-export type ReminderKind = 'due' | 'stale' | 'age' | 'pump' | 'nap';
+export type ReminderKind = 'due' | 'stale' | 'age' | 'pump' | 'nap' | 'cure';
 
 export interface ScheduledNotification {
   /** stable, and encodes the fire time so a moved date yields a new id */
@@ -418,6 +420,119 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   ];
 }
 
+/**
+ * How many occurrences to schedule ahead PER CURE, in both schedule modes. Same
+ * reasoning as PUMP_AHEAD: a repeating reminder built from one-shot triggers
+ * needs the app to reschedule after each fire, and this margin keeps the chain
+ * alive between foregrounds.
+ *
+ * A per-cure occurrence count rather than a fixed number of days, which gives
+ * sparse schedules more lookahead for free: a once-a-day cure reaches eight days
+ * ahead, a four-slot cure reaches two. It also bounds the total: a parent with
+ * several treatments cannot flood the OS queue.
+ */
+export const CURE_AHEAD = 8;
+
+/** Hard bound on the times-of-day day walk. Only load-bearing for a cure whose
+ *  `timesOfDay` is empty, which accumulates no occurrences and would otherwise
+ *  never reach CURE_AHEAD. With at least one slot chosen the walk finishes
+ *  inside nine days. */
+export const CURE_MAX_DAYS = 14;
+
+function cureNote(cure: Cure, fireAt: number): ScheduledNotification {
+  const dosage = cureDosageLabel(cure);
+  return {
+    // Keyed on the id, not the name: the id survives a rename and a rename must
+    // not orphan pending alerts. The name still reaches the diff through the
+    // title, and `diffScheduled` compares titles, so renaming a treatment
+    // reschedules its alerts with the new copy.
+    //
+    // `fireAt` is in the identifier for the same reason it is in the pumping
+    // one. Changing `everyHours`, or re-anchoring the grid, recomputes fireAt
+    // for the same cure; without it here the diff would see no change and
+    // Android's already-pending alarm would stay at the old spacing (commit
+    // bf7c0a5 was exactly this bug for pumping). It stays stable while `now`
+    // advances, because fireAt derives from the anchor and the interval.
+    identifier: `${REMINDER_PREFIX}cure:${cure.id}:${fireAt}`,
+    kind: 'cure',
+    title: `${cure.name.trim()} due`,
+    // The dosage is the single most useful thing this can carry: it puts "5 mg"
+    // on the lock screen without the parent opening the app. With no dosage
+    // recorded there is nothing to say, so fall back to the instruction.
+    body: dosage || 'Tap to log the dose.',
+    fireAt,
+    // Lands on the existing medication deep link with the cure named, which
+    // seeds the confirm sheet from it. See src/lib/logDeepLink.ts. The tap
+    // opens, it never writes, so "tap to log the dose" stays literally true.
+    data: { url: `/log/medication?cure=${encodeURIComponent(cure.id)}` },
+  };
+}
+
+/**
+ * Fixed times of day: each chosen slot fires at its mapped wall-clock hour.
+ *
+ * Walks forward day by day, stopping at CURE_AHEAD occurrences, CURE_MAX_DAYS
+ * days, or the cure's toDate, whichever comes first. Each instant is built off
+ * THAT day's own midnight with setHours (via `timeOfDaySlotMs`), never as
+ * midnight plus n * 86_400_000, so a DST boundary cannot move the 08:00 dose to
+ * 07:00 or 09:00 for half the year.
+ */
+function cureTimesOfDayReminders(
+  cure: Cure,
+  input: ScheduleInput,
+  now: number,
+  todayMidnight: number,
+): ScheduledNotification[] {
+  const slots = TIME_OF_DAY_ORDER.filter((tod) => cure.timesOfDay?.includes(tod));
+  const dosesToday = input.cureDoses[cure.id]?.today ?? 0;
+  const out: ScheduledNotification[] = [];
+  for (let day = 0; day < CURE_MAX_DAYS && out.length < CURE_AHEAD; day++) {
+    const dayMidnight = addDays(todayMidnight, day);
+    // toDate is stored at local midnight and is inclusive, so the regimen covers
+    // the whole of that day.
+    if (cure.toDate != null && dayMidnight > cure.toDate) break;
+    for (let k = 0; k < slots.length && out.length < CURE_AHEAD; k++) {
+      // TODAY ONLY: the kth slot (1-based, counted from the start of the day
+      // rather than from now) is settled once k doses are logged today. This is
+      // `cureDueState`'s counting rule expressed forward. Counting rather than
+      // matching slot to dose is what makes a late dose behave: on a
+      // morning+evening cure one dose given at 19:00 settles the earlier owed
+      // slot and leaves the later one owed, where a per-slot "any dose after
+      // this slot clears it" rule would let that single dose clear both.
+      // Future days are unaffected: their doses-today is zero by definition.
+      if (day === 0 && dosesToday >= k + 1) continue;
+      const fireAt = timeOfDaySlotMs(dayMidnight, slots[k]);
+      if (fireAt <= now) continue;
+      out.push(cureNote(cure, fireAt));
+    }
+  }
+  return out;
+}
+
+/**
+ * Reminders for the treatments a parent authored. Unlike the other five kinds,
+ * which are derived from facts the app works out for itself, this one only ever
+ * reports back a schedule the user typed in. That is why it ships on.
+ */
+function cureReminders(input: ScheduleInput, now: number): ScheduledNotification[] {
+  const todayMidnight = startOfDay(now);
+  const out: ScheduledNotification[] = [];
+  for (const cure of input.cures) {
+    // Scoped to the selected child, and forced rather than chosen: in server
+    // mode `s.entries` only ever holds the child the last fetch loaded, so dose
+    // history for anyone else is unreliable. `napReminders` gates on the same
+    // constraint for the same reason. `isCureActiveToday` also covers the
+    // paused flag and the fromDate/toDate range.
+    if (!isCureActiveToday(cure, todayMidnight, input.selectedChildId)) continue;
+    // A cure always carries a name (the editor requires one), but gate on it the
+    // same way `logMedicationFromCure` does: an alert titled " due" whose tap
+    // that action then refuses would be a dead tap.
+    if (!cure.name.trim()) continue;
+    out.push(...cureTimesOfDayReminders(cure, input, now, todayMidnight));
+  }
+  return out;
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
@@ -434,6 +549,9 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.napSuggestions) {
     for (const c of input.children) out.push(...napReminders(c, input, now));
+  }
+  if (input.prefs.treatmentReminders) {
+    out.push(...cureReminders(input, now));
   }
   return out;
 }

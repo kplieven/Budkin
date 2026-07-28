@@ -12,8 +12,10 @@ const TIME_OF_DAY_LABEL: Record<CureTimeOfDay, string> = {
   night: 'Night',
 };
 
-/** Fixed order the four times of day read in, regardless of pick order. */
-const TIME_OF_DAY_ORDER: CureTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
+/** Fixed order the four times of day read in, regardless of pick order. Also the
+ *  chronological order their slots fire in, which is why `cureReminders` in
+ *  src/notifications/scheduled.ts reuses this rather than keeping its own copy. */
+export const TIME_OF_DAY_ORDER: CureTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
 
 /** A short human summary of the cure's schedule, e.g. "Every 6 hours" or
  *  "Morning, Evening". Empty string when a mode has nothing chosen yet. */
