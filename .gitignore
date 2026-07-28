@@ -19,6 +19,10 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Play Store service account key (keep outside the repo; this is a safety net)
+play-service-account.json
+google-service-account*.json
+
 # Metro
 .metro-health-check*
 
