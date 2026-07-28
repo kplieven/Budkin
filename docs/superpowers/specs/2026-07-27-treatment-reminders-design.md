@@ -176,9 +176,23 @@ budkin:cure:{cureId}:{fireAt}
 ```
 
 Keyed on `cure.id`, not on the name: the id survives a rename, and a rename must
-not orphan pending alerts. The name still reaches the diff through the body, and
-`diffScheduled` already compares bodies, so renaming a treatment reschedules its
-alerts with the new copy.
+not orphan pending alerts. The name still reaches the diff through the title, and
+`diffScheduled` already compares both title and body, so renaming a treatment
+reschedules its alerts with the new copy.
+
+That rename safety is complete only for a `timesOfDay` cure. For an `everyHours`
+cure, dose ATTRIBUTION is still by name (`dosesForCure`, keyed on `cure.name`,
+not `cure.id`, for the reason given above): the moment the cure is renamed, the
+doses already logged under the old name stop matching, `lastAt` goes back to
+null, and `cureEveryHoursReminders` returns `[]` for it, cancelling the whole
+pending grid on the next reconcile. The identifier surviving the rename does not
+help here, since there is no grid left to keep an identifier for. The in-app
+Medication tile does not share this blind spot: `cureDueState` re-derives `due`
+from the renamed cure's current name each render, so it still reads the cure as
+due. The two diverge until the next dose is logged under the new name, which
+re-anchors the grid. This is a forced consequence of name-based attribution
+(a Baby Buddy medication record carries no reference back to its cure and cannot
+be given one), not something fixed here.
 
 `fireAt` is in the identifier for the same reason it is in the pumping one.
 Changing `everyHours`, or re-anchoring the grid, recomputes `fireAt` for the same

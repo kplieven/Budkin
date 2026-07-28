@@ -14,7 +14,14 @@ const cure = (over: Partial<Cure> = {}): Cure => ({
   ...over,
 });
 
-const base = { type: 'feeding', cure: undefined, connected: true, expected: false, cures: [] as Cure[] };
+const base = {
+  type: 'feeding',
+  cure: undefined,
+  connected: true,
+  expected: false,
+  selectedChildId: 'c1',
+  cures: [] as Cure[],
+};
 
 describe('resolveLogDeepLink', () => {
   it('opens the sheet for a plain activity', () => {
@@ -54,6 +61,22 @@ describe('resolveLogDeepLink', () => {
     // unknown id and would open nothing at all.
     expect(
       resolveLogDeepLink({ ...base, type: 'medication', cure: 'gone', cures: [cure()] }),
+    ).toEqual({ kind: 'medicationLog' });
+  });
+
+  it('falls back when the named cure belongs to a child other than the one selected', () => {
+    // A delivered notification can outlive a child switch: the pending alert for
+    // child A stays in the tray after the parent switches to child B, and
+    // tapping it must not seed the sheet with A's cure while the app is headed
+    // for B. Falls back to the picker exactly like an unknown cure.
+    expect(
+      resolveLogDeepLink({
+        ...base,
+        type: 'medication',
+        cure: 'cure1',
+        cures: [cure()],
+        selectedChildId: 'c2',
+      }),
     ).toEqual({ kind: 'medicationLog' });
   });
 

@@ -793,7 +793,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     expect(out[1].fireAt).toBe(at(2026, 9, 3, 18));
   });
 
-  it('caps output at CURE_AHEAD occurrences per cure', () => {
+  it('caps output at CURE_AHEAD occurrences', () => {
     const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
     expect(out).toHaveLength(CURE_AHEAD);
   });
@@ -835,6 +835,16 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
 
   it('schedules nothing for a cure belonging to another child', () => {
     expect(run({ cures: [cure({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
+  });
+
+  it('schedules nothing while the selected child is expected, since a cure cannot be dosed against a due date', () => {
+    // Every other reminder kind guards `child.expected`; this one must too,
+    // because resolveLogDeepLink (src/lib/logDeepLink.ts) refuses to open
+    // anything for an expected child, so a scheduled "X due" alert would be a
+    // tap the app itself cannot service.
+    expect(
+      run({ cures: [cure()], children: [child({ id: 'c1', expected: true })] }, at(2026, 9, 2, 6)),
+    ).toEqual([]);
   });
 
   it('schedules nothing for a cure whose name is blank', () => {
