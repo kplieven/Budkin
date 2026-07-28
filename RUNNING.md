@@ -71,7 +71,8 @@ If your Baby Buddy runs over plain **http://** on your LAN:
 
 ## Config worth knowing
 
-- Bundle id / package: `eu.steeldesignce.babybuddy` (`app.json`) — change before
-  any store submission.
+- Bundle id / package: `dev.karellievens.budkin` (`app.json`). Locked once the
+  app is published to Google Play, so it cannot be changed after the first
+  store submission.
 - New Architecture + Reanimated 4 are enabled (SDK 56 default). The splash
   screen / icons are still the Expo template defaults — rebrand when ready.
