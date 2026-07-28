@@ -28,6 +28,9 @@ export default function LogDeepLink() {
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const logMedicationFromCure = useAppStore((s) => s.logMedicationFromCure);
   const expected = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.expected ?? false);
+  // Plain string selector, not a derived object or array: returning a fresh
+  // reference from a useAppStore selector loops zustand v5 forever.
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
 
   useEffect(() => {
     // `cures` is read imperatively rather than subscribed. The root layout
@@ -41,12 +44,13 @@ export default function LogDeepLink() {
       cure,
       connected,
       expected,
+      selectedChildId,
       cures: useAppStore.getState().cures,
     });
     if (action.kind === 'sheet') openSheet(action.activity);
     else if (action.kind === 'cure') logMedicationFromCure(action.cureId);
     else if (action.kind === 'medicationLog') openMedicationLog();
-  }, [connected, expected, type, cure, openSheet, openMedicationLog, logMedicationFromCure]);
+  }, [connected, expected, selectedChildId, type, cure, openSheet, openMedicationLog, logMedicationFromCure]);
 
   if (!connected) return <Redirect href="/onboarding" />;
   // Always lands on Home. When the selected child is expected, the resolver

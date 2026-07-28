@@ -568,6 +568,18 @@ function cureEveryHoursReminders(
  * reports back a schedule the user typed in. That is why it ships on.
  */
 function cureReminders(input: ScheduleInput, now: number): ScheduledNotification[] {
+  // Every cure here is already scoped to `selectedChildId` by `isCureActiveToday`
+  // below, so one check against the selected child is correct and sufficient; no
+  // per-cure lookup is needed. Gate on `expected` the same way `dueReminders`,
+  // `ageReminders` and `napReminders` do, but for a different reason: those
+  // three have no fact to report yet (no age, no wake window) while an expecting
+  // child is due, not born. A cure cannot be dosed against a due date either,
+  // AND `resolveLogDeepLink` (src/lib/logDeepLink.ts) refuses to open anything
+  // for an expected child, so without this guard the alert would fire and its
+  // own tap target would refuse to service it.
+  const selectedChild = input.children.find((c) => c.id === input.selectedChildId);
+  if (selectedChild?.expected) return [];
+
   const todayMidnight = startOfDay(now);
   const out: ScheduledNotification[] = [];
   for (const cure of input.cures) {
