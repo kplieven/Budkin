@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { Cure, Entry } from '@/types/models';
+
 // In-memory AsyncStorage so the store's data modules load under node.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({
@@ -435,5 +437,76 @@ describe('nap suggestion end-to-end (regression: toInput\'s key space (e.childId
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('cure projection', () => {
+  const cureRec: Cure = {
+    id: 'cure1',
+    childId: 'c1',
+    name: 'Omeprazol',
+    scheduleMode: 'timesOfDay',
+    timesOfDay: ['morning'],
+    fromDate: new Date(2020, 0, 1).getTime(),
+    active: true,
+  };
+
+  const dose = (childId: string, time: number): Entry => ({
+    id: `m-${time}`,
+    childId,
+    type: 'medication',
+    name: 'Omeprazol',
+    time,
+    // `tags` is required on EntryBase; omitting it is a type error, not an
+    // inferred default.
+    tags: [],
+  });
+
+  it('projects cures and per-cure dose scalars', async () => {
+    const { desired, useAppStore } = await setup();
+    const doseAt = Date.now() - 60_000;
+    useAppStore.setState({ selectedChildId: 'c1', cures: [cureRec], entries: [dose('c1', doseAt)] });
+    await flush();
+
+    const input = desired.mock.calls.at(-1)![0];
+    expect(input.cures).toEqual([cureRec]);
+    expect(input.cureDoses.cure1.lastAt).toBe(doseAt);
+  });
+
+  it('scopes dose scalars to the selected child', async () => {
+    const { desired, useAppStore } = await setup();
+    useAppStore.setState({
+      selectedChildId: 'c1',
+      cures: [cureRec],
+      entries: [dose('c2', Date.now() - 60_000)],
+    });
+    await flush();
+
+    // The dose belongs to another child, so it must not count toward c1's cure.
+    expect(desired.mock.calls.at(-1)![0].cureDoses.cure1).toEqual({ today: 0, lastAt: null });
+  });
+
+  it('rebuilds when the cures list changes', async () => {
+    const { desired, useAppStore } = await setup();
+    const builds = desired.mock.calls.length;
+    useAppStore.setState({ cures: [cureRec] });
+    await flush();
+    expect(desired.mock.calls.length).toBeGreaterThan(builds);
+  });
+
+  it('rebuilds when the treatments pref is toggled', async () => {
+    const { desired, useAppStore } = await setup();
+    const builds = desired.mock.calls.length;
+    useAppStore.setState({ treatmentReminders: false });
+    await flush();
+    expect(desired.mock.calls.length).toBeGreaterThan(builds);
+  });
+
+  it('rebuilds when the treatments resync stamp moves', async () => {
+    const { desired, useAppStore } = await setup();
+    const builds = desired.mock.calls.length;
+    useAppStore.setState({ treatmentRemindersEnabledAt: Date.now() });
+    await flush();
+    expect(desired.mock.calls.length).toBeGreaterThan(builds);
   });
 });

@@ -13,7 +13,7 @@
 import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
-import type { ActivityType, Child, Timer } from '@/types/models';
+import type { ActivityType, Child, Cure, Timer } from '@/types/models';
 
 /** Every identifier we own starts with this. `diffScheduled` refuses to cancel
  *  anything without it, so a timer notification (bare uuid) is never touched. */
@@ -54,6 +54,9 @@ export interface ReminderPrefs {
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
   napSuggestions: boolean;
+  treatmentReminders: boolean;
+  /** when the treatments toggle was last switched on, epoch ms */
+  treatmentRemindersEnabledAt: number | null;
 }
 
 /** A narrow projection of the store, so this layer never imports store types. */
@@ -81,6 +84,16 @@ export interface ScheduleInput {
    *  Mirrors the `timer.childId ?? selectedChildId` fallback `mirrorTimerCreate`
    *  uses in `useAppStore.ts`. */
   selectedChildId: string;
+  /** Every cure the store holds. `cureReminders` scopes to `selectedChildId`
+   *  itself, the same way `napReminders` does and for the same reason: in server
+   *  mode `s.entries` only ever holds the child the last fetch loaded, so dose
+   *  history for any other child is unreliable. */
+  cures: Cure[];
+  /** Per cure id: doses logged since local midnight, and the most recent dose
+   *  instant. Derived scalars rather than raw entries, matching `lastPumpAt` and
+   *  `lastSleepEndByChild`, so this file stays ignorant of `Entry`. Built by
+   *  `cureDoseScalars`, which owns the by-name dose attribution rule. */
+  cureDoses: Record<string, { today: number; lastAt: number | null }>;
 }
 
 /** 09:00 local on the calendar day containing `ms`. Built from local Y/M/D

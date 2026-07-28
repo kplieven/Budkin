@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, cureDueHint, cureDueList, cureDueState, curesAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, cureDoseScalars, cureDueHint, cureDueList, cureDueState, curesAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Cure, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -753,6 +753,38 @@ describe('cureDueState / cureDueList / cureDueHint / curesAllGiven', () => {
 
     it('shows no check while a dose is still owed', () => {
       expect(curesAllGiven(cureDueList([morning], 'c1', [], at(9)))).toBe(false);
+    });
+  });
+
+  describe('cureDoseScalars', () => {
+    it("counts today's doses and reports the latest dose instant", () => {
+      const out = cureDoseScalars([cure()], [dayAt(3, 8), at(8), at(12)].map((t) => dose(t)), at(14));
+      expect(out['cure-1']).toEqual({ today: 2, lastAt: at(12) });
+    });
+
+    it('matches a dose to its cure by trimmed, case-insensitive name', () => {
+      const out = cureDoseScalars([cure()], [dose(at(8), '  omeprazol ')], at(14));
+      expect(out['cure-1'].today).toBe(1);
+    });
+
+    it('ignores a dose for a different medication', () => {
+      const out = cureDoseScalars([cure()], [dose(at(8), 'Paracetamol')], at(14));
+      expect(out['cure-1']).toEqual({ today: 0, lastAt: null });
+    });
+
+    it('reports a cure with no doses at all rather than omitting it', () => {
+      expect(cureDoseScalars([cure()], [], at(14))['cure-1']).toEqual({ today: 0, lastAt: null });
+    });
+
+    it('ignores a dose stamped in the future, matching cureDueState', () => {
+      const out = cureDoseScalars([cure()], [dose(at(20))], at(14));
+      expect(out['cure-1']).toEqual({ today: 0, lastAt: null });
+    });
+
+    it('keys every cure it is given', () => {
+      const out = cureDoseScalars([cure(), cure({ id: 'cure-2', name: 'Amoxicilline' })], [dose(at(8))], at(14));
+      expect(Object.keys(out).sort()).toEqual(['cure-1', 'cure-2']);
+      expect(out['cure-2']).toEqual({ today: 0, lastAt: null });
     });
   });
 });
