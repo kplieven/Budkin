@@ -851,3 +851,161 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     expect(out).toEqual([]);
   });
 });
+
+describe('desiredScheduled: treatments, every N hours', () => {
+  const only = (over: Partial<ReminderPrefs> = {}) =>
+    prefs({
+      dueDateReminders: false,
+      staleTimerReminders: false,
+      ageMilestones: false,
+      treatmentReminders: true,
+      ...over,
+    });
+
+  const cure = (over: Partial<Cure> = {}): Cure => ({
+    id: 'cure1',
+    childId: 'c1',
+    name: 'Amoxicilline',
+    scheduleMode: 'everyHours',
+    everyHours: 8,
+    fromDate: at(2026, 9, 1),
+    active: true,
+    ...over,
+  });
+
+  const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
+    desiredScheduled(input({ prefs: only(p), selectedChildId: 'c1', ...over }), now);
+
+  it('anchors the grid on the last logged dose', () => {
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      at(2026, 9, 2, 7),
+    );
+    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 14));
+    expect(out[1].fireAt).toBe(at(2026, 9, 2, 22));
+    expect(out[0].title).toBe('Amoxicilline due');
+  });
+
+  it('re-anchors when a newer dose is logged', () => {
+    const a = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      at(2026, 9, 2, 7),
+    );
+    const b = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 7) } } },
+      at(2026, 9, 2, 7),
+    );
+    expect(b[0].fireAt).toBe(at(2026, 9, 2, 15));
+    expect(a[0].identifier).not.toBe(b[0].identifier);
+  });
+
+  it('re-enters the grid on phase when every occurrence has already passed', () => {
+    // Dosed two days ago, app never opened since. Scheduling blindly from the
+    // anchor would produce only past instants and therefore nothing at all.
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: at(2026, 9, 1, 6) } } },
+      at(2026, 9, 3, 7),
+    );
+    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out.every((n) => n.fireAt > at(2026, 9, 3, 7))).toBe(true);
+    expect(out[0].fireAt).toBe(at(2026, 9, 3, 14));
+  });
+
+  it('schedules nothing for an interval cure that has never been dosed', () => {
+    // "Every 8 hours" means eight hours after the last dose. With no last dose
+    // there is no defined next instant, and any anchor invented for one is a
+    // guess. The in-app tile still shows it as due, so nobody is left unaware.
+    expect(run({ cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 7))).toEqual([]);
+    expect(run({ cures: [cure()], cureDoses: {} }, at(2026, 9, 2, 7))).toEqual([]);
+  });
+
+  it('schedules nothing for an interval cure with no interval set', () => {
+    expect(
+      run(
+        { cures: [cure({ everyHours: undefined })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+        at(2026, 9, 2, 7),
+      ),
+    ).toEqual([]);
+  });
+
+  it('moves an existing grid forward when the resync stamp is later than the last dose', () => {
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      at(2026, 9, 2, 11),
+      { treatmentRemindersEnabledAt: at(2026, 9, 2, 10) },
+    );
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 18));
+  });
+
+  it('ignores a resync stamp older than the last dose', () => {
+    const out = run(
+      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      at(2026, 9, 2, 7),
+      { treatmentRemindersEnabledAt: at(2026, 9, 1, 10) },
+    );
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 14));
+  });
+
+  it('still schedules nothing when the resync stamp is set but no dose was ever logged', () => {
+    // The ordering guard. A plain Math.max(lastAt ?? 0, enabledAt ?? 0), which
+    // is what pumpReminders does, would manufacture a grid here out of a time
+    // the app invented. The stamp may only ever MOVE an existing grid.
+    expect(
+      run({ cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 11), {
+        treatmentRemindersEnabledAt: at(2026, 9, 2, 10),
+      }),
+    ).toEqual([]);
+  });
+
+  it('does not let the resync stamp shift a times-of-day cure', () => {
+    // Those instants come off the wall clock, not off a phase, so there is
+    // nothing for a rebase to move. Toggling off and on cannot move an 08:00
+    // dose, and should not.
+    const todCure: Cure = {
+      id: 'cure2',
+      childId: 'c1',
+      name: 'Omeprazol',
+      scheduleMode: 'timesOfDay',
+      timesOfDay: ['morning'],
+      fromDate: at(2026, 9, 1),
+      active: true,
+    };
+    const out = run({ cures: [todCure] }, at(2026, 9, 2, 6), {
+      treatmentRemindersEnabledAt: at(2026, 9, 2, 5),
+    });
+    expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
+  });
+
+  it('keeps the identifier stable as now advances within the same occurrence', () => {
+    const doses = { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
+    const a = run({ cures: [cure()], cureDoses: doses }, at(2026, 9, 2, 7));
+    const b = run({ cures: [cure()], cureDoses: doses }, at(2026, 9, 2, 8));
+    expect(a[0].identifier).toBe(b[0].identifier);
+  });
+
+  it('changes the identifier when the interval changes', () => {
+    const doses = { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
+    const a = run({ cures: [cure({ everyHours: 8 })], cureDoses: doses }, at(2026, 9, 2, 7));
+    const b = run({ cures: [cure({ everyHours: 6 })], cureDoses: doses }, at(2026, 9, 2, 7));
+    expect(a[0].identifier).not.toBe(b[0].identifier);
+  });
+
+  it('stops at the end of the day toDate names', () => {
+    const out = run(
+      { cures: [cure({ toDate: at(2026, 9, 2) })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      at(2026, 9, 2, 7),
+    );
+    // 14:00 and 22:00 fall inside the last day; 06:00 the next morning does not.
+    expect(out.map((n) => n.fireAt)).toEqual([at(2026, 9, 2, 14), at(2026, 9, 2, 22)]);
+  });
+
+  it('schedules nothing for a paused interval cure', () => {
+    expect(
+      run(
+        { cures: [cure({ active: false })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+        at(2026, 9, 2, 7),
+      ),
+    ).toEqual([]);
+  });
+});
