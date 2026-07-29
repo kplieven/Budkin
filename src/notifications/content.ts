@@ -14,6 +14,13 @@ import type { Timer } from '@/types/models';
  *  route notifications to a noisy fallback channel. */
 export const TIMER_CHANNEL_ID = 'timers';
 
+/** Android channel id for SCHEDULED reminders (due date, stale timers, age
+ *  milestones, pumping). Separate from TIMER_CHANNEL_ID on purpose: that one is
+ *  LOW importance because a running timer is a persistent status, and reusing it
+ *  would make every reminder here silent. It also lets a user mute reminders in
+ *  Android settings without losing the timer display. */
+export const REMINDER_CHANNEL_ID = 'reminders';
+
 export interface TimerNotification {
   /** stable id = timer.id, so posts update in place and dismissals are exact */
   identifier: string;

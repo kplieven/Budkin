@@ -1,3 +1,4 @@
+import { APPROX_MONTH_DAYS } from '@/lib/format';
 import type { Entry, MilestoneEntry } from '@/types/models';
 
 export type MilestoneCategory =
@@ -107,6 +108,22 @@ export function overdueUnlogged(
   return MILESTONES.filter(
     (m) => ageMonths > m.maxMonths && !reached.has(m.key) && !answered.includes(m.key),
   ).sort((a, b) => a.maxMonths - b.maxMonths);
+}
+
+/**
+ * The instant `overdueUnlogged` starts returning this milestone: the first
+ * moment `ageMonths` reads strictly greater than the typical window's upper
+ * bound.
+ *
+ * Scheduling reads this rather than adding `maxMonths + 1` CALENDAR months,
+ * because `ageMonths` counts in 30.4-day months. Four calendar months after a
+ * birth is 120 to 123 days, which `ageMonths` still reports as 3 for the
+ * shorter spans — so a calendar-derived reminder could arrive days before the
+ * home-screen nudge would show the same milestone, telling a parent to catch up
+ * on something the app itself does not yet consider overdue.
+ */
+export function catchUpDueAt(birth: number, m: MilestoneDef): number {
+  return birth + Math.ceil((m.maxMonths + 1) * APPROX_MONTH_DAYS * 86400000);
 }
 
 /** Group defs by category in MILESTONE_CATEGORIES order, omitting empties. */

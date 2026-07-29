@@ -7,18 +7,18 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { ActivityType, Child, Cure, Entry, Measurement, MeasurementKind, Timer } from '@/types/models';
+import type { ActivityType, Child, Treatment, Entry, Measurement, MeasurementKind, Timer } from '@/types/models';
 
 export type PendingOp =
   | { op: 'update'; entity: 'child'; payload: Child }
   | { op: 'update'; entity: 'measurement'; payload: Measurement }
   | { op: 'update'; entity: 'entry'; payload: Entry }
   | { op: 'update'; entity: 'timer'; payload: Timer }
-  | { op: 'update'; entity: 'cure'; payload: Cure }
+  | { op: 'update'; entity: 'treatment'; payload: Treatment }
   | { op: 'delete'; entity: 'entry'; entryType: ActivityType; serverId: number }
   | { op: 'delete'; entity: 'measurement'; kind: MeasurementKind; serverId: number }
   | { op: 'delete'; entity: 'timer'; serverId: number }
-  | { op: 'delete'; entity: 'cure'; serverId: number };
+  | { op: 'delete'; entity: 'treatment'; serverId: number };
 
 const KEY = 'budkin.pendingOps.v1';
 

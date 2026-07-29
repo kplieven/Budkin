@@ -1,14 +1,15 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
-import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels';
+import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -21,6 +22,7 @@ import {
 } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { fontFamily } from '@/theme/fonts';
+import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
 
 /**
@@ -223,32 +225,13 @@ function CountField({
   );
 }
 
-function Toggle({ on }: { on: boolean }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        width: 50,
-        height: 30,
-        borderRadius: 99,
-        backgroundColor: on ? t.primary : t.elevated,
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: on ? 23 : 3,
-          width: 24,
-          height: 24,
-          borderRadius: 99,
-          backgroundColor: '#fff',
-          boxShadow: '0px 1px 3px rgba(0,0,0,0.3)',
-        }}
-      />
-    </View>
-  );
+/**
+ * Sentence-case a display label. fmtDayStartHour is a lowercase primitive so it
+ * can be dropped mid-sentence elsewhere, but the "Day starts at" pills stand
+ * alone, so they capitalize here. A no-op for labels like "7:00".
+ */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export default function Settings() {
@@ -276,32 +259,15 @@ export default function Settings() {
   const openAdopt = useAppStore((s) => s.openAdopt);
   const children = useAppStore((s) => s.children);
   const entries = useAppStore((s) => s.entries);
-  const cures = useAppStore((s) => s.cures);
+  const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  const openCureEditor = useAppStore((s) => s.openCureEditor);
+  const openTreatmentEditor = useAppStore((s) => s.openTreatmentEditor);
 
   useEffect(() => {
     loadProfile();
   }, [loadProfile]);
 
-  const group = {
-    backgroundColor: t.surface,
-    borderWidth: 1.5,
-    borderColor: t.line,
-    borderRadius: 18,
-    overflow: 'hidden' as const,
-  };
-  const row = {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  };
-  const sectionLabel = {
-    marginTop: 22,
-    marginBottom: 9,
-    marginHorizontal: 4,
-  };
+  const { group, row, sectionLabel } = makeSettingsListStyles(t);
 
   const host =
     connection?.mode === 'local'
@@ -332,12 +298,12 @@ export default function Settings() {
     connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
-  // Cures are per-child, so scope the management list to the selected child.
+  // Treatments are per-child, so scope the management list to the selected child.
   // Filtered in the render body (never inside a useAppStore selector) so a fresh
-  // array can't drive the zustand v5 re-render loop. Both active and paused cures
+  // array can't drive the zustand v5 re-render loop. Both active and paused treatments
   // are shown here (this is where you manage them); the log picker filters.
   const selectedChild = children.find((c) => c.id === selectedChildId);
-  const childCures = cures.filter((c) => c.childId === selectedChildId);
+  const childTreatments = treatments.filter((c) => c.childId === selectedChildId);
 
   const body = (
     <>
@@ -475,7 +441,7 @@ export default function Settings() {
             {[19, 12, 7, 0].map((h) => (
               <Chip
                 key={h}
-                label={fmtDayStartHour(h)}
+                label={capitalize(fmtDayStartHour(h))}
                 color={t.primary}
                 selected={rhythmOriginHour === h}
                 onPress={() => setRhythmOriginHour(h)}
@@ -494,10 +460,10 @@ export default function Settings() {
             Treatments for {selectedChild.first}
           </Txt>
           <View style={group}>
-            {childCures.map((c, i) => (
+            {childTreatments.map((c, i) => (
               <Pressable
                 key={c.id}
-                onPress={() => openCureEditor(c.id)}
+                onPress={() => openTreatmentEditor(c.id)}
                 accessibilityRole="button"
                 accessibilityLabel={`Edit ${c.name}`}
                 style={(s) => [
@@ -520,14 +486,14 @@ export default function Settings() {
                     )}
                   </View>
                   <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-                    {[cureDosageLabel(c), cureScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
+                    {[treatmentDosageLabel(c), treatmentScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
                   </Txt>
                 </View>
                 <Icon name="chevron-right" color={t.faint} size={18} />
               </Pressable>
             ))}
             <Pressable
-              onPress={() => openCureEditor()}
+              onPress={() => openTreatmentEditor()}
               accessibilityRole="button"
               accessibilityLabel="Add a treatment"
               style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
@@ -539,9 +505,34 @@ export default function Settings() {
             </Pressable>
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
-            Treatments stay on this device and are never sent to Baby Buddy. Logging a dose from a
-            treatment still saves the dose the usual way.
+            Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
+            save as ordinary medication entries and are matched to a treatment by name, so renaming
+            one leaves its earlier doses behind.
           </Txt>
+        </>
+      )}
+
+      {/* Scheduled reminders only fire on Android (permission.ts's stub is a
+          permanent no off it), so the row is hidden rather than linking to a
+          screen that can never do anything there. */}
+      {Platform.OS === 'android' && (
+        <>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+            Reminders
+          </Txt>
+          <View style={group}>
+            <Pressable
+              onPress={() => router.navigate('/settings/notifications')}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications"
+              style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+            >
+              <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
+                Notifications
+              </Txt>
+              <Icon name="chevron-right" color={t.faint} size={18} />
+            </Pressable>
+          </View>
         </>
       )}
 
