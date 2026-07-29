@@ -237,17 +237,16 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
                 {fmtDur((now - tm.start) / 60000)}
               </Txt>
             </View>
-            {/* Right column: the "View" affordance with the per-timer sync badge
-                stacked beneath it, so the middle column is just label + duration
-                and the card sits shorter. */}
-            <View style={{ alignItems: 'flex-end' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                <Txt unselectable weight={600} size={13.5} color={t.dim}>
-                  View
-                </Txt>
-                <Icon name="chevron-right" color={t.dim} size={16} />
-              </View>
-              {isServer && <SyncBadge synced={tm.serverId != null} />}
+            {/* Right column: one centred row of sync badge + chevron. The badge
+                takes the slot the word "View" used to hold, so the column is a
+                single line instead of two and the card never grows for it. The
+                chevron carries the "goes somewhere" affordance on its own, and
+                the card's accessibilityLabel above still announces both the sync
+                state and "view timers", so dropping the word costs nothing to a
+                screen reader. In local mode only the chevron renders. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+              {isServer && <SyncBadge synced={tm.serverId != null} inline />}
+              <Icon name="chevron-right" color={t.dim} size={16} />
             </View>
           </Pressable>
         ))}
