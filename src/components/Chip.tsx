@@ -7,6 +7,9 @@ import { useTheme } from '@/theme/useTheme';
 
 interface ChipProps {
   label: string;
+  /** Spoken instead of `label` when the visible text is an abbreviation a
+   *  screen reader would mangle ("3h" reads as "three h"). */
+  accessibilityLabel?: string;
   /** activity color used when selected */
   color: string;
   selected?: boolean;
@@ -23,6 +26,7 @@ interface ChipProps {
 
 export function Chip({
   label,
+  accessibilityLabel,
   color,
   selected = false,
   onPress,
@@ -40,6 +44,7 @@ export function Chip({
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
         accessibilityState={{ selected }}
         style={(s) => [
           {
@@ -69,6 +74,7 @@ export function Chip({
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ selected }}
       style={(s) => [
         {

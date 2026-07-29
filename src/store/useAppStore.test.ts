@@ -4751,6 +4751,202 @@ describe('unit-system persistence', () => {
   });
 });
 
+describe('reminder preference persistence', () => {
+  it('setReminderPref updates state and persists via savePrefs for a plain toggle', () => {
+    useAppStore.setState({ dueDateReminders: true });
+    s().setReminderPref('dueDateReminders', false);
+    expect(s().dueDateReminders).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ dueDateReminders: false });
+  });
+
+  it('setReminderPref updates staleTimerReminders and persists', () => {
+    useAppStore.setState({ staleTimerReminders: true });
+    s().setReminderPref('staleTimerReminders', false);
+    expect(s().staleTimerReminders).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ staleTimerReminders: false });
+  });
+
+  it('setReminderPref updates ageMilestones and persists', () => {
+    useAppStore.setState({ ageMilestones: true });
+    s().setReminderPref('ageMilestones', false);
+    expect(s().ageMilestones).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ ageMilestones: false });
+  });
+
+  it('switching pumpingReminders ON stamps pumpingEnabledAt with the current time', () => {
+    useAppStore.setState({ pumpingReminders: false, pumpingEnabledAt: null });
+    const before = Date.now();
+    s().setReminderPref('pumpingReminders', true);
+    const after = Date.now();
+    expect(s().pumpingReminders).toBe(true);
+    expect(s().pumpingEnabledAt).not.toBeNull();
+    expect(s().pumpingEnabledAt as number).toBeGreaterThanOrEqual(before);
+    expect(s().pumpingEnabledAt as number).toBeLessThanOrEqual(after);
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingReminders: true, pumpingEnabledAt: s().pumpingEnabledAt });
+  });
+
+  it('switching pumpingReminders OFF clears pumpingEnabledAt to null', () => {
+    useAppStore.setState({ pumpingReminders: true, pumpingEnabledAt: NOW });
+    s().setReminderPref('pumpingReminders', false);
+    expect(s().pumpingReminders).toBe(false);
+    expect(s().pumpingEnabledAt).toBeNull();
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingReminders: false, pumpingEnabledAt: null });
+  });
+
+  it('setPumpingInterval updates state and persists via savePrefs', () => {
+    useAppStore.setState({ pumpingIntervalMin: 180 });
+    s().setPumpingInterval(240);
+    expect(s().pumpingIntervalMin).toBe(240);
+    expect(savePrefs).toHaveBeenCalledWith({ pumpingIntervalMin: 240 });
+  });
+
+  it('hydrate applies persisted reminder prefs', async () => {
+    h.prefs = {
+      dueDateReminders: false,
+      staleTimerReminders: false,
+      ageMilestones: false,
+      pumpingReminders: true,
+      pumpingIntervalMin: 120,
+      pumpingEnabledAt: NOW,
+    };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({
+      dueDateReminders: true,
+      staleTimerReminders: true,
+      ageMilestones: true,
+      pumpingReminders: false,
+      pumpingIntervalMin: 180,
+      pumpingEnabledAt: null,
+    });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(false);
+    expect(s().staleTimerReminders).toBe(false);
+    expect(s().ageMilestones).toBe(false);
+    expect(s().pumpingReminders).toBe(true);
+    expect(s().pumpingIntervalMin).toBe(120);
+    expect(s().pumpingEnabledAt).toBe(NOW);
+  });
+
+  it('hydrate leaves reminder prefs at their defaults when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({
+      dueDateReminders: true,
+      staleTimerReminders: true,
+      ageMilestones: true,
+      pumpingReminders: false,
+      pumpingIntervalMin: 180,
+      pumpingEnabledAt: null,
+    });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(true);
+    expect(s().staleTimerReminders).toBe(true);
+    expect(s().ageMilestones).toBe(true);
+    expect(s().pumpingReminders).toBe(false);
+    expect(s().pumpingIntervalMin).toBe(180);
+    expect(s().pumpingEnabledAt).toBeNull();
+  });
+
+  // Regression guard: a persisted `false` is meaningful and must survive
+  // hydration. A truthiness check (`if (prefs.dueDateReminders)`) would treat
+  // a stored `false` as "nothing persisted" and silently resurrect the
+  // default `true`. This test fails under that regression.
+  it('hydrate restores a persisted false, not the default true (truthiness regression guard)', async () => {
+    h.prefs = { dueDateReminders: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ dueDateReminders: true });
+    await s().hydrate();
+    expect(s().dueDateReminders).toBe(false);
+  });
+
+  // pumpingEnabledAt's own guard is `!== undefined` rather than `!= null`,
+  // because a persisted explicit `null` (pumping was turned off) must
+  // overwrite a stale non-null value already in memory.
+  it('hydrate restores a persisted null pumpingEnabledAt over a stale in-memory value', async () => {
+    h.prefs = { pumpingEnabledAt: null };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ pumpingEnabledAt: NOW });
+    await s().hydrate();
+    expect(s().pumpingEnabledAt).toBeNull();
+  });
+
+  it('napSuggestions defaults to off, because it is advice rather than a fact', () => {
+    expect(s().napSuggestions).toBe(false);
+  });
+
+  it('setReminderPref updates napSuggestions and persists', () => {
+    useAppStore.setState({ napSuggestions: false });
+    s().setReminderPref('napSuggestions', true);
+    expect(s().napSuggestions).toBe(true);
+    expect(savePrefs).toHaveBeenCalledWith({ napSuggestions: true });
+  });
+
+  it('hydrate applies a persisted napSuggestions, including a stored false', async () => {
+    h.prefs = { napSuggestions: true };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napSuggestions: false });
+    await s().hydrate();
+    expect(s().napSuggestions).toBe(true);
+
+    // `!= null`, not truthiness: a persisted false has to survive hydration.
+    h.prefs = { napSuggestions: false };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ napSuggestions: true });
+    await s().hydrate();
+    expect(s().napSuggestions).toBe(false);
+  });
+
+  it('treatmentReminders defaults on', () => {
+    expect(useAppStore.getState().treatmentReminders).toBe(true);
+  });
+
+  it('switching treatmentReminders ON stamps treatmentRemindersEnabledAt with the current time', () => {
+    useAppStore.setState({ treatmentReminders: false, treatmentRemindersEnabledAt: null });
+    const before = Date.now();
+    s().setReminderPref('treatmentReminders', true);
+    const after = Date.now();
+    expect(s().treatmentReminders).toBe(true);
+    expect(s().treatmentRemindersEnabledAt).not.toBeNull();
+    expect(s().treatmentRemindersEnabledAt as number).toBeGreaterThanOrEqual(before);
+    expect(s().treatmentRemindersEnabledAt as number).toBeLessThanOrEqual(after);
+    expect(savePrefs).toHaveBeenCalledWith({
+      treatmentReminders: true,
+      treatmentRemindersEnabledAt: s().treatmentRemindersEnabledAt,
+    });
+  });
+
+  it('switching treatmentReminders OFF clears treatmentRemindersEnabledAt to null', () => {
+    useAppStore.setState({ treatmentReminders: true, treatmentRemindersEnabledAt: NOW });
+    s().setReminderPref('treatmentReminders', false);
+    expect(s().treatmentReminders).toBe(false);
+    expect(s().treatmentRemindersEnabledAt).toBeNull();
+    expect(savePrefs).toHaveBeenCalledWith({
+      treatmentReminders: false,
+      treatmentRemindersEnabledAt: null,
+    });
+  });
+
+  it('hydrate applies persisted treatment reminder prefs', async () => {
+    h.prefs = { treatmentReminders: false, treatmentRemindersEnabledAt: 1234 };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ treatmentReminders: true, treatmentRemindersEnabledAt: null });
+    await s().hydrate();
+    expect(s().treatmentReminders).toBe(false);
+    expect(s().treatmentRemindersEnabledAt).toBe(1234);
+  });
+
+  // treatmentRemindersEnabledAt's own guard is `!== undefined` rather than
+  // `!= null`, because a persisted explicit `null` (treatments were turned
+  // off) must overwrite a stale non-null value already in memory.
+  it('hydrate restores a persisted null treatmentRemindersEnabledAt over a stale in-memory value', async () => {
+    h.prefs = { treatmentRemindersEnabledAt: null };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    useAppStore.setState({ treatmentRemindersEnabledAt: NOW });
+    await s().hydrate();
+    expect(s().treatmentRemindersEnabledAt).toBeNull();
+  });
+});
+
 describe('growth-reference persistence', () => {
   it('setGrowthReference toggles the flag and persists it', () => {
     useAppStore.setState({ showGrowthReference: true });

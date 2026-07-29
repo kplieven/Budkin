@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 
-import { TIMER_CHANNEL_ID } from '@/notifications/content';
+import { REMINDER_CHANNEL_ID, TIMER_CHANNEL_ID } from '@/notifications/content';
 
 // Without a handler, notifications posted while the app is in the FOREGROUND are
 // suppressed (not shown in the tray). This makes them appear; sound is left to the
@@ -23,11 +23,19 @@ void Notifications.setNotificationChannelAsync(TIMER_CHANNEL_ID, {
   importance: Notifications.AndroidImportance.LOW,
 });
 
-// Tapping a timer notification routes to the timers page (where the user stops /
-// edits). All timer notifications carry data.url === '/timers'.
+// DEFAULT importance, unlike the LOW timers channel: these are alerts a parent
+// should actually notice, not a persistent status.
+void Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
+  name: 'Reminders',
+  importance: Notifications.AndroidImportance.DEFAULT,
+});
+
+// Every notification we post carries its own destination in `data.url`, always
+// app-generated: '/timers' for timers and stale-timer alerts, '/' for due
+// dates, '/history' for age milestones.
 function openFromResponse(response: Notifications.NotificationResponse | null): void {
   const url = response?.notification.request.content.data?.url;
-  if (url === '/timers') router.navigate('/timers');
+  if (typeof url === 'string' && url.startsWith('/')) router.navigate(url as never);
 }
 
 // Warm taps (app running or backgrounded).

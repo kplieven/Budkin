@@ -1,12 +1,13 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
 import { backOr } from '@/lib/nav';
@@ -21,6 +22,7 @@ import {
 } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { fontFamily } from '@/theme/fonts';
+import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
 
 /**
@@ -223,34 +225,6 @@ function CountField({
   );
 }
 
-function Toggle({ on }: { on: boolean }) {
-  const t = useTheme();
-  return (
-    <View
-      style={{
-        width: 50,
-        height: 30,
-        borderRadius: 99,
-        backgroundColor: on ? t.primary : t.elevated,
-        justifyContent: 'center',
-      }}
-    >
-      <View
-        style={{
-          position: 'absolute',
-          top: 3,
-          left: on ? 23 : 3,
-          width: 24,
-          height: 24,
-          borderRadius: 99,
-          backgroundColor: '#fff',
-          boxShadow: '0px 1px 3px rgba(0,0,0,0.3)',
-        }}
-      />
-    </View>
-  );
-}
-
 /**
  * Sentence-case a display label. fmtDayStartHour is a lowercase primitive so it
  * can be dropped mid-sentence elsewhere, but the "Day starts at" pills stand
@@ -293,24 +267,7 @@ export default function Settings() {
     loadProfile();
   }, [loadProfile]);
 
-  const group = {
-    backgroundColor: t.surface,
-    borderWidth: 1.5,
-    borderColor: t.line,
-    borderRadius: 18,
-    overflow: 'hidden' as const,
-  };
-  const row = {
-    flexDirection: 'row' as const,
-    alignItems: 'center' as const,
-    paddingVertical: 15,
-    paddingHorizontal: 16,
-  };
-  const sectionLabel = {
-    marginTop: 22,
-    marginBottom: 9,
-    marginHorizontal: 4,
-  };
+  const { group, row, sectionLabel } = makeSettingsListStyles(t);
 
   const host =
     connection?.mode === 'local'
@@ -552,6 +509,30 @@ export default function Settings() {
             save as ordinary medication entries and are matched to a treatment by name, so renaming
             one leaves its earlier doses behind.
           </Txt>
+        </>
+      )}
+
+      {/* Scheduled reminders only fire on Android (permission.ts's stub is a
+          permanent no off it), so the row is hidden rather than linking to a
+          screen that can never do anything there. */}
+      {Platform.OS === 'android' && (
+        <>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+            Reminders
+          </Txt>
+          <View style={group}>
+            <Pressable
+              onPress={() => router.navigate('/settings/notifications')}
+              accessibilityRole="button"
+              accessibilityLabel="Notifications"
+              style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+            >
+              <Txt unselectable weight={600} size={16} style={{ flex: 1 }}>
+                Notifications
+              </Txt>
+              <Icon name="chevron-right" color={t.faint} size={18} />
+            </Pressable>
+          </View>
         </>
       )}
 
