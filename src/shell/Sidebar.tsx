@@ -64,7 +64,7 @@ export function Sidebar() {
             boxShadow: `0px 6px 18px ${hexA(t.primary, 0.4)}`,
           }}
         >
-          <Icon name="heart" color={t.onPrimary} size={22} />
+          <Icon name="budkin" color={t.onPrimary} size={22} />
         </View>
         <Txt weight={800} size={19} tracking={-0.4}>
           Budkin
