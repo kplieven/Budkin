@@ -13,7 +13,7 @@ import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { sleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { bathGivenToday, cureDueHint, cureDueList, curesAllGiven, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
+import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -63,7 +63,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
   // Raw select (stable reference); the due list is derived in the render body
   // below, never in the selector, per the zustand v5 rule.
-  const cures = useAppStore((s) => s.cures);
+  const treatments = useAppStore((s) => s.treatments);
   // Sync badges only mean something when mirroring to a server; hidden in local
   // mode, exactly as on the Timers screen. Primitive selector, stable reference.
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
@@ -125,12 +125,12 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const washHint = washedToday ? 'Washed today' : washKind === 'big' ? 'Big wash due today' : 'Small wash due';
   // Treatments get the same treatment as washes: a forward-looking "due" hint
   // and a done check once the day's doses are all logged. `null` means this
-  // child keeps no cures, so the tile falls back to the generic copy.
-  const cureDue = cureDueList(cures, selectedChild?.id, childEntries, now);
-  const medHint = cureDueHint(cureDue);
-  // `undefined`, not `false`, when this child keeps no cures: the tile then has
+  // child keeps no treatments, so the tile falls back to the generic copy.
+  const treatmentDue = treatmentDueList(treatments, selectedChild?.id, childEntries, now);
+  const medHint = treatmentDueHint(treatmentDue);
+  // `undefined`, not `false`, when this child keeps no treatments: the tile then has
   // no done state at all and must not announce itself as an unchecked one.
-  const dosesAllGiven = cureDue.length > 0 ? curesAllGiven(cureDue) : undefined;
+  const dosesAllGiven = treatmentDue.length > 0 ? treatmentsAllGiven(treatmentDue) : undefined;
   const activityHint: Record<ActivityType, string> = {
     feeding: `${lastFeedAgo != null ? `${fmtAgoShort(lastFeedAgo)} ago` : 'Tap to log'} · start ${startSideLabel}`,
     sleep: napStatus,
@@ -317,8 +317,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             icon={ICON_FOR[a]}
             hint={activityHint[a]}
             widthStyle={tileStyle}
-            // Medication routes through the cure picker (which falls back to the
-            // manual form when the child has no active cures today); every other
+            // Medication routes through the treatment picker (which falls back to the
+            // manual form when the child has no active treatments today); every other
             // tile opens its log sheet directly.
             onPress={() => (a === 'medication' ? openMedicationLog() : openSheet(a))}
             done={a === 'bath' ? washedToday : a === 'medication' ? dosesAllGiven : undefined}

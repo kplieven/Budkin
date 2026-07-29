@@ -15,8 +15,8 @@ import type {
   BathEntry,
   Child,
   ChildGender,
-  Cure,
-  CureTimeOfDay,
+  Treatment,
+  TreatmentTimeOfDay,
   DiaperColor,
   DiaperEntry,
   Entry,
@@ -242,22 +242,23 @@ function intakeLevelFromServer(tags: string[], amount: number | null): 1 | 2 | 3
 // `milestone` (marker) + `mk:<key>` (which one). Same pattern as baths.
 const isStructuralMilestoneTag = (t: string): boolean => t === 'milestone' || t.startsWith('mk:');
 
-// --- cure structural tags ---
-// A cure is a Note tagged `cure` plus its schedule; the full encoding and the
-// reasoning behind the tag/body split live with the serializers further down.
-const CURE_TAG = 'cure';
-const CURE_TOD_PREFIX = 'cure:tod:';
-const CURE_EVERY_PREFIX = 'cure:every:';
-const CURE_PAUSED_TAG = 'cure:paused';
+// --- treatment structural tags ---
+// A treatment is a Note tagged `treatment` plus its schedule; the full encoding
+// and the reasoning behind the tag/body split live with the serializers further
+// down.
+const TREATMENT_TAG = 'treatment';
+const TREATMENT_TOD_PREFIX = 'treatment:tod:';
+const TREATMENT_EVERY_PREFIX = 'treatment:every:';
+const TREATMENT_PAUSED_TAG = 'treatment:paused';
 
-const isStructuralCureTag = (t: string): boolean => t === CURE_TAG || t.startsWith('cure:');
+const isStructuralTreatmentTag = (t: string): boolean => t === TREATMENT_TAG || t.startsWith('treatment:');
 
 // --- gender structural tags ---
 // Baby Buddy's `Child` model carries only first_name / last_name / birth_date /
 // birth_time / slug / picture — there is no gender field, and DRF drops unknown
 // keys silently, so a `gender` sent to /api/children/ would vanish without an
 // error. A child's gender therefore rides as a `gender`-tagged note against that
-// child, the same channel baths, milestones and cures use.
+// child, the same channel baths, milestones and treatments use.
 const GENDER_TAG = 'gender';
 const GENDER_PREFIX = 'g:';
 
@@ -265,13 +266,13 @@ const isStructuralGenderTag = (t: string): boolean => t === GENDER_TAG || t.star
 
 /** True for any tag the picker must never surface or let the user create: the
  *  bath/side structural tags plus the milestone marker, mk:<key>, intake level
- *  and cure schedule tags. */
+ *  and treatment schedule tags. */
 export function isHiddenTag(name: string): boolean {
   return (
     HIDDEN_TAGS.has(name) ||
     isStructuralMilestoneTag(name) ||
     isIntakeTag(name) ||
-    isStructuralCureTag(name) ||
+    isStructuralTreatmentTag(name) ||
     isStructuralGenderTag(name)
   );
 }
@@ -376,11 +377,11 @@ export function noteToMilestoneEntry(n: any, childId: string): MilestoneEntry {
   };
 }
 
-// --- cure <-> Baby Buddy Note (tagged-note) serialization ---
-// Baby Buddy has no regimen resource, so a cure is a Note tagged `cure` plus its
-// schedule: `cure:tod:<slot>` per chosen time of day, or `cure:every:<hours>`,
-// plus `cure:paused` while the cure is off. Same tagged-note pattern as baths
-// and milestones.
+// --- treatment <-> Baby Buddy Note (tagged-note) serialization ---
+// Baby Buddy has no regimen resource, so a treatment is a Note tagged
+// `treatment` plus its schedule: `treatment:tod:<slot>` per chosen time of day,
+// or `treatment:every:<hours>`, plus `treatment:paused` while the treatment is
+// off. Same tagged-note pattern as baths and milestones.
 //
 // Why the split between tags and body: the SCHEDULE rides in tags because it is
 // bounded (four slots, a whole number of hours), and a Baby Buddy tag name is
@@ -390,71 +391,72 @@ export function noteToMilestoneEntry(n: any, childId: string): MilestoneEntry {
 // free-text and date fields ride in the note BODY instead, as a machine-readable
 // payload line beneath a human-readable summary. A body edited by hand in Baby
 // Buddy's own UI therefore degrades to the tag-borne schedule plus a best-effort
-// name, rather than losing the cure altogether.
+// name, rather than losing the treatment altogether.
 //
 // KNOWN LIMITATION: the scheme is name-based, exactly like the `intake:` tags
-// above. A tag the user had already created called `cure` (or `cure:…`) is
-// indistinguishable from ours and will make that note read as a treatment.
-/** Marks the machine-readable line in a cure note's body. Versioned so a later
- *  encoding can be told apart from this one instead of being mis-parsed. */
-const CURE_PAYLOAD_PREFIX = 'budkin-cure-v1:';
+// above. A tag the user had already created called `treatment` (or `treatment:…`)
+// is indistinguishable from ours, and any note carrying it will read back here as
+// a regimen.
+/** Marks the machine-readable line in a treatment note's body. Versioned so a
+ *  later encoding can be told apart from this one instead of being mis-parsed. */
+const TREATMENT_PAYLOAD_PREFIX = 'budkin-treatment-v1:';
 
-const CURE_TIMES_OF_DAY: CureTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
+const TREATMENT_TIMES_OF_DAY: TreatmentTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
 
-/** The single discriminator: a cure note carries the `cure` tag. */
-export function isCureNote(n: any): boolean {
-  return tagNames(n?.tags).includes(CURE_TAG);
+/** The single discriminator: a treatment note carries the `treatment` tag. */
+export function isTreatmentNote(n: any): boolean {
+  return tagNames(n?.tags).includes(TREATMENT_TAG);
 }
 
-/** The human-readable first line of a cure note, e.g.
+/** The human-readable first line of a treatment note, e.g.
  *  "Omeprazol, 2.5 mL, morning and evening". Kept independent of the UI's label
  *  helpers so the API layer does not reach into `features/`. */
-function cureSummary(cure: Cure): string {
-  const dose = cure.dosage == null ? '' : [String(cure.dosage), cure.dosageUnit].filter(Boolean).join(' ');
+function treatmentSummary(treatment: Treatment): string {
+  const dose = treatment.dosage == null ? '' : [String(treatment.dosage), treatment.dosageUnit].filter(Boolean).join(' ');
   const schedule =
-    cure.scheduleMode === 'everyHours'
-      ? cure.everyHours == null
+    treatment.scheduleMode === 'everyHours'
+      ? treatment.everyHours == null
         ? ''
-        : `every ${cure.everyHours} ${cure.everyHours === 1 ? 'hour' : 'hours'}`
-      : CURE_TIMES_OF_DAY.filter((tod) => cure.timesOfDay?.includes(tod)).join(', ');
-  return [cure.name.trim(), dose, schedule].filter(Boolean).join(', ');
+        : `every ${treatment.everyHours} ${treatment.everyHours === 1 ? 'hour' : 'hours'}`
+      : TREATMENT_TIMES_OF_DAY.filter((tod) => treatment.timesOfDay?.includes(tod)).join(', ');
+  return [treatment.name.trim(), dose, schedule].filter(Boolean).join(', ');
 }
 
-/** Encode a cure as the body for a Baby Buddy Note (create/update). */
-export function cureToNoteBody(cure: Cure, childServerId: number): Record<string, unknown> {
-  const payload: Record<string, unknown> = { name: cure.name.trim(), fromDate: toDateStr(cure.fromDate) };
-  if (cure.dosage != null) payload.dosage = cure.dosage;
-  if (cure.dosageUnit) payload.dosageUnit = cure.dosageUnit;
-  if (cure.toDate != null) payload.toDate = toDateStr(cure.toDate);
-  if (cure.condition) payload.condition = cure.condition;
-  if (cure.notes) payload.notes = cure.notes;
+/** Encode a treatment as the body for a Baby Buddy Note (create/update). */
+export function treatmentToNoteBody(treatment: Treatment, childServerId: number): Record<string, unknown> {
+  const payload: Record<string, unknown> = { name: treatment.name.trim(), fromDate: toDateStr(treatment.fromDate) };
+  if (treatment.dosage != null) payload.dosage = treatment.dosage;
+  if (treatment.dosageUnit) payload.dosageUnit = treatment.dosageUnit;
+  if (treatment.toDate != null) payload.toDate = toDateStr(treatment.toDate);
+  if (treatment.condition) payload.condition = treatment.condition;
+  if (treatment.notes) payload.notes = treatment.notes;
 
-  const tags = [CURE_TAG];
-  if (cure.scheduleMode === 'everyHours') {
-    if (cure.everyHours != null) tags.push(`${CURE_EVERY_PREFIX}${cure.everyHours}`);
+  const tags = [TREATMENT_TAG];
+  if (treatment.scheduleMode === 'everyHours') {
+    if (treatment.everyHours != null) tags.push(`${TREATMENT_EVERY_PREFIX}${treatment.everyHours}`);
   } else {
-    for (const tod of CURE_TIMES_OF_DAY) if (cure.timesOfDay?.includes(tod)) tags.push(`${CURE_TOD_PREFIX}${tod}`);
+    for (const tod of TREATMENT_TIMES_OF_DAY) if (treatment.timesOfDay?.includes(tod)) tags.push(`${TREATMENT_TOD_PREFIX}${tod}`);
   }
-  if (!cure.active) tags.push(CURE_PAUSED_TAG);
+  if (!treatment.active) tags.push(TREATMENT_PAUSED_TAG);
 
   return {
     child: childServerId,
     // A regimen is not a point event; dating the note at its start is the one
-    // timestamp that means something, and `listChildCures` filters by tag rather
-    // than recency so an old start date can never push a cure out of view.
-    time: toISO(cure.fromDate),
-    note: `${cureSummary(cure)}\n${CURE_PAYLOAD_PREFIX}${JSON.stringify(payload)}`,
+    // timestamp that means something, and `listChildTreatments` filters by tag rather
+    // than recency so an old start date can never push a treatment out of view.
+    time: toISO(treatment.fromDate),
+    note: `${treatmentSummary(treatment)}\n${TREATMENT_PAYLOAD_PREFIX}${JSON.stringify(payload)}`,
     tags,
   };
 }
 
-/** The payload object encoded in a cure note's body, or `null` when the body
+/** The payload object encoded in a treatment note's body, or `null` when the body
  *  carries none (hand-edited in Baby Buddy, or written by an older client). */
-function cureNotePayload(note: string): Record<string, unknown> | null {
-  const line = note.split('\n').find((l) => l.trimStart().startsWith(CURE_PAYLOAD_PREFIX));
+function treatmentNotePayload(note: string): Record<string, unknown> | null {
+  const line = note.split('\n').find((l) => l.trimStart().startsWith(TREATMENT_PAYLOAD_PREFIX));
   if (!line) return null;
   try {
-    const parsed: unknown = JSON.parse(line.trimStart().slice(CURE_PAYLOAD_PREFIX.length));
+    const parsed: unknown = JSON.parse(line.trimStart().slice(TREATMENT_PAYLOAD_PREFIX.length));
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -465,24 +467,24 @@ const asString = (v: unknown): string | undefined => (typeof v === 'string' && v
 const asNumber = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 /**
- * Reconstruct a cure from a Baby Buddy Note carrying the `cure` tag. The tags are
+ * Reconstruct a treatment from a Baby Buddy Note carrying the `treatment` tag. The tags are
  * the source of truth for the schedule and the paused flag; the body payload
- * supplies the name, dose, dates and free text. With no usable payload the cure
+ * supplies the name, dose, dates and free text. With no usable payload the treatment
  * still comes back with its schedule intact and the body's first line as its
  * name, which is what keeps a hand-edited note from destroying the record.
  */
-export function noteToCure(n: any, childId: string): Cure {
+export function noteToTreatment(n: any, childId: string): Treatment {
   const tags = tagNames(n.tags);
-  const payload = cureNotePayload(String(n.note ?? '')) ?? {};
-  const everyTag = tags.find((t) => t.startsWith(CURE_EVERY_PREFIX));
-  const everyHours = everyTag ? Number(everyTag.slice(CURE_EVERY_PREFIX.length)) : Number.NaN;
-  const timesOfDay = CURE_TIMES_OF_DAY.filter((tod) => tags.includes(`${CURE_TOD_PREFIX}${tod}`));
+  const payload = treatmentNotePayload(String(n.note ?? '')) ?? {};
+  const everyTag = tags.find((t) => t.startsWith(TREATMENT_EVERY_PREFIX));
+  const everyHours = everyTag ? Number(everyTag.slice(TREATMENT_EVERY_PREFIX.length)) : Number.NaN;
+  const timesOfDay = TREATMENT_TIMES_OF_DAY.filter((tod) => tags.includes(`${TREATMENT_TOD_PREFIX}${tod}`));
   const isInterval = Number.isFinite(everyHours);
   const fromDate = asString(payload.fromDate);
   const toDate = asString(payload.toDate);
 
   return {
-    id: `cure-${n.id}`,
+    id: `treatment-${n.id}`,
     serverId: n.id,
     childId,
     // Falls back to the note's first line, which is the human summary we wrote.
@@ -491,13 +493,13 @@ export function noteToCure(n: any, childId: string): Cure {
     ...(isInterval ? { everyHours } : { timesOfDay }),
     dosage: asNumber(payload.dosage),
     dosageUnit: asString(payload.dosageUnit),
-    // The note's own time is exactly what `cureToNoteBody` wrote the start date
+    // The note's own time is exactly what `treatmentToNoteBody` wrote the start date
     // from, so it is a lossless fallback for a missing payload.
     fromDate: fromDate ? fromDateStr(fromDate) : startOfLocalDay(fromISO(n.time)),
     toDate: toDate ? fromDateStr(toDate) : undefined,
     condition: asString(payload.condition),
     notes: asString(payload.notes),
-    active: !tags.includes(CURE_PAUSED_TAG),
+    active: !tags.includes(TREATMENT_PAUSED_TAG),
   };
 }
 
@@ -533,7 +535,7 @@ export function genderFromNote(n: any): ChildGender | undefined {
   return CHILD_GENDERS.find((g) => g === value);
 }
 
-/** Local midnight of the day containing `ms`. Cure dates are stored at local
+/** Local midnight of the day containing `ms`. Treatment dates are stored at local
  *  midnight, so a fallback derived from a timestamp has to be floored to it. */
 function startOfLocalDay(ms: number): number {
   const d = new Date(ms);
@@ -935,8 +937,8 @@ export class BabybuddyClient {
    * share this one endpoint, so a single fetch feeds them all — no double-fetch.
    * Milestone is checked first, so a note carrying both marker tags is a milestone.
    *
-   * `cure`-tagged notes are DROPPED here rather than returned: they are treatment
-   * regimens, not timeline events, and `listChildCures` fetches them in full by
+   * `treatment`-tagged notes are DROPPED here rather than returned: they are treatment
+   * regimens, not timeline events, and `listChildTreatments` fetches them in full by
    * tag. Recognising them is still this method's job, because otherwise they
    * would fall through to the general-notes bucket and show up in the Notes tab.
    */
@@ -953,27 +955,27 @@ export class BabybuddyClient {
     for (const n of data.results) {
       if (isMilestoneNote(n)) milestones.push(noteToMilestoneEntry(n, childId));
       else if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
-      else if (isCureNote(n) || isGenderNote(n)) continue;
+      else if (isTreatmentNote(n) || isGenderNote(n)) continue;
       else notes.push(noteToNoteEntry(n, childId));
     }
     return { baths, milestones, notes };
   }
 
   /**
-   * The child's treatment regimens, as `cure`-tagged notes. Filtered server-side
+   * The child's treatment regimens, as `treatment`-tagged notes. Filtered server-side
    * by tag (`NoteFilter` extends `TagsFieldFilter`) rather than read out of the
-   * recent-notes window: a cure note is dated at the regimen's START, so a
+   * recent-notes window: a treatment note is dated at the regimen's START, so a
    * long-running treatment would otherwise fall off the end of `listChildNotes`
    * and silently vanish from the other device.
    */
-  async listChildCures(childId: string, limit = 100): Promise<Cure[]> {
+  async listChildTreatments(childId: string, limit = 100): Promise<Treatment[]> {
     const data = await this.request<Paginated<any>>(
-      `/notes/?child=${childId}&tags=${CURE_TAG}&ordering=-time&limit=${limit}`,
+      `/notes/?child=${childId}&tags=${TREATMENT_TAG}&ordering=-time&limit=${limit}`,
     );
     // The tag filter is a server-side `tags__name in [...]` match, so re-check
     // locally: an instance that ignores the filter would otherwise turn every
-    // note into a cure.
-    return data.results.filter((n: any) => isCureNote(n)).map((n: any) => noteToCure(n, childId));
+    // note into a treatment.
+    return data.results.filter((n: any) => isTreatmentNote(n)).map((n: any) => noteToTreatment(n, childId));
   }
 
   /**
@@ -1023,27 +1025,27 @@ export class BabybuddyClient {
     else await this.request('/notes/', { method: 'POST', body });
   }
 
-  /** Create a cure on the server as a tagged note; returns its new server id. */
-  async createCure(cure: Cure, childServerId: number): Promise<number | undefined> {
+  /** Create a treatment on the server as a tagged note; returns its new server id. */
+  async createTreatment(treatment: Treatment, childServerId: number): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>('/notes/', {
       method: 'POST',
-      body: JSON.stringify(cureToNoteBody(cure, childServerId)),
+      body: JSON.stringify(treatmentToNoteBody(treatment, childServerId)),
     });
     return res?.id;
   }
 
-  /** Overwrite an already-synced cure's note. */
-  async updateCure(cure: Cure, childServerId: number): Promise<void> {
-    if (cure.serverId == null) return;
-    await this.request(`/notes/${cure.serverId}/`, {
+  /** Overwrite an already-synced treatment's note. */
+  async updateTreatment(treatment: Treatment, childServerId: number): Promise<void> {
+    if (treatment.serverId == null) return;
+    await this.request(`/notes/${treatment.serverId}/`, {
       method: 'PATCH',
-      body: JSON.stringify(cureToNoteBody(cure, childServerId)),
+      body: JSON.stringify(treatmentToNoteBody(treatment, childServerId)),
     });
   }
 
-  /** Delete a cure's note. Deleting a cure deletes the regimen only; the doses
+  /** Delete a treatment's note. Deleting a treatment deletes the regimen only; the doses
    *  already logged from it are ordinary medication entries and stay put. */
-  async deleteCure(serverId: number): Promise<void> {
+  async deleteTreatment(serverId: number): Promise<void> {
     await this.request(`/notes/${serverId}/`, { method: 'DELETE' });
   }
 

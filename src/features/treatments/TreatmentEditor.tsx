@@ -13,7 +13,7 @@ import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
-import type { Cure, CureScheduleMode, CureTimeOfDay } from '@/types/models';
+import type { Treatment, TreatmentScheduleMode, TreatmentTimeOfDay } from '@/types/models';
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet
 
@@ -22,7 +22,7 @@ const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet
 // real micro sign.
 const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 
-const TIMES_OF_DAY: [CureTimeOfDay, string][] = [
+const TIMES_OF_DAY: [TreatmentTimeOfDay, string][] = [
   ['morning', 'Morning'],
   ['noon', 'Noon'],
   ['evening', 'Evening'],
@@ -30,7 +30,7 @@ const TIMES_OF_DAY: [CureTimeOfDay, string][] = [
 ];
 
 /** Local midnight epoch ms from raw D/M/Y text. Unlike `clampBirth` this does
- *  NOT cap at today: a cure can start or end in the future. Out-of-range parts
+ *  NOT cap at today: a treatment can start or end in the future. Out-of-range parts
  *  are clamped to a valid date. `new Date(y, m-1, d)` is local midnight. */
 function toMidnightMs(dStr: string, mStr: string, yStr: string): number {
   const now = new Date();
@@ -47,8 +47,8 @@ function toDMY(ms: number): { d: string; m: string; y: string } {
   return { d: String(dt.getDate()), m: String(dt.getMonth() + 1), y: String(dt.getFullYear()) };
 }
 
-export function CureEditor() {
-  const editor = useAppStore((s) => s.cureEditor);
+export function TreatmentEditor() {
+  const editor = useAppStore((s) => s.treatmentEditor);
   if (!editor) return null;
   return <Inner key={editor.editingId ?? 'new'} editingId={editor.editingId} />;
 }
@@ -56,22 +56,22 @@ export function CureEditor() {
 function Inner({ editingId }: { editingId: string | null }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const cures = useAppStore((s) => s.cures);
+  const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  const addCure = useAppStore((s) => s.addCure);
-  const updateCure = useAppStore((s) => s.updateCure);
-  const deleteCure = useAppStore((s) => s.deleteCure);
-  const close = useAppStore((s) => s.closeCureEditor);
+  const addTreatment = useAppStore((s) => s.addTreatment);
+  const updateTreatment = useAppStore((s) => s.updateTreatment);
+  const deleteTreatment = useAppStore((s) => s.deleteTreatment);
+  const close = useAppStore((s) => s.closeTreatmentEditor);
 
-  const editing: Cure | null = editingId ? (cures.find((c) => c.id === editingId) ?? null) : null;
+  const editing: Treatment | null = editingId ? (treatments.find((c) => c.id === editingId) ?? null) : null;
   const today = toDMY(Date.now());
   const fromInit = editing ? toDMY(editing.fromDate) : today;
   const toInit = editing?.toDate != null ? toDMY(editing.toDate) : today;
 
   const [name, setName] = useState(editing?.name ?? '');
   const [condition, setCondition] = useState(editing?.condition ?? '');
-  const [scheduleMode, setScheduleMode] = useState<CureScheduleMode>(editing?.scheduleMode ?? 'timesOfDay');
-  const [times, setTimes] = useState<CureTimeOfDay[]>(editing?.timesOfDay ?? ['morning']);
+  const [scheduleMode, setScheduleMode] = useState<TreatmentScheduleMode>(editing?.scheduleMode ?? 'timesOfDay');
+  const [times, setTimes] = useState<TreatmentTimeOfDay[]>(editing?.timesOfDay ?? ['morning']);
   const [everyHours, setEveryHours] = useState(String(editing?.everyHours ?? 6));
   const [dosage, setDosage] = useState(editing?.dosage != null ? String(editing.dosage) : '');
   const [dosageFocused, setDosageFocused] = useState(false);
@@ -92,7 +92,7 @@ function Inner({ editingId }: { editingId: string | null }) {
 
   const canSave = name.trim().length > 0;
 
-  const toggleTime = (tod: CureTimeOfDay) =>
+  const toggleTime = (tod: TreatmentTimeOfDay) =>
     setTimes((prev) => (prev.includes(tod) ? prev.filter((x) => x !== tod) : [...prev, tod]));
 
   const pickUnit = (u: string) => {
@@ -105,10 +105,10 @@ function Inner({ editingId }: { editingId: string | null }) {
     if (!canSave) return;
     const parsedDose = parseFloat(dosage.replace(',', '.'));
     const parsedHours = Math.max(1, Math.round(parseInt(everyHours, 10) || 1));
-    const cure: Cure = {
-      id: editing?.id ?? 'cure' + Date.now(),
+    const treatment: Treatment = {
+      id: editing?.id ?? 'treatment' + Date.now(),
       // Carry the backing note's server id through an edit. Dropping it would
-      // make `updateCure` skip the PATCH and leave the cure looking unsynced,
+      // make `updateTreatment` skip the PATCH and leave the treatment looking unsynced,
       // so `flushUnsynced` would POST a second note for the same treatment.
       serverId: editing?.serverId,
       childId: editing?.childId ?? selectedChildId,
@@ -124,8 +124,8 @@ function Inner({ editingId }: { editingId: string | null }) {
       condition: condition.trim() || undefined,
       active,
     };
-    if (editing) updateCure(cure);
-    else addCure(cure);
+    if (editing) updateTreatment(treatment);
+    else addTreatment(treatment);
     close();
   };
 
@@ -135,7 +135,7 @@ function Inner({ editingId }: { editingId: string | null }) {
       setConfirmDelete(true);
       return;
     }
-    deleteCure(editing.id);
+    deleteTreatment(editing.id);
   };
 
   const inputStyle = {
