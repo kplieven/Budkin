@@ -34,8 +34,8 @@ const PRIMARY: Hex = '#EC9A66';
  */
 const SCHEME = (() => {
   const s = Constants.expoConfig?.scheme;
-  if (Array.isArray(s)) return s[0] ?? 'babybuddy';
-  return s ?? 'babybuddy';
+  if (Array.isArray(s)) return s[0] ?? 'budkin';
+  return s ?? 'budkin';
 })();
 
 function agoLabel(ms: number | null | undefined, now: number): string {

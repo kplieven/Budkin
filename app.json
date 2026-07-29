@@ -6,14 +6,14 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "babybuddy",
+    "scheme": "budkin",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "eu.steeldesignce.babybuddy"
+      "bundleIdentifier": "dev.karellievens.budkin"
     },
     "android": {
-      "package": "eu.steeldesignce.babybuddy",
+      "package": "dev.karellievens.budkin",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

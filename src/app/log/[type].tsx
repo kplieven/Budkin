@@ -5,9 +5,11 @@ import { resolveLogDeepLink } from '@/lib/logDeepLink';
 import { useAppStore } from '@/store/useAppStore';
 
 /**
- * Deep-link target: `babybuddy://log/<type>` (a home-screen widget, or a
- * treatment reminder tap). Opens the matching Quick-Log sheet over Home, or
- * routes to onboarding if the app isn't connected yet.
+ * Deep-link target: `budkin://log/<type>` (a home-screen widget, or a treatment
+ * reminder tap). Opens the matching Quick-Log sheet over Home, or routes to
+ * onboarding if the app isn't connected yet. Development builds ship their own
+ * scheme, so the widget derives it rather than hardcoding one; see
+ * StatusWidget.tsx and app.config.js.
  *
  * `?cure=<id>` seeds the medication sheet from that treatment: name, dosage,
  * unit and next-dose interval filled in, opened in confirm mode, with only the

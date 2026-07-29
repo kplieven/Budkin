@@ -12,7 +12,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { UnitSystem } from '@/lib/units';
 import type { ThemeMode } from '@/theme/tokens';
 
-const KEY = 'babybuddy.prefs.v1';
+const KEY = 'budkin.prefs.v1';
 
 export interface Prefs {
   themeMode: ThemeMode;

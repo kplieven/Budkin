@@ -15,7 +15,7 @@ vi.mock('expo-secure-store', () => ({
   }),
 }));
 
-const KEY = 'babybuddy.connection.v1';
+const KEY = 'budkin.connection.v1';
 
 beforeEach(() => {
   mem.store.clear();

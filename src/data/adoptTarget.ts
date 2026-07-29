@@ -7,7 +7,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const KEY = 'babybuddy.adoptTarget.v1';
+const KEY = 'budkin.adoptTarget.v1';
 
 export async function loadAdoptTarget(): Promise<string | null> {
   try {
