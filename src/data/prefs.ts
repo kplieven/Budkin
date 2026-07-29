@@ -32,7 +32,7 @@ export interface Prefs {
    *  advice, from a curve the app labels as not medical consensus. */
   napSuggestions: boolean;
   /**
-   * Treatment (cure) dose reminders. On by default, unlike naps and pumping:
+   * Treatment (treatment) dose reminders. On by default, unlike naps and pumping:
    * this one reports back a schedule the parent authored rather than offering
    * advice, and it is inert until they create a treatment, so defaulting it on
    * cannot surprise anyone who does not use the feature.
@@ -43,7 +43,7 @@ export interface Prefs {
    * for a drifting interval grid, exactly like `pumpingEnabledAt`: a dose given
    * but not logged leaves the reminder early, and toggling off and on rebases
    * the phase to now. It can only ever MOVE an existing grid, never start one.
-   * See `cureReminders` in src/notifications/scheduled.ts.
+   * See `treatmentReminders` in src/notifications/scheduled.ts.
    */
   treatmentRemindersEnabledAt: number | null;
   /**

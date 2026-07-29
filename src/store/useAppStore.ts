@@ -1074,9 +1074,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // to nudge it. Toggling off and on rebases the phase to now.
       //
       // One deliberate difference from pumping. This stamp can only ever MOVE an
-      // existing interval grid, never bring one into being: `cureReminders`
-      // returns early when the cure has no logged dose, before it consults this
-      // value. It also does nothing at all to a times-of-day cure, whose instants
+      // existing interval grid, never bring one into being: `treatmentReminders`
+      // returns early when the treatment has no logged dose, before it consults this
+      // value. It also does nothing at all to a times-of-day treatment, whose instants
       // come off the wall clock rather than a phase. See scheduled.ts.
       const treatmentRemindersEnabledAt = value ? Date.now() : null;
       set({ treatmentReminders: value, treatmentRemindersEnabledAt });

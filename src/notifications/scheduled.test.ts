@@ -8,7 +8,7 @@ import {
   AGE_HORIZON_MONTHS,
   AGE_STEPS,
   atReminderHour,
-  CURE_AHEAD,
+  TREATMENT_AHEAD,
   desiredScheduled,
   diffScheduled,
   PUMP_AHEAD,
@@ -17,7 +17,7 @@ import {
   type ReminderPrefs,
   type ScheduleInput,
 } from '@/notifications/scheduled';
-import type { Child, Cure, Timer } from '@/types/models';
+import type { Child, Treatment, Timer } from '@/types/models';
 
 /** Local-time construction, so the 09:00 assertions hold in any timezone. */
 const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
@@ -53,8 +53,8 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   lastSleepEndByChild: {},
   asleepChildIds: {},
   selectedChildId: 'c1',
-  cures: [],
-  cureDoses: {},
+  treatments: [],
+  treatmentDoses: {},
   reachedMilestoneKeys: [],
   answeredMilestoneKeys: [],
   ...over,
@@ -695,8 +695,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
       ...over,
     });
 
-  const cure = (over: Partial<Cure> = {}): Cure => ({
-    id: 'cure1',
+  const treatment = (over: Partial<Treatment> = {}): Treatment => ({
+    id: 'treatment1',
     childId: 'c1',
     name: 'Omeprazol',
     scheduleMode: 'timesOfDay',
@@ -710,28 +710,28 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     desiredScheduled(input({ prefs: only({}), selectedChildId: 'c1', ...over }), now);
 
   it('schedules each chosen slot at its mapped wall-clock hour', () => {
-    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
+    const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
     expect(out[1].fireAt).toBe(at(2026, 9, 2, 18));
     expect(out[2].fireAt).toBe(at(2026, 9, 3, 8));
   });
 
-  it('names the treatment and carries its dosage and cure-seeded tap target', () => {
-    const out = run({ cures: [cure({ dosage: 5, dosageUnit: 'mg' })] }, at(2026, 9, 2, 6));
-    expect(out[0].kind).toBe('cure');
+  it('names the treatment and carries its dosage and treatment-seeded tap target', () => {
+    const out = run({ treatments: [treatment({ dosage: 5, dosageUnit: 'mg' })] }, at(2026, 9, 2, 6));
+    expect(out[0].kind).toBe('treatment');
     expect(out[0].title).toBe('Omeprazol due');
     expect(out[0].body).toBe('5 mg');
-    expect(out[0].data.url).toBe('/log/medication?cure=cure1');
-    expect(out[0].identifier).toBe(`${REMINDER_PREFIX}cure:cure1:${at(2026, 9, 2, 8)}`);
+    expect(out[0].data.url).toBe('/log/medication?treatment=treatment1');
+    expect(out[0].identifier).toBe(`${REMINDER_PREFIX}treatment:treatment1:${at(2026, 9, 2, 8)}`);
   });
 
-  it('falls back to an instruction when the cure records no dosage', () => {
-    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
+  it('falls back to an instruction when the treatment records no dosage', () => {
+    const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));
     expect(out[0].body).toBe('Tap to log the dose.');
   });
 
   it('emits slots in chronological order regardless of the order they were picked', () => {
-    const out = run({ cures: [cure({ timesOfDay: ['night', 'morning', 'noon'] })] }, at(2026, 9, 2, 6));
+    const out = run({ treatments: [treatment({ timesOfDay: ['night', 'morning', 'noon'] })] }, at(2026, 9, 2, 6));
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
     expect(out[1].fireAt).toBe(at(2026, 9, 2, 12));
     expect(out[2].fireAt).toBe(at(2026, 9, 2, 22));
@@ -744,8 +744,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     // half the year. In a timezone without DST this is a tautology; in one with
     // it, it is the whole point. The eight-day run from 24 October crosses the
     // European clock change on the 25th.
-    const out = run({ cures: [cure({ timesOfDay: ['morning'], fromDate: at(2026, 10, 20) })] }, at(2026, 10, 24, 6));
-    expect(out).toHaveLength(CURE_AHEAD);
+    const out = run({ treatments: [treatment({ timesOfDay: ['morning'], fromDate: at(2026, 10, 20) })] }, at(2026, 10, 24, 6));
+    expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
     expect(out[0].fireAt).toBe(at(2026, 10, 24, 8));
     expect(out[4].fireAt).toBe(at(2026, 10, 28, 8));
@@ -755,19 +755,19 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     // The other direction, which fails differently: a millisecond day walk
     // lands at 09:00 here rather than 07:00. The eight-day run from 27 March
     // crosses the European clock change on the 29th.
-    const out = run({ cures: [cure({ timesOfDay: ['morning'], fromDate: at(2026, 3, 20) })] }, at(2026, 3, 27, 6));
-    expect(out).toHaveLength(CURE_AHEAD);
+    const out = run({ treatments: [treatment({ timesOfDay: ['morning'], fromDate: at(2026, 3, 20) })] }, at(2026, 3, 27, 6));
+    expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
     expect(out[0].fireAt).toBe(at(2026, 3, 27, 8));
     expect(out[4].fireAt).toBe(at(2026, 3, 31, 8));
   });
 
   it("suppresses today's kth slot once k doses are logged today", () => {
-    // One dose given on a morning+evening cure. Counting, not slot matching:
+    // One dose given on a morning+evening treatment. Counting, not slot matching:
     // the dose settles the FIRST slot and leaves the second owed, so exactly
     // one of today's two slots survives.
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 7) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 7) } } },
       at(2026, 9, 2, 6),
     );
     const today = out.filter((n) => n.fireAt < at(2026, 9, 3));
@@ -781,8 +781,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     // now would make evening k = 1, see dosesToday >= 1, and wrongly drop it.
     const out = run(
       {
-        cures: [cure({ timesOfDay: ['morning', 'noon', 'evening'] })],
-        cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 12) } },
+        treatments: [treatment({ timesOfDay: ['morning', 'noon', 'evening'] })],
+        treatmentDoses: { treatment1: { today: 2, lastAt: at(2026, 9, 2, 12) } },
       },
       at(2026, 9, 2, 14),
     );
@@ -791,24 +791,24 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
 
   it('suppresses nothing on future days, whatever today looked like', () => {
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 18) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 2, lastAt: at(2026, 9, 2, 18) } } },
       at(2026, 9, 2, 20),
     );
     expect(out[0].fireAt).toBe(at(2026, 9, 3, 8));
     expect(out[1].fireAt).toBe(at(2026, 9, 3, 18));
   });
 
-  it('caps output at CURE_AHEAD occurrences', () => {
-    const out = run({ cures: [cure()] }, at(2026, 9, 2, 6));
-    expect(out).toHaveLength(CURE_AHEAD);
+  it('caps output at TREATMENT_AHEAD occurrences', () => {
+    const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));
+    expect(out).toHaveLength(TREATMENT_AHEAD);
   });
 
   it('emits one notification per treatment when two are due at the same slot', () => {
     const out = run(
       {
-        cures: [
-          cure({ timesOfDay: ['morning'] }),
-          cure({ id: 'cure2', name: 'Amoxicilline', timesOfDay: ['morning'] }),
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', name: 'Amoxicilline', timesOfDay: ['morning'] }),
         ],
       },
       at(2026, 9, 2, 6),
@@ -818,49 +818,49 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('stops at toDate rather than scheduling past the end of the regimen', () => {
-    const out = run({ cures: [cure({ toDate: at(2026, 9, 3) })] }, at(2026, 9, 2, 6));
+    const out = run({ treatments: [treatment({ toDate: at(2026, 9, 3) })] }, at(2026, 9, 2, 6));
     // toDate is inclusive, so 3 September's slots are the last ones.
     expect(out.every((n) => n.fireAt < at(2026, 9, 4))).toBe(true);
     expect(out.map((n) => n.fireAt)).toContain(at(2026, 9, 3, 18));
   });
 
-  it('terminates on a cure with no times of day chosen', () => {
-    expect(run({ cures: [cure({ timesOfDay: [] })] }, at(2026, 9, 2, 6))).toEqual([]);
-    expect(run({ cures: [cure({ timesOfDay: undefined })] }, at(2026, 9, 2, 6))).toEqual([]);
+  it('terminates on a treatment with no times of day chosen', () => {
+    expect(run({ treatments: [treatment({ timesOfDay: [] })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ treatments: [treatment({ timesOfDay: undefined })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing for a paused cure', () => {
-    expect(run({ cures: [cure({ active: false })] }, at(2026, 9, 2, 6))).toEqual([]);
+  it('schedules nothing for a paused treatment', () => {
+    expect(run({ treatments: [treatment({ active: false })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
   it('schedules nothing before fromDate or after toDate', () => {
-    expect(run({ cures: [cure({ fromDate: at(2026, 9, 10) })] }, at(2026, 9, 2, 6))).toEqual([]);
-    expect(run({ cures: [cure({ toDate: at(2026, 9, 1) })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ treatments: [treatment({ fromDate: at(2026, 9, 10) })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ treatments: [treatment({ toDate: at(2026, 9, 1) })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing for a cure belonging to another child', () => {
-    expect(run({ cures: [cure({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
+  it('schedules nothing for a treatment belonging to another child', () => {
+    expect(run({ treatments: [treatment({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing while the selected child is expected, since a cure cannot be dosed against a due date', () => {
+  it('schedules nothing while the selected child is expected, since a treatment cannot be dosed against a due date', () => {
     // Every other reminder kind guards `child.expected`; this one must too,
     // because resolveLogDeepLink (src/lib/logDeepLink.ts) refuses to open
     // anything for an expected child, so a scheduled "X due" alert would be a
     // tap the app itself cannot service.
     expect(
-      run({ cures: [cure()], children: [child({ id: 'c1', expected: true })] }, at(2026, 9, 2, 6)),
+      run({ treatments: [treatment()], children: [child({ id: 'c1', expected: true })] }, at(2026, 9, 2, 6)),
     ).toEqual([]);
   });
 
-  it('schedules nothing for a cure whose name is blank', () => {
-    // `logMedicationFromCure` refuses a blank name, so such a notification would
+  it('schedules nothing for a treatment whose name is blank', () => {
+    // `logMedicationFromTreatment` refuses a blank name, so such a notification would
     // dead-tap. It would also read as " due".
-    expect(run({ cures: [cure({ name: '   ' })] }, at(2026, 9, 2, 6))).toEqual([]);
+    expect(run({ treatments: [treatment({ name: '   ' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
   it('schedules nothing while the pref is off', () => {
     const out = desiredScheduled(
-      input({ prefs: only({ treatmentReminders: false }), cures: [cure()], selectedChildId: 'c1' }),
+      input({ prefs: only({ treatmentReminders: false }), treatments: [treatment()], selectedChildId: 'c1' }),
       at(2026, 9, 2, 6),
     );
     expect(out).toEqual([]);
@@ -877,8 +877,8 @@ describe('desiredScheduled: treatments, every N hours', () => {
       ...over,
     });
 
-  const cure = (over: Partial<Cure> = {}): Cure => ({
-    id: 'cure1',
+  const treatment = (over: Partial<Treatment> = {}): Treatment => ({
+    id: 'treatment1',
     childId: 'c1',
     name: 'Amoxicilline',
     scheduleMode: 'everyHours',
@@ -893,10 +893,10 @@ describe('desiredScheduled: treatments, every N hours', () => {
 
   it('anchors the grid on the last logged dose', () => {
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
       at(2026, 9, 2, 7),
     );
-    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 14));
     expect(out[1].fireAt).toBe(at(2026, 9, 2, 22));
     expect(out[0].title).toBe('Amoxicilline due');
@@ -904,11 +904,11 @@ describe('desiredScheduled: treatments, every N hours', () => {
 
   it('re-anchors when a newer dose is logged', () => {
     const a = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
       at(2026, 9, 2, 7),
     );
     const b = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 2, lastAt: at(2026, 9, 2, 7) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 2, lastAt: at(2026, 9, 2, 7) } } },
       at(2026, 9, 2, 7),
     );
     expect(b[0].fireAt).toBe(at(2026, 9, 2, 15));
@@ -919,26 +919,26 @@ describe('desiredScheduled: treatments, every N hours', () => {
     // Dosed two days ago, app never opened since. Scheduling blindly from the
     // anchor would produce only past instants and therefore nothing at all.
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: at(2026, 9, 1, 6) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: at(2026, 9, 1, 6) } } },
       at(2026, 9, 3, 7),
     );
-    expect(out).toHaveLength(CURE_AHEAD);
+    expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out.every((n) => n.fireAt > at(2026, 9, 3, 7))).toBe(true);
     expect(out[0].fireAt).toBe(at(2026, 9, 3, 14));
   });
 
-  it('schedules nothing for an interval cure that has never been dosed', () => {
+  it('schedules nothing for an interval treatment that has never been dosed', () => {
     // "Every 8 hours" means eight hours after the last dose. With no last dose
     // there is no defined next instant, and any anchor invented for one is a
     // guess. The in-app tile still shows it as due, so nobody is left unaware.
-    expect(run({ cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 7))).toEqual([]);
-    expect(run({ cures: [cure()], cureDoses: {} }, at(2026, 9, 2, 7))).toEqual([]);
+    expect(run({ treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 7))).toEqual([]);
+    expect(run({ treatments: [treatment()], treatmentDoses: {} }, at(2026, 9, 2, 7))).toEqual([]);
   });
 
-  it('schedules nothing for an interval cure with no interval set', () => {
+  it('schedules nothing for an interval treatment with no interval set', () => {
     expect(
       run(
-        { cures: [cure({ everyHours: undefined })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+        { treatments: [treatment({ everyHours: undefined })], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
         at(2026, 9, 2, 7),
       ),
     ).toEqual([]);
@@ -946,7 +946,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
 
   it('moves an existing grid forward when the resync stamp is later than the last dose', () => {
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
       at(2026, 9, 2, 11),
       { treatmentRemindersEnabledAt: at(2026, 9, 2, 10) },
     );
@@ -955,7 +955,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
 
   it('ignores a resync stamp older than the last dose', () => {
     const out = run(
-      { cures: [cure()], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
       at(2026, 9, 2, 7),
       { treatmentRemindersEnabledAt: at(2026, 9, 1, 10) },
     );
@@ -967,18 +967,18 @@ describe('desiredScheduled: treatments, every N hours', () => {
     // is what pumpReminders does, would manufacture a grid here out of a time
     // the app invented. The stamp may only ever MOVE an existing grid.
     expect(
-      run({ cures: [cure()], cureDoses: { cure1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 11), {
+      run({ treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 11), {
         treatmentRemindersEnabledAt: at(2026, 9, 2, 10),
       }),
     ).toEqual([]);
   });
 
-  it('does not let the resync stamp shift a times-of-day cure', () => {
+  it('does not let the resync stamp shift a times-of-day treatment', () => {
     // Those instants come off the wall clock, not off a phase, so there is
     // nothing for a rebase to move. Toggling off and on cannot move an 08:00
     // dose, and should not.
-    const todCure: Cure = {
-      id: 'cure2',
+    const todTreatment: Treatment = {
+      id: 'treatment2',
       childId: 'c1',
       name: 'Omeprazol',
       scheduleMode: 'timesOfDay',
@@ -986,39 +986,39 @@ describe('desiredScheduled: treatments, every N hours', () => {
       fromDate: at(2026, 9, 1),
       active: true,
     };
-    const out = run({ cures: [todCure] }, at(2026, 9, 2, 6), {
+    const out = run({ treatments: [todTreatment] }, at(2026, 9, 2, 6), {
       treatmentRemindersEnabledAt: at(2026, 9, 2, 5),
     });
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 8));
   });
 
   it('keeps the identifier stable as now advances within the same occurrence', () => {
-    const doses = { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
-    const a = run({ cures: [cure()], cureDoses: doses }, at(2026, 9, 2, 7));
-    const b = run({ cures: [cure()], cureDoses: doses }, at(2026, 9, 2, 8));
+    const doses = { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
+    const a = run({ treatments: [treatment()], treatmentDoses: doses }, at(2026, 9, 2, 7));
+    const b = run({ treatments: [treatment()], treatmentDoses: doses }, at(2026, 9, 2, 8));
     expect(a[0].identifier).toBe(b[0].identifier);
   });
 
   it('changes the identifier when the interval changes', () => {
-    const doses = { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
-    const a = run({ cures: [cure({ everyHours: 8 })], cureDoses: doses }, at(2026, 9, 2, 7));
-    const b = run({ cures: [cure({ everyHours: 6 })], cureDoses: doses }, at(2026, 9, 2, 7));
+    const doses = { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } };
+    const a = run({ treatments: [treatment({ everyHours: 8 })], treatmentDoses: doses }, at(2026, 9, 2, 7));
+    const b = run({ treatments: [treatment({ everyHours: 6 })], treatmentDoses: doses }, at(2026, 9, 2, 7));
     expect(a[0].identifier).not.toBe(b[0].identifier);
   });
 
   it('stops at the end of the day toDate names', () => {
     const out = run(
-      { cures: [cure({ toDate: at(2026, 9, 2) })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+      { treatments: [treatment({ toDate: at(2026, 9, 2) })], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
       at(2026, 9, 2, 7),
     );
     // 14:00 and 22:00 fall inside the last day; 06:00 the next morning does not.
     expect(out.map((n) => n.fireAt)).toEqual([at(2026, 9, 2, 14), at(2026, 9, 2, 22)]);
   });
 
-  it('schedules nothing for a paused interval cure', () => {
+  it('schedules nothing for a paused interval treatment', () => {
     expect(
       run(
-        { cures: [cure({ active: false })], cureDoses: { cure1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
+        { treatments: [treatment({ active: false })], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },
         at(2026, 9, 2, 7),
       ),
     ).toEqual([]);

@@ -756,35 +756,35 @@ describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAl
     });
   });
 
-  describe('cureDoseScalars', () => {
+  describe('treatmentDoseScalars', () => {
     it("counts today's doses and reports the latest dose instant", () => {
-      const out = cureDoseScalars([cure()], [dayAt(3, 8), at(8), at(12)].map((t) => dose(t)), at(14));
-      expect(out['cure-1']).toEqual({ today: 2, lastAt: at(12) });
+      const out = treatmentDoseScalars([treatment()], [dayAt(3, 8), at(8), at(12)].map((t) => dose(t)), at(14));
+      expect(out['treatment-1']).toEqual({ today: 2, lastAt: at(12) });
     });
 
-    it('matches a dose to its cure by trimmed, case-insensitive name', () => {
-      const out = cureDoseScalars([cure()], [dose(at(8), '  omeprazol ')], at(14));
-      expect(out['cure-1'].today).toBe(1);
+    it('matches a dose to its treatment by trimmed, case-insensitive name', () => {
+      const out = treatmentDoseScalars([treatment()], [dose(at(8), '  omeprazol ')], at(14));
+      expect(out['treatment-1'].today).toBe(1);
     });
 
     it('ignores a dose for a different medication', () => {
-      const out = cureDoseScalars([cure()], [dose(at(8), 'Paracetamol')], at(14));
-      expect(out['cure-1']).toEqual({ today: 0, lastAt: null });
+      const out = treatmentDoseScalars([treatment()], [dose(at(8), 'Paracetamol')], at(14));
+      expect(out['treatment-1']).toEqual({ today: 0, lastAt: null });
     });
 
-    it('reports a cure with no doses at all rather than omitting it', () => {
-      expect(cureDoseScalars([cure()], [], at(14))['cure-1']).toEqual({ today: 0, lastAt: null });
+    it('reports a treatment with no doses at all rather than omitting it', () => {
+      expect(treatmentDoseScalars([treatment()], [], at(14))['treatment-1']).toEqual({ today: 0, lastAt: null });
     });
 
-    it('ignores a dose stamped in the future, matching cureDueState', () => {
-      const out = cureDoseScalars([cure()], [dose(at(20))], at(14));
-      expect(out['cure-1']).toEqual({ today: 0, lastAt: null });
+    it('ignores a dose stamped in the future, matching treatmentDueState', () => {
+      const out = treatmentDoseScalars([treatment()], [dose(at(20))], at(14));
+      expect(out['treatment-1']).toEqual({ today: 0, lastAt: null });
     });
 
-    it('keys every cure it is given', () => {
-      const out = cureDoseScalars([cure(), cure({ id: 'cure-2', name: 'Amoxicilline' })], [dose(at(8))], at(14));
-      expect(Object.keys(out).sort()).toEqual(['cure-1', 'cure-2']);
-      expect(out['cure-2']).toEqual({ today: 0, lastAt: null });
+    it('keys every treatment it is given', () => {
+      const out = treatmentDoseScalars([treatment(), treatment({ id: 'treatment-2', name: 'Amoxicilline' })], [dose(at(8))], at(14));
+      expect(Object.keys(out).sort()).toEqual(['treatment-1', 'treatment-2']);
+      expect(out['treatment-2']).toEqual({ today: 0, lastAt: null });
     });
   });
 });
