@@ -157,9 +157,10 @@ vi.mock('@/data/milestonePrompts', () => ({
   }),
 }));
 
-// Treatments are local-only and AsyncStorage-backed, same reason the timers module is
-// mocked: keep the native module out of the node test env. `h.treatments` mirrors the
-// stored list so the persistence subscribe can be observed.
+// Treatments are AsyncStorage-backed (the local-mode store, and the offline cache
+// in front of the server when connected), so this is mocked for the same reason the
+// timers module is: keep the native module out of the node test env. `h.treatments`
+// mirrors the stored list so the persistence subscribe can be observed.
 vi.mock('@/data/treatments', () => ({
   loadTreatments: vi.fn(async () => h.treatments),
   saveTreatments: vi.fn(async (c: unknown[]) => {

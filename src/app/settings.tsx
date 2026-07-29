@@ -548,8 +548,9 @@ export default function Settings() {
             </Pressable>
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
-            Treatments stay on this device and are never sent to Baby Buddy. Logging a dose from a
-            treatment still saves the dose the usual way.
+            Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
+            save as ordinary medication entries. Which treatment a dose belongs to is matched by
+            name, and only on this device.
           </Txt>
         </>
       )}
