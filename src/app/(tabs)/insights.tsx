@@ -92,6 +92,26 @@ export default function Insights() {
   }, [reloadInsights]);
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, reloadInsights);
+  // True while a pointer is down on the Rhythm plot, dragging the crosshair.
+  // Android's native ScrollView intercepts a child's vertical drag by itself,
+  // and under the New Architecture the JS responder can no longer veto that:
+  // BridgelessUIManager.setJSResponder is a soft-error stub and the Fabric
+  // renderer never calls it, so requestDisallowInterceptTouchEvent is never
+  // reached and onResponderTerminationRequest only blocks JS-side termination.
+  // Switching the ScrollView off for the length of the gesture is what actually
+  // traps the drag. SleepHeatmap reports the end on both release and terminate,
+  // so this cannot latch on.
+  const [scrubbing, setScrubbing] = useState(false);
+  const onScrubStart = useCallback(() => setScrubbing(true), []);
+  const onScrubEnd = useCallback(() => setScrubbing(false), []);
+  // Web is deliberately left alone. The plot already blocks the browser's own
+  // scroll with `touchAction: 'none'` (see SleepHeatmap), so there is nothing to
+  // add, and react-native-web renders scrollEnabled={false} as overflow:hidden,
+  // which drops the scrollbar and reflows the page mid-drag. That would slide
+  // the plot out from under the finger, and the crosshair reads a page X against
+  // a plot-left measured once at gesture start. Web is the reference behaviour
+  // here; Android is being brought up to match it, not the other way round.
+  const lockScroll = scrubbing && Platform.OS !== 'web';
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
@@ -188,7 +208,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 12 }}>Last 4 weeks, {originPhrase}</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} onScrubStart={onScrubStart} onScrubEnd={onScrubEnd} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.
@@ -315,6 +335,7 @@ export default function Insights() {
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1, backgroundColor: t.bg }}
+          scrollEnabled={!lockScroll}
           refreshControl={
             canPullToRefresh ? (
               <RefreshControl
