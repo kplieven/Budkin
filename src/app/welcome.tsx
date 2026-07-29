@@ -79,7 +79,7 @@ export default function Welcome() {
           shadowStyle(`0px 8px 24px ${hexA(t.primary, 0.4)}`),
         ]}
       >
-        <Icon name="heart" color={t.onPrimary} size={30} />
+        <Icon name="budkin" color={t.onPrimary} size={30} />
       </View>
 
       <Txt weight={800} size={28} tracking={-0.6} style={{ marginTop: 22, lineHeight: 34 }}>

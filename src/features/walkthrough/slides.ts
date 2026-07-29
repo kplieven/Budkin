@@ -9,7 +9,7 @@ export interface WalkthroughSlide {
 /** The first-run walkthrough deck. Headlines are unique (used as React keys). */
 export const WALKTHROUGH_SLIDES: WalkthroughSlide[] = [
   {
-    icon: 'heart',
+    icon: 'budkin',
     headline: 'Welcome to Budkin',
     body: "A calm, fast way to track your baby's day, from feeds and naps to the milestones in between.",
   },
