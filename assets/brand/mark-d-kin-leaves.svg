@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">Budkin mark, option D: kin leaves</title>
+  <desc id="desc">Two leaves from one root, one large and one small. Two generations, one family.</desc>
+
+  <!-- Background. Delete this rect for a transparent mark. -->
+  <rect width="100" height="100" rx="22" fill="#F6EDE3"/>
+
+  <!-- Large leaf, sweeping up and left -->
+  <path d="M56 86 C56 52 46 28 22 22 C14 48 26 74 56 86 Z" fill="#D17A45" fill-opacity=".55"/>
+
+  <!-- Small leaf, up and right. KNOWN ISSUE: the two leaves touch along their
+       lower edge, so flattened to a single colour they fuse into one blob and
+       the parent/child reading is lost. Needs a visible gap to ship. -->
+  <path d="M56 86 C56 64 66 48 84 43 C89 62 79 78 56 86 Z" fill="#D17A45"/>
+</svg>
