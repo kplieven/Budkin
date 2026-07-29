@@ -67,18 +67,24 @@ export function anchorLabel(base: string, agoMin?: number): string {
 }
 
 /** "12 days old" / "8 weeks old" / "3 months old" */
+/** Days in the approximate month `ageStr` and `ageMonths` count in. Exported
+ *  because scheduling has to hit the exact instant `ageMonths` ticks over (see
+ *  `catchUpDueAt` in src/lib/milestones.ts), which it cannot do from a calendar
+ *  month. */
+export const APPROX_MONTH_DAYS = 30.4;
+
 export function ageStr(birth: number, now: number): string {
   const days = Math.floor((now - birth) / 86400000);
   if (days < 14) return `${days} days old`;
   const w = Math.floor(days / 7);
   if (w < 14) return `${w} weeks old`;
-  const mo = Math.floor(days / 30.4);
+  const mo = Math.floor(days / APPROX_MONTH_DAYS);
   return `${mo} months old`;
 }
 
 /** Whole months of age, matching ageStr's 30.4-day month. Floored, never negative. */
 export function ageMonths(birth: number, now: number): number {
-  return Math.max(0, Math.floor((now - birth) / 86400000 / 30.4));
+  return Math.max(0, Math.floor((now - birth) / 86400000 / APPROX_MONTH_DAYS));
 }
 
 /** Age for a born child, a countdown for an expected one. Takes primitives

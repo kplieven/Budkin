@@ -144,6 +144,8 @@ interface AppState {
   treatmentReminders: boolean;
   /** when the treatments toggle was last switched on, epoch ms */
   treatmentRemindersEnabledAt: number | null;
+  /** Milestone catch-up nudges (default off). See src/data/prefs.ts. */
+  milestoneCatchUp: boolean;
   /** Growth charts: whether the WHO percentile reference is drawn (default true). */
   showGrowthReference: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
@@ -272,7 +274,8 @@ interface AppActions {
       | 'ageMilestones'
       | 'pumpingReminders'
       | 'napSuggestions'
-      | 'treatmentReminders',
+      | 'treatmentReminders'
+      | 'milestoneCatchUp',
     value: boolean,
   ) => void;
   setPumpingInterval: (minutes: number) => void;
@@ -978,6 +981,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   napSuggestions: false,
   treatmentReminders: true,
   treatmentRemindersEnabledAt: null,
+  milestoneCatchUp: false,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
@@ -1176,6 +1180,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // (the toggle is off) and must not be skipped. Matches pumpingEnabledAt.
     if (prefs.treatmentRemindersEnabledAt !== undefined)
       set({ treatmentRemindersEnabledAt: prefs.treatmentRemindersEnabledAt });
+    if (prefs.milestoneCatchUp != null) set({ milestoneCatchUp: prefs.milestoneCatchUp });
     // `!= null`, not a truthy guard: this one is a number, and a truthy check
     // would silently discard a legitimately stored value at the low end.
     if (prefs.smallWashesPerBig != null) {

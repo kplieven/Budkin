@@ -23,7 +23,8 @@ type ReminderKey =
   | 'ageMilestones'
   | 'napSuggestions'
   | 'pumpingReminders'
-  | 'treatmentReminders';
+  | 'treatmentReminders'
+  | 'milestoneCatchUp';
 
 interface ReminderRow {
   key: ReminderKey;
@@ -59,6 +60,7 @@ export default function NotificationSettings() {
   const pumpingReminders = useAppStore((s) => s.pumpingReminders);
   const pumpingIntervalMin = useAppStore((s) => s.pumpingIntervalMin);
   const treatmentReminders = useAppStore((s) => s.treatmentReminders);
+  const milestoneCatchUp = useAppStore((s) => s.milestoneCatchUp);
   const setReminderPref = useAppStore((s) => s.setReminderPref);
   const setPumpingInterval = useAppStore((s) => s.setPumpingInterval);
 
@@ -128,6 +130,12 @@ export default function NotificationSettings() {
           label: 'Age milestones',
           hint: 'One week, one month, then every few months.',
           on: ageMilestones,
+        },
+        {
+          key: 'milestoneCatchUp',
+          label: 'Milestone catch-up',
+          hint: 'When a typical window passes with nothing logged, a nudge to check whether it already happened.',
+          on: milestoneCatchUp,
         },
       ],
     },

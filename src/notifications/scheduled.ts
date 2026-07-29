@@ -14,6 +14,7 @@ import { cureDosageLabel, TIME_OF_DAY_ORDER } from '@/features/cures/cureLabels'
 import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
+import { catchUpDueAt, type MilestoneDef, MILESTONES } from '@/lib/milestones';
 import { isCureActiveToday, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
 import type { ActivityType, Child, Cure, Timer } from '@/types/models';
 
@@ -27,7 +28,7 @@ export const REMINDER_HOUR = 9;
 /** Days before the due date for the lead-up reminder. */
 export const DUE_LEAD_DAYS = 7;
 
-export type ReminderKind = 'due' | 'stale' | 'age' | 'pump' | 'nap' | 'cure';
+export type ReminderKind = 'due' | 'stale' | 'age' | 'pump' | 'nap' | 'cure' | 'milestone';
 
 export interface ScheduledNotification {
   /** stable, and encodes the fire time so a moved date yields a new id */
@@ -59,6 +60,7 @@ export interface ReminderPrefs {
   treatmentReminders: boolean;
   /** when the treatments toggle was last switched on, epoch ms */
   treatmentRemindersEnabledAt: number | null;
+  milestoneCatchUp: boolean;
 }
 
 /** A narrow projection of the store, so this layer never imports store types. */
@@ -96,6 +98,16 @@ export interface ScheduleInput {
    *  `lastSleepEndByChild`, so this file stays ignorant of `Entry`. Built by
    *  `cureDoseScalars`, which owns the by-name dose attribution rule. */
   cureDoses: Record<string, { today: number; lastAt: number | null }>;
+  /** Catalog keys the SELECTED child has already logged a milestone entry for.
+   *  Scoped the same way `cures` and `lastSleepEndByChild` are, and for the same
+   *  reason: in server mode `s.entries` only holds the child the last fetch
+   *  loaded, so another child's milestone history reads as empty. Plain keys
+   *  rather than entries, so this file stays ignorant of `Entry`. */
+  reachedMilestoneKeys: readonly string[];
+  /** Catalog keys the selected child's parent has already answered the
+   *  home-screen catch-up nudge for (yes, not yet, or dismissed). Persisted by
+   *  src/data/milestonePrompts.ts. */
+  answeredMilestoneKeys: readonly string[];
 }
 
 /** 09:00 local on the calendar day containing `ms`. Built from local Y/M/D
@@ -602,6 +614,68 @@ function cureReminders(input: ScheduleInput, now: number): ScheduledNotification
   return out;
 }
 
+/**
+ * Catch-up nudges for milestones whose typical window closes without the parent
+ * having logged them. The scheduled twin of the home-screen `MilestoneNudge`
+ * card: both ask the same question about the same milestones, so both derive
+ * "due" from `catchUpDueAt`, and answering the card retires the notification
+ * through `answeredMilestoneKeys`.
+ *
+ * Shares `AGE_HORIZON_MONTHS`, since these are absolute calendar instants off
+ * the birth date exactly like the age reminders.
+ */
+function milestoneReminders(
+  child: Child,
+  input: ScheduleInput,
+  now: number,
+): ScheduledNotification[] {
+  // `birth` holds a DUE date while expecting, so there is no age to measure a
+  // typical window against. Same gate, and same reason, as `ageReminders`.
+  if (child.expected) return [];
+
+  const horizon = addMonths(now, AGE_HORIZON_MONTHS);
+  const done = new Set([...input.reachedMilestoneKeys, ...input.answeredMilestoneKeys]);
+
+  // Several windows close at the same age (`lifts-head` and `first-smile` both
+  // at 3 months), so group by instant: one alert per catalog entry would land
+  // as a burst of near-identical notifications on the same morning.
+  const byFireAt = new Map<number, MilestoneDef[]>();
+  for (const m of MILESTONES) {
+    if (done.has(m.key)) continue;
+    const due = catchUpDueAt(child.birth, m);
+    // `atReminderHour` moves BACK to 09:00 of the containing day, which can land
+    // before `due` itself. Nudging on the following morning keeps the promise
+    // that the notification never precedes the card.
+    const sameDay = atReminderHour(due);
+    const fireAt = sameDay >= due ? sameDay : atReminderHour(addDays(due, 1));
+    if (fireAt <= now || fireAt > horizon) continue;
+    const group = byFireAt.get(fireAt);
+    if (group) group.push(m);
+    else byFireAt.set(fireAt, [m]);
+  }
+
+  const out: ScheduledNotification[] = [];
+  for (const [fireAt, defs] of byFireAt) {
+    const single = defs.length === 1;
+    out.push({
+      // The keys ride in the identifier so that logging one milestone out of a
+      // batch yields a DIFFERENT id, which `diffScheduled` cancels and replaces
+      // rather than leaving a pending alert that names it.
+      identifier: `${REMINDER_PREFIX}milestone:${child.id}:${defs.map((d) => d.key).join(',')}:${fireAt}`,
+      kind: 'milestone',
+      title: single
+        ? `A milestone to check for ${child.first}.`
+        : `${defs.length} milestones to check for ${child.first}.`,
+      body: single
+        ? `${defs[0].title}. Most babies do this by ${defs[0].maxMonths} months.`
+        : `${defs.map((d) => d.title).join(', ')}.`,
+      fireAt,
+      data: { url: '/milestones' },
+    });
+  }
+  return out;
+}
+
 export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNotification[] {
   const out: ScheduledNotification[] = [];
   if (input.prefs.dueDateReminders) {
@@ -621,6 +695,14 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.treatmentReminders) {
     out.push(...cureReminders(input, now));
+  }
+  if (input.prefs.milestoneCatchUp) {
+    // Selected child only, not every child: `reachedMilestoneKeys` can only ever
+    // describe one of them (see its comment on ScheduleInput), so looping would
+    // read every other child as having reached nothing and nudge their parent
+    // about milestones they logged months ago.
+    const selected = input.children.find((c) => c.id === input.selectedChildId);
+    if (selected) out.push(...milestoneReminders(selected, input, now));
   }
   return out;
 }
