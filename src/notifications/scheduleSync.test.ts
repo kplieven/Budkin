@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { Cure, Entry } from '@/types/models';
+import type { Treatment, Entry } from '@/types/models';
 
 // In-memory AsyncStorage so the store's data modules load under node.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
@@ -440,9 +440,9 @@ describe('nap suggestion end-to-end (regression: toInput\'s key space (e.childId
   });
 });
 
-describe('cure projection', () => {
-  const cureRec: Cure = {
-    id: 'cure1',
+describe('treatment projection', () => {
+  const treatmentRec: Treatment = {
+    id: 'treatment1',
     childId: 'c1',
     name: 'Omeprazol',
     scheduleMode: 'timesOfDay',
@@ -462,34 +462,34 @@ describe('cure projection', () => {
     tags: [],
   });
 
-  it('projects cures and per-cure dose scalars', async () => {
+  it('projects treatments and per-treatment dose scalars', async () => {
     const { desired, useAppStore } = await setup();
     const doseAt = Date.now() - 60_000;
-    useAppStore.setState({ selectedChildId: 'c1', cures: [cureRec], entries: [dose('c1', doseAt)] });
+    useAppStore.setState({ selectedChildId: 'c1', treatments: [treatmentRec], entries: [dose('c1', doseAt)] });
     await flush();
 
     const input = desired.mock.calls.at(-1)![0];
-    expect(input.cures).toEqual([cureRec]);
-    expect(input.cureDoses.cure1.lastAt).toBe(doseAt);
+    expect(input.treatments).toEqual([treatmentRec]);
+    expect(input.treatmentDoses.treatment1.lastAt).toBe(doseAt);
   });
 
   it('scopes dose scalars to the selected child', async () => {
     const { desired, useAppStore } = await setup();
     useAppStore.setState({
       selectedChildId: 'c1',
-      cures: [cureRec],
+      treatments: [treatmentRec],
       entries: [dose('c2', Date.now() - 60_000)],
     });
     await flush();
 
-    // The dose belongs to another child, so it must not count toward c1's cure.
-    expect(desired.mock.calls.at(-1)![0].cureDoses.cure1).toEqual({ today: 0, lastAt: null });
+    // The dose belongs to another child, so it must not count toward c1's treatment.
+    expect(desired.mock.calls.at(-1)![0].treatmentDoses.treatment1).toEqual({ today: 0, lastAt: null });
   });
 
-  it('rebuilds when the cures list changes', async () => {
+  it('rebuilds when the treatments list changes', async () => {
     const { desired, useAppStore } = await setup();
     const builds = desired.mock.calls.length;
-    useAppStore.setState({ cures: [cureRec] });
+    useAppStore.setState({ treatments: [treatmentRec] });
     await flush();
     expect(desired.mock.calls.length).toBeGreaterThan(builds);
   });

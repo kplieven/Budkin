@@ -7,7 +7,7 @@
 import { reachedForChild } from '@/lib/milestones';
 import { applyScheduled } from '@/notifications/applySchedule';
 import { desiredScheduled, type ScheduleInput } from '@/notifications/scheduled';
-import { cureDoseScalars, entriesForChild } from '@/store/selectors';
+import { treatmentDoseScalars, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 
 let started = false;
@@ -69,18 +69,18 @@ function toInput(s: State, now: number): ScheduleInput {
     lastSleepEndByChild,
     asleepChildIds,
     selectedChildId: s.selectedChildId,
-    cures: s.cures,
+    treatments: s.treatments,
     // Scoped to the selected child on both sides, for the reason in the comment
     // above this function: in server mode `s.entries` only ever holds one child,
     // so counting doses for anyone else would silently read another child's
     // history as empty.
-    cureDoses: cureDoseScalars(
-      s.cures.filter((c) => c.childId === s.selectedChildId),
+    treatmentDoses: treatmentDoseScalars(
+      s.treatments.filter((c) => c.childId === s.selectedChildId),
       entriesForChild(s.entries, s.selectedChildId),
       now,
     ),
     // Scoped to the selected child on both halves, for the same reason as
-    // `cureDoses` above. `answeredMilestonePrompts` is already keyed by child;
+    // `treatmentDoses` above. `answeredMilestonePrompts` is already keyed by child;
     // `reachedForChild` does the filtering for the other.
     reachedMilestoneKeys: [...reachedForChild(s.entries, s.selectedChildId).keys()],
     answeredMilestoneKeys: s.answeredMilestonePrompts[s.selectedChildId] ?? [],
@@ -187,7 +187,7 @@ export function initScheduledReminderSync(): void {
       state.pumpingIntervalMin === previous.pumpingIntervalMin &&
       state.pumpingEnabledAt === previous.pumpingEnabledAt &&
       state.napSuggestions === previous.napSuggestions &&
-      state.cures === previous.cures &&
+      state.treatments === previous.treatments &&
       state.treatmentReminders === previous.treatmentReminders &&
       state.treatmentRemindersEnabledAt === previous.treatmentRemindersEnabledAt &&
       state.milestoneCatchUp === previous.milestoneCatchUp &&

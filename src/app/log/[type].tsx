@@ -11,10 +11,10 @@ import { useAppStore } from '@/store/useAppStore';
  * scheme, so the widget derives it rather than hardcoding one; see
  * StatusWidget.tsx and app.config.js.
  *
- * `?cure=<id>` seeds the medication sheet from that treatment: name, dosage,
+ * `?treatment=<id>` seeds the medication sheet from that treatment: name, dosage,
  * unit and next-dose interval filled in, opened in confirm mode, with only the
  * time left to adjust and Log left to press. It writes nothing. A notification
- * tap opens something, it never writes, and `logMedicationFromCure` already
+ * tap opens something, it never writes, and `logMedicationFromTreatment` already
  * holds that line ("No entry is written here; save() commits it once the user
  * confirms").
  *
@@ -24,35 +24,35 @@ import { useAppStore } from '@/store/useAppStore';
  * cold start where the navigation container ref isn't live yet, see timer.tsx.
  */
 export default function LogDeepLink() {
-  const { type, cure } = useLocalSearchParams<{ type: string; cure?: string }>();
+  const { type, treatment } = useLocalSearchParams<{ type: string; treatment?: string }>();
   const connected = useAppStore((s) => s.connected);
   const openSheet = useAppStore((s) => s.openSheet);
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
-  const logMedicationFromCure = useAppStore((s) => s.logMedicationFromCure);
+  const logMedicationFromTreatment = useAppStore((s) => s.logMedicationFromTreatment);
   const expected = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.expected ?? false);
   // Plain string selector, not a derived object or array: returning a fresh
   // reference from a useAppStore selector loops zustand v5 forever.
   const selectedChildId = useAppStore((s) => s.selectedChildId);
 
   useEffect(() => {
-    // `cures` is read imperatively rather than subscribed. The root layout
-    // renders null until `hydrating` clears (see _layout.tsx), so cures are
+    // `treatments` is read imperatively rather than subscribed. The root layout
+    // renders null until `hydrating` clears (see _layout.tsx), so treatments are
     // already loaded by the time this route mounts, and keeping the array out
     // of the dep list stops a background sync replacing it from re-running this
     // effect, which would reseed the draft and wipe a time the parent had
     // already adjusted.
     const action = resolveLogDeepLink({
       type,
-      cure,
+      treatment,
       connected,
       expected,
       selectedChildId,
-      cures: useAppStore.getState().cures,
+      treatments: useAppStore.getState().treatments,
     });
     if (action.kind === 'sheet') openSheet(action.activity);
-    else if (action.kind === 'cure') logMedicationFromCure(action.cureId);
+    else if (action.kind === 'treatment') logMedicationFromTreatment(action.treatmentId);
     else if (action.kind === 'medicationLog') openMedicationLog();
-  }, [connected, expected, selectedChildId, type, cure, openSheet, openMedicationLog, logMedicationFromCure]);
+  }, [connected, expected, selectedChildId, type, treatment, openSheet, openMedicationLog, logMedicationFromTreatment]);
 
   if (!connected) return <Redirect href="/onboarding" />;
   // Always lands on Home. When the selected child is expected, the resolver

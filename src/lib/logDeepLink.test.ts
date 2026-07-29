@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { resolveLogDeepLink } from '@/lib/logDeepLink';
-import type { Cure } from '@/types/models';
+import type { Treatment } from '@/types/models';
 
-const cure = (over: Partial<Cure> = {}): Cure => ({
-  id: 'cure1',
+const treatment = (over: Partial<Treatment> = {}): Treatment => ({
+  id: 'treatment1',
   childId: 'c1',
   name: 'Omeprazol',
   scheduleMode: 'timesOfDay',
@@ -16,11 +16,11 @@ const cure = (over: Partial<Cure> = {}): Cure => ({
 
 const base = {
   type: 'feeding',
-  cure: undefined,
+  treatment: undefined,
   connected: true,
   expected: false,
   selectedChildId: 'c1',
-  cures: [] as Cure[],
+  treatments: [] as Treatment[],
 };
 
 describe('resolveLogDeepLink', () => {
@@ -43,65 +43,65 @@ describe('resolveLogDeepLink', () => {
     expect(resolveLogDeepLink({ ...base, type: undefined })).toEqual({ kind: 'none' });
   });
 
-  it('seeds the sheet from a cure the parameter names', () => {
+  it('seeds the sheet from a treatment the parameter names', () => {
     expect(
-      resolveLogDeepLink({ ...base, type: 'medication', cure: 'cure1', cures: [cure()] }),
-    ).toEqual({ kind: 'cure', cureId: 'cure1' });
+      resolveLogDeepLink({ ...base, type: 'medication', treatment: 'treatment1', treatments: [treatment()] }),
+    ).toEqual({ kind: 'treatment', treatmentId: 'treatment1' });
   });
 
   it('opens the medication log when the parameter is absent', () => {
-    expect(resolveLogDeepLink({ ...base, type: 'medication', cures: [cure()] })).toEqual({
+    expect(resolveLogDeepLink({ ...base, type: 'medication', treatments: [treatment()] })).toEqual({
       kind: 'medicationLog',
     });
   });
 
-  it('falls back when the parameter names a cure that no longer exists', () => {
-    // A pending notification outlives the cure it names: it can be deleted
-    // between being scheduled and being tapped. logMedicationFromCure refuses an
+  it('falls back when the parameter names a treatment that no longer exists', () => {
+    // A pending notification outlives the treatment it names: it can be deleted
+    // between being scheduled and being tapped. logMedicationFromTreatment refuses an
     // unknown id and would open nothing at all.
     expect(
-      resolveLogDeepLink({ ...base, type: 'medication', cure: 'gone', cures: [cure()] }),
+      resolveLogDeepLink({ ...base, type: 'medication', treatment: 'gone', treatments: [treatment()] }),
     ).toEqual({ kind: 'medicationLog' });
   });
 
-  it('falls back when the named cure belongs to a child other than the one selected', () => {
+  it('falls back when the named treatment belongs to a child other than the one selected', () => {
     // A delivered notification can outlive a child switch: the pending alert for
     // child A stays in the tray after the parent switches to child B, and
-    // tapping it must not seed the sheet with A's cure while the app is headed
-    // for B. Falls back to the picker exactly like an unknown cure.
+    // tapping it must not seed the sheet with A's treatment while the app is headed
+    // for B. Falls back to the picker exactly like an unknown treatment.
     expect(
       resolveLogDeepLink({
         ...base,
         type: 'medication',
-        cure: 'cure1',
-        cures: [cure()],
+        treatment: 'treatment1',
+        treatments: [treatment()],
         selectedChildId: 'c2',
       }),
     ).toEqual({ kind: 'medicationLog' });
   });
 
-  it('falls back when the named cure has a blank name', () => {
-    // logMedicationFromCure refuses this too, for the same reason save() does.
+  it('falls back when the named treatment has a blank name', () => {
+    // logMedicationFromTreatment refuses this too, for the same reason save() does.
     expect(
-      resolveLogDeepLink({ ...base, type: 'medication', cure: 'cure1', cures: [cure({ name: '  ' })] }),
+      resolveLogDeepLink({ ...base, type: 'medication', treatment: 'treatment1', treatments: [treatment({ name: '  ' })] }),
     ).toEqual({ kind: 'medicationLog' });
   });
 
   it('falls back on a blank or whitespace-only parameter', () => {
     expect(
-      resolveLogDeepLink({ ...base, type: 'medication', cure: '   ', cures: [cure()] }),
+      resolveLogDeepLink({ ...base, type: 'medication', treatment: '   ', treatments: [treatment()] }),
     ).toEqual({ kind: 'medicationLog' });
   });
 
-  it('ignores a cure parameter on a non-medication activity', () => {
+  it('ignores a treatment parameter on a non-medication activity', () => {
     expect(
-      resolveLogDeepLink({ ...base, type: 'sleep', cure: 'cure1', cures: [cure()] }),
+      resolveLogDeepLink({ ...base, type: 'sleep', treatment: 'treatment1', treatments: [treatment()] }),
     ).toEqual({ kind: 'sheet', activity: 'sleep' });
   });
 
-  it('still refuses everything when not connected, even with a valid cure', () => {
+  it('still refuses everything when not connected, even with a valid treatment', () => {
     expect(
-      resolveLogDeepLink({ ...base, type: 'medication', cure: 'cure1', cures: [cure()], connected: false }),
+      resolveLogDeepLink({ ...base, type: 'medication', treatment: 'treatment1', treatments: [treatment()], connected: false }),
     ).toEqual({ kind: 'none' });
   });
 });
