@@ -12,8 +12,10 @@ const TIME_OF_DAY_LABEL: Record<TreatmentTimeOfDay, string> = {
   night: 'Night',
 };
 
-/** Fixed order the four times of day read in, regardless of pick order. */
-const TIME_OF_DAY_ORDER: TreatmentTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
+/** Fixed order the four times of day read in, regardless of pick order. Also the
+ *  chronological order their slots fire in, which is why `treatmentReminders` in
+ *  src/notifications/scheduled.ts reuses this rather than keeping its own copy. */
+export const TIME_OF_DAY_ORDER: TreatmentTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
 
 /** A short human summary of the treatment's schedule, e.g. "Every 6 hours" or
  *  "Morning, Evening". Empty string when a mode has nothing chosen yet. */

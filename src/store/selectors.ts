@@ -442,7 +442,7 @@ export const TREATMENT_TIME_OF_DAY_HOUR: Record<TreatmentTimeOfDay, number> = {
 /** Today's wall-clock ms for one time-of-day slot. Built with setHours off the
  *  day's midnight rather than by adding hours, so it stays on the intended hour
  *  across a DST boundary. */
-function timeOfDaySlotMs(todayMidnight: number, tod: TreatmentTimeOfDay): number {
+export function timeOfDaySlotMs(todayMidnight: number, tod: TreatmentTimeOfDay): number {
   const d = new Date(todayMidnight);
   d.setHours(TREATMENT_TIME_OF_DAY_HOUR[tod], 0, 0, 0);
   return d.getTime();
@@ -509,6 +509,39 @@ export function treatmentDueState(treatment: Treatment, entries: Entry[], now: n
 
   const reached = (treatment.timesOfDay ?? []).filter((tod) => now >= timeOfDaySlotMs(todayMidnight, tod)).length;
   return { treatment, due: Math.max(0, reached - dosesToday), expected: reached };
+}
+
+/**
+ * The two per-treatment dose facts the reminder layer needs, keyed by treatment
+ * id: how many doses were logged today, and the instant of the most recent one.
+ *
+ * Lives here rather than in the notifications layer so that dose-to-treatment
+ * name attribution has exactly one home. Both figures are computed the same way
+ * `treatmentDueState` computes them, including the `e.time <= now` bound that
+ * keeps a dose stamped in the future from counting as already given.
+ *
+ * Every treatment passed in gets an entry, including one with no doses on
+ * record, so a caller can tell "no doses" apart from "treatment not
+ * considered". Scope `entries` to the child first.
+ */
+export function treatmentDoseScalars(
+  treatments: Treatment[],
+  entries: Entry[],
+  now: number,
+): Record<string, { today: number; lastAt: number | null }> {
+  const todayMidnight = startOfDay(now);
+  const out: Record<string, { today: number; lastAt: number | null }> = {};
+  for (const treatment of treatments) {
+    const doses = dosesForTreatment(entries, treatment);
+    out[treatment.id] = {
+      today: doses.filter((e) => e.time >= todayMidnight && e.time <= now).length,
+      lastAt: doses.reduce<number | null>(
+        (max, e) => (e.time <= now && (max == null || e.time > max) ? e.time : max),
+        null,
+      ),
+    };
+  }
+  return out;
 }
 
 /**

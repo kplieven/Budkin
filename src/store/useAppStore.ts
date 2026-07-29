@@ -132,6 +132,20 @@ interface AppState {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
+  dueDateReminders: boolean;
+  staleTimerReminders: boolean;
+  ageMilestones: boolean;
+  pumpingReminders: boolean;
+  pumpingIntervalMin: number;
+  /** when the pumping toggle was last switched on, epoch ms */
+  pumpingEnabledAt: number | null;
+  napSuggestions: boolean;
+  treatmentReminders: boolean;
+  /** when the treatments toggle was last switched on, epoch ms */
+  treatmentRemindersEnabledAt: number | null;
+  /** Milestone catch-up nudges (default off). See src/data/prefs.ts. */
+  milestoneCatchUp: boolean;
   /** Growth charts: whether the WHO percentile reference is drawn (default true). */
   showGrowthReference: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
@@ -253,6 +267,18 @@ interface AppActions {
   completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
+  setReminderPref: (
+    key:
+      | 'dueDateReminders'
+      | 'staleTimerReminders'
+      | 'ageMilestones'
+      | 'pumpingReminders'
+      | 'napSuggestions'
+      | 'treatmentReminders'
+      | 'milestoneCatchUp',
+    value: boolean,
+  ) => void;
+  setPumpingInterval: (minutes: number) => void;
   setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
   setRhythmOriginHour: (hour: number) => void;
@@ -946,6 +972,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
   unitSystem: 'metric',
   showGrowthReference: true,
   tutorialSeen: false,
+  dueDateReminders: true,
+  staleTimerReminders: true,
+  ageMilestones: true,
+  pumpingReminders: false,
+  pumpingIntervalMin: 180,
+  pumpingEnabledAt: null,
+  napSuggestions: false,
+  treatmentReminders: true,
+  treatmentRemindersEnabledAt: null,
+  milestoneCatchUp: false,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
@@ -1021,6 +1057,38 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
+  },
+  setReminderPref: (key, value) => {
+    // Switching pumping ON stamps the anchor the reminder grid is built from,
+    // so a parent who has never logged a pump still gets reminders. Switching
+    // OFF clears it, so re-enabling later does not resume an ancient phase.
+    if (key === 'pumpingReminders') {
+      const pumpingEnabledAt = value ? Date.now() : null;
+      set({ pumpingReminders: value, pumpingEnabledAt });
+      void savePrefs({ pumpingReminders: value, pumpingEnabledAt });
+      return;
+    }
+    if (key === 'treatmentReminders') {
+      // The same resync lever pumping has, for the same gap: a parent who gives
+      // a dose and forgets to log it gets a reminder that is early, with no way
+      // to nudge it. Toggling off and on rebases the phase to now.
+      //
+      // One deliberate difference from pumping. This stamp can only ever MOVE an
+      // existing interval grid, never bring one into being: `cureReminders`
+      // returns early when the cure has no logged dose, before it consults this
+      // value. It also does nothing at all to a times-of-day cure, whose instants
+      // come off the wall clock rather than a phase. See scheduled.ts.
+      const treatmentRemindersEnabledAt = value ? Date.now() : null;
+      set({ treatmentReminders: value, treatmentRemindersEnabledAt });
+      void savePrefs({ treatmentReminders: value, treatmentRemindersEnabledAt });
+      return;
+    }
+    set({ [key]: value } as Pick<AppState, typeof key>);
+    void savePrefs({ [key]: value });
+  },
+  setPumpingInterval: (minutes) => {
+    set({ pumpingIntervalMin: minutes });
+    void savePrefs({ pumpingIntervalMin: minutes });
   },
   setSmallWashesPerBig: (n) => {
     // Clamp before storing so a bad value can never reach persistence, and so
@@ -1100,6 +1168,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
+    if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });
+    if (prefs.staleTimerReminders != null) set({ staleTimerReminders: prefs.staleTimerReminders });
+    if (prefs.ageMilestones != null) set({ ageMilestones: prefs.ageMilestones });
+    if (prefs.pumpingReminders != null) set({ pumpingReminders: prefs.pumpingReminders });
+    if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
+    if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
+    if (prefs.napSuggestions != null) set({ napSuggestions: prefs.napSuggestions });
+    if (prefs.treatmentReminders != null) set({ treatmentReminders: prefs.treatmentReminders });
+    // `!== undefined`, not `!= null`: a persisted null is a real value here
+    // (the toggle is off) and must not be skipped. Matches pumpingEnabledAt.
+    if (prefs.treatmentRemindersEnabledAt !== undefined)
+      set({ treatmentRemindersEnabledAt: prefs.treatmentRemindersEnabledAt });
+    if (prefs.milestoneCatchUp != null) set({ milestoneCatchUp: prefs.milestoneCatchUp });
     // `!= null`, not a truthy guard: this one is a number, and a truthy check
     // would silently discard a legitimately stored value at the low end.
     if (prefs.smallWashesPerBig != null) {
