@@ -47,6 +47,14 @@ export interface Prefs {
    */
   treatmentRemindersEnabledAt: number | null;
   /**
+   * Milestone catch-up nudges: when a catalog milestone's typical window closes
+   * with nothing logged, ask whether it already happened. Off by default, like
+   * naps and pumping: it is the notification twin of the home-screen
+   * `MilestoneNudge` card, which already asks unprompted, so the push half is
+   * the part a parent should opt into.
+   */
+  milestoneCatchUp: boolean;
+  /**
    * Bath rhythm: how many SMALL washes fall between two big ones (default 3,
    * range 1..30). Purely local — Baby Buddy has no notion of wash size, so this
    * only drives Budkin's "what's due next" pre-selection.

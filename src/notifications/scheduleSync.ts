@@ -4,6 +4,7 @@
  * hand it to the platform reconciler. No-ops cleanly off Android.
  */
 
+import { reachedForChild } from '@/lib/milestones';
 import { applyScheduled } from '@/notifications/applySchedule';
 import { desiredScheduled, type ScheduleInput } from '@/notifications/scheduled';
 import { cureDoseScalars, entriesForChild } from '@/store/selectors';
@@ -62,6 +63,7 @@ function toInput(s: State, now: number): ScheduleInput {
       napSuggestions: s.napSuggestions,
       treatmentReminders: s.treatmentReminders,
       treatmentRemindersEnabledAt: s.treatmentRemindersEnabledAt,
+      milestoneCatchUp: s.milestoneCatchUp,
     },
     lastPumpAt,
     lastSleepEndByChild,
@@ -77,6 +79,11 @@ function toInput(s: State, now: number): ScheduleInput {
       entriesForChild(s.entries, s.selectedChildId),
       now,
     ),
+    // Scoped to the selected child on both halves, for the same reason as
+    // `cureDoses` above. `answeredMilestonePrompts` is already keyed by child;
+    // `reachedForChild` does the filtering for the other.
+    reachedMilestoneKeys: [...reachedForChild(s.entries, s.selectedChildId).keys()],
+    answeredMilestoneKeys: s.answeredMilestonePrompts[s.selectedChildId] ?? [],
   };
 }
 
@@ -183,6 +190,13 @@ export function initScheduledReminderSync(): void {
       state.cures === previous.cures &&
       state.treatmentReminders === previous.treatmentReminders &&
       state.treatmentRemindersEnabledAt === previous.treatmentRemindersEnabledAt &&
+      state.milestoneCatchUp === previous.milestoneCatchUp &&
+      // Answering the home-screen nudge retires that milestone, which must
+      // cancel its pending notification. Nothing else in this list moves when
+      // it does: `answerMilestonePrompt` writes only this slice, so without it
+      // the alert would survive until the next foreground reconcile and ask
+      // about a milestone the parent has already answered.
+      state.answeredMilestonePrompts === previous.answeredMilestonePrompts &&
       state.selectedChildId === previous.selectedChildId
     ) {
       return;

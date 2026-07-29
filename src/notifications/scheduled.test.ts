@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
+import { ageMonths } from '@/lib/format';
+import { overdueUnlogged } from '@/lib/milestones';
 import {
   addDays,
   addMonths,
@@ -30,6 +32,7 @@ const prefs = (over: Partial<ReminderPrefs> = {}): ReminderPrefs => ({
   napSuggestions: false,
   treatmentReminders: false,
   treatmentRemindersEnabledAt: null,
+  milestoneCatchUp: false,
   ...over,
 });
 
@@ -52,6 +55,8 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   selectedChildId: 'c1',
   cures: [],
   cureDoses: {},
+  reachedMilestoneKeys: [],
+  answeredMilestoneKeys: [],
   ...over,
 });
 
@@ -1017,5 +1022,90 @@ describe('desiredScheduled: treatments, every N hours', () => {
         at(2026, 9, 2, 7),
       ),
     ).toEqual([]);
+  });
+});
+
+describe('desiredScheduled: milestone catch-up', () => {
+  const born = child({ birth: at(2026, 9, 1) });
+  const on = (over: Partial<ReminderPrefs> = {}) =>
+    prefs({
+      dueDateReminders: false,
+      staleTimerReminders: false,
+      ageMilestones: false,
+      milestoneCatchUp: true,
+      ...over,
+    });
+  const run = (over: Partial<ScheduleInput> = {}, now = at(2026, 9, 1, 12)) =>
+    desiredScheduled(input({ children: [born], prefs: on(), ...over }), now);
+
+  it('schedules nothing while the toggle is off', () => {
+    expect(
+      desiredScheduled(input({ children: [born], prefs: on({ milestoneCatchUp: false }) }), at(2026, 9, 1, 12)),
+    ).toEqual([]);
+  });
+
+  it('never fires before the home-screen nudge would show the same milestone', () => {
+    // The load-bearing guarantee: `MilestoneNudge` renders `overdueUnlogged`,
+    // so every scheduled alert must name milestones that call already returns
+    // at its own fire time. A calendar-month fire date fails this.
+    for (const n of run()) {
+      const keys = n.identifier.split(':')[3].split(',');
+      const overdue = overdueUnlogged(ageMonths(born.birth, n.fireAt), new Map(), []).map((m) => m.key);
+      for (const k of keys) expect(overdue).toContain(k);
+    }
+  });
+
+  it('groups every milestone closing on the same morning into one notification', () => {
+    const out = run();
+    // `lifts-head` and `first-smile` both close at 3 months.
+    const shared = out.find((n) => n.identifier.includes('lifts-head'));
+    expect(shared?.identifier).toContain('first-smile');
+    expect(shared?.title).toBe('2 milestones to check for Rowan.');
+    expect(shared?.body).toBe('Lifts head, First smile.');
+    expect(out.map((n) => n.fireAt)).toEqual([...new Set(out.map((n) => n.fireAt))]);
+  });
+
+  it('names the typical window when only one milestone closes', () => {
+    const out = run({ reachedMilestoneKeys: ['first-smile'] });
+    const solo = out.find((n) => n.identifier.includes('lifts-head'));
+    expect(solo?.title).toBe('A milestone to check for Rowan.');
+    expect(solo?.body).toBe('Lifts head. Most babies do this by 3 months.');
+    expect(solo?.data.url).toBe('/milestones');
+  });
+
+  it('skips milestones already logged or already answered', () => {
+    const out = run({ reachedMilestoneKeys: ['lifts-head'], answeredMilestoneKeys: ['first-smile'] });
+    expect(out.some((n) => n.identifier.includes('lifts-head'))).toBe(false);
+    expect(out.some((n) => n.identifier.includes('first-smile'))).toBe(false);
+  });
+
+  it('changes the identifier when one of a batch is logged, so the diff replaces it', () => {
+    const before = run().find((n) => n.identifier.includes('lifts-head'));
+    const after = run({ reachedMilestoneKeys: ['first-smile'] }).find((n) => n.identifier.includes('lifts-head'));
+    expect(before?.identifier).not.toBe(after?.identifier);
+    expect(before?.fireAt).toBe(after?.fireAt);
+  });
+
+  it('fires at 09:00 and stays inside the age horizon', () => {
+    const out = run();
+    expect(out.length).toBeGreaterThan(0);
+    const horizon = addMonths(at(2026, 9, 1, 12), AGE_HORIZON_MONTHS);
+    for (const n of out) {
+      expect(new Date(n.fireAt).getHours()).toBe(9);
+      expect(n.fireAt).toBeGreaterThan(at(2026, 9, 1, 12));
+      expect(n.fireAt).toBeLessThanOrEqual(horizon);
+    }
+  });
+
+  it('schedules nothing for an expected child', () => {
+    expect(run({ children: [child({ expected: true })] })).toEqual([]);
+  });
+
+  it('only ever covers the selected child', () => {
+    // `reachedMilestoneKeys` can only describe one child, so a second child's
+    // empty history must not be read as "reached nothing".
+    const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
+    const out = run({ children: [born, sibling] });
+    expect(out.every((n) => n.identifier.includes(':c1:'))).toBe(true);
   });
 });
