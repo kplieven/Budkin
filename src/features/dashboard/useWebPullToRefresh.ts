@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useState } from 'react';
+import { type RefObject, useEffect, useRef, useState } from 'react';
 import { Platform, type ScrollView } from 'react-native';
 import { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
@@ -36,13 +36,31 @@ const isTouchWeb =
  * While dragging, the caller shows a determinate glyph rotated by `glyphStyle`
  * (progress, not motion); only once released into a refresh does `refreshing`
  * flip true and the caller swap in a spinner. Spinning always means "working".
+ *
+ * `suppressed` lets a caller switch the gesture off for the length of some other
+ * gesture that owns the finger. Insights passes it while a drag is scrubbing the
+ * Rhythm plot's crosshair: these listeners sit on the scroll node's DOM and
+ * inspect neither `scrollEnabled` nor `e.target`, so without it a scrub that
+ * drifts downward at the top of the page reloads the screen. It defaults to
+ * false, so the four callers that have no competing gesture pass nothing.
  */
 export function useWebPullToRefresh(
   scrollRef: RefObject<ScrollView | null>,
   onRefresh: () => Promise<void> | void,
+  suppressed: boolean = false,
 ) {
   const pull = useSharedValue(0);
   const [refreshing, setRefreshing] = useState(false);
+  // Read through a ref inside the handlers, deliberately NOT in the effect's
+  // dependency array: depending on it would tear the listeners down and rebuild
+  // them on every scrub start and end, discarding the in-progress gesture state
+  // (`startY`, `busy`) each time. Synced by a no-dep effect that runs after
+  // every render, so nothing is mutated during render (the React Compiler is
+  // on). Same shape as the `onScrubEnd` ref in SleepHeatmap.
+  const suppressedRef = useRef(suppressed);
+  useEffect(() => {
+    suppressedRef.current = suppressed;
+  });
 
   // Puck position/fade: opacity ramps in with the pull, and it rides down with it.
   const style = useAnimatedStyle(() => ({
@@ -75,10 +93,28 @@ export function useWebPullToRefresh(
     };
 
     const onStart = (e: TouchEvent) => {
-      startY = !busy && node.scrollTop <= 0 ? e.touches[0].pageY : null;
+      startY = !busy && !suppressedRef.current && node.scrollTop <= 0 ? e.touches[0].pageY : null;
     };
     const onMove = (e: TouchEvent) => {
       if (startY == null || busy) return;
+      // Suppression usually lands mid-drag rather than at touch-down: the caller
+      // sets it from a React state update on the very touch that starts the
+      // competing gesture, so the ref only catches up a commit later and the
+      // guard in `onStart` above misses it. Abandoning here is what actually
+      // does the work. `startY = null` both stops this drag driving the
+      // indicator and disarms `finish` below, so the gesture is dead for good
+      // rather than resuming if the flag clears mid-drag.
+      //
+      // Ease back rather than dropping to 0, so a pull that was already part
+      // drawn retracts the same way a released-too-short one does instead of
+      // stranding a half-drawn indicator on screen. `busy` is checked first on
+      // purpose: a refresh that already committed is left to finish and unwind
+      // through its own `.finally`, since its spinner means real work is running.
+      if (suppressedRef.current) {
+        startY = null;
+        easeTo(0, 320);
+        return;
+      }
       const dy = e.touches[0].pageY - startY;
       if (dy > 0 && node.scrollTop <= 0) {
         // Direct assignment tracks the finger 1:1 and cancels any easing in flight.
@@ -90,7 +126,12 @@ export function useWebPullToRefresh(
     };
     const finish = () => {
       if (startY == null) return;
-      const reached = shouldTrigger(pull.value);
+      // Re-checked rather than left to `onMove`: a drag can be armed at
+      // touch-down and released with no touchmove in between (a flick the
+      // browser coalesces, or a scrub the user holds still), and that path would
+      // otherwise release straight into a refresh. Falling through to the else
+      // branch below still eases the indicator back.
+      const reached = !suppressedRef.current && shouldTrigger(pull.value);
       startY = null;
       if (reached) {
         busy = true;
