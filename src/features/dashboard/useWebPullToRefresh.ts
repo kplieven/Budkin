@@ -126,11 +126,11 @@ export function useWebPullToRefresh(
     };
     const finish = () => {
       if (startY == null) return;
-      // Re-checked rather than left to `onMove`: a drag can be armed at
-      // touch-down and released with no touchmove in between (a flick the
-      // browser coalesces, or a scrub the user holds still), and that path would
-      // otherwise release straight into a refresh. Falling through to the else
-      // branch below still eases the indicator back.
+      // Re-checked rather than left to `onMove`, which cannot cover every case:
+      // the suppression flag can land between the last touchmove and touchend,
+      // with `pull.value` already past the threshold from earlier moves that ran
+      // while the ref was still stale. Without this the release would go straight
+      // into a refresh. Falling through to the else branch still eases back.
       const reached = !suppressedRef.current && shouldTrigger(pull.value);
       startY = null;
       if (reached) {
