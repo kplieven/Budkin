@@ -104,13 +104,16 @@ export default function Insights() {
   const [scrubbing, setScrubbing] = useState(false);
   const onScrubStart = useCallback(() => setScrubbing(true), []);
   const onScrubEnd = useCallback(() => setScrubbing(false), []);
-  // Web is deliberately left alone. The plot already blocks the browser's own
-  // scroll with `touchAction: 'none'` (see SleepHeatmap), so there is nothing to
-  // add, and react-native-web renders scrollEnabled={false} as overflow:hidden,
-  // which drops the scrollbar and reflows the page mid-drag. That would slide
-  // the plot out from under the finger, and the crosshair reads a page X against
-  // a plot-left measured once at gesture start. Web is the reference behaviour
-  // here; Android is being brought up to match it, not the other way round.
+  // Web is deliberately left alone, for two reasons. The plot already blocks the
+  // browser's own scroll with `touchAction: 'none'` (see SleepHeatmap), and
+  // touch-action is latched at touchstart, so flipping it on an ancestor
+  // mid-gesture cannot reach the drag already in flight either way. And
+  // react-native-web renders scrollEnabled={false} as overflow:hidden, which on
+  // a classic-scrollbar browser reflows the page mid-drag and slides the plot
+  // out from under a plot-left measured once at gesture start. That last part
+  // does NOT bite on a touch phone, where scrollbars overlay at zero width; it
+  // bites a desktop window under the 1024px shell breakpoint. Web is the
+  // reference behaviour here, Android is being brought up to match it.
   const lockScroll = scrubbing && Platform.OS !== 'web';
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 

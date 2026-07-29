@@ -58,9 +58,19 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   // the render threshold, a child switch resetting the load state). That would
   // strand the parent's scroll lock on and leave the page unscrollable, so
   // report the end on teardown too. Doing that with no scrub in flight is
-  // harmless: the parent just clears an already-clear flag. Declared before the
-  // early return below so hook order stays stable.
-  useEffect(() => () => onScrubEnd?.(), [onScrubEnd]);
+  // harmless: the parent just clears an already-clear flag.
+  //
+  // The callback goes through a ref so the teardown can depend on nothing. Were
+  // it to depend on `onScrubEnd` directly, a caller passing an inline arrow
+  // would change its identity every render, and the cleanup would then fire one
+  // frame after the lock landed, silently restoring the bug this exists to fix
+  // with nothing in the types or the linter to catch it. Both declared before
+  // the early return below so hook order stays stable.
+  const onScrubEndRef = useRef(onScrubEnd);
+  useEffect(() => {
+    onScrubEndRef.current = onScrubEnd;
+  });
+  useEffect(() => () => onScrubEndRef.current?.(), []);
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;

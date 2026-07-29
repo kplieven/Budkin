@@ -357,8 +357,14 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
       //
       // with stroke widths scaled by the same 0.2928 (11 -> 3.22, 7 -> 2.05).
       // Re-derive the numbers that way if the source art changes. Do not nudge
-      // them by hand: the two shapes must stay clear of each other, and a stem
-      // that reaches the cradle turns the whole mark into an anchor.
+      // them by hand: the leaf tips have to stay clear of the cradle walls, and
+      // closing that gap makes the whole mark read as an anchor.
+      //
+      // This is a faithful port of the art as drawn, which includes the stem
+      // running into the bowl: source y 72 plus a 3.5 round cap reaches 75.5,
+      // against a cradle stroke edge at 70.5. The source file's own note asks
+      // for the stem to stop short of that curve, and it does not. If that is
+      // ever corrected, fix it in budkin-mark.svg and re-derive, not here.
       //
       // The source's two leaf fills collapse to `color`, the same flattening
       // Android's monochrome themed-icon layer already does.
