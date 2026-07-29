@@ -1,5 +1,5 @@
 /**
- * The routing decision behind `babybuddy://log/<type>`, split out of
+ * The routing decision behind `budkin://log/<type>`, split out of
  * `app/log/[type].tsx` so it can be unit-tested: vitest runs under node with
  * `include: ['src/**\/*.test.ts']`, so a .tsx route has no test harness. Same
  * split as `scheduled.ts` and `scheduleSync.ts`: pure decision, thin caller.

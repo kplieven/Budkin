@@ -11,7 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { Timer } from '@/types/models';
 
-const KEY = 'babybuddy.timers.v1';
+const KEY = 'budkin.timers.v1';
 
 export async function loadTimers(): Promise<Timer[]> {
   try {

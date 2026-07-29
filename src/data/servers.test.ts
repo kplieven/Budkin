@@ -81,7 +81,7 @@ describe('persistence', () => {
   });
 
   it('returns [] when stored value is not an array', async () => {
-    mem.store.set('babybuddy.servers.v1', JSON.stringify({ not: 'array' }));
+    mem.store.set('budkin.servers.v1', JSON.stringify({ not: 'array' }));
     expect(await loadServers()).toEqual([]);
   });
 

@@ -38,7 +38,7 @@ describe('timers persistence', () => {
     // Simulate a timer persisted by a pre-WI-4 build, before `stagedEnd` was
     // removed from the Timer model.
     const legacy = { ...t('a'), stagedEnd: 500 };
-    mem.store.set('babybuddy.timers.v1', JSON.stringify([legacy]));
+    mem.store.set('budkin.timers.v1', JSON.stringify([legacy]));
     expect(await loadTimers()).toEqual([t('a')]);
   });
 

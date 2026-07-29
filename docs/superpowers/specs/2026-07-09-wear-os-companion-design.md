@@ -80,7 +80,7 @@ actions ship, so proving it on the thinnest surface de-risks everything after.
   app is already native-heavy (widgets, notifications, secure-store) and a hand-
   owned `android/` is simpler to reason about than fragile prebuild plumbing.
 - **Same package + same signing key.** The Wear module ships under the existing
-  package `eu.steeldesignce.babybuddy` and must be signed with the same key as
+  package `dev.karellievens.budkin` and must be signed with the same key as
   the phone app — a hard requirement of the RN↔Wear bridge libraries and of
   Play's Wear distribution.
 - **Thin MVP first.** Build the whole pipeline with only nap-toggle + status,
@@ -143,7 +143,7 @@ background-execution failure are debugged separately, not at once.
 ### 3. Watch module — Wear Tile (MVP), Compose app (phase 2)
 
 - **New Gradle module** `wear/` inside the committed `android/`, package
-  `eu.steeldesignce.babybuddy`, same signing config as the phone app.
+  `dev.karellievens.budkin`, same signing config as the phone app.
 - **Tile** (Jetpack Tiles / ProtoLayout, Kotlin): the swipeable card — the watch
   analog of the `Nap`/`Status` home widgets.
   - **Nap toggle button:** tap sends `NAP_TOGGLE`; label reflects snapshot state

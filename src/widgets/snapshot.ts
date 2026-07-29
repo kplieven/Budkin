@@ -32,7 +32,7 @@ export interface WidgetSnapshot {
   canQueueNap: boolean;
 }
 
-const KEY = 'babybuddy.widget.v1';
+const KEY = 'budkin.widget.v1';
 
 export async function writeWidgetSnapshot(s: WidgetSnapshot): Promise<void> {
   try {
