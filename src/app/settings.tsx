@@ -251,6 +251,15 @@ function Toggle({ on }: { on: boolean }) {
   );
 }
 
+/**
+ * Sentence-case a display label. fmtDayStartHour is a lowercase primitive so it
+ * can be dropped mid-sentence elsewhere, but the "Day starts at" pills stand
+ * alone, so they capitalize here. A no-op for labels like "7:00".
+ */
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export default function Settings() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -475,7 +484,7 @@ export default function Settings() {
             {[19, 12, 7, 0].map((h) => (
               <Chip
                 key={h}
-                label={fmtDayStartHour(h)}
+                label={capitalize(fmtDayStartHour(h))}
                 color={t.primary}
                 selected={rhythmOriginHour === h}
                 onPress={() => setRhythmOriginHour(h)}
