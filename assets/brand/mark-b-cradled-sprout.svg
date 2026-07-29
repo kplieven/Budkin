@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">Budkin mark, option B: cradled sprout</title>
+  <desc id="desc">A two-leaf sprout resting inside an open cradle. Bud and kin: something new and growing, held safely.</desc>
+
+  <!-- Background. Delete this rect for a transparent mark. -->
+  <rect width="100" height="100" rx="22" fill="#F6EDE3"/>
+
+  <!-- Cradle: open curve reading as a bowl or a pair of arms -->
+  <path d="M22 34 C14 58 26 80 50 84 C74 80 86 58 78 34"
+        fill="none" stroke="#D17A45" stroke-width="11"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Sprout, left leaf -->
+  <path d="M50 66 C50 50 41 39 27 41 C24 55 34 66 50 66 Z" fill="#D17A45"/>
+
+  <!-- Sprout, right leaf. Lighter only for depth; the silhouette must read
+       without it, since Android's themed-icon layer flattens both to one colour. -->
+  <path d="M50 66 C50 50 59 39 73 41 C76 55 66 66 50 66 Z" fill="#D17A45" fill-opacity=".55"/>
+</svg>

@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512" role="img" aria-labelledby="title desc">
+  <title id="title">Budkin mark</title>
+  <desc id="desc">A two-leaf sprout resting inside an open cradle. Bud and kin: something new and growing, held.</desc>
+
+  <!--
+    Source of truth for every Budkin icon. Regenerate the PNGs with
+    assets/brand/build-icons.py after editing this file.
+
+    The drawing is laid out on a 100-unit grid where the mark's own bounding box
+    is centred on (50,56), not (50,50). The wrapper below recentres it and scales
+    it to fill the tile, so SCALE is the single knob for "bigger" or "smaller":
+    1.00 leaves it floating in whitespace, 1.32 crowds the rounded corners.
+
+    Two shapes carry the meaning and must not touch each other: the cradle arc
+    and the sprout inside it. Keep the gap between the leaf tips and the cradle
+    walls, and keep the stem stopping short of the cradle's curve. A stem that
+    crosses that curve turns the whole mark into an anchor.
+  -->
+  <g transform="translate(50 50) scale(1.22) translate(-50 -56)">
+    <!-- Cradle. Open arc reading as a bowl or a pair of arms. The ends must not
+         curl inward or the silhouette reads as horns. -->
+    <path d="M20 36 C22 62 33 75 50 76 C67 75 78 62 80 36"
+          fill="none" stroke="#D17A45" stroke-width="11"
+          stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Stem, grounding the sprout to the cradle floor without meeting it. -->
+    <path d="M50 72 L50 60" fill="none" stroke="#D17A45" stroke-width="7" stroke-linecap="round"/>
+
+    <!-- Sprout, left leaf. -->
+    <path d="M50 60 C50 47 44 37 34 38 C32 49 40 58 50 60 Z" fill="#D17A45"/>
+
+    <!-- Sprout, right leaf. Lighter for depth only: Android's themed-icon layer
+         flattens both leaves to one flat colour, so the shape must read without
+         the tonal difference.
+
+         This is a solid colour, deliberately not the primary at 55% opacity.
+         Translucency blends toward whatever sits behind the mark, so on a dark
+         splash the "lighter" leaf came out darker than the primary and the depth
+         cue inverted. Solid keeps the mark identical on any background. -->
+    <path d="M50 60 C50 47 56 37 66 38 C68 49 60 58 50 60 Z" fill="#E2AE8C"/>
+  </g>
+</svg>
