@@ -40,7 +40,9 @@ export type IconName =
   | 'edit'
   | 'image'
   | 'camera'
-  | 'trash';
+  | 'trash'
+  /** the Budkin brand mark, for logo badges rather than for use as a UI icon */
+  | 'budkin';
 
 interface IconProps {
   name: IconName;
@@ -340,6 +342,39 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
             strokeLinejoin="round"
           />
           <Path d="M10 11v5M14 11v5" stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" />
+        </Svg>
+      );
+    case 'budkin':
+      // The Budkin mark: a two-leaf sprout resting in an open cradle.
+      //
+      // Ported from assets/brand/budkin-mark.svg, which draws on a 100-unit grid
+      // wrapped in <g transform="translate(50 50) scale(1.22) translate(-50 -56)">
+      // because the artwork is centred on (50,56) rather than (50,50). That
+      // wrapper and the 100 -> 24 viewBox change are folded together here into one
+      // affine map applied to every coordinate:
+      //
+      //   x' = 0.2928 * x - 2.64        y' = 0.2928 * y - 4.3968
+      //
+      // with stroke widths scaled by the same 0.2928 (11 -> 3.22, 7 -> 2.05).
+      // Re-derive the numbers that way if the source art changes. Do not nudge
+      // them by hand: the two shapes must stay clear of each other, and a stem
+      // that reaches the cradle turns the whole mark into an anchor.
+      //
+      // The source's two leaf fills collapse to `color`, the same flattening
+      // Android's monochrome themed-icon layer already does.
+      return (
+        <Svg {...common}>
+          <Path
+            d="M3.22 6.14 C3.8 13.76 7.02 17.56 12 17.86 C16.98 17.56 20.2 13.76 20.78 6.14"
+            fill="none"
+            stroke={color}
+            strokeWidth={3.22}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <Path d="M12 16.68 L12 13.17" stroke={color} strokeWidth={2.05} strokeLinecap="round" />
+          <Path d="M12 13.17 C12 9.36 10.24 6.44 7.32 6.73 C6.73 9.95 9.07 12.59 12 13.17 Z" fill={color} />
+          <Path d="M12 13.17 C12 9.36 13.76 6.44 16.68 6.73 C17.27 9.95 14.93 12.59 12 13.17 Z" fill={color} />
         </Svg>
       );
   }
