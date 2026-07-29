@@ -8,7 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
-import { cureDosageLabel, cureScheduleLabel } from '@/features/cures/cureLabels';
+import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -285,9 +285,9 @@ export default function Settings() {
   const openAdopt = useAppStore((s) => s.openAdopt);
   const children = useAppStore((s) => s.children);
   const entries = useAppStore((s) => s.entries);
-  const cures = useAppStore((s) => s.cures);
+  const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  const openCureEditor = useAppStore((s) => s.openCureEditor);
+  const openTreatmentEditor = useAppStore((s) => s.openTreatmentEditor);
 
   useEffect(() => {
     loadProfile();
@@ -341,12 +341,12 @@ export default function Settings() {
     connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
-  // Cures are per-child, so scope the management list to the selected child.
+  // Treatments are per-child, so scope the management list to the selected child.
   // Filtered in the render body (never inside a useAppStore selector) so a fresh
-  // array can't drive the zustand v5 re-render loop. Both active and paused cures
+  // array can't drive the zustand v5 re-render loop. Both active and paused treatments
   // are shown here (this is where you manage them); the log picker filters.
   const selectedChild = children.find((c) => c.id === selectedChildId);
-  const childCures = cures.filter((c) => c.childId === selectedChildId);
+  const childTreatments = treatments.filter((c) => c.childId === selectedChildId);
 
   const body = (
     <>
@@ -503,10 +503,10 @@ export default function Settings() {
             Treatments for {selectedChild.first}
           </Txt>
           <View style={group}>
-            {childCures.map((c, i) => (
+            {childTreatments.map((c, i) => (
               <Pressable
                 key={c.id}
-                onPress={() => openCureEditor(c.id)}
+                onPress={() => openTreatmentEditor(c.id)}
                 accessibilityRole="button"
                 accessibilityLabel={`Edit ${c.name}`}
                 style={(s) => [
@@ -529,14 +529,14 @@ export default function Settings() {
                     )}
                   </View>
                   <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-                    {[cureDosageLabel(c), cureScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
+                    {[treatmentDosageLabel(c), treatmentScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
                   </Txt>
                 </View>
                 <Icon name="chevron-right" color={t.faint} size={18} />
               </Pressable>
             ))}
             <Pressable
-              onPress={() => openCureEditor()}
+              onPress={() => openTreatmentEditor()}
               accessibilityRole="button"
               accessibilityLabel="Add a treatment"
               style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}

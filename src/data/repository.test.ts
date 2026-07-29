@@ -26,7 +26,7 @@ const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
 const listMedication = vi.fn(async () => []);
 const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
-const listChildCures = vi.fn(async () => [] as any[]);
+const listChildTreatments = vi.fn(async () => [] as any[]);
 const listGenders = vi.fn(async () => new Map<number, string>());
 const setChildGender = vi.fn(async () => undefined);
 const listMeasurements = vi.fn(async () => []);
@@ -46,7 +46,7 @@ vi.mock('@/api/client', () => ({
     listTemperature,
     listMedication,
     listChildNotes,
-    listChildCures,
+    listChildTreatments,
     listGenders,
     setChildGender,
     listMeasurements,

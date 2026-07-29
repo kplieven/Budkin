@@ -6,52 +6,52 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
-import { cureScheduleLabel, cureDosageLabel } from '@/features/cures/cureLabels';
-import { cureDueList, entriesForChild } from '@/store/selectors';
+import { treatmentScheduleLabel, treatmentDosageLabel } from '@/features/treatments/treatmentLabels';
+import { treatmentDueList, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 /**
- * Cure picker: opened from the Medication tile when the selected child has at
- * least one active cure covering today (the tile decides via `openMedicationLog`,
- * so this sheet is never shown empty). Tapping a cure logs a dose from it right
+ * Treatment picker: opened from the Medication tile when the selected child has at
+ * least one active treatment covering today (the tile decides via `openMedicationLog`,
+ * so this sheet is never shown empty). Tapping a treatment logs a dose from it right
  * away (no form to confirm); "Log manually" opens the plain form instead.
  *
  * A treatment whose dose is owed right now is marked with a "Due" pill and an
- * accent border, and `cureDueList` floats those rows to the top, so the sheet
+ * accent border, and `treatmentDueList` floats those rows to the top, so the sheet
  * answers "what do I give now?" before it answers "what is this child on?".
  *
  * The due list is derived HERE in render (a pure helper over raw-selected
- * `cures` / `entries`), never from a store selector, per the zustand v5 rule
+ * `treatments` / `entries`), never from a store selector, per the zustand v5 rule
  * against returning a fresh filtered array.
  */
-export function CurePickerSheet() {
+export function TreatmentPickerSheet() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const open = useAppStore((s) => s.curePicker?.open ?? false);
+  const open = useAppStore((s) => s.treatmentPicker?.open ?? false);
   // Raw selects (stable references), then derive the filtered list in render.
-  const cures = useAppStore((s) => s.cures);
+  const treatments = useAppStore((s) => s.treatments);
   const entries = useAppStore((s) => s.entries);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const now = useAppStore((s) => s.now);
-  const closeCurePicker = useAppStore((s) => s.closeCurePicker);
+  const closeTreatmentPicker = useAppStore((s) => s.closeTreatmentPicker);
   const openSheet = useAppStore((s) => s.openSheet);
-  const logMedicationFromCure = useAppStore((s) => s.logMedicationFromCure);
+  const logMedicationFromTreatment = useAppStore((s) => s.logMedicationFromTreatment);
 
   if (!open) return null;
 
   // Entries must be child-scoped before the due maths: the store's `entries` is
   // a flat all-children array, so a sibling's dose of the same medication would
   // otherwise settle this child's treatment.
-  const active = cureDueList(cures, selectedChildId, entriesForChild(entries, selectedChildId), now);
+  const active = treatmentDueList(treatments, selectedChildId, entriesForChild(entries, selectedChildId), now);
 
   const logManually = () => {
-    closeCurePicker();
+    closeTreatmentPicker();
     openSheet('medication');
   };
 
   return (
-    <BottomSheet onClose={closeCurePicker}>
+    <BottomSheet onClose={closeTreatmentPicker}>
       <View style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 6, flexShrink: 0 }}>
         <Txt weight={800} size={18}>
           Log a dose
@@ -61,12 +61,12 @@ export function CurePickerSheet() {
         </Txt>
       </View>
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 10, gap: 8 }}>
-        {active.map(({ cure: c, due }) => {
+        {active.map(({ treatment: c, due }) => {
           const isDue = due > 0;
           return (
             <Pressable
               key={c.id}
-              onPress={() => logMedicationFromCure(c.id)}
+              onPress={() => logMedicationFromTreatment(c.id)}
               accessibilityRole="button"
               // The due state rides in the label too, so it reaches a screen
               // reader that never sees the pill.
@@ -104,7 +104,7 @@ export function CurePickerSheet() {
                   ) : null}
                 </View>
                 <Txt weight={500} size={13} color={t.dim}>
-                  {[cureDosageLabel(c), cureScheduleLabel(c)].filter(Boolean).join(' · ')}
+                  {[treatmentDosageLabel(c), treatmentScheduleLabel(c)].filter(Boolean).join(' · ')}
                 </Txt>
               </View>
               <Icon name="chevron-right" color={t.faint} size={18} />
