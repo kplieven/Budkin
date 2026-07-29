@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,6 +25,29 @@ type ReminderKey =
   | 'pumpingReminders'
   | 'treatmentReminders';
 
+interface ReminderRow {
+  key: ReminderKey;
+  label: string;
+  hint: string;
+  on: boolean;
+  /** Settings this reminder owns, revealed directly beneath it while it is on.
+   *  Rendered inside the same card as an attached sub-row, never as a card of
+   *  its own: a detached one reads as unrelated to the toggle that governs it. */
+  sub?: ReactNode;
+}
+
+/** Reminders are grouped by what drives them, which is also how `scheduled.ts`
+ *  splits: `Routine` fires off the rhythm of what you log, `Milestones` off
+ *  fixed calendar dates derived from the birth date, `App` off the app's own
+ *  state rather than the baby's. */
+interface ReminderSection {
+  label: string;
+  rows: ReminderRow[];
+}
+
+/** Selectable gaps between pumping reminders, in minutes. */
+const PUMP_INTERVALS_MIN = [120, 180, 240, 300];
+
 export default function NotificationSettings() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -44,46 +67,84 @@ export default function NotificationSettings() {
     void hasReminderPermission().then(setGranted);
   }, []);
 
-  const { group, row } = makeSettingsListStyles(t);
+  const { group, row, sectionLabel } = makeSettingsListStyles(t);
 
-  const rows: { key: ReminderKey; label: string; hint: string; on: boolean }[] = [
+  const pumpingInterval = (
+    <>
+      <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginBottom: 9 }}>
+        Remind me every
+      </Txt>
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+        {PUMP_INTERVALS_MIN.map((min) => (
+          <Chip
+            key={min}
+            label={`${min / 60}h`}
+            accessibilityLabel={`Every ${min / 60} hours`}
+            color={t.primary}
+            selected={pumpingIntervalMin === min}
+            onPress={() => setPumpingInterval(min)}
+          />
+        ))}
+      </View>
+    </>
+  );
+
+  const sections: ReminderSection[] = [
     {
-      key: 'dueDateReminders',
-      label: 'Due date',
-      hint: 'A week before, and on the day itself.',
-      on: dueDateReminders,
+      label: 'Routine',
+      rows: [
+        {
+          key: 'napSuggestions',
+          label: 'Nap suggestions',
+          hint: 'As your baby nears the typical wake window for their age. General guidance, not medical advice.',
+          on: napSuggestions,
+        },
+        {
+          key: 'pumpingReminders',
+          label: 'Pumping',
+          hint: 'On a set interval from your last session.',
+          on: pumpingReminders,
+          sub: pumpingInterval,
+        },
+        {
+          key: 'treatmentReminders',
+          label: 'Treatments',
+          hint: 'When a dose of a treatment is due.',
+          on: treatmentReminders,
+        },
+      ],
     },
     {
-      key: 'staleTimerReminders',
-      label: 'Timer left running',
-      hint: 'If a timer runs far longer than usual.',
-      on: staleTimerReminders,
+      label: 'Milestones',
+      rows: [
+        {
+          key: 'dueDateReminders',
+          label: 'Due date',
+          hint: 'A week before, and on the day itself.',
+          on: dueDateReminders,
+        },
+        {
+          key: 'ageMilestones',
+          label: 'Age milestones',
+          hint: 'One week, one month, then every few months.',
+          on: ageMilestones,
+        },
+      ],
     },
     {
-      key: 'ageMilestones',
-      label: 'Age milestones',
-      hint: 'One week, one month, then every few months.',
-      on: ageMilestones,
-    },
-    {
-      key: 'napSuggestions',
-      label: 'Nap suggestions',
-      hint: 'As your baby nears the typical wake window for their age. General guidance, not medical advice.',
-      on: napSuggestions,
-    },
-    {
-      key: 'pumpingReminders',
-      label: 'Pumping',
-      hint: 'On a set interval from your last session.',
-      on: pumpingReminders,
-    },
-    {
-      key: 'treatmentReminders',
-      label: 'Treatments',
-      hint: 'When a dose of a treatment is due.',
-      on: treatmentReminders,
+      label: 'App',
+      rows: [
+        {
+          key: 'staleTimerReminders',
+          label: 'Timer left running',
+          hint: 'If a timer runs far longer than usual.',
+          on: staleTimerReminders,
+        },
+      ],
     },
   ];
+
+  const divider = { borderBottomWidth: 1, borderBottomColor: t.line };
 
   const body = (
     <>
@@ -136,52 +197,70 @@ export default function NotificationSettings() {
         </View>
       )}
 
-      <View style={group}>
-        {rows.map((r, i) => (
-          <Pressable
-            key={r.key}
-            onPress={() => setReminderPref(r.key, !r.on)}
-            accessibilityRole="switch"
-            accessibilityLabel={r.label}
-            accessibilityState={{ checked: r.on }}
-            style={(s) => [
-              row,
-              i < rows.length - 1 && { borderBottomWidth: 1, borderBottomColor: t.line },
-              { cursor: 'pointer' },
-              isHovered(s) && { backgroundColor: t.elevated },
-            ]}
+      {sections.map((section, si) => (
+        <Fragment key={section.label}>
+          <Txt
+            weight={700}
+            size={12.5}
+            color={t.faint}
+            tracking={0.8}
+            style={{ ...sectionLabel, ...(si === 0 && { marginTop: 4 }), textTransform: 'uppercase' }}
           >
-            <View style={{ flex: 1, paddingRight: 12 }}>
-              <Txt unselectable weight={600} size={16}>
-                {r.label}
-              </Txt>
-              <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
-                {r.hint}
-              </Txt>
-            </View>
-            <Toggle on={r.on} />
-          </Pressable>
-        ))}
-      </View>
-
-      {pumpingReminders && (
-        <View style={{ ...group, marginTop: 12, padding: 16 }}>
-          <Txt size={13} color={t.faint} style={{ marginBottom: 10 }}>
-            Remind me every
+            {section.label}
           </Txt>
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            {[120, 180, 240, 300].map((min) => (
-              <Chip
-                key={min}
-                label={`${min / 60}h`}
-                color={t.primary}
-                selected={pumpingIntervalMin === min}
-                onPress={() => setPumpingInterval(min)}
-              />
-            ))}
+          <View style={group}>
+            {section.rows.map((r, i) => {
+              const last = i === section.rows.length - 1;
+              const showSub = r.sub != null && r.on;
+              return (
+                <Fragment key={r.key}>
+                  <Pressable
+                    onPress={() => setReminderPref(r.key, !r.on)}
+                    accessibilityRole="switch"
+                    accessibilityLabel={r.label}
+                    accessibilityState={{ checked: r.on }}
+                    style={(s) => [
+                      row,
+                      // The sub-row carries the divider in its place, so the two
+                      // read as one unit rather than as neighbours.
+                      !showSub && !last && divider,
+                      { cursor: 'pointer' },
+                      isHovered(s) && { backgroundColor: t.elevated },
+                    ]}
+                  >
+                    <View style={{ flex: 1, paddingRight: 12 }}>
+                      <Txt unselectable weight={600} size={16}>
+                        {r.label}
+                      </Txt>
+                      <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                        {r.hint}
+                      </Txt>
+                    </View>
+                    <Toggle on={r.on} />
+                  </Pressable>
+
+                  {showSub && (
+                    <View
+                      style={{
+                        backgroundColor: t.elevated,
+                        paddingTop: 13,
+                        paddingBottom: 15,
+                        // Indented past the parent row's text, recessed against
+                        // the card: both say "this belongs to the row above".
+                        paddingLeft: 28,
+                        paddingRight: 16,
+                        ...(!last && divider),
+                      }}
+                    >
+                      {r.sub}
+                    </View>
+                  )}
+                </Fragment>
+              );
+            })}
           </View>
-        </View>
-      )}
+        </Fragment>
+      ))}
     </>
   );
 
