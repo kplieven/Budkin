@@ -52,7 +52,10 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "android:dev": "APP_VARIANT=development expo run:android --device",
+    "start:dev": "APP_VARIANT=development expo start",
+    "prebuild:dev": "APP_VARIANT=development expo prebuild --platform android --clean"
   },
   "private": true
 }
