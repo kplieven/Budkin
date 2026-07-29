@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clearCures, loadCures, saveCures } from '@/data/cures';
-import type { Cure } from '@/types/models';
+import { clearTreatments, loadTreatments, saveTreatments } from '@/data/treatments';
+import type { Treatment } from '@/types/models';
 
 // In-memory stand-in for AsyncStorage (node env has no native module).
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
@@ -21,8 +21,8 @@ beforeEach(() => {
   mem.store.clear();
 });
 
-const interval: Cure = {
-  id: 'cure-1',
+const interval: Treatment = {
+  id: 'treatment-1',
   childId: 'c1',
   name: 'Paracetamol',
   scheduleMode: 'everyHours',
@@ -36,8 +36,8 @@ const interval: Cure = {
   active: true,
 };
 
-const timesOfDay: Cure = {
-  id: 'cure-2',
+const timesOfDay: Treatment = {
+  id: 'treatment-2',
   childId: 'c2',
   name: 'Vitamin D',
   scheduleMode: 'timesOfDay',
@@ -46,19 +46,19 @@ const timesOfDay: Cure = {
   active: false,
 };
 
-describe('cures persistence', () => {
+describe('treatments persistence', () => {
   it('returns an empty array when nothing is stored', async () => {
-    expect(await loadCures()).toEqual([]);
+    expect(await loadTreatments()).toEqual([]);
   });
 
-  it('round-trips a list of cures (both schedule modes, open-ended and paused)', async () => {
-    await saveCures([interval, timesOfDay]);
-    expect(await loadCures()).toEqual([interval, timesOfDay]);
+  it('round-trips a list of treatments (both schedule modes, open-ended and paused)', async () => {
+    await saveTreatments([interval, timesOfDay]);
+    expect(await loadTreatments()).toEqual([interval, timesOfDay]);
   });
 
-  it('clearCures removes the stored list', async () => {
-    await saveCures([interval]);
-    await clearCures();
-    expect(await loadCures()).toEqual([]);
+  it('clearTreatments removes the stored list', async () => {
+    await saveTreatments([interval]);
+    await clearTreatments();
+    expect(await loadTreatments()).toEqual([]);
   });
 });

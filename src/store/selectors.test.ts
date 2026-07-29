@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeCuresForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, cureDueHint, cureDueList, cureDueState, curesAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isCureActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
-import type { Cure, Entry, Measurement, Timer } from '@/types/models';
+import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import type { Treatment, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -510,13 +510,13 @@ describe('startOfDay', () => {
   });
 });
 
-describe('isCureActiveToday / activeCuresForChildToday', () => {
+describe('isTreatmentActiveToday / activeTreatmentsForChildToday', () => {
   // Local-midnight day anchors so the numeric range compare is exact.
   const day = (y: number, m: number, d: number) => new Date(y, m - 1, d, 0, 0, 0, 0).getTime();
   const TODAY = day(2026, 3, 4);
 
-  const base: Cure = {
-    id: 'cure-1',
+  const base: Treatment = {
+    id: 'treatment-1',
     childId: 'c1',
     name: 'Paracetamol',
     scheduleMode: 'everyHours',
@@ -527,50 +527,50 @@ describe('isCureActiveToday / activeCuresForChildToday', () => {
   };
 
   it('is active inside the range for the matching child', () => {
-    expect(isCureActiveToday(base, TODAY, 'c1')).toBe(true);
+    expect(isTreatmentActiveToday(base, TODAY, 'c1')).toBe(true);
   });
   it('is inactive when paused', () => {
-    expect(isCureActiveToday({ ...base, active: false }, TODAY, 'c1')).toBe(false);
+    expect(isTreatmentActiveToday({ ...base, active: false }, TODAY, 'c1')).toBe(false);
   });
   it('is inactive for a different child (per-child scoping)', () => {
-    expect(isCureActiveToday(base, TODAY, 'c2')).toBe(false);
-    expect(isCureActiveToday({ ...base, childId: 'c2' }, TODAY, 'c1')).toBe(false);
+    expect(isTreatmentActiveToday(base, TODAY, 'c2')).toBe(false);
+    expect(isTreatmentActiveToday({ ...base, childId: 'c2' }, TODAY, 'c1')).toBe(false);
   });
   it('is inactive before the from date and active exactly on it', () => {
-    expect(isCureActiveToday({ ...base, fromDate: day(2026, 3, 5) }, TODAY, 'c1')).toBe(false);
-    expect(isCureActiveToday({ ...base, fromDate: TODAY }, TODAY, 'c1')).toBe(true);
+    expect(isTreatmentActiveToday({ ...base, fromDate: day(2026, 3, 5) }, TODAY, 'c1')).toBe(false);
+    expect(isTreatmentActiveToday({ ...base, fromDate: TODAY }, TODAY, 'c1')).toBe(true);
   });
   it('is inactive after the to date and active exactly on it (inclusive boundary)', () => {
-    expect(isCureActiveToday({ ...base, toDate: day(2026, 3, 3) }, TODAY, 'c1')).toBe(false);
-    expect(isCureActiveToday({ ...base, toDate: TODAY }, TODAY, 'c1')).toBe(true);
+    expect(isTreatmentActiveToday({ ...base, toDate: day(2026, 3, 3) }, TODAY, 'c1')).toBe(false);
+    expect(isTreatmentActiveToday({ ...base, toDate: TODAY }, TODAY, 'c1')).toBe(true);
   });
   it('treats an undefined to date as open-ended', () => {
-    expect(isCureActiveToday({ ...base, toDate: undefined }, TODAY, 'c1')).toBe(true);
+    expect(isTreatmentActiveToday({ ...base, toDate: undefined }, TODAY, 'c1')).toBe(true);
   });
 
-  it('activeCuresForChildToday keeps only this child\'s active-today cures', () => {
-    const cures: Cure[] = [
+  it('activeTreatmentsForChildToday keeps only this child\'s active-today treatments', () => {
+    const treatments: Treatment[] = [
       base, // active, c1
-      { ...base, id: 'cure-2', childId: 'c2' }, // other child
-      { ...base, id: 'cure-3', active: false }, // paused
-      { ...base, id: 'cure-4', toDate: day(2026, 3, 3) }, // ended yesterday
-      { ...base, id: 'cure-5', toDate: undefined }, // open-ended, active
+      { ...base, id: 'treatment-2', childId: 'c2' }, // other child
+      { ...base, id: 'treatment-3', active: false }, // paused
+      { ...base, id: 'treatment-4', toDate: day(2026, 3, 3) }, // ended yesterday
+      { ...base, id: 'treatment-5', toDate: undefined }, // open-ended, active
     ];
-    expect(activeCuresForChildToday(cures, 'c1', TODAY).map((c) => c.id)).toEqual(['cure-1', 'cure-5']);
+    expect(activeTreatmentsForChildToday(treatments, 'c1', TODAY).map((c) => c.id)).toEqual(['treatment-1', 'treatment-5']);
   });
-  it('activeCuresForChildToday returns [] when no child is selected', () => {
-    expect(activeCuresForChildToday([base], '', TODAY)).toEqual([]);
+  it('activeTreatmentsForChildToday returns [] when no child is selected', () => {
+    expect(activeTreatmentsForChildToday([base], '', TODAY)).toEqual([]);
   });
 });
 
-describe('cureDueState / cureDueList / cureDueHint / curesAllGiven', () => {
+describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAllGiven', () => {
   // A fixed local day so every slot hour is exact.
   const at = (h: number, min = 0) => new Date(2026, 2, 4, h, min, 0, 0).getTime();
   const dayAt = (d: number, h: number) => new Date(2026, 2, d, h, 0, 0, 0).getTime();
   const FROM = new Date(2026, 2, 1, 0, 0, 0, 0).getTime();
 
-  const cure = (over: Partial<Cure> = {}): Cure => ({
-    id: 'cure-1',
+  const treatment = (over: Partial<Treatment> = {}): Treatment => ({
+    id: 'treatment-1',
     childId: 'c1',
     name: 'Omeprazol',
     scheduleMode: 'timesOfDay',
@@ -589,170 +589,170 @@ describe('cureDueState / cureDueList / cureDueHint / curesAllGiven', () => {
     tags: [],
   });
 
-  describe('times-of-day cures', () => {
+  describe('times-of-day treatments', () => {
     it('owes nothing before the first slot is reached', () => {
       // 07:00, ahead of the 08:00 morning slot: nothing is late yet.
-      expect(cureDueState(cure(), [], at(7))).toMatchObject({ due: 0, expected: 0 });
+      expect(treatmentDueState(treatment(), [], at(7))).toMatchObject({ due: 0, expected: 0 });
     });
 
     it('owes a dose once a slot is reached, exactly on the hour', () => {
-      expect(cureDueState(cure(), [], at(8))).toMatchObject({ due: 1, expected: 1 });
-      expect(cureDueState(cure(), [], at(7, 59))).toMatchObject({ due: 0, expected: 0 });
+      expect(treatmentDueState(treatment(), [], at(8))).toMatchObject({ due: 1, expected: 1 });
+      expect(treatmentDueState(treatment(), [], at(7, 59))).toMatchObject({ due: 0, expected: 0 });
     });
 
     it('is settled by a dose logged for that slot', () => {
-      expect(cureDueState(cure(), [dose(at(8, 30))], at(9))).toMatchObject({ due: 0, expected: 1 });
+      expect(treatmentDueState(treatment(), [dose(at(8, 30))], at(9))).toMatchObject({ due: 0, expected: 1 });
     });
 
     it('owes the second slot once evening arrives', () => {
       const doses = [dose(at(8, 30))];
-      expect(cureDueState(cure(), doses, at(17))).toMatchObject({ due: 0, expected: 1 });
-      expect(cureDueState(cure(), doses, at(18, 1))).toMatchObject({ due: 1, expected: 2 });
+      expect(treatmentDueState(treatment(), doses, at(17))).toMatchObject({ due: 0, expected: 1 });
+      expect(treatmentDueState(treatment(), doses, at(18, 1))).toMatchObject({ due: 1, expected: 2 });
     });
 
     it('a single late dose settles ONE owed slot, not every earlier one', () => {
       // Morning skipped, one dose at 19:00. Counting (not per-slot clearing) is
       // what keeps the skipped morning dose owed.
-      expect(cureDueState(cure(), [dose(at(19))], at(19, 30))).toMatchObject({ due: 1, expected: 2 });
+      expect(treatmentDueState(treatment(), [dose(at(19))], at(19, 30))).toMatchObject({ due: 1, expected: 2 });
     });
 
-    it('counts every slot of a four-times-a-day cure', () => {
-      const c = cure({ timesOfDay: ['morning', 'noon', 'evening', 'night'] });
-      expect(cureDueState(c, [], at(23))).toMatchObject({ due: 4, expected: 4 });
-      expect(cureDueState(c, [dose(at(8)), dose(at(12))], at(23))).toMatchObject({ due: 2, expected: 4 });
+    it('counts every slot of a four-times-a-day treatment', () => {
+      const c = treatment({ timesOfDay: ['morning', 'noon', 'evening', 'night'] });
+      expect(treatmentDueState(c, [], at(23))).toMatchObject({ due: 4, expected: 4 });
+      expect(treatmentDueState(c, [dose(at(8)), dose(at(12))], at(23))).toMatchObject({ due: 2, expected: 4 });
     });
 
     it('never goes negative when more doses are logged than slots called for', () => {
-      expect(cureDueState(cure(), [dose(at(8)), dose(at(9)), dose(at(10))], at(11))).toMatchObject({ due: 0 });
+      expect(treatmentDueState(treatment(), [dose(at(8)), dose(at(9)), dose(at(10))], at(11))).toMatchObject({ due: 0 });
     });
 
     it('ignores yesterday\'s doses and yesterday\'s slots', () => {
       // A dose given yesterday evening does not settle this morning's slot.
-      expect(cureDueState(cure(), [dose(dayAt(3, 19))], at(9))).toMatchObject({ due: 1, expected: 1 });
+      expect(treatmentDueState(treatment(), [dose(dayAt(3, 19))], at(9))).toMatchObject({ due: 1, expected: 1 });
     });
 
     it('ignores a dose logged later today than now', () => {
       // `now` is the clock; a future-stamped dose cannot settle a slot yet.
-      expect(cureDueState(cure(), [dose(at(20))], at(9))).toMatchObject({ due: 1, expected: 1 });
+      expect(treatmentDueState(treatment(), [dose(at(20))], at(9))).toMatchObject({ due: 1, expected: 1 });
     });
 
     it('owes nothing when no times of day are chosen', () => {
-      expect(cureDueState(cure({ timesOfDay: undefined }), [], at(23))).toMatchObject({ due: 0, expected: 0 });
+      expect(treatmentDueState(treatment({ timesOfDay: undefined }), [], at(23))).toMatchObject({ due: 0, expected: 0 });
     });
   });
 
-  describe('dose-to-cure matching is by name', () => {
+  describe('dose-to-treatment matching is by name', () => {
     it('matches case-insensitively and ignores surrounding space', () => {
-      expect(cureDueState(cure(), [dose(at(8, 5), '  omeprazol ')], at(9))).toMatchObject({ due: 0 });
+      expect(treatmentDueState(treatment(), [dose(at(8, 5), '  omeprazol ')], at(9))).toMatchObject({ due: 0 });
     });
     it('does not match a different medication', () => {
-      expect(cureDueState(cure(), [dose(at(8, 5), 'Nurofen')], at(9))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(treatment(), [dose(at(8, 5), 'Nurofen')], at(9))).toMatchObject({ due: 1 });
     });
-    it('reads already-scoped entries, so a sibling\'s dose cannot settle this cure', () => {
+    it('reads already-scoped entries, so a sibling\'s dose cannot settle this treatment', () => {
       const mine = dose(at(8, 5));
       const sibling = dose(at(8, 5), 'Omeprazol', 'c2');
-      expect(cureDueState(cure(), entriesForChild([sibling], 'c1'), at(9))).toMatchObject({ due: 1 });
-      expect(cureDueState(cure(), entriesForChild([mine, sibling], 'c1'), at(9))).toMatchObject({ due: 0 });
+      expect(treatmentDueState(treatment(), entriesForChild([sibling], 'c1'), at(9))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(treatment(), entriesForChild([mine, sibling], 'c1'), at(9))).toMatchObject({ due: 0 });
     });
     it('ignores non-medication entries', () => {
       const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'small', tags: [] };
-      expect(cureDueState(cure(), [bath], at(9))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(treatment(), [bath], at(9))).toMatchObject({ due: 1 });
     });
   });
 
-  describe('interval cures', () => {
-    const every6 = cure({ scheduleMode: 'everyHours', everyHours: 6, timesOfDay: undefined });
+  describe('interval treatments', () => {
+    const every6 = treatment({ scheduleMode: 'everyHours', everyHours: 6, timesOfDay: undefined });
 
     it('owes a dose immediately when none was ever logged', () => {
       // fromDate has already passed, so the regimen has started and dose one is late.
-      expect(cureDueState(every6, [], at(1))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(every6, [], at(1))).toMatchObject({ due: 1 });
     });
 
     it('is settled until the interval elapses, then owes again', () => {
       const doses = [dose(at(8))];
-      expect(cureDueState(every6, doses, at(13, 59))).toMatchObject({ due: 0, expected: 1 });
-      expect(cureDueState(every6, doses, at(14))).toMatchObject({ due: 1, expected: 2 });
+      expect(treatmentDueState(every6, doses, at(13, 59))).toMatchObject({ due: 0, expected: 1 });
+      expect(treatmentDueState(every6, doses, at(14))).toMatchObject({ due: 1, expected: 2 });
     });
 
     it('counts from the LATEST dose, not the first', () => {
-      expect(cureDueState(every6, [dose(at(8)), dose(at(11))], at(16))).toMatchObject({ due: 0 });
-      expect(cureDueState(every6, [dose(at(8)), dose(at(11))], at(17, 1))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(every6, [dose(at(8)), dose(at(11))], at(16))).toMatchObject({ due: 0 });
+      expect(treatmentDueState(every6, [dose(at(8)), dose(at(11))], at(17, 1))).toMatchObject({ due: 1 });
     });
 
     it('owes at most one dose no matter how many intervals were missed', () => {
       // 08:00 yesterday, now 23:00 today: many intervals lapsed, still one state.
-      expect(cureDueState(every6, [dose(dayAt(3, 8))], at(23))).toMatchObject({ due: 1 });
+      expect(treatmentDueState(every6, [dose(dayAt(3, 8))], at(23))).toMatchObject({ due: 1 });
     });
 
     it('owes nothing when the interval has not been set', () => {
-      expect(cureDueState(cure({ scheduleMode: 'everyHours', everyHours: undefined, timesOfDay: undefined }), [], at(12)))
+      expect(treatmentDueState(treatment({ scheduleMode: 'everyHours', everyHours: undefined, timesOfDay: undefined }), [], at(12)))
         .toMatchObject({ due: 0, expected: 0 });
     });
   });
 
-  describe('cureDueList', () => {
-    const owed = cure({ id: 'owed', name: 'Omeprazol', timesOfDay: ['morning'] });
-    const settled = cure({ id: 'settled', name: 'Nurofen', timesOfDay: ['morning'] });
+  describe('treatmentDueList', () => {
+    const owed = treatment({ id: 'owed', name: 'Omeprazol', timesOfDay: ['morning'] });
+    const settled = treatment({ id: 'settled', name: 'Nurofen', timesOfDay: ['morning'] });
 
-    it('sorts owed cures first, keeping stored order within each group', () => {
-      const cures = [settled, owed, cure({ id: 'later', name: 'Vitamin D', timesOfDay: ['night'] })];
-      const list = cureDueList(cures, 'c1', [dose(at(8, 5), 'Nurofen')], at(9));
-      expect(list.map((d) => d.cure.id)).toEqual(['owed', 'settled', 'later']);
+    it('sorts owed treatments first, keeping stored order within each group', () => {
+      const treatments = [settled, owed, treatment({ id: 'later', name: 'Vitamin D', timesOfDay: ['night'] })];
+      const list = treatmentDueList(treatments, 'c1', [dose(at(8, 5), 'Nurofen')], at(9));
+      expect(list.map((d) => d.treatment.id)).toEqual(['owed', 'settled', 'later']);
       expect(list.map((d) => d.due)).toEqual([1, 0, 0]);
     });
 
-    it('drops cures that are not active for this child today', () => {
-      const cures = [owed, cure({ id: 'paused', active: false }), cure({ id: 'other', childId: 'c2' })];
-      expect(cureDueList(cures, 'c1', [], at(9)).map((d) => d.cure.id)).toEqual(['owed']);
+    it('drops treatments that are not active for this child today', () => {
+      const treatments = [owed, treatment({ id: 'paused', active: false }), treatment({ id: 'other', childId: 'c2' })];
+      expect(treatmentDueList(treatments, 'c1', [], at(9)).map((d) => d.treatment.id)).toEqual(['owed']);
     });
 
     it('returns [] when no child is selected', () => {
-      expect(cureDueList([owed], undefined, [], at(9))).toEqual([]);
+      expect(treatmentDueList([owed], undefined, [], at(9))).toEqual([]);
     });
   });
 
-  describe('cureDueHint / curesAllGiven', () => {
-    const morning = cure({ id: 'a', name: 'Omeprazol', timesOfDay: ['morning'] });
-    const noon = cure({ id: 'b', name: 'Nurofen', timesOfDay: ['noon'] });
+  describe('treatmentDueHint / treatmentsAllGiven', () => {
+    const morning = treatment({ id: 'a', name: 'Omeprazol', timesOfDay: ['morning'] });
+    const noon = treatment({ id: 'b', name: 'Nurofen', timesOfDay: ['noon'] });
 
     it('names the treatment when exactly one dose is owed', () => {
-      expect(cureDueHint(cureDueList([morning], 'c1', [], at(9)))).toBe('Omeprazol due');
+      expect(treatmentDueHint(treatmentDueList([morning], 'c1', [], at(9)))).toBe('Omeprazol due');
     });
 
     it('trims the name it puts in the hint', () => {
-      const padded = cure({ id: 'a', name: '  Omeprazol  ', timesOfDay: ['morning'] });
-      expect(cureDueHint(cureDueList([padded], 'c1', [], at(9)))).toBe('Omeprazol due');
+      const padded = treatment({ id: 'a', name: '  Omeprazol  ', timesOfDay: ['morning'] });
+      expect(treatmentDueHint(treatmentDueList([padded], 'c1', [], at(9)))).toBe('Omeprazol due');
     });
 
     it('counts instead of naming once more than one dose is owed', () => {
-      expect(cureDueHint(cureDueList([morning, noon], 'c1', [], at(13)))).toBe('2 doses due');
+      expect(treatmentDueHint(treatmentDueList([morning, noon], 'c1', [], at(13)))).toBe('2 doses due');
     });
 
     it('counts multiple owed doses of the SAME treatment', () => {
-      const twice = cure({ timesOfDay: ['morning', 'noon'] });
-      expect(cureDueHint(cureDueList([twice], 'c1', [], at(13)))).toBe('2 doses due');
+      const twice = treatment({ timesOfDay: ['morning', 'noon'] });
+      expect(treatmentDueHint(treatmentDueList([twice], 'c1', [], at(13)))).toBe('2 doses due');
     });
 
     it('reports all given once every owed dose is logged, and shows the check', () => {
-      const list = cureDueList([morning], 'c1', [dose(at(8, 10))], at(9));
-      expect(cureDueHint(list)).toBe('All doses given');
-      expect(curesAllGiven(list)).toBe(true);
+      const list = treatmentDueList([morning], 'c1', [dose(at(8, 10))], at(9));
+      expect(treatmentDueHint(list)).toBe('All doses given');
+      expect(treatmentsAllGiven(list)).toBe(true);
     });
 
     it('says nothing is due before the first slot, with no check', () => {
       // Doses were never called for today yet, so "all given" would be a lie.
-      const list = cureDueList([morning], 'c1', [], at(7));
-      expect(cureDueHint(list)).toBe('Nothing due');
-      expect(curesAllGiven(list)).toBe(false);
+      const list = treatmentDueList([morning], 'c1', [], at(7));
+      expect(treatmentDueHint(list)).toBe('Nothing due');
+      expect(treatmentsAllGiven(list)).toBe(false);
     });
 
-    it('gives no hint and no check when the child has no active cures', () => {
-      expect(cureDueHint([])).toBeNull();
-      expect(curesAllGiven([])).toBe(false);
+    it('gives no hint and no check when the child has no active treatments', () => {
+      expect(treatmentDueHint([])).toBeNull();
+      expect(treatmentsAllGiven([])).toBe(false);
     });
 
     it('shows no check while a dose is still owed', () => {
-      expect(curesAllGiven(cureDueList([morning], 'c1', [], at(9)))).toBe(false);
+      expect(treatmentsAllGiven(treatmentDueList([morning], 'c1', [], at(9)))).toBe(false);
     });
   });
 });

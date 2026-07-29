@@ -11,7 +11,7 @@ import {
   type ActivityType,
   type Child,
   type ChildGender,
-  type Cure,
+  type Treatment,
   type Entry,
   type FeedMethod,
   type FeedType,
@@ -34,9 +34,9 @@ export interface LoadResult {
   selectedChildId: string;
   lastFeed: { feedType: FeedType; method: FeedMethod };
   measurements: Measurement[];
-  /** The selected child's treatment regimens, read from their `cure`-tagged
+  /** The selected child's treatment regimens, read from their `treatment`-tagged
    *  notes. Empty in local mode and whenever the fetch fails. */
-  cures: Cure[];
+  treatments: Treatment[];
 }
 
 /** Validate the connection and load children + recent entries from the server.
@@ -64,7 +64,7 @@ export async function loadFromServer(
       selectedChildId: '',
       lastFeed: { feedType: 'breast', method: 'left' },
       measurements: [],
-      cures: [],
+      treatments: [],
     };
   }
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
@@ -88,9 +88,9 @@ export async function loadFromServer(
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
   let entries: Entry[] = [];
-  let cures: Cure[] = [];
+  let treatments: Treatment[] = [];
   if (selectedChildId) {
-    const [f, s, d, p, tt, notesData, temp, med, cureList] = await Promise.all([
+    const [f, s, d, p, tt, notesData, temp, med, treatmentList] = await Promise.all([
       client.listFeedings(selectedChildId).catch(() => []),
       client.listSleep(selectedChildId).catch(() => []),
       client.listChanges(selectedChildId).catch(() => []),
@@ -100,13 +100,13 @@ export async function loadFromServer(
       client.listChildNotes(selectedChildId).catch(() => ({ baths: [], milestones: [], notes: [] })),
       client.listTemperature(selectedChildId).catch(() => []),
       client.listMedication(selectedChildId).catch(() => []),
-      // Cures come from a SECOND /api/notes/ request filtered by the `cure` tag,
-      // not out of `listChildNotes`: a cure note is dated at the regimen's start,
+      // Treatments come from a SECOND /api/notes/ request filtered by the `treatment` tag,
+      // not out of `listChildNotes`: a treatment note is dated at the regimen's start,
       // so a long-running treatment would drop out of the recent-notes window.
-      client.listChildCures(selectedChildId).catch(() => [] as Cure[]),
+      client.listChildTreatments(selectedChildId).catch(() => [] as Treatment[]),
     ]);
     entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp, ...med];
-    cures = cureList;
+    treatments = treatmentList;
   }
 
   const lastFeeding = entries
@@ -142,7 +142,7 @@ export async function loadFromServer(
     timers = [];
   }
 
-  return { children, entries, timers, selectedChildId, lastFeed, measurements, cures };
+  return { children, entries, timers, selectedChildId, lastFeed, measurements, treatments };
 }
 
 /**
@@ -247,27 +247,27 @@ export async function setChildGenderOnServer(
   await client.setChildGender(childServerId, gender, atMs);
 }
 
-/** Push a newly created cure (a `cure`-tagged note); returns its new server id. */
-export async function pushCureToServer(
+/** Push a newly created treatment (a `treatment`-tagged note); returns its new server id. */
+export async function pushTreatmentToServer(
   conn: Connection,
-  cure: Cure,
+  treatment: Treatment,
   childServerId: number,
 ): Promise<number | undefined> {
   if (conn.mode !== 'server') return undefined;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  return client.createCure(cure, childServerId);
+  return client.createTreatment(treatment, childServerId);
 }
 
-export async function updateCureOnServer(conn: Connection, cure: Cure, childServerId: number): Promise<void> {
+export async function updateTreatmentOnServer(conn: Connection, treatment: Treatment, childServerId: number): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.updateCure(cure, childServerId);
+  await client.updateTreatment(treatment, childServerId);
 }
 
-export async function deleteCureFromServer(conn: Connection, serverId: number): Promise<void> {
+export async function deleteTreatmentFromServer(conn: Connection, serverId: number): Promise<void> {
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
-  await client.deleteCure(serverId);
+  await client.deleteTreatment(serverId);
 }
 
 /** Push a newly created child (with an optional photo); returns the new server
