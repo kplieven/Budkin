@@ -360,7 +360,14 @@ export default function Insights() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
-                enabled={!scrubbing}
+                // `|| refreshing` keeps a COMMITTED refresh visible: androidx's
+                // SwipeRefreshLayout overrides setEnabled and calls reset() on
+                // false, which hides the spinner without clearing mRefreshing,
+                // and RefreshControl only re-pushes `refreshing` when that prop
+                // itself changes, so it would never come back. Scrubbing during
+                // a live reload would otherwise blank the indicator while the
+                // network call ran. Matches what the web path already does.
+                enabled={!scrubbing || refreshing}
                 tintColor={t.dim}
                 colors={['#E2B554']}
                 progressViewOffset={insets.top}

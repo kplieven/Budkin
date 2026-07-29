@@ -549,8 +549,8 @@ export default function Settings() {
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
             Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
-            save as ordinary medication entries. Which treatment a dose belongs to is matched by
-            name, and only on this device.
+            save as ordinary medication entries and are matched to a treatment by name, so renaming
+            one leaves its earlier doses behind.
           </Txt>
         </>
       )}

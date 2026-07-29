@@ -3,8 +3,8 @@
  * One-shot Baby Buddy migration: rename the `cure` tag family to `treatment`.
  *
  * Budkin stores a medication regimen as a Baby Buddy Note carrying structural
- * tags plus a machine-readable payload line in the note body. Budkin 1.1 renamed
- * that whole vocabulary from "cure" to "treatment", on the wire as well as in the
+ * tags plus a machine-readable payload line in the note body. Budkin renamed that
+ * whole vocabulary from "cure" to "treatment", on the wire as well as in the
  * code, and ships NO in-app fallback that reads the old names. This script moves
  * the existing server-side records across so the renamed app finds them.
  *
@@ -198,13 +198,23 @@ export function planForNote(note) {
  * written. Paginating while patching would shift the offsets underneath us (a
  * migrated note drops out of the `?tags=cure` result set), which silently skips
  * records, so collection and mutation are kept strictly in that order.
+ *
+ * `ordering=id` is not decoration. DRF's limit/offset pagination over an
+ * unordered queryset can shift page boundaries between requests, duplicating one
+ * row and dropping another. Budkin dates every treatment note at local midnight
+ * of its start date, so ties on the default `-time` ordering are common, and
+ * ties are exactly where row order stops being guaranteed.
+ *
+ * Returns the server's own `count` alongside the rows so the caller can prove it
+ * saw everything, rather than trusting that the loop terminated for a good
+ * reason.
  */
 async function fetchAllCureNotes(base, token, pageSize) {
   const notes = [];
   let offset = 0;
   let expected = null;
   for (;;) {
-    const page = await request(base, token, `/notes/?tags=${encodeURIComponent(OLD_TAG)}&limit=${pageSize}&offset=${offset}`);
+    const page = await request(base, token, `/notes/?tags=${encodeURIComponent(OLD_TAG)}&ordering=id&limit=${pageSize}&offset=${offset}`);
     const results = Array.isArray(page?.results) ? page.results : [];
     if (expected === null && typeof page?.count === 'number') expected = page.count;
     notes.push(...results);
@@ -213,7 +223,7 @@ async function fetchAllCureNotes(base, token, pageSize) {
     // Belt and braces against a server that always reports a `next`.
     if (expected !== null && notes.length >= expected) break;
   }
-  return notes;
+  return { notes, reported: expected };
 }
 
 async function fetchAllTags(base, token, pageSize) {
@@ -264,11 +274,20 @@ async function main() {
   console.log('');
 
   let notes;
+  let reported;
   try {
-    notes = await fetchAllCureNotes(base, token, opts.pageSize);
+    ({ notes, reported } = await fetchAllCureNotes(base, token, opts.pageSize));
   } catch (e) {
     console.error(`Could not list \`${OLD_TAG}\`-tagged notes: ${e.message}`);
     return 1;
+  }
+
+  // The one number that proves the scan was complete. If these disagree, the
+  // pagination under-scanned and the run must not be trusted.
+  if (reported !== null && reported !== notes.length) {
+    console.error(`WARNING: server reported ${reported} \`${OLD_TAG}\`-tagged notes but only ${notes.length} were collected.`);
+    console.error('Re-run before trusting the counts below. The migration is idempotent, so a re-run is safe.');
+    console.error('');
   }
 
   let found = 0;
@@ -324,6 +343,7 @@ async function main() {
 
   console.log('');
   console.log('--- notes ---');
+  console.log(`reported: ${reported === null ? 'unknown' : reported} (by the server)`);
   console.log(`found:    ${found}`);
   console.log(`${opts.apply ? 'migrated' : 'would migrate'}: ${migrated}`);
   console.log(`skipped:  ${skipped} (already carried the new names)`);
