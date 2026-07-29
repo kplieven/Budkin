@@ -7,6 +7,7 @@
 // Layout: a header + a flex:1 status list (fills the upper area) + a 2x2 button
 // grid pinned to the bottom, so it fills a portrait cell at any height.
 
+import Constants from 'expo-constants';
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 
 import { ageOrDueLabel, fmtAgoShort, fmtDur } from '@/lib/format';
@@ -23,6 +24,19 @@ const FEED: Hex = '#F0A878';
 const SLEEP: Hex = '#A99EDC';
 const DIAPER: Hex = '#6FC0A6';
 const PRIMARY: Hex = '#EC9A66';
+
+/**
+ * The scheme these buttons deep-link into, read from the running app rather
+ * than hardcoded. The development variant ships its own (`budkindev`, see
+ * app.config.js) so that with both variants installed, a widget button cannot
+ * open the other app. `scheme` is typed `string | string[]`; the array form
+ * lists alternates, and the first is the canonical one.
+ */
+const SCHEME = (() => {
+  const s = Constants.expoConfig?.scheme;
+  if (Array.isArray(s)) return s[0] ?? 'babybuddy';
+  return s ?? 'babybuddy';
+})();
 
 function agoLabel(ms: number | null | undefined, now: number): string {
   if (ms == null) return '—';
@@ -97,12 +111,12 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flexDirection: 'column', width: 'match_parent' }}>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="feeding" label="Feed" color={FEED} uri="babybuddy://log/feeding" />
-          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri="babybuddy://log/diaper" />
+          <IconButton kind="feeding" label="Feed" color={FEED} uri={`${SCHEME}://log/feeding`} />
+          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri={`${SCHEME}://log/diaper`} />
         </FlexWidget>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri="babybuddy://log/sleep" />
-          <IconButton kind="timer" label="Timer" color={PRIMARY} uri="babybuddy://timer" />
+          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri={`${SCHEME}://log/sleep`} />
+          <IconButton kind="timer" label="Timer" color={PRIMARY} uri={`${SCHEME}://timer`} />
         </FlexWidget>
       </FlexWidget>
     </FlexWidget>
