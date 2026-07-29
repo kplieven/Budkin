@@ -82,8 +82,35 @@ export default function Insights() {
   // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
   const [width, setWidth] = useState(0);
+  // True while a pointer is down on the Rhythm plot, dragging the crosshair.
+  // Three things read it: the native scroll lock below, Android's RefreshControl
+  // and the touch-web pull-to-refresh gesture. A drag inside the plot scrubs the
+  // crosshair and does nothing else, on every platform. SleepHeatmap reports the
+  // end on both release and terminate, so none of the three can latch on.
+  //
+  // For the scroll lock specifically: Android's native ScrollView intercepts a
+  // child's vertical drag by itself, and under the New Architecture the JS
+  // responder can no longer veto that: BridgelessUIManager.setJSResponder is a
+  // soft-error stub and the Fabric renderer never calls it, so
+  // requestDisallowInterceptTouchEvent is never reached and
+  // onResponderTerminationRequest only blocks JS-side termination. Switching the
+  // ScrollView off for the length of the gesture is what actually traps the drag.
+  const [scrubbing, setScrubbing] = useState(false);
+  const onScrubStart = useCallback(() => setScrubbing(true), []);
+  const onScrubEnd = useCallback(() => setScrubbing(false), []);
   // Pull-to-refresh, mirroring History: native uses the platform RefreshControl,
   // touch-web the custom gesture, mouse-web nothing. Reloads insights history only.
+  //
+  // Both paths need their own scrub guard, because neither is reached by the
+  // scroll lock below. On Android the RefreshControl is a SwipeRefreshLayout
+  // WRAPPING the ScrollView (ScrollView.js clones it as the parent), so it
+  // intercepts the downward drag before the ScrollView ever sees it; its
+  // `enabled` prop maps straight to the layout's isEnabled, which androidx
+  // re-checks on every touch event. On web the gesture listens on the scroll
+  // node's DOM directly and never consulted scrollEnabled at all, so it takes
+  // the flag as a parameter. iOS needs neither: there the RefreshControl is a
+  // CHILD of the ScrollView, so switching scrolling off already stops it (and
+  // RefreshControl.render drops `enabled` on iOS anyway).
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -91,7 +118,19 @@ export default function Insights() {
     reloadInsights().finally(() => setRefreshing(false));
   }, [reloadInsights]);
   const scrollRef = useRef<ScrollView | null>(null);
-  const webPull = useWebPullToRefresh(scrollRef, reloadInsights);
+  const webPull = useWebPullToRefresh(scrollRef, reloadInsights, scrubbing);
+  // The web SCROLL is deliberately left alone (its pull-to-refresh is suppressed
+  // separately, just above), for two reasons. The plot already blocks the
+  // browser's own scroll with `touchAction: 'none'` (see SleepHeatmap), and
+  // touch-action is latched at touchstart, so flipping it on an ancestor
+  // mid-gesture cannot reach the drag already in flight either way. And
+  // react-native-web renders scrollEnabled={false} as overflow:hidden, which on
+  // a classic-scrollbar browser reflows the page mid-drag and slides the plot
+  // out from under a plot-left measured once at gesture start. That last part
+  // does NOT bite on a touch phone, where scrollbars overlay at zero width; it
+  // bites a desktop window under the 1024px shell breakpoint. Web is the
+  // reference behaviour here, Android is being brought up to match it.
+  const lockScroll = scrubbing && Platform.OS !== 'web';
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
   const birth = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.birth ?? s.now);
@@ -188,7 +227,7 @@ export default function Insights() {
         </View>
         <Txt weight={500} size={11.5} color={t.dim} style={{ marginBottom: 12 }}>Last 4 weeks, {originPhrase}</Txt>
         {daysWithSleep >= 7 ? (
-          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} />
+          <SleepHeatmap rows={heatRows} width={width - 30} now={nowH} runningSince={runningSince} runningFeedSince={runningFeedSince} originHour={originHour} showSleep={showSleep} showFeeds={showFeeds} showDiapers={showDiapers} onScrubStart={onScrubStart} onScrubEnd={onScrubEnd} />
         ) : (
           <Txt weight={600} size={13} color={t.dim} style={{ paddingVertical: 18, lineHeight: 20 }}>
             Log about a week of sleep to see the rhythm heatmap here.
@@ -315,11 +354,20 @@ export default function Insights() {
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1, backgroundColor: t.bg }}
+          scrollEnabled={!lockScroll}
           refreshControl={
             canPullToRefresh ? (
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={onRefresh}
+                // `|| refreshing` keeps a COMMITTED refresh visible: androidx's
+                // SwipeRefreshLayout overrides setEnabled and calls reset() on
+                // false, which hides the spinner without clearing mRefreshing,
+                // and RefreshControl only re-pushes `refreshing` when that prop
+                // itself changes, so it would never come back. Scrubbing during
+                // a live reload would otherwise blank the indicator while the
+                // network call ran. Matches what the web path already does.
+                enabled={!scrubbing || refreshing}
                 tintColor={t.dim}
                 colors={['#E2B554']}
                 progressViewOffset={insets.top}

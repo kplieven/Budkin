@@ -20,6 +20,40 @@ export interface Prefs {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
+  dueDateReminders: boolean;
+  staleTimerReminders: boolean;
+  ageMilestones: boolean;
+  pumpingReminders: boolean;
+  pumpingIntervalMin: number;
+  /** when the pumping toggle was last switched on, epoch ms */
+  pumpingEnabledAt: number | null;
+  /** Nap suggestions. Off by default: unlike the other four this one gives
+   *  advice, from a curve the app labels as not medical consensus. */
+  napSuggestions: boolean;
+  /**
+   * Treatment (treatment) dose reminders. On by default, unlike naps and pumping:
+   * this one reports back a schedule the parent authored rather than offering
+   * advice, and it is inert until they create a treatment, so defaulting it on
+   * cannot surprise anyone who does not use the feature.
+   */
+  treatmentReminders: boolean;
+  /**
+   * When the treatments toggle was last switched on, epoch ms. The resync lever
+   * for a drifting interval grid, exactly like `pumpingEnabledAt`: a dose given
+   * but not logged leaves the reminder early, and toggling off and on rebases
+   * the phase to now. It can only ever MOVE an existing grid, never start one.
+   * See `treatmentReminders` in src/notifications/scheduled.ts.
+   */
+  treatmentRemindersEnabledAt: number | null;
+  /**
+   * Milestone catch-up nudges: when a catalog milestone's typical window closes
+   * with nothing logged, ask whether it already happened. Off by default, like
+   * naps and pumping: it is the notification twin of the home-screen
+   * `MilestoneNudge` card, which already asks unprompted, so the push half is
+   * the part a parent should opt into.
+   */
+  milestoneCatchUp: boolean;
   /**
    * Bath rhythm: how many SMALL washes fall between two big ones (default 3,
    * range 1..30). Purely local — Baby Buddy has no notion of wash size, so this

@@ -302,42 +302,42 @@ export interface Measurement {
   notes?: string;
 }
 
-/** The four coarse times of day a fixed-schedule cure can be dosed at. */
-export type CureTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
+/** The four coarse times of day a fixed-schedule treatment can be dosed at. */
+export type TreatmentTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
 
-/** How a cure repeats: at fixed times of day, or every N hours. */
-export type CureScheduleMode = 'timesOfDay' | 'everyHours';
+/** How a treatment repeats: at fixed times of day, or every N hours. */
+export type TreatmentScheduleMode = 'timesOfDay' | 'everyHours';
 
 /**
- * A medication regimen ("cure"): a per-child TEMPLATE the user fills a
+ * A medication regimen ("treatment"): a per-child TEMPLATE the user fills a
  * medication dose from.
  *
  * Baby Buddy has no regimen resource (only individual doses via
- * `MedicationEntry`), so a cure syncs as a `cure`-tagged Note, the same
- * tagged-note channel baths and milestones ride on. See `cureToNoteBody` in
+ * `MedicationEntry`), so a treatment syncs as a `treatment`-tagged Note, the same
+ * tagged-note channel baths and milestones ride on. See `treatmentToNoteBody` in
  * src/api/client.ts for the encoding. In local mode it lives only in
- * src/data/cures.ts, which doubles as the offline cache when connected.
+ * src/data/treatments.ts, which doubles as the offline cache when connected.
  *
- * A dose logged from a cure is an ordinary `MedicationEntry` that syncs like any
- * other, and carries no reference back to the cure it came from: Baby Buddy has
- * no field for one, so the app attributes doses to cures BY NAME (see
- * `cureDueState` in src/store/selectors.ts).
+ * A dose logged from a treatment is an ordinary `MedicationEntry` that syncs like any
+ * other, and carries no reference back to the treatment it came from: Baby Buddy has
+ * no field for one, so the app attributes doses to treatments BY NAME (see
+ * `treatmentDueState` in src/store/selectors.ts).
  */
-export interface Cure {
+export interface Treatment {
   id: string;
-  /** server numeric id of the backing `cure`-tagged note; present once created
-   *  on / loaded from a server, absent for a cure made in local mode or offline */
+  /** server numeric id of the backing `treatment`-tagged note; present once created
+   *  on / loaded from a server, absent for a treatment made in local mode or offline */
   serverId?: number;
-  /** the child this cure belongs to (the selected child at creation) */
+  /** the child this treatment belongs to (the selected child at creation) */
   childId: string;
   /** medication name (required) */
   name: string;
   /** schedule mode: fixed times of day OR a repeating hourly interval */
-  scheduleMode: CureScheduleMode;
+  scheduleMode: TreatmentScheduleMode;
   /** when `scheduleMode` is 'timesOfDay': the subset of times chosen */
-  timesOfDay?: CureTimeOfDay[];
+  timesOfDay?: TreatmentTimeOfDay[];
   /** when `scheduleMode` is 'everyHours': the interval in whole hours. A dose
-   *  logged from an interval cure stamps `next_dose_interval` = everyHours*3600. */
+   *  logged from an interval treatment stamps `next_dose_interval` = everyHours*3600. */
   everyHours?: number;
   /** dose amount (a plain number, paired with `dosageUnit`) */
   dosage?: number;
@@ -349,9 +349,9 @@ export interface Cure {
   toDate?: number;
   /** free-text notes */
   notes?: string;
-  /** what the cure is for (free text, optional) */
+  /** what the treatment is for (free text, optional) */
   condition?: string;
-  /** false = paused: the cure drops out of the log picker but is kept */
+  /** false = paused: the treatment drops out of the log picker but is kept */
   active: boolean;
 }
 

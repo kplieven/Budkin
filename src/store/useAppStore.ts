@@ -16,7 +16,7 @@ import {
 import {
   type Connection,
   deleteChildFromServer,
-  deleteCureFromServer,
+  deleteTreatmentFromServer,
   deleteEntryFromServer,
   deleteMeasurementFromServer,
   deleteTimerFromServer,
@@ -25,14 +25,14 @@ import {
   loadProfileFromServer,
   loadTagsFromServer,
   pushChildToServer,
-  pushCureToServer,
+  pushTreatmentToServer,
   setChildGenderOnServer,
   pushEntryToServer,
   pushMeasurementToServer,
   pushTimerToServer,
   serverHasData,
   updateChildOnServer,
-  updateCureOnServer,
+  updateTreatmentOnServer,
   updateEntryOnServer,
   updateMeasurementOnServer,
   updateTimerOnServer,
@@ -51,7 +51,7 @@ import {
   saveMeasurements,
   saveSelectedChildId,
 } from '@/data/entityStore';
-import { loadCures, saveCures } from '@/data/cures';
+import { loadTreatments, saveTreatments } from '@/data/treatments';
 import { loadMilestonePrompts, saveMilestonePrompts } from '@/data/milestonePrompts';
 import {
   addPendingOp,
@@ -75,7 +75,7 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import {
-  activeCuresForChildToday,
+  activeTreatmentsForChildToday,
   clampHourOfDay,
   clampMinuteOfDay,
   clampSmallWashesPerBig,
@@ -98,7 +98,7 @@ import type {
   ActivityType,
   Child,
   ChildGender,
-  Cure,
+  Treatment,
   Entry,
   FeedMethod,
   FeedType,
@@ -132,6 +132,20 @@ interface AppState {
   unitSystem: UnitSystem;
   /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
+  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
+  dueDateReminders: boolean;
+  staleTimerReminders: boolean;
+  ageMilestones: boolean;
+  pumpingReminders: boolean;
+  pumpingIntervalMin: number;
+  /** when the pumping toggle was last switched on, epoch ms */
+  pumpingEnabledAt: number | null;
+  napSuggestions: boolean;
+  treatmentReminders: boolean;
+  /** when the treatments toggle was last switched on, epoch ms */
+  treatmentRemindersEnabledAt: number | null;
+  /** Milestone catch-up nudges (default off). See src/data/prefs.ts. */
+  milestoneCatchUp: boolean;
   /** Growth charts: whether the WHO percentile reference is drawn (default true). */
   showGrowthReference: boolean;
   /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
@@ -186,12 +200,12 @@ interface AppState {
    *  sheets, so its overlay anchors to the viewport, not the page). `log` names
    *  a catalog key to mark reached; `edit` names an existing milestone entry. */
   milestoneSheet: { mode: 'log'; key: string } | { mode: 'edit'; id: string } | null;
-  /** true while the cure-picker sheet is open (tapping the Medication tile when
-   *  the selected child has active cures today; picks a cure to pre-fill a dose). */
-  curePicker: { open: boolean } | null;
-  /** Cure create/edit sheet: `editingId` null = creating a new cure, otherwise
-   *  the id of the cure being edited. null (the field itself) = closed. */
-  cureEditor: { editingId: string | null } | null;
+  /** true while the treatment-picker sheet is open (tapping the Medication tile when
+   *  the selected child has active treatments today; picks a treatment to pre-fill a dose). */
+  treatmentPicker: { open: boolean } | null;
+  /** Treatment create/edit sheet: `editingId` null = creating a new treatment, otherwise
+   *  the id of the treatment being edited. null (the field itself) = closed. */
+  treatmentEditor: { editingId: string | null } | null;
 
   // data
   selectedChildId: string;
@@ -203,11 +217,11 @@ interface AppState {
   entries: Entry[];
   timers: Timer[];
   measurements: Measurement[];
-  /** Per-child medication regimens ("cures"). Synced to Baby Buddy as
-   *  `cure`-tagged notes. Persisted via src/data/cures, which is the local-mode
+  /** Per-child medication regimens ("treatments"). Synced to Baby Buddy as
+   *  `treatment`-tagged notes. Persisted via src/data/treatments, which is the local-mode
    *  store and the offline cache when connected; survives disconnect (user
    *  data, not the synced entity store). */
-  cures: Cure[];
+  treatments: Treatment[];
   lastFeed: { feedType: FeedType; method: FeedMethod };
   insightsEntries: Entry[];
   insightsLoaded: boolean;
@@ -253,6 +267,18 @@ interface AppActions {
   completeTutorial: () => void;
   setUnitSystem: (system: UnitSystem) => void;
   toggleUnitSystem: () => void;
+  setReminderPref: (
+    key:
+      | 'dueDateReminders'
+      | 'staleTimerReminders'
+      | 'ageMilestones'
+      | 'pumpingReminders'
+      | 'napSuggestions'
+      | 'treatmentReminders'
+      | 'milestoneCatchUp',
+    value: boolean,
+  ) => void;
+  setPumpingInterval: (minutes: number) => void;
   setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
   setRhythmOriginHour: (hour: number) => void;
@@ -349,26 +375,26 @@ interface AppActions {
   saveMeasurement: (value: number, date: number, notes?: string) => void;
   deleteMeasurement: (id: string) => void;
 
-  // cures (medication regimens; synced as `cure`-tagged notes)
-  /** Add a fully-formed cure (the editor stamps id + childId). */
-  addCure: (cure: Cure) => void;
-  /** Replace a cure by id with an updated copy. */
-  updateCure: (cure: Cure) => void;
-  /** Remove a cure by id. */
-  deleteCure: (id: string) => void;
-  /** Open the cure create/edit sheet: no id = create, an id = edit that cure. */
-  openCureEditor: (id?: string) => void;
-  closeCureEditor: () => void;
-  openCurePicker: () => void;
-  closeCurePicker: () => void;
-  /** Medication tile tap: open the cure picker when the selected child has an
-   *  active cure covering today, otherwise open the plain manual log form. */
+  // treatments (medication regimens; synced as `treatment`-tagged notes)
+  /** Add a fully-formed treatment (the editor stamps id + childId). */
+  addTreatment: (treatment: Treatment) => void;
+  /** Replace a treatment by id with an updated copy. */
+  updateTreatment: (treatment: Treatment) => void;
+  /** Remove a treatment by id. */
+  deleteTreatment: (id: string) => void;
+  /** Open the treatment create/edit sheet: no id = create, an id = edit that treatment. */
+  openTreatmentEditor: (id?: string) => void;
+  closeTreatmentEditor: () => void;
+  openTreatmentPicker: () => void;
+  closeTreatmentPicker: () => void;
+  /** Medication tile tap: open the treatment picker when the selected child has an
+   *  active treatment covering today, otherwise open the plain manual log form. */
   openMedicationLog: () => void;
-  /** Tapping a saved cure: seed the medication draft from it (name/dosage/unit,
-   *  plus the next-dose interval for an interval cure) and open the medication
+  /** Tapping a saved treatment: seed the medication draft from it (name/dosage/unit,
+   *  plus the next-dose interval for an interval treatment) and open the medication
    *  sheet in confirm mode (a read-only summary + the time picker), closing the
    *  picker. No dose is written here; save() commits it once the user confirms. */
-  logMedicationFromCure: (cureId: string) => void;
+  logMedicationFromTreatment: (treatmentId: string) => void;
   /** Reveal the full editable medication form from the confirm modal: drop the
    *  `confirm` flag on the medication sheet, keeping the seeded draft. */
   expandMedicationLog: () => void;
@@ -494,15 +520,15 @@ export function mergeUnsynced<T extends { id: string; serverId?: number }>(
 }
 
 /**
- * Merge server-loaded cures with the on-device copy. The local list is BOTH the
- * offline cache and the only home of cures created offline (serverId == null),
- * so a wholesale refresh must not replace it outright, and incoming cures carry
+ * Merge server-loaded treatments with the on-device copy. The local list is BOTH the
+ * offline cache and the only home of treatments created offline (serverId == null),
+ * so a wholesale refresh must not replace it outright, and incoming treatments carry
  * the server's child id until `remapChildIds` rewrites it. Same shape as the
  * measurement merge one line up, kept as a named helper because all three load
  * paths (hydrate / refresh / adopt) need the identical pair of steps.
  */
-export function mergeCures(serverCures: Cure[], localCures: Cure[], children: Child[]): Cure[] {
-  return mergeUnsynced(remapChildIds(serverCures, children), localCures);
+export function mergeTreatments(serverTreatments: Treatment[], localTreatments: Treatment[], children: Child[]): Treatment[] {
+  return mergeUnsynced(remapChildIds(serverTreatments, children), localTreatments);
 }
 
 /**
@@ -702,7 +728,7 @@ function buildUploadDeps(conn: Connection): UploadDeps {
     pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
-    pushCure: (c, childServerId) => pushCureToServer(conn, c, childServerId),
+    pushTreatment: (c, childServerId) => pushTreatmentToServer(conn, c, childServerId),
   };
 }
 
@@ -946,6 +972,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
   unitSystem: 'metric',
   showGrowthReference: true,
   tutorialSeen: false,
+  dueDateReminders: true,
+  staleTimerReminders: true,
+  ageMilestones: true,
+  pumpingReminders: false,
+  pumpingIntervalMin: 180,
+  pumpingEnabledAt: null,
+  napSuggestions: false,
+  treatmentReminders: true,
+  treatmentRemindersEnabledAt: null,
+  milestoneCatchUp: false,
   smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
@@ -970,8 +1006,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   measurementSheet: null,
   editingMeasurementId: null,
   milestoneSheet: null,
-  curePicker: null,
-  cureEditor: null,
+  treatmentPicker: null,
+  treatmentEditor: null,
   answeredMilestonePrompts: {},
 
   selectedChildId: '',
@@ -979,7 +1015,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   entries: [],
   timers: [],
   measurements: [],
-  cures: [],
+  treatments: [],
   lastFeed: { feedType: 'breast', method: 'left' },
   insightsEntries: [],
   insightsLoaded: false,
@@ -1021,6 +1057,38 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
+  },
+  setReminderPref: (key, value) => {
+    // Switching pumping ON stamps the anchor the reminder grid is built from,
+    // so a parent who has never logged a pump still gets reminders. Switching
+    // OFF clears it, so re-enabling later does not resume an ancient phase.
+    if (key === 'pumpingReminders') {
+      const pumpingEnabledAt = value ? Date.now() : null;
+      set({ pumpingReminders: value, pumpingEnabledAt });
+      void savePrefs({ pumpingReminders: value, pumpingEnabledAt });
+      return;
+    }
+    if (key === 'treatmentReminders') {
+      // The same resync lever pumping has, for the same gap: a parent who gives
+      // a dose and forgets to log it gets a reminder that is early, with no way
+      // to nudge it. Toggling off and on rebases the phase to now.
+      //
+      // One deliberate difference from pumping. This stamp can only ever MOVE an
+      // existing interval grid, never bring one into being: `treatmentReminders`
+      // returns early when the treatment has no logged dose, before it consults this
+      // value. It also does nothing at all to a times-of-day treatment, whose instants
+      // come off the wall clock rather than a phase. See scheduled.ts.
+      const treatmentRemindersEnabledAt = value ? Date.now() : null;
+      set({ treatmentReminders: value, treatmentRemindersEnabledAt });
+      void savePrefs({ treatmentReminders: value, treatmentRemindersEnabledAt });
+      return;
+    }
+    set({ [key]: value } as Pick<AppState, typeof key>);
+    void savePrefs({ [key]: value });
+  },
+  setPumpingInterval: (minutes) => {
+    set({ pumpingIntervalMin: minutes });
+    void savePrefs({ pumpingIntervalMin: minutes });
   },
   setSmallWashesPerBig: (n) => {
     // Clamp before storing so a bad value can never reach persistence, and so
@@ -1100,6 +1168,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
     if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
+    if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });
+    if (prefs.staleTimerReminders != null) set({ staleTimerReminders: prefs.staleTimerReminders });
+    if (prefs.ageMilestones != null) set({ ageMilestones: prefs.ageMilestones });
+    if (prefs.pumpingReminders != null) set({ pumpingReminders: prefs.pumpingReminders });
+    if (prefs.pumpingIntervalMin != null) set({ pumpingIntervalMin: prefs.pumpingIntervalMin });
+    if (prefs.pumpingEnabledAt !== undefined) set({ pumpingEnabledAt: prefs.pumpingEnabledAt });
+    if (prefs.napSuggestions != null) set({ napSuggestions: prefs.napSuggestions });
+    if (prefs.treatmentReminders != null) set({ treatmentReminders: prefs.treatmentReminders });
+    // `!== undefined`, not `!= null`: a persisted null is a real value here
+    // (the toggle is off) and must not be skipped. Matches pumpingEnabledAt.
+    if (prefs.treatmentRemindersEnabledAt !== undefined)
+      set({ treatmentRemindersEnabledAt: prefs.treatmentRemindersEnabledAt });
+    if (prefs.milestoneCatchUp != null) set({ milestoneCatchUp: prefs.milestoneCatchUp });
     // `!= null`, not a truthy guard: this one is a number, and a truthy check
     // would silently discard a legitimately stored value at the low end.
     if (prefs.smallWashesPerBig != null) {
@@ -1124,11 +1205,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
-    // Cures are user data that survives disconnect, so load the on-device copy
+    // Treatments are user data that survives disconnect, so load the on-device copy
     // unconditionally here, exactly like timers below. In server mode this is
     // the offline cache the freshly-loaded server list merges on top of (see
-    // `mergeCures`); in local mode it is the only copy.
-    set({ cures: await loadCures() });
+    // `mergeTreatments`); in local mode it is the only copy.
+    set({ treatments: await loadTreatments() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
     // state is loaded below.
@@ -1228,9 +1309,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // via `mergeHeldBackEntries`, on top of the normal queue merge.
         entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
         timers: reconcileTimers(savedTimers, remappedTimers),
-        // `get().cures` was filled from on-device storage a few lines up, so it
+        // `get().treatments` was filled from on-device storage a few lines up, so it
         // is the offline cache the server list merges on top of.
-        cures: mergeCures(data.cures, get().cures, reconciledChildren),
+        treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
         selectedChildId,
       });
       void get().flushQueue();
@@ -1354,7 +1435,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // warm reload, not a cold restart), never on the server, so merge
         // them back the same way `hydrate()` does from the entity store.
         entries: mergeHeldBackEntries(remappedEntries, s.entries, reconciledChildren),
-        cures: mergeCures(data.cures, s.cures, reconciledChildren),
+        treatments: mergeTreatments(data.treatments, s.treatments, reconciledChildren),
         selectedChildId,
         timers: reconcileTimers(localTimers, remappedTimers),
       });
@@ -1437,7 +1518,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         children: st.children.map((c) => ({ ...c, serverId: undefined })),
         entries: st.entries.map((e) => ({ ...e, serverId: undefined })),
         measurements: st.measurements.map((m) => ({ ...m, serverId: undefined })),
-        cures: st.cures.map((c) => ({ ...c, serverId: undefined })),
+        treatments: st.treatments.map((c) => ({ ...c, serverId: undefined })),
         timers: st.timers.map((t) => ({ ...t, serverId: undefined })),
       }));
     }
@@ -1457,7 +1538,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     const s = get();
-    let state = { children: s.children, entries: s.entries, measurements: s.measurements, cures: s.cures };
+    let state = { children: s.children, entries: s.entries, measurements: s.measurements, treatments: s.treatments };
     if (hasData && opts?.uploadAnyway) {
       // Dedup: attach each not-yet-synced local child to a matching existing
       // server child (by name + birth date) instead of duplicating it.
@@ -1487,7 +1568,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: result.children,
       entries: result.entries.map((e) => (e.heldBack && e.serverId != null ? { ...e, heldBack: false } : e)),
       measurements: result.measurements,
-      cures: result.cures ?? s.cures,
+      treatments: result.treatments ?? s.treatments,
     });
 
     // An expected child is deliberately held back from the server (its
@@ -1500,7 +1581,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       result.children.some((c) => c.serverId == null && !c.expected) ||
       result.entries.some((e) => e.serverId == null && !expectingChildIds.has(e.childId)) ||
       result.measurements.some((m) => m.serverId == null && !expectingChildIds.has(m.childId)) ||
-      (result.cures ?? []).some((c) => c.serverId == null && !expectingChildIds.has(c.childId));
+      (result.treatments ?? []).some((c) => c.serverId == null && !expectingChildIds.has(c.childId));
     if (stillUnsynced) {
       // Interrupted mid-upload: stay in local mode, keep `adoptTarget` so a
       // retry against the SAME server doesn't wrongly reset the ids we just stamped.
@@ -1565,7 +1646,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: reconciledChildren,
       entries: mergedEntries,
       measurements: mergedMeasurements,
-      cures: mergeCures(data.cures, get().cures, reconciledChildren),
+      treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
       timers: remappedTimers,
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
@@ -1709,11 +1790,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           if (childServerId == null) throw new Error('child not synced');
           await updateEntryOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'update' && op.entity === 'cure') {
+        } else if (op.op === 'update' && op.entity === 'treatment') {
           const childServerId = childServerIdFor(s.children, op.payload.childId);
           if (childServerId == null) throw new Error('child not synced');
-          await updateCureOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'delete' && op.entity === 'cure') await deleteCureFromServer(conn, op.serverId);
+          await updateTreatmentOnServer(conn, op.payload, childServerId);
+        } else if (op.op === 'delete' && op.entity === 'treatment') await deleteTreatmentFromServer(conn, op.serverId);
         else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
         else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
         else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
@@ -1749,13 +1830,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const hasUnsynced =
         s.children.some((c) => c.serverId == null) ||
         s.measurements.some((m) => m.serverId == null) ||
-        s.cures.some((c) => c.serverId == null) ||
+        s.treatments.some((c) => c.serverId == null) ||
         heldBackEntries.length > 0;
       const hasUnsyncedTimer = s.timers.some((t) => t.serverId == null);
       if (!hasUnsynced && !hasUnsyncedTimer) return;
       if (hasUnsynced) {
         const result = await uploadUnsynced(
-          { children: s.children, entries: heldBackEntries, measurements: s.measurements, cures: s.cures },
+          { children: s.children, entries: heldBackEntries, measurements: s.measurements, treatments: s.treatments },
           buildUploadDeps(conn),
         );
         // Count only records that WERE serverId==null in the pre-upload snapshot
@@ -1769,8 +1850,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
             (m) => m.serverId == null && result.measurements.find((r) => r.id === m.id)?.serverId != null,
           ).length +
           heldBackEntries.filter((e) => result.entries.find((r) => r.id === e.id)?.serverId != null).length +
-          s.cures.filter(
-            (c) => c.serverId == null && (result.cures ?? []).find((r) => r.id === c.id)?.serverId != null,
+          s.treatments.filter(
+            (c) => c.serverId == null && (result.treatments ?? []).find((r) => r.id === c.id)?.serverId != null,
           ).length;
         // Functional merge-by-id (reads the CURRENT state via `st`, not the
         // pre-await snapshot `s`) that only stamps serverIds, so a create that
@@ -1784,8 +1865,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
             const u = result.measurements.find((r) => r.id === m.id);
             return u && u.serverId != null ? { ...m, serverId: u.serverId } : m;
           }),
-          cures: st.cures.map((c) => {
-            const u = (result.cures ?? []).find((r) => r.id === c.id);
+          treatments: st.treatments.map((c) => {
+            const u = (result.treatments ?? []).find((r) => r.id === c.id);
             return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
           }),
           entries: st.entries.map((e) => {
@@ -2682,95 +2763,95 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  // --- cures (medication regimens) ---
+  // --- treatments (medication regimens) ---
   // Offline-first, exactly like measurements: the local write lands first and
   // the server mirror is fire-and-forget, with an offline edit/delete recorded
-  // as a pending op so it replays on reconnect. A cure rides on the server as a
-  // `cure`-tagged note (see `cureToNoteBody`). The `cures` subscribe at the
+  // as a pending op so it replays on reconnect. A treatment rides on the server as a
+  // `treatment`-tagged note (see `treatmentToNoteBody`). The `treatments` subscribe at the
   // bottom of this file persists every change to on-device storage, which is
   // both the local-mode store and the offline cache when connected.
-  addCure: (cure) => {
+  addTreatment: (treatment) => {
     const s = get();
-    set({ cures: [cure, ...s.cures] });
+    set({ treatments: [treatment, ...s.treatments] });
     const conn = s.connection;
     if (conn && conn.mode === 'server' && !s.offline) {
-      const childServerId = childServerIdFor(s.children, cure.childId);
-      // No server id for the child yet (an expecting child, say): leave the cure
+      const childServerId = childServerIdFor(s.children, treatment.childId);
+      // No server id for the child yet (an expecting child, say): leave the treatment
       // unstamped and let flushUnsynced push it once the child lands.
       if (childServerId != null) {
-        void pushCureToServer(conn, cure, childServerId)
+        void pushTreatmentToServer(conn, treatment, childServerId)
           .then((serverId) => {
             if (serverId != null) {
-              set((st) => ({ cures: st.cures.map((c) => (c.id === cure.id ? { ...c, serverId } : c)) }));
+              set((st) => ({ treatments: st.treatments.map((c) => (c.id === treatment.id ? { ...c, serverId } : c)) }));
             }
           })
           .catch(() => {});
       }
     }
-    // A cure created offline needs no pending op: its create is still pending,
+    // A treatment created offline needs no pending op: its create is still pending,
     // and flushUnsynced picks it up by serverId == null.
   },
-  updateCure: (cure) => {
+  updateTreatment: (treatment) => {
     const s = get();
-    set({ cures: s.cures.map((c) => (c.id === cure.id ? cure : c)) });
+    set({ treatments: s.treatments.map((c) => (c.id === treatment.id ? treatment : c)) });
     const conn = s.connection;
     if (!conn || conn.mode !== 'server') return;
-    const childServerId = childServerIdFor(s.children, cure.childId);
+    const childServerId = childServerIdFor(s.children, treatment.childId);
     if (!s.offline) {
-      if (childServerId != null && cure.serverId != null) {
-        void updateCureOnServer(conn, cure, childServerId).catch(() => {});
+      if (childServerId != null && treatment.serverId != null) {
+        void updateTreatmentOnServer(conn, treatment, childServerId).catch(() => {});
       }
-    } else if (cure.serverId != null) {
-      void addPendingOp({ op: 'update', entity: 'cure', payload: cure });
+    } else if (treatment.serverId != null) {
+      void addPendingOp({ op: 'update', entity: 'treatment', payload: treatment });
     }
   },
-  deleteCure: (id) => {
+  deleteTreatment: (id) => {
     const s = get();
-    const cure = s.cures.find((c) => c.id === id);
+    const treatment = s.treatments.find((c) => c.id === id);
     set({
-      cures: s.cures.filter((c) => c.id !== id),
-      // If the sheet is open on the cure being deleted, close it.
-      cureEditor: s.cureEditor?.editingId === id ? null : s.cureEditor,
+      treatments: s.treatments.filter((c) => c.id !== id),
+      // If the sheet is open on the treatment being deleted, close it.
+      treatmentEditor: s.treatmentEditor?.editingId === id ? null : s.treatmentEditor,
     });
     const conn = s.connection;
-    if (!cure || cure.serverId == null || !conn || conn.mode !== 'server') return;
-    if (!s.offline) void deleteCureFromServer(conn, cure.serverId).catch(() => {});
-    else void addPendingOp({ op: 'delete', entity: 'cure', serverId: cure.serverId });
+    if (!treatment || treatment.serverId == null || !conn || conn.mode !== 'server') return;
+    if (!s.offline) void deleteTreatmentFromServer(conn, treatment.serverId).catch(() => {});
+    else void addPendingOp({ op: 'delete', entity: 'treatment', serverId: treatment.serverId });
   },
-  openCureEditor: (id) => set({ cureEditor: { editingId: id ?? null } }),
-  closeCureEditor: () => set({ cureEditor: null }),
-  openCurePicker: () => set({ curePicker: { open: true } }),
-  closeCurePicker: () => set({ curePicker: null }),
+  openTreatmentEditor: (id) => set({ treatmentEditor: { editingId: id ?? null } }),
+  closeTreatmentEditor: () => set({ treatmentEditor: null }),
+  openTreatmentPicker: () => set({ treatmentPicker: { open: true } }),
+  closeTreatmentPicker: () => set({ treatmentPicker: null }),
   openMedicationLog: () => {
     const s = get();
-    // Scope to the selected child and to cures whose range covers today; if none,
+    // Scope to the selected child and to treatments whose range covers today; if none,
     // there is nothing to pick from, so skip straight to the manual form rather
     // than opening an empty picker. `s.now` (not the wall clock) keys "today".
-    const active = activeCuresForChildToday(s.cures, s.selectedChildId, startOfDay(s.now));
-    if (active.length > 0) set({ curePicker: { open: true } });
+    const active = activeTreatmentsForChildToday(s.treatments, s.selectedChildId, startOfDay(s.now));
+    if (active.length > 0) set({ treatmentPicker: { open: true } });
     else get().openSheet('medication');
   },
-  logMedicationFromCure: (cureId) => {
-    const cure = get().cures.find((c) => c.id === cureId);
-    if (!cure) return;
-    // A cure always carries a name (the editor requires one), but gate on it the
+  logMedicationFromTreatment: (treatmentId) => {
+    const treatment = get().treatments.find((c) => c.id === treatmentId);
+    if (!treatment) return;
+    // A treatment always carries a name (the editor requires one), but gate on it the
     // same way save() gates a manual dose so a nameless record can never be seeded.
-    if (!cure.name.trim()) return;
-    // Confirm-before-log: seed a fresh point medication draft from the cure and
+    if (!treatment.name.trim()) return;
+    // Confirm-before-log: seed a fresh point medication draft from the treatment and
     // open the sheet in confirm mode (read-only summary + time picker). No entry
     // is written here; save() commits it once the user confirms. openSheet resets
     // the draft to a blank point medication form, so seed it afterwards.
     get().openSheet('medication');
     const patch: Partial<TimeEntryState> = {
-      medName: cure.name,
-      medDosage: cure.dosage,
-      medUnit: cure.dosageUnit,
-      // Only an interval cure carries a next-dose interval onto the dose; a
-      // times-of-day cure leaves it unset.
+      medName: treatment.name,
+      medDosage: treatment.dosage,
+      medUnit: treatment.dosageUnit,
+      // Only an interval treatment carries a next-dose interval onto the dose; a
+      // times-of-day treatment leaves it unset.
       medNextDoseIntervalSec:
-        cure.scheduleMode === 'everyHours' && cure.everyHours != null ? cure.everyHours * 3600 : undefined,
+        treatment.scheduleMode === 'everyHours' && treatment.everyHours != null ? treatment.everyHours * 3600 : undefined,
     };
-    set((s) => ({ curePicker: null, sheet: { type: 'medication', confirm: true }, te: { ...s.te, ...patch } }));
+    set((s) => ({ treatmentPicker: null, sheet: { type: 'medication', confirm: true }, te: { ...s.te, ...patch } }));
   },
   expandMedicationLog: () => set({ sheet: { type: 'medication' } }),
 
@@ -3024,7 +3105,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     } else if (type === 'medication') {
       // medication (point) — a real Baby Buddy /api/medication/ resource. Name is
       // guaranteed non-empty by the guard above; amount + free-text unit are
-      // optional. `nextDoseIntervalSec` is seeded from an interval cure when the
+      // optional. `nextDoseIntervalSec` is seeded from an interval treatment when the
       // dose was logged from one (else undefined), and is preserved across edits.
       entry = {
         id,
@@ -3313,13 +3394,13 @@ useAppStore.subscribe((state, prev) => {
   if (state.timers !== prev.timers) void saveTimers(state.timers);
 });
 
-// Persist cures the same single-path way as timers: a reference change
+// Persist treatments the same single-path way as timers: a reference change
 // (add/update/delete replaces the array) writes the whole list to on-device
-// storage. This is persistence ONLY — the server mirror is the cure actions'
+// storage. This is persistence ONLY — the server mirror is the treatment actions'
 // job, so a serverId stamped by a push lands here through the same subscribe.
 // Deliberately NOT cleared on disconnect (see `disconnect`).
 useAppStore.subscribe((state, prev) => {
-  if (state.cures !== prev.cures) void saveCures(state.cures);
+  if (state.treatments !== prev.treatments) void saveTreatments(state.treatments);
 });
 
 // Persist the durable local-mode entities to on-device storage whenever they

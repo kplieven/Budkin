@@ -19,9 +19,17 @@ const fmtClock = (min: number) => {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 };
 
-export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true }: {
+export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince, originHour = 12, showSleep = true, showFeeds = true, showDiapers = true, onScrubStart, onScrubEnd }: {
   rows: HeatRow[]; width: number; now: number; runningSince?: number | null; runningFeedSince?: number | null; originHour?: number;
   showSleep?: boolean; showFeeds?: boolean; showDiapers?: boolean;
+  /**
+   * Called when a pointer goes down on the plot and when that gesture ends
+   * (released or terminated). The plot cannot keep an enclosing native
+   * ScrollView from stealing a vertical drag on its own, so the parent uses
+   * this pair to switch scrolling off for the duration. Every start is followed
+   * by exactly one end, so the parent never latches.
+   */
+  onScrubStart?: () => void; onScrubEnd?: () => void;
 }) {
   const t = useTheme();
   // Breathing pulse for the live "asleep now" bar. Declared before the early
@@ -45,6 +53,24 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   // Cached page-left of the plot, measured on gesture start so each drag move can
   // convert pageX synchronously without re-measuring.
   const plotLeftRef = useRef(0);
+  // A gesture normally ends with release or terminate, but neither fires if the
+  // plot is unmounted mid-drag (a background sync dropping the row count under
+  // the render threshold, a child switch resetting the load state). That would
+  // strand the parent's scroll lock on and leave the page unscrollable, so
+  // report the end on teardown too. Doing that with no scrub in flight is
+  // harmless: the parent just clears an already-clear flag.
+  //
+  // The callback goes through a ref so the teardown can depend on nothing. Were
+  // it to depend on `onScrubEnd` directly, a caller passing an inline arrow
+  // would change its identity every render, and the cleanup would then fire one
+  // frame after the lock landed, silently restoring the bug this exists to fix
+  // with nothing in the types or the linter to catch it. Both declared before
+  // the early return below so hook order stays stable.
+  const onScrubEndRef = useRef(onScrubEnd);
+  useEffect(() => {
+    onScrubEndRef.current = onScrubEnd;
+  });
+  useEffect(() => () => onScrubEndRef.current?.(), []);
   if (width <= 0 || rows.length === 0) return null;
 
   const night = t.activity.sleep;
@@ -120,8 +146,21 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
         onStartShouldSetResponder={() => true}
         onMoveShouldSetResponder={() => true}
         onResponderTerminationRequest={() => false}
-        onResponderGrant={(e) => measureThenScrub(e.nativeEvent.pageX)}
+        onResponderGrant={(e) => {
+          onScrubStart?.();
+          measureThenScrub(e.nativeEvent.pageX);
+        }}
         onResponderMove={(e) => scrubToPageX(e.nativeEvent.pageX)}
+        // A gesture can end two ways and BOTH have to report it. Release is the
+        // finger lifting; terminate is the responder being taken away, which
+        // onResponderTerminationRequest cannot always prevent (the OS can still
+        // claim it). Missing either one would leave the parent's scroll lock
+        // stuck on, so the page would never scroll again.
+        //
+        // Ending a scrub only lifts that lock. The guide is sticky on purpose:
+        // it stays where it was dropped until the ✕ on its label clears it.
+        onResponderRelease={() => onScrubEnd?.()}
+        onResponderTerminate={() => onScrubEnd?.()}
       >
       <Svg width={width} height={height}>
         {TICK_HS.map((h) => (
