@@ -24,15 +24,20 @@
 // The list holds three 15dp stat rows on 3dp gaps (54dp) inside 3dp margins
 // (6dp), then the summary line at 9sp, which is 13dp on one line and 26dp when
 // it wraps. So the whole thing wants 192dp for the stat rows alone, 205dp with
-// a one-line summary and 218dp with a wrapped one, all inside the 180-220dp a
-// three-row cell actually measures. A 3-row cell on a phone is far taller
-// again (a Pixel row is ~120dp), so this is only tight in the worst case.
+// a one-line summary, 218dp with a wrapped one.
 //
-// Under that, the list clips from the BOTTOM (hence justifyContent flex-start,
-// not space-around, which is centred and would eat the "Fed" row first): the
-// summary goes first, then the Diaper row. The buttons, being fixed and last,
-// never clip at all, which is the point. The thing this widget is FOR survives
-// every size the launcher can hand it.
+// At the declared 180dp floor that does NOT all fit, and is not meant to: 192
+// against 180 is a 12dp deficit, so the summary line goes entirely and the
+// Diaper row loses roughly 12dp. From 205dp up everything is whole, and a
+// three-row cell on a phone is far taller again (a Pixel row is ~120dp), so
+// the floor is the pathological case and not the ordinary one.
+//
+// What the deficit must never take is a button. The list clips from the BOTTOM
+// (hence justifyContent flex-start, not space-around, which is centred and
+// would eat the "Fed" row first), and the buttons sit below it as a fixed,
+// non-weighted child, so LinearLayout clamps the list's weight at 0 before it
+// touches them. The thing this widget is FOR survives every size the launcher
+// can hand it.
 //
 // Width. 110dp minus 20dp of side padding leaves 90dp, which several of these
 // strings exceed on their own: `sleepValue` reaches "12h 34m · napping" and
@@ -95,11 +100,16 @@ function StatRow({ label, value, color }: { label: string; value: string; color:
   );
 }
 
-function IconButton({ kind, label, color, uri }: { kind: 'feeding' | 'diaper' | 'sleep' | 'timer'; label: string; color: Hex; uri: string }) {
+function IconButton({ kind, label, a11y, color, uri }: { kind: 'feeding' | 'diaper' | 'sleep' | 'timer'; label: string; a11y: string; color: Hex; uri: string }) {
   return (
     <FlexWidget
       clickAction="OPEN_URI"
       clickActionData={{ uri }}
+      // Spelled out for screen readers, because the visible label is a
+      // deliberately tiny abbreviation of the action (see allowFontScaling
+      // below). WidgetFactory.java only reads accessibilityLabel off props that
+      // also carry a clickAction, which this has.
+      accessibilityLabel={a11y}
       style={{
         flex: 1,
         // Fixed, and deliberately the largest fixed thing here: these four are
@@ -115,17 +125,39 @@ function IconButton({ kind, label, color, uri }: { kind: 'feeding' | 'diaper' | 
       }}
     >
       <SvgWidget svg={activitySvg(kind, color)} style={{ height: 20, width: 20 }} />
-      <TextWidget text={label} maxLines={1} truncate="END" style={{ fontSize: 10, fontWeight: 'bold', color: TEXT, marginTop: 2 }} />
+      {/* allowFontScaling defaults to TRUE and TextWidget.java hands the size
+          over in SP unless it is explicitly false, so this label would grow
+          with the system font setting while the 38dp box above did not: ~35.5dp
+          of content at scale 1.0 leaves 2.5dp of slack, and clipping would
+          start around 1.2x and be severe at Android 14's 2.0x.
+          Fixed by pinning the label rather than by letting the button wrap its
+          content, because a wrapping button is the one thing that can break the
+          invariant this layout is built on. At 2.0x a wrap_content grid comes to
+          ~130dp which, with a header that has scaled to ~62dp, puts the fixed
+          chrome at ~204dp: past the 180dp cell, so the buttons themselves would
+          be cut. Pinned, the chrome tops out at ~162dp at 2.0x and every tap
+          target survives. The cost is a label that stays small, which the icon's
+          size and colour and the accessibilityLabel above between them cover. */}
+      <TextWidget text={label} maxLines={1} truncate="END" allowFontScaling={false} style={{ fontSize: 10, fontWeight: 'bold', color: TEXT, marginTop: 2 }} />
     </FlexWidget>
   );
 }
 
 export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; now: number }) {
   const s = snapshot;
-  // Initial, not the whole word: "start Right" is ~85dp at the old 14sp, and the
-  // header has ~90dp total to share with the child's name. "start R" at 10sp is
-  // ~39dp, which leaves the name something to occupy.
+  // Initial, not the whole word. The header shares ~90dp: at the 10sp it now
+  // renders at, "start Right" takes ~57dp and leaves the name ~27dp, while
+  // "start R" takes ~39dp and leaves it ~45dp. Not a huge saving in absolute
+  // terms, but it is the difference between a name that ellipsizes after two
+  // characters and one that shows a short name whole.
   const nextSide = s?.nextSide === 'right' ? 'R' : 'L';
+  // The abbreviation is new here: every other surface spells the side out. It
+  // is readable in context and the widget opens the app on tap, but a screen
+  // reader would otherwise get the literal "start R", so it is spelled out
+  // below. That needs a clickAction to survive: WidgetFactory.java reads
+  // accessibilityLabel only off props that also carry one. OPEN_APP matches
+  // what the root already does, so the tap behaviour is unchanged.
+  const nextSideLabel = `Next feed starts on the ${s?.nextSide === 'right' ? 'right' : 'left'}`;
   const age = s?.birth != null ? ageOrDueLabel(s.birth, s.expected, now) : '';
   // The whole day window, computed HERE from the snapshot's raw records against
   // the live `now`, so the boundary rollover self-corrects on the next refresh
@@ -151,7 +183,13 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
           <TextWidget text={s?.childName || 'Budkin'} maxLines={1} truncate="END" style={{ fontSize: 14, fontWeight: 'bold', color: TEXT }} />
           {age ? <TextWidget text={age} maxLines={1} truncate="END" style={{ fontSize: 9, color: DIM }} /> : <FlexWidget style={{ height: 0 }} />}
         </FlexWidget>
-        <TextWidget text={`start ${nextSide}`} maxLines={1} style={{ fontSize: 10, fontWeight: 'bold', color: FEED, marginLeft: 6 }} />
+        <TextWidget
+          text={`start ${nextSide}`}
+          maxLines={1}
+          clickAction="OPEN_APP"
+          accessibilityLabel={nextSideLabel}
+          style={{ fontSize: 10, fontWeight: 'bold', color: FEED, marginLeft: 6 }}
+        />
       </FlexWidget>
 
       {/* flex-start, not space-around: this is the only region that can absorb a
@@ -170,12 +208,12 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flexDirection: 'column', width: 'match_parent' }}>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="feeding" label="Feed" color={FEED} uri={`${SCHEME}://log/feeding`} />
-          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri={`${SCHEME}://log/diaper`} />
+          <IconButton kind="feeding" label="Feed" a11y="Log a feed" color={FEED} uri={`${SCHEME}://log/feeding`} />
+          <IconButton kind="diaper" label="Diaper" a11y="Log a diaper change" color={DIAPER} uri={`${SCHEME}://log/diaper`} />
         </FlexWidget>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri={`${SCHEME}://log/sleep`} />
-          <IconButton kind="timer" label="Timer" color={PRIMARY} uri={`${SCHEME}://timer`} />
+          <IconButton kind="sleep" label="Sleep" a11y="Log sleep" color={SLEEP} uri={`${SCHEME}://log/sleep`} />
+          <IconButton kind="timer" label="Timer" a11y="Open timers" color={PRIMARY} uri={`${SCHEME}://timer`} />
         </FlexWidget>
       </FlexWidget>
     </FlexWidget>
