@@ -155,14 +155,17 @@ export function sleepMsInWindow(entries: Entry[], winStart: number): number {
  * switched to sleep belongs in this total. Timers are NOT scoped to a child
  * here — pass `timersForChild(...)` output, the same way `entries` must already
  * be `entriesForChild(...)` output. Every running sleep timer in the array
- * contributes, so two overlapping ones would double-count; the app has no path
- * that creates those, and filtering by child is what keeps a sibling's nap out.
+ * contributes, so two overlapping ones double-count. That state is reachable
+ * (start two quick timers, set both to save as sleep) but deliberately not
+ * defended against here: `sleepMsInWindow` does not deduplicate overlapping
+ * completed sleeps either, so the number is the same before and after those
+ * timers stop. Filtering by child is what keeps a sibling's nap out.
  *
  * Deliberately a separate function rather than an option on `sleepMsInWindow`:
- * the `totalSleep` trend and the heatmap must keep counting logged sleep only
- * (a trend point that grows while a nap runs would make history look unstable),
- * so the two intents stay visible at each call site instead of hiding behind a
- * defaulted argument.
+ * "logged sleep" and "sleep so far, live" are two different questions, and a
+ * defaulted argument would hide which one a call site is asking. Note that the
+ * totalSleep trend and the heatmap do not go through `sleepMsInWindow` at all —
+ * each repeats the boundary split inline.
  */
 export function liveSleepMsInWindow(entries: Entry[], timers: Timer[], winStart: number, now: number): number {
   const winEnd = winStart + DAY;
