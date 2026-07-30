@@ -13,22 +13,26 @@
 // number below is chosen against that floor.
 //
 // Height. Only the flex:1 list can absorb, so the FIXED chrome has to leave it
-// something at 180dp:
+// something at 180dp. Taking a text line as roughly 1.35x its sp:
 //
-//   16dp  root paddingVertical (8 top + 8 bottom)
+//   12dp  root paddingVertical (6 + 6)
 //   32dp  header (14sp name ~19dp over a 9sp age line ~13dp)
-//   92dp  buttons (2 rows of a 40dp button plus 3dp margins)
+//   88dp  buttons (2 rows of a 38dp button plus 3dp margins)
 //   ----
-//  140dp  fixed, leaving 40dp of list at the 180dp floor
+//  132dp  fixed, leaving 48dp of list at the 180dp floor
 //
-// The list wants 45dp for its three stat rows and another 13-26dp for the
-// summary line, so the whole layout needs ~198dp for a one-line summary and
-// ~211dp for a wrapped one. Both sit inside the 180-220dp a three-row cell
-// actually measures on real launchers, and a 3-row Pixel cell is far taller
-// still. Below that the list clips from the BOTTOM (hence justifyContent
-// flex-start, not space-around, which is centred and would eat the "Fed" row
-// first), so the summary line goes before any stat row and the buttons, the
-// thing this widget is for, never clip at all.
+// The list holds three 15dp stat rows on 3dp gaps (54dp) inside 3dp margins
+// (6dp), then the summary line at 9sp, which is 13dp on one line and 26dp when
+// it wraps. So the whole thing wants 192dp for the stat rows alone, 205dp with
+// a one-line summary and 218dp with a wrapped one, all inside the 180-220dp a
+// three-row cell actually measures. A 3-row cell on a phone is far taller
+// again (a Pixel row is ~120dp), so this is only tight in the worst case.
+//
+// Under that, the list clips from the BOTTOM (hence justifyContent flex-start,
+// not space-around, which is centred and would eat the "Fed" row first): the
+// summary goes first, then the Diaper row. The buttons, being fixed and last,
+// never clip at all, which is the point. The thing this widget is FOR survives
+// every size the launcher can hand it.
 //
 // Width. 110dp minus 20dp of side padding leaves 90dp, which several of these
 // strings exceed on their own: `sleepValue` reaches "12h 34m · napping" and
@@ -75,7 +79,7 @@ function agoLabel(ms: number | null | undefined, now: number): string {
 
 function StatRow({ label, value, color }: { label: string; value: string; color: Hex }) {
   return (
-    <FlexWidget style={{ flexDirection: 'row', width: 'match_parent', alignItems: 'center', marginBottom: 5 }}>
+    <FlexWidget style={{ flexDirection: 'row', width: 'match_parent', alignItems: 'center', marginBottom: 3 }}>
       <FlexWidget style={{ flexDirection: 'row', alignItems: 'center' }}>
         <FlexWidget style={{ width: 8, height: 8, borderRadius: 8, backgroundColor: color, marginRight: 6 }} />
         <TextWidget text={label} style={{ fontSize: 11, color: TEXT }} />
@@ -100,8 +104,8 @@ function IconButton({ kind, label, color, uri }: { kind: 'feeding' | 'diaper' | 
         flex: 1,
         // Fixed, and deliberately the largest fixed thing here: these four are
         // the only tap targets, so they are the last thing allowed to shrink.
-        // 40dp holds a 20dp icon over a 10sp label (~14dp) with 2dp between.
-        height: 40,
+        // 38dp holds a 20dp icon over a 10sp label (~14dp) with 2dp between.
+        height: 38,
         margin: 3,
         flexDirection: 'column',
         justifyContent: 'center',
@@ -140,7 +144,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
   return (
     <FlexWidget
       clickAction="OPEN_APP"
-      style={{ height: 'match_parent', width: 'match_parent', flexDirection: 'column', backgroundColor: BG, borderRadius: 18, paddingHorizontal: 10, paddingVertical: 8 }}
+      style={{ height: 'match_parent', width: 'match_parent', flexDirection: 'column', backgroundColor: BG, borderRadius: 18, paddingHorizontal: 10, paddingVertical: 6 }}
     >
       <FlexWidget style={{ flexDirection: 'row', width: 'match_parent', alignItems: 'center' }}>
         <FlexWidget style={{ flex: 1, flexDirection: 'column' }}>
@@ -154,7 +158,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
           short cell, and a centred one would clip the top ("Fed", the row that
           matters most) as readily as the bottom. Anchored to the top, the
           summary line is what goes first. */}
-      <FlexWidget style={{ flex: 1, flexDirection: 'column', width: 'match_parent', justifyContent: 'flex-start', marginTop: 4, marginBottom: 4 }}>
+      <FlexWidget style={{ flex: 1, flexDirection: 'column', width: 'match_parent', justifyContent: 'flex-start', marginTop: 3, marginBottom: 3 }}>
         <StatRow label="Fed" value={agoLabel(s?.lastFeedStart, now)} color={FEED} />
         <StatRow label="Sleep" value={today.sleepValue} color={SLEEP} />
         <StatRow label="Diaper" value={agoLabel(s?.lastDiaper, now)} color={DIAPER} />
