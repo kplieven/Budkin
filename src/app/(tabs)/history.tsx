@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -31,6 +32,13 @@ export default function History() {
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
   const refresh = useAppStore((s) => s.refresh);
+  // Raw array + object references out of the store, never a Set built inside a
+  // selector: a selector returning a fresh reference makes zustand v5 loop
+  // forever. The Set is derived below, in the render body.
+  const queuedIds = useAppStore((s) => s.queuedIds);
+  const connection = useAppStore((s) => s.connection);
+  const serverMode = connection?.mode === 'server';
+  const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
   // Pull-to-refresh, mirroring Home: native uses RefreshControl, touch-web a
   // custom gesture, mouse-web nothing. History has no offline banner, so the
@@ -94,6 +102,7 @@ export default function History() {
                 onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
                 isFirst={i === 0}
                 isLast={i === g.items.length - 1}
+                queued={isItemQueued(e, queued)}
               />
             ))}
           </View>
