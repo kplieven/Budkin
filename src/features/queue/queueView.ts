@@ -13,7 +13,6 @@
  * phrased as if it were that one.
  */
 
-import { groupByDay, type DayGroup } from '@/features/activity/groupByDay';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import type { ActivityType, Entry } from '@/types/models';
 
@@ -31,6 +30,27 @@ export function entryCountLabel(n: number): string {
  */
 export function queueSummaryLine(n: number): string {
   return n === 0 ? 'Nothing waiting to upload' : `Waiting to upload: ${entryCountLabel(n)}`;
+}
+
+/**
+ * The sentence under the headline count.
+ *
+ * Takes `loaded` because an unread queue counts 0, and the empty copy is an
+ * "everything is synced" claim: shown during the read it contradicts the
+ * headline directly above it, on every visit, to a user who came here precisely
+ * because things are not synced.
+ *
+ * Deliberately does NOT send the user to History. `commitWrite` queues any
+ * `Entry`, and a queued `note` shows only in the Notes tab while a queued
+ * `milestone` shows only in the Growth checklist (see `src/types/models.ts`), so
+ * "they already show in History" is false for two of the ten types this screen
+ * lists. Where the copy has to say something reassuring, it says the thing that
+ * is true of all ten: they are saved, and nothing needs logging again.
+ */
+export function queueSummaryHint(loaded: boolean, count: number): string {
+  if (!loaded) return 'Checking what is still waiting to upload.';
+  if (count === 0) return 'Entries you log while offline wait here until Budkin can reach the server. Nothing is waiting right now.';
+  return 'These are saved on this device and go up on their own once the server is reachable. Nothing needs logging again.';
 }
 
 export interface QueueTypeCount {
@@ -61,20 +81,6 @@ export function queueTypeCounts(queue: Entry[]): QueueTypeCount[] {
 }
 
 /**
- * The queue as day groups, newest first, reusing the History timeline's own
- * grouping so a queued entry sits under the same Today / Yesterday / date
- * heading it will have once it lands.
- *
- * Grouped by the entry's OWN timestamp, not by when it was enqueued: the queue
- * records no enqueue time (`Entry` has no such field and `budkin.queue.v1` must
- * not be migrated for this screen), and the entry's timestamp is the one the
- * user recognises anyway.
- */
-export function groupQueuedByDay(queue: Entry[], now: number): DayGroup<Entry>[] {
-  return groupByDay(queue, now);
-}
-
-/**
  * Whose entry this is, or null when saying so adds nothing.
  *
  * Null for a single-child household (the answer is never in doubt) and null for
@@ -95,10 +101,21 @@ export function attributionFor(childId: string, children: { id: string; first: s
  * do nothing. `offline` is the store's derived flag, so the dev "Simulate
  * offline" toggle blocks the button exactly as a real outage does, which is the
  * honest reading: nothing can reach the server either way.
+ *
+ * `loading` comes FIRST and is why `loaded` is a parameter at all: an unread
+ * queue counts 0, so without it every visit would show a greyed button for the
+ * length of an AsyncStorage round trip and then enable it, for no reason the
+ * user can see.
  */
-export type SyncBlock = 'local' | 'offline' | 'empty';
+export type SyncBlock = 'loading' | 'local' | 'offline' | 'empty';
 
-export function syncBlockedBy(opts: { serverMode: boolean; offline: boolean; count: number }): SyncBlock | null {
+export function syncBlockedBy(opts: {
+  loaded: boolean;
+  serverMode: boolean;
+  offline: boolean;
+  count: number;
+}): SyncBlock | null {
+  if (!opts.loaded) return 'loading';
   if (!opts.serverMode) return 'local';
   if (opts.offline) return 'offline';
   if (opts.count === 0) return 'empty';
@@ -112,6 +129,10 @@ export function syncBlockedHint(block: SyncBlock | null): string | null {
       return 'Local mode keeps everything on this device, so there is nothing to upload.';
     case 'offline':
       return 'No connection to the server right now. Entries upload on their own once it is back.';
+    // Nothing to explain in either of the remaining cases: an empty queue is
+    // already spelled out by the card above, and a read in flight is over
+    // before a sentence about it could be read.
+    case 'loading':
     case 'empty':
       return null;
     default:
@@ -129,13 +150,19 @@ export function syncBlockedHint(block: SyncBlock | null): string | null {
  * truthful thing this screen can say is what moved and what did not. It must
  * never claim success on a flush that quietly re-queued everything.
  *
- * `after > before` is reachable: a write made while the flush was in flight
- * lands on the queue behind it. Reported as a plain count rather than as a
- * failure, because nothing went wrong.
+ * `after > before` gets its OWN branch and must not fall in with the failure
+ * case. A write landing on the queue while the flush is in flight (the Android
+ * widget's headless task can do exactly this) grows the queue past where it
+ * started, so a flush that uploaded every entry it had can still end with more
+ * waiting than it began with. Reported as a count, with the reason, because
+ * subtracting two numbers cannot separate what went up from what arrived.
  */
 export function syncResultMessage(before: number, after: number): string {
   if (before === 0) return 'Nothing was waiting.';
   if (after === 0) return `Uploaded ${entryCountLabel(before)}.`;
-  if (after >= before) return `Nothing uploaded. ${entryCountLabel(after)} still waiting.`;
+  if (after > before) {
+    return `${entryCountLabel(after)} waiting now. More were logged while the sync ran, so what went up cannot be told apart.`;
+  }
+  if (after === before) return `Nothing uploaded. ${entryCountLabel(after)} still waiting.`;
   return `Uploaded ${before - after} of ${before}. ${entryCountLabel(after)} still waiting.`;
 }

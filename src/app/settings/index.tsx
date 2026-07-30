@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
+import { entryCountLabel } from '@/features/queue/queueView';
 import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -609,9 +610,7 @@ export default function Settings() {
                   screen that shows the write queue alone, and the banners'
                   pending figure counts unsynced measurements on top of it. */}
               <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
-                {queueCount === 0
-                  ? 'Nothing waiting to upload'
-                  : `${queueCount} ${queueCount === 1 ? 'entry' : 'entries'} waiting to upload`}
+                {queueCount === 0 ? 'Nothing waiting to upload' : `${entryCountLabel(queueCount)} waiting to upload`}
               </Txt>
             </View>
             <Icon name="chevron-right" color={t.faint} size={18} />
