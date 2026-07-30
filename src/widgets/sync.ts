@@ -22,16 +22,21 @@ export function initWidgetSync(): void {
     await writeWidgetSnapshot(snap);
     await pushWidgetUpdate(snap);
   };
-  // Gate on the slices `buildWidgetSnapshot` actually reads. The per-second `now`
-  // tick replaces nothing else, so it early-returns here — no snapshot rebuild,
-  // no JSON.stringify, no widget push on the hot path.
+  // Gate on the slices `buildWidgetSnapshot` actually reads, which now include
+  // `rhythmOriginHour`: the snapshot carries the day boundary for the widget to
+  // window against, so changing it in Settings must rebuild. `now` stays OUT
+  // deliberately, even though the builder takes it: the per-second tick replaces
+  // nothing the widget can see (it only anchors the 48h record prune), so it
+  // early-returns here. No snapshot rebuild, no JSON.stringify, and no widget
+  // push on the hot path.
   useAppStore.subscribe((state, prev) => {
     if (
       state.children === prev.children &&
       state.selectedChildId === prev.selectedChildId &&
       state.entries === prev.entries &&
       state.timers === prev.timers &&
-      state.connection === prev.connection
+      state.connection === prev.connection &&
+      state.rhythmOriginHour === prev.rhythmOriginHour
     ) {
       return;
     }

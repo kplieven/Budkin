@@ -13,7 +13,7 @@ import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind, timersForChild } from '@/store/selectors';
+import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind, runningTimer, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -97,7 +97,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   // the timer will be written as when stopped — a quick timer switched to sleep
   // is sleep. Same rule the sleep-aware notification scheduler uses.
   const childTimers = timersForChild(timers, selectedChild?.id);
-  const runningSleep = childTimers.find((tm) => tm.saveAs === 'sleep');
+  // `runningTimer` is that same rule for one kind of timer: the selected child is
+  // passed as both ids, which is the `timersForChild` case, so this is exactly
+  // `childTimers.find(saveAs === 'sleep')` with the rule stated in one place.
+  const runningSleep = runningTimer(timers, 'sleep', selectedChild?.id, selectedChild?.id);
   const lastSleep = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .sort((a, b) => (b.end as number) - (a.end as number))[0];

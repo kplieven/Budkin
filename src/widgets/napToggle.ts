@@ -20,8 +20,9 @@ import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { buildTimerNotification } from '@/notifications/content';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
-import { NAP_WINDOW_END_DEFAULT, NAP_WINDOW_START_DEFAULT, type NapWindow } from '@/store/selectors';
+import { NAP_WINDOW_END_DEFAULT, NAP_WINDOW_START_DEFAULT, runningTimer, type NapWindow } from '@/store/selectors';
 import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
+import { pruneWidgetEntries } from '@/widgets/today';
 
 // Android can re-deliver a widget click (and a physical bounce can double-fire),
 // so a single tap may invoke this handler more than once within a few ms. Because
@@ -84,6 +85,16 @@ export async function toggleNapFromWidget(
     return;
   }
 
+  if (!snap.selectedChildId) {
+    // No child selected (a fresh install writes a baseline snapshot with an empty
+    // id before onboarding). There is nobody to file a nap against, and the
+    // scoped lookup below would never find a timer stamped with an empty id, so
+    // every tap would start another one and leave the widget stuck on "napping".
+    // Repaint so the tap still gets feedback.
+    render(snap);
+    return;
+  }
+
   // Debounce duplicate/rapid delivery: repaint the widget from the current
   // snapshot without mutating any timer or logging an entry. Repainting (rather
   // than doing nothing) keeps a swallowed tap from feeling dead.
@@ -93,15 +104,31 @@ export async function toggleNapFromWidget(
   }
   await writeLastToggleAt(now);
 
-  const running = timers.find((t) => t.activity === 'sleep');
+  // The SAME lookup `buildWidgetSnapshot` uses for `sleepStart`, and it has to
+  // stay that way: if the render rule and this tap rule disagree, a tap on a
+  // widget that shows "napping" finds no timer and starts a SECOND one. Keyed on
+  // `saveAs`, and scoped to the selected child, which is a deliberate behaviour
+  // change: a sibling's running nap can no longer be stopped from the widget. A
+  // widget shows one child, and the unscoped version was a misattribution bug,
+  // filing the stopped nap against `snap.selectedChildId` whoever it belonged to.
+  // (The Timers tab stays the multi-child surface where any timer is stoppable.)
+  const running = runningTimer(timers, 'sleep', snap.selectedChildId, snap.selectedChildId);
 
   if (running) {
     // Stop: queue the finished nap (unless demo/unconfigured) and drop the timer.
+    const entry = buildSleepEntry(running, now, snap.selectedChildId, napWindow);
     if (snap.canQueueNap && snap.selectedChildId) {
-      await enqueueEntry(buildSleepEntry(running, now, snap.selectedChildId, napWindow));
+      await enqueueEntry(entry);
     }
     await saveTimers(timers.filter((t) => t !== running));
-    const next: WidgetSnapshot = { ...snap, sleepStart: null };
+    // Append the nap we just built to the snapshot's records. The sleep total is
+    // now always shown and is derived from these, so carrying them forward
+    // unchanged would drop the just-finished nap out of the figure the instant
+    // the timer stopped, and leave it wrong until the app next ran. Re-pruned so
+    // the lookback stays bounded. `rhythmOriginHour` rides along in `...snap`:
+    // the app owns that field and rewrites the snapshot whenever it changes, so
+    // there is nothing for the headless task to freshen.
+    const next: WidgetSnapshot = { ...snap, sleepStart: null, entries: pruneWidgetEntries([...(snap.entries ?? []), entry], now) };
     await writeWidgetSnapshot(next);
     render(next); // repaint now — state is durable; dismiss the notification after.
     await dismissTimerNotification(running.id);
