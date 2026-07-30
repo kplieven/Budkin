@@ -115,9 +115,9 @@ export default function Timers() {
                   Started earlier?
                 </Txt>
                 {([
-                  ['−15m', -15],
-                  ['−5m', -5],
-                  ['+5m', 5],
+                  ['−15', -15],
+                  ['−5', -5],
+                  ['+5', 5],
                 ] as const).map(([lbl, d]) => (
                   <Pressable
                     key={lbl}
