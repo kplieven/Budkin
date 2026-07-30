@@ -93,47 +93,49 @@ export function attributionFor(childId: string, children: { id: string; first: s
 }
 
 /**
- * Why "Sync now" cannot run right now, or null when it can.
+ * Why "Retry" cannot run right now, or null when it can.
  *
- * Mirrors `flushQueue`'s own guards (`useAppStore.ts`: it returns early unless
- * there is a server connection and `offline` is false) rather than second
- * guessing them, so the button is never enabled for a call that would silently
- * do nothing. `offline` is the store's derived flag, so the dev "Simulate
- * offline" toggle blocks the button exactly as a real outage does, which is the
- * honest reading: nothing can reach the server either way.
+ * Deliberately does NOT mirror `flushQueue`'s guards. The button re-checks the
+ * connection before it flushes (`refresh()` in the store, the only call that can
+ * clear `offline`), so `offline` is the reason to press it, not a reason to grey
+ * it out: this is the same affordance as the offline banner's own retry, and a
+ * user sent here from that banner would otherwise arrive at a dead button. An
+ * empty queue blocks nothing either, for the same reason: with nothing waiting
+ * there is still a connection worth re-checking, which is now the button's first
+ * job. Both are still taken as arguments so this stays a complete answer to "can
+ * the button run", and so a future guard cannot be re-added here unnoticed.
  *
- * `loading` comes FIRST and is why `loaded` is a parameter at all: an unread
- * queue counts 0, so without it every visit would show a greyed button for the
- * length of an AsyncStorage round trip and then enable it, for no reason the
- * user can see.
+ * What is left is the pair no retry can get out of. `local` has no server to
+ * reach at all. `loading` comes FIRST and is why `loaded` is a parameter: for
+ * the length of an AsyncStorage read the screen does not yet know what it is
+ * looking at, and a result line landing under a card still headed "Reading the
+ * queue" answers a question it has not finished asking.
  */
-export type SyncBlock = 'loading' | 'local' | 'offline' | 'empty';
+export type SyncBlock = 'loading' | 'local';
 
 export function syncBlockedBy(opts: {
   loaded: boolean;
   serverMode: boolean;
+  /** Never blocks. See above: being offline is what the button is for. */
   offline: boolean;
+  /** Never blocks. See above: an empty queue still has a connection to check. */
   count: number;
 }): SyncBlock | null {
   if (!opts.loaded) return 'loading';
   if (!opts.serverMode) return 'local';
-  if (opts.offline) return 'offline';
-  if (opts.count === 0) return 'empty';
   return null;
 }
 
-/** The sentence shown beneath a disabled "Sync now", or null when it is live. */
+/** The sentence shown beneath a disabled "Retry", or null when it is live. */
 export function syncBlockedHint(block: SyncBlock | null): string | null {
   switch (block) {
     case 'local':
       return 'Local mode keeps everything on this device, so there is nothing to upload.';
-    case 'offline':
-      return 'No connection to the server right now. Entries upload on their own once it is back.';
-    // Nothing to explain in either of the remaining cases: an empty queue is
-    // already spelled out by the card above, and a read in flight is over
-    // before a sentence about it could be read.
+    // Nothing to explain: a read in flight is over before a sentence about it
+    // could be read. The offline hint that used to live here is gone with the
+    // block it explained; what the connection is doing is now reported by
+    // `syncResultMessage` after the user has actually asked.
     case 'loading':
-    case 'empty':
       return null;
     default:
       return null;
@@ -141,14 +143,24 @@ export function syncBlockedHint(block: SyncBlock | null): string | null {
 }
 
 /**
- * What a finished "Sync now" actually achieved, in the queue's own terms:
- * how many entries were waiting before, and how many still are.
+ * What a finished "Retry" actually achieved: whether the server can be reached,
+ * and what that did to the queue (how many entries were waiting before, how many
+ * still are).
  *
- * Counted rather than reported by the flush because nothing records WHY a push
- * failed. `flushQueue` catches a throwing push and puts the entry straight back
- * on the queue with no error, no retry count and no timestamp, so the only
- * truthful thing this screen can say is what moved and what did not. It must
- * never claim success on a flush that quietly re-queued everything.
+ * `offline` is the store's flag read AFTER the retry, so it reports the state the
+ * re-check left behind rather than the one the press started from. While it is
+ * set nothing can have gone up (`flushQueue` returns early on exactly that flag),
+ * so those cases name the connection: "Nothing uploaded" would read as a failed
+ * upload of entries that were never attempted. Both offline lines describe the
+ * state now rather than narrating the attempt, which keeps them true even when
+ * the connection dropped part-way through the flush.
+ *
+ * The counts are counted rather than reported by the flush because nothing
+ * records WHY a push failed. `flushQueue` catches a throwing push and puts the
+ * entry straight back on the queue with no error, no retry count and no
+ * timestamp, so the only truthful thing this screen can say is what moved and
+ * what did not. It must never claim success on a flush that quietly re-queued
+ * everything.
  *
  * `after > before` gets its OWN branch and must not fall in with the failure
  * case. A write landing on the queue while the flush is in flight (the Android
@@ -157,8 +169,15 @@ export function syncBlockedHint(block: SyncBlock | null): string | null {
  * waiting than it began with. Reported as a count, with the reason, because
  * subtracting two numbers cannot separate what went up from what arrived.
  */
-export function syncResultMessage(before: number, after: number): string {
-  if (before === 0) return 'Nothing was waiting.';
+export function syncResultMessage(opts: { offline: boolean; before: number; after: number }): string {
+  const { offline, before, after } = opts;
+  if (offline) {
+    if (after === 0) return 'No connection to the server. Nothing is waiting to upload.';
+    return `No connection to the server. ${entryCountLabel(after)} still waiting.`;
+  }
+  // Reached the server with nothing queued: the connection IS the result, and
+  // it is the only thing the press can have been asking about.
+  if (before === 0) return 'Connected. Nothing was waiting to upload.';
   if (after === 0) return `Uploaded ${entryCountLabel(before)}.`;
   if (after > before) {
     return `${entryCountLabel(after)} waiting now. More were logged while the sync ran, so what went up cannot be told apart.`;
