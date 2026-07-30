@@ -243,6 +243,7 @@ export default function Settings() {
   const simulateOffline = useAppStore((s) => s.simulateOffline);
   const networkOnline = useAppStore((s) => s.networkOnline);
   const connection = useAppStore((s) => s.connection);
+  const queueCount = useAppStore((s) => s.queueCount);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setUnitSystem = useAppStore((s) => s.setUnitSystem);
   const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
@@ -585,6 +586,37 @@ export default function Settings() {
           </View>
           <View style={{ width: 9, height: 9, borderRadius: 99, backgroundColor: '#5FB39B' }} />
         </View>
+        {/* Only in server mode: in local mode nothing is ever queued for upload,
+            so the row would advertise a screen with permanently nothing on it.
+            The ROUTE still renders in local mode with its own empty state, so a
+            typed /settings/queue does not dead-end. */}
+        {connection?.mode === 'server' && (
+          <Pressable
+            onPress={() => router.navigate('/settings/queue')}
+            accessibilityRole="button"
+            accessibilityLabel="Offline queue"
+            style={(s) => [
+              row,
+              { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <Txt unselectable weight={600} size={16}>
+                Offline queue
+              </Txt>
+              {/* `queueCount` and not `selectPendingCount`: this row points at a
+                  screen that shows the write queue alone, and the banners'
+                  pending figure counts unsynced measurements on top of it. */}
+              <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                {queueCount === 0
+                  ? 'Nothing waiting to upload'
+                  : `${queueCount} ${queueCount === 1 ? 'entry' : 'entries'} waiting to upload`}
+              </Txt>
+            </View>
+            <Icon name="chevron-right" color={t.faint} size={18} />
+          </Pressable>
+        )}
         {connection?.mode === 'local' && (
           <Pressable
             onPress={openAdopt}
