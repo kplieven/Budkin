@@ -182,10 +182,13 @@ export default function OfflineQueue() {
         </View>
       )}
 
-      {/* Labelled "Retry connection" to a screen reader, matching the offline
-          banner's own button (`src/app/(tabs)/index.tsx`, `src/shell/TopBar.tsx`):
-          announced on its own, with none of the card around it, a bare "Retry"
-          says nothing about what is being retried. */}
+      {/* Labelled "Retry connection" to a screen reader because, announced on
+          its own with none of the card around it, a bare "Retry" says nothing
+          about what is being retried. Not a match with the offline banner any
+          more: wherever this screen is offered at all, the banner announces
+          "Offline, open the offline queue" instead (`offlineBanner.ts`). It
+          keeps the old wording only in local mode, which is the one mode that
+          never sends anyone here. */}
       <Pressable
         onPress={() => void onSync()}
         disabled={block != null || syncing}
@@ -210,8 +213,9 @@ export default function OfflineQueue() {
         {syncing && <ActivityIndicator size="small" color={block != null ? t.dim : t.onPrimary} />}
         <Txt unselectable weight={700} size={15} color={block != null ? t.faint : t.onPrimary}>
           {/* "Retry", not "Sync now": the press re-checks the connection first
-              and uploads second, so it is the same affordance as the offline
-              banner's Retry and says so. */}
+              and uploads second, so "Retry" names the whole of it. It is also
+              the app's one retry affordance now, the banner having become the
+              way here rather than a second, weaker re-check. */}
           {syncing ? 'Retrying…' : 'Retry'}
         </Txt>
       </Pressable>

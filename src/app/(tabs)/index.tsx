@@ -25,7 +25,7 @@ import { ageOrDueLabel } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
 import { TimelineRail } from '@/shell/TimelineRail';
 import { useDesktopShell } from '@/shell/useDesktopShell';
-import { selectPendingCount } from '@/store/selectors';
+import { selectPendingCount, selectServerMode } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -42,9 +42,10 @@ export default function Home() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
-  // A boolean out of the selector, never the `connection` object reshaped: a
-  // freshly built reference here is the zustand v5 render loop.
-  const serverMode = useAppStore((s) => s.connection?.mode === 'server');
+  // The shared predicate, so this and the desktop pill cannot answer the
+  // question differently. It hands back a boolean and never a reshaped
+  // `connection`: a freshly built reference here is the zustand v5 render loop.
+  const serverMode = useAppStore(selectServerMode);
 
   // Tap the offline banner to see what is waiting. `atQueue` is false because
   // this banner belongs to `/` and cannot be rendered over its own destination;
@@ -55,16 +56,20 @@ export default function Home() {
       router.navigate(QUEUE_ROUTE);
       return;
     }
-    // Local mode: there is no queue screen to send anyone to, so the press keeps
-    // doing what it always did and re-checks the connection (works on web + native).
+    // Local mode, where the queue screen is deliberately unreachable, so there
+    // is nowhere to send the user. The press keeps the toast and the `refresh()`
+    // it always had, which in local mode amounts to nothing: `refresh` returns
+    // early for a non-server connection, so the toast is the whole of it.
     showToast('Checking connection…');
     void refresh();
   }, [bannerAction, refresh, showToast]);
 
   // Pull-to-refresh. Native uses the platform RefreshControl. On web that
   // control is an inert stub, so touch-capable web (phones/tablets) gets a
-  // custom gesture instead; mouse-driven laptops get neither (they use the
-  // tappable offline banner and auto-refresh on tab refocus).
+  // custom gesture instead; mouse-driven laptops get neither. What they have is
+  // the auto-refresh when the tab regains focus (`_layout.tsx`), and, while
+  // offline, the banner below: it no longer refreshes in place, it opens the
+  // queue screen, whose Retry button re-checks the connection.
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -137,8 +142,8 @@ export default function Home() {
               : 'Offline — changes will sync when reconnected'}
           </Txt>
           {/* A chevron where the word "Retry" used to be: the press opens the
-              queue now, and the retry lives on that screen's own button. The
-              local-mode press still retries, so there it still says so. */}
+              queue now, and the retry lives on that screen's own button. Local
+              mode keeps the old word, because there the press opens nothing. */}
           {bannerAction === 'open-queue' ? (
             <Icon name="chevron-right" color="#E2B554" size={16} />
           ) : (

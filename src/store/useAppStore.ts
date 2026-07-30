@@ -2041,7 +2041,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // own re-entry (`refreshInFlight`) and no-ops for demo, no connection, and
     // the manual offline override, so this needs no further gating. A failed
     // fetch does leave the offline banner up, which is deliberate: it is the
-    // only thing that explains the empty history, and it carries the retry.
+    // only thing that explains the empty history. What it is not is the retry:
+    // in server mode, which is exactly the branch below, pressing it opens the
+    // offline queue screen, and the re-check lives on that screen's Retry.
     if (get().connection?.mode === 'server') void get().refresh();
   },
   openSwitcher: () => set({ showChildSwitcher: true }),

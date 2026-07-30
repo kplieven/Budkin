@@ -27,8 +27,9 @@ export const QUEUE_ROUTE = '/settings/queue';
  * What a press does.
  *
  * `open-queue` navigates to {@link QUEUE_ROUTE}. `retry` is the older behaviour,
- * kept for the cases where navigating would go nowhere: re-check the connection
- * and say so.
+ * kept for the cases where navigating would go nowhere: show the "Checking
+ * connection…" toast and call `refresh()`. That call only does something in
+ * server mode; see {@link offlineBannerAction} for what it means in local mode.
  */
 export type OfflineBannerAction = 'open-queue' | 'retry';
 
@@ -51,17 +52,26 @@ export function isQueueRoute(pathname: string): boolean {
 /**
  * Navigate, or retry in place.
  *
- * `serverMode` is `connection?.mode === 'server'`. Local mode retries and does
- * NOT navigate: `src/app/settings/index.tsx` deliberately hides its Offline
- * queue row there because nothing is ever queued in local mode, and a banner
- * that navigated anyway would put back the dead end that row's absence removes.
- * The banner still appears in local mode (`setNetworkOnline` is called from
- * `_layout.tsx` whatever the connection mode), so this branch is reachable and
- * has to do something useful. Re-checking the connection is that something, and
- * it is what the banner already did.
+ * `serverMode` is `selectServerMode` from `src/store/selectors.ts`, which is
+ * where every surface that asks this question gets its answer.
  *
- * `atQueue` retries for a different reason: the destination is already on
- * screen, so navigating is a no-op and reads as a button that does nothing.
+ * Local mode does NOT navigate. `src/app/settings/index.tsx` deliberately hides
+ * its Offline queue row there because nothing is ever queued in local mode, so
+ * the screen is unreachable by design and permanently empty; a banner that
+ * navigated anyway would put back the dead end that row's absence removes. The
+ * banner itself still shows in local mode (`setNetworkOnline` is called from
+ * `_layout.tsx` whatever the connection mode), so the branch is reachable and
+ * has to answer something, and `retry` is what it answered before.
+ *
+ * Be plain about what that `retry` currently does in local mode: nothing.
+ * `refresh()` returns early for any non-server connection (see the guard in
+ * `src/store/useAppStore.ts`), so the press shows the "Checking connection…"
+ * toast and stops. The carve-out earns its keep by NOT sending the user to that
+ * unreachable screen, not by re-checking anything.
+ *
+ * `atQueue` retries for a different reason, and there the retry is real: the
+ * destination is already on screen, so navigating is a no-op that reads as a
+ * button that does nothing, while `refresh()` in server mode does re-check.
  */
 export function offlineBannerAction(opts: { serverMode: boolean; atQueue: boolean }): OfflineBannerAction {
   if (!opts.serverMode) return 'retry';
