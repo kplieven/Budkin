@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, runningTimer, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Treatment, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -340,6 +340,88 @@ describe('timersForChild', () => {
 
   it('returns nothing but the unowned ones for a child running no timer', () => {
     expect(timersForChild([timer('t1', 'c1'), timer('t2', 'c2')], 'c3')).toEqual([]);
+  });
+});
+
+describe('runningTimer', () => {
+  // Override factory rather than positional args: the interesting cases vary
+  // `activity` against `saveAs` and `childId` independently.
+  const timer = (over: Partial<Timer> = {}): Timer => ({
+    id: 't1',
+    childId: 'c1',
+    activity: 'sleep',
+    saveAs: 'sleep',
+    name: 'Sleep',
+    start: NOW - 20 * M,
+    ...over,
+  });
+
+  it('keys on saveAs, so a quick timer repointed to sleep counts as a sleep timer', () => {
+    const repointed = timer({ activity: 'feeding', saveAs: 'sleep', name: 'Sleep' });
+    expect(runningTimer([repointed], 'sleep', 'c1', 'c1')).toBe(repointed);
+  });
+
+  it('ignores activity, so a timer started as sleep but repointed to feeding is a feeding timer', () => {
+    const repointed = timer({ activity: 'sleep', saveAs: 'feeding' });
+    expect(runningTimer([repointed], 'sleep', 'c1', 'c1')).toBeUndefined();
+    expect(runningTimer([repointed], 'feeding', 'c1', 'c1')).toBe(repointed);
+  });
+
+  it('finds an owned timer for its own child and not for a sibling', () => {
+    const mine = timer({ childId: 'c1' });
+    expect(runningTimer([mine], 'sleep', 'c1', 'c1')).toBe(mine);
+    expect(runningTimer([mine], 'sleep', 'c2', 'c2')).toBeUndefined();
+  });
+
+  it('resolves an unowned timer to the selected child only, never to a sibling', () => {
+    // The distinction napReminders depends on: an unowned timer means the
+    // SELECTED child is asleep, so it must not silence another child's nudge.
+    const unowned = timer({ childId: undefined });
+    expect(runningTimer([unowned], 'sleep', 'c1', 'c1')).toBe(unowned);
+    expect(runningTimer([unowned], 'sleep', 'c2', 'c1')).toBeUndefined();
+  });
+
+  it('treats an empty-string childId as owned, not unowned', () => {
+    // Pins the choice of `??` over `||`: an empty string is a (nonsense) owner,
+    // so it must not be adopted by the selected child the way a missing id is.
+    // `||` would coalesce it and silently diverge from the old timersForChild rule.
+    expect(runningTimer([timer({ childId: '' })], 'sleep', 'c1', 'c1')).toBeUndefined();
+  });
+
+  it('reads a persisted null childId as unowned, like a missing one', () => {
+    const unowned = { ...timer(), childId: null } as unknown as Timer;
+    expect(runningTimer([unowned], 'sleep', 'c1', 'c1')).toBe(unowned);
+    expect(runningTimer([unowned], 'sleep', 'c2', 'c1')).toBeUndefined();
+  });
+
+  it('finds nothing with no child to scope to, rather than adopting an unowned timer', () => {
+    const unowned = timer({ childId: undefined });
+    expect(runningTimer([unowned], 'sleep', undefined, undefined)).toBeUndefined();
+    expect(runningTimer([unowned], 'sleep', '', '')).toBeUndefined();
+  });
+
+  it('leaves an unowned timer unadopted when no child is selected to adopt it', () => {
+    const unowned = timer({ childId: undefined });
+    expect(runningTimer([unowned], 'sleep', 'c1', undefined)).toBeUndefined();
+  });
+
+  it('returns undefined for an empty list', () => {
+    expect(runningTimer([], 'sleep', 'c1', 'c1')).toBeUndefined();
+  });
+
+  it('returns the first match when two timers of one kind run at once', () => {
+    const first = timer({ id: 't1', start: NOW - 20 * M });
+    const second = timer({ id: 't2', start: NOW - 5 * M });
+    expect(runningTimer([first, second], 'sleep', 'c1', 'c1')).toBe(first);
+  });
+
+  it('applies the same adoption rule as timersForChild for the selected child', () => {
+    // timersForChild is the special case childId === selectedChildId, so the
+    // two must agree for every child. One rule, two shapes.
+    const all = [timer({ id: 't1', childId: 'c1' }), timer({ id: 't2', childId: undefined }), timer({ id: 't3', childId: 'c2' })];
+    for (const c of ['c1', 'c2', 'c3', '']) {
+      expect(runningTimer(all, 'sleep', c, c)).toBe(timersForChild(all, c)[0]);
+    }
   });
 });
 

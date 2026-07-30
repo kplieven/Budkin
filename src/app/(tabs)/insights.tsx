@@ -21,7 +21,7 @@ import { hexA } from '@/lib/color';
 import { fmtDur } from '@/lib/format';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
-import { fmtDayStartHour } from '@/store/selectors';
+import { fmtDayStartHour, runningTimer } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -72,12 +72,24 @@ export default function Insights() {
   // timezones).
   const nowH = useAppStore((s) => Math.floor(s.now / 3600000) * 3600000);
   const entries = useAppStore((s) => s.insightsEntries);
+  // Raw select (a stable reference), with the two live-bar anchors derived in the
+  // render body below rather than inside the selector, per the zustand v5 rule.
+  // Costs no extra renders: `s.timers` identity only changes on timer mutation,
+  // so this screen stays off the per-second path that `nowH` above keeps it off.
+  const timers = useAppStore((s) => s.timers);
   // Start of a currently-running sleep timer (epoch ms), else null. Drives the
-  // live breathing bar on the heatmap's Today row.
-  const runningSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'sleep')?.start ?? null);
+  // live breathing bar on the heatmap's Today row. Scoped to the selected child,
+  // which `insightsEntries` already is by construction, and keyed on `saveAs`
+  // rather than `activity` so a quick timer repointed to sleep draws in the sleep
+  // colour: the same rule Home and the reminder scheduler use. The child id is
+  // passed twice because this screen only ever asks about the selected child; the
+  // two arguments differ only for the scheduler, which walks every child.
+  const runningSince = runningTimer(timers, 'sleep', selectedChildId, selectedChildId)?.start ?? null;
   // Start of a currently-running feeding timer, for the live feeding bar (drawn
-  // on top of a live sleep bar so feeding takes precedence).
-  const runningFeedSince = useAppStore((s) => s.timers.find((tm) => tm.activity === 'feeding')?.start ?? null);
+  // on top of a live sleep bar so feeding takes precedence). Keying on `saveAs`
+  // makes the two mutually exclusive per timer, so that precedence is only
+  // reachable with a sleep and a feeding timer running at the same time.
+  const runningFeedSince = runningTimer(timers, 'feeding', selectedChildId, selectedChildId)?.start ?? null;
   // The day boundary (set on the Settings page). Drives the heatmap and every
   // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
