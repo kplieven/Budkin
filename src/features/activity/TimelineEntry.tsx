@@ -280,7 +280,11 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
               is already icon chip + label + rule + detail, and the state is
               carried for screen readers by the row's accessibilityLabel above.
               Last in the row so it stays put while the detail text shrinks. */}
-          {queued ? <Icon name="clock" color={t.faint} size={13} /> : null}
+          {queued ? (
+            <View style={{ flexShrink: 0 }}>
+              <Icon name="clock" color={t.faint} size={13} />
+            </View>
+          ) : null}
         </View>
       </View>
     </Pressable>
