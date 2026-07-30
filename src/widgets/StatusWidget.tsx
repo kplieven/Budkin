@@ -10,8 +10,9 @@
 import Constants from 'expo-constants';
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 
-import { ageOrDueLabel, fmtAgoShort, fmtDur } from '@/lib/format';
+import { ageOrDueLabel, fmtAgoShort } from '@/lib/format';
 import type { WidgetSnapshot } from '@/widgets/snapshot';
+import { widgetToday } from '@/widgets/today';
 import { activitySvg } from '@/widgets/widgetIcons';
 
 type Hex = `#${string}`;
@@ -82,12 +83,17 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
   const nextSide = s?.nextSide === 'right' ? 'Right' : 'Left';
   const age = s?.birth != null ? ageOrDueLabel(s.birth, s.expected, now) : '';
   const napping = s?.sleepStart != null;
-  const sleepValue = napping
-    ? fmtDur((now - (s as WidgetSnapshot).sleepStart!) / 60000)
-    : s && s.sleepTodayMin > 0
-      ? `${fmtDur(s.sleepTodayMin)} today`
-      : '—';
-  const today = `Today · ${s?.feedsToday ?? 0} feeds · ${s?.diapersToday ?? 0} changes`;
+  // The whole day window, computed HERE from the snapshot's raw records against
+  // the live `now`, so the boundary rollover self-corrects on the next refresh
+  // instead of showing yesterday's totals off a frozen bitmap. All of the
+  // arithmetic and both strings come from the pure module, which is the only part
+  // of this widget a test can reach.
+  //
+  // The Sleep row is always the day total, live nap included, matching Home: the
+  // old "current nap only while napping" discarded every logged sleep, the exact
+  // bug Home already fixed. The `Napping` label flip below keeps that signal, and
+  // the summary line names the boundary the numbers count from.
+  const today = widgetToday(s, now);
 
   return (
     <FlexWidget
@@ -104,9 +110,9 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flex: 1, flexDirection: 'column', width: 'match_parent', justifyContent: 'space-around', marginTop: 6, marginBottom: 6 }}>
         <StatRow label="Fed" value={agoLabel(s?.lastFeedStart, now)} color={FEED} />
-        <StatRow label={napping ? 'Napping' : 'Sleep'} value={sleepValue} color={SLEEP} />
+        <StatRow label={napping ? 'Napping' : 'Sleep'} value={today.sleepValue} color={SLEEP} />
         <StatRow label="Diaper" value={agoLabel(s?.lastDiaper, now)} color={DIAPER} />
-        <TextWidget text={today} style={{ fontSize: 12, color: DIM }} />
+        <TextWidget text={today.todayLine} style={{ fontSize: 12, color: DIM }} />
       </FlexWidget>
 
       <FlexWidget style={{ flexDirection: 'column', width: 'match_parent' }}>

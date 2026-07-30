@@ -7,7 +7,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { entriesForChild, lastDiaper, nextStartSide } from '@/store/selectors';
+import { entriesForChild, lastDiaper, nextStartSide, runningTimer } from '@/store/selectors';
+import { pruneWidgetEntries } from '@/widgets/today';
 import type { Connection } from '@/data/repository';
 import type { Child, Entry, Timer } from '@/types/models';
 
@@ -22,17 +23,31 @@ export interface WidgetSnapshot {
   lastDiaperSolid: boolean;
   /** start of a running sleep timer, or null */
   sleepStart: number | null;
-  /** total sleep minutes today (used when not currently napping) */
-  sleepTodayMin: number;
-  feedsToday: number;
-  diapersToday: number;
+  /**
+   * RAW records for the selected child, pruned to the widget's 48h lookback and
+   * to the three types it reads (see `pruneWidgetEntries`). Deliberately raw and
+   * not pre-summed totals: the widget's bitmap is frozen and Android's refresh
+   * floor is 30 minutes, so a baked-in "today" total goes from stale to plain
+   * wrong the moment the day boundary passes. The render path has a live clock,
+   * so it windows these itself (`widgetToday`) and the rollover self-corrects.
+   */
+  entries: Entry[];
+  /** the client-wide day boundary from Settings, so the widget windows like Home */
+  rhythmOriginHour: number;
   /** id of the selected child — stamps entries created from the widget */
   selectedChildId: string;
   /** true when a real (non-demo) connection exists, so a widget-saved nap can be queued */
   canQueueNap: boolean;
 }
 
-const KEY = 'budkin.widget.v1';
+/**
+ * v2: the shape changed from pre-baked totals to raw records plus the day
+ * boundary. A persisted v1 payload must never be read as a v2 one, and there is
+ * deliberately no dual-path reader keeping the old fields as a fallback: two
+ * permanent code paths is worse than one stale render. Until the app next runs
+ * and writes v2, the widget shows the empty state `StatusWidget` already handles.
+ */
+const KEY = 'budkin.widget.v2';
 
 export async function writeWidgetSnapshot(s: WidgetSnapshot): Promise<void> {
   try {
@@ -51,12 +66,19 @@ export async function readWidgetSnapshot(): Promise<WidgetSnapshot | null> {
   }
 }
 
+/**
+ * Takes a structural subset of the store state, so `sync.ts` can keep passing the
+ * whole state object. `now` is used ONLY to anchor the record prune: no "today"
+ * figure is computed here, by design (see `entries` above).
+ */
 export function buildWidgetSnapshot(s: {
   children: Child[];
   selectedChildId: string;
   entries: Entry[];
   timers: Timer[];
   connection: Connection | null;
+  rhythmOriginHour: number;
+  now: number;
 }): WidgetSnapshot {
   const child = s.children.find((c) => c.id === s.selectedChildId);
   // `entries` holds every child's records, so scope to the selected child before
@@ -67,19 +89,14 @@ export function buildWidgetSnapshot(s: {
   const lastFeeding = entries
     .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding' && e.end != null)
     .sort((a, b) => b.start - a.start)[0];
-  const todayStr = new Date().toDateString();
-  const sleepTodayMin = entries
-    .filter((e): e is Extract<Entry, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
-    .filter((e) => new Date(e.end as number).toDateString() === todayStr)
-    .reduce((sum, e) => sum + ((e.end as number) - e.start) / 60000, 0);
   const diaper = lastDiaper(entries);
-  const runningSleep = s.timers.find((t) => t.activity === 'sleep');
-  const feedsToday = entries.filter(
-    (e) => e.type === 'feeding' && new Date(e.end ?? e.start).toDateString() === todayStr,
-  ).length;
-  const diapersToday = entries.filter(
-    (e) => e.type === 'diaper' && new Date(e.time).toDateString() === todayStr,
-  ).length;
+  // The shared timer rule, keyed on `saveAs` (what the timer will be written as,
+  // so a quick timer repointed to sleep counts) and scoped to the selected child
+  // (so a sibling's nap does not show up as this child's). The selected child is
+  // passed as both ids: an ownerless timer is the selected child's, and nobody
+  // else's. `napToggle` MUST look the running nap up the same way, or a tap on a
+  // widget showing "napping" would start a second timer.
+  const runningSleep = runningTimer(s.timers, 'sleep', s.selectedChildId, s.selectedChildId);
 
   return {
     childName: child ? child.first : '',
@@ -90,9 +107,8 @@ export function buildWidgetSnapshot(s: {
     lastDiaper: diaper?.time ?? null,
     lastDiaperSolid: diaper?.solid ?? false,
     sleepStart: runningSleep?.start ?? null,
-    sleepTodayMin: Math.round(sleepTodayMin),
-    feedsToday,
-    diapersToday,
+    entries: pruneWidgetEntries(entries, s.now),
+    rhythmOriginHour: s.rhythmOriginHour,
     selectedChildId: s.selectedChildId,
     canQueueNap: s.connection?.mode === 'server',
   };

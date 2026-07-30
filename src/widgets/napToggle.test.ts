@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadQueue } from '@/data/queue';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
+import type { Entry } from '@/types/models';
 import { toggleNapFromWidget } from '@/widgets/napToggle';
 import { writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
+import { widgetToday } from '@/widgets/today';
+
+const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 
 // In-memory stand-in for the native AsyncStorage module (same pattern as timers.test.ts).
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
@@ -34,9 +38,8 @@ const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
   lastDiaper: null,
   lastDiaperSolid: false,
   sleepStart: null,
-  sleepTodayMin: 0,
-  feedsToday: 0,
-  diapersToday: 0,
+  entries: [],
+  rhythmOriginHour: 12,
   selectedChildId: 'c1',
   canQueueNap: true,
   ...over,
@@ -204,6 +207,65 @@ describe('toggleNapFromWidget', () => {
     expect(rendered).toHaveLength(1); // it repainted the widget
     expect(rendered[0]?.sleepStart).toBe(1000); // from the current (napping) snapshot
     expect(postTimerNotification).toHaveBeenCalledTimes(1); // only the real start posted
+  });
+
+  it('stop: appends the finished nap to the snapshot records, so the total stays right', async () => {
+    // The sleep total is derived from these records at render time, so a stop
+    // that carried them forward unchanged would drop the nap out of the figure
+    // until the app next ran.
+    const start = at(2026, 6, 5, 13);
+    const end = at(2026, 6, 5, 14);
+    await writeWidgetSnapshot(snap({ sleepStart: start }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    const { render, last } = capture();
+    await toggleNapFromWidget(end, render);
+    const next = last() as WidgetSnapshot;
+    expect(next.entries).toHaveLength(1);
+    expect(next.entries[0]).toMatchObject({ type: 'sleep', start, end, childId: 'c1' });
+    // still 1h of sleep in the window, now as a logged record instead of a timer
+    expect(widgetToday(next, end).sleepMin).toBe(60);
+  });
+
+  it('stop: keeps the existing records and re-prunes them to the lookback', async () => {
+    const start = at(2026, 6, 5, 13);
+    const end = at(2026, 6, 5, 14);
+    const keep: Entry = { id: 'd1', childId: 'c1', type: 'diaper', time: at(2026, 6, 5, 12, 30), wet: true, solid: false, color: null, tags: [] };
+    const stale: Entry = { id: 'd0', childId: 'c1', type: 'diaper', time: at(2026, 6, 2, 12), wet: true, solid: false, color: null, tags: [] };
+    await writeWidgetSnapshot(snap({ sleepStart: start, entries: [stale, keep] }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    const { render, last } = capture();
+    await toggleNapFromWidget(end, render);
+    const next = last() as WidgetSnapshot;
+    expect(next.entries.map((e) => e.id)).toEqual(['d1', `e${end}`]);
+  });
+
+  it('stop: finds the timer by saveAs, so a quick timer repointed to sleep stops instead of starting a second one', async () => {
+    // `buildWidgetSnapshot` shows this timer as the running nap (same rule), so
+    // an activity-keyed lookup here would leave the widget saying "napping" while
+    // this tap started a SECOND timer.
+    await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
+    await saveTimers([{ id: 't1', activity: 'feeding', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    const { render, last } = capture();
+    await toggleNapFromWidget(5000, render);
+    expect(last()?.sleepStart).toBeNull();
+    expect(await loadTimers()).toHaveLength(0);
+    expect(await loadQueue()).toHaveLength(1);
+  });
+
+  it("does not stop a sibling's nap; it starts one for the selected child", async () => {
+    // Accepted consequence of scoping: a widget shows ONE child, and the unscoped
+    // version filed the stopped nap against the selected child whoever it
+    // belonged to. A sibling's timer stays stoppable on the Timers tab.
+    await writeWidgetSnapshot(snap({ selectedChildId: 'c1' }));
+    await saveTimers([{ id: 't1', childId: 'c2', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    const { render, last } = capture();
+    await toggleNapFromWidget(5000, render);
+    expect(last()?.sleepStart).toBe(5000);
+    const timers = await loadTimers();
+    expect(timers).toHaveLength(2);
+    expect(timers[0]).toMatchObject({ id: 't1', childId: 'c2' }); // untouched
+    expect(timers[1]).toMatchObject({ childId: 'c1', start: 5000 });
+    expect(await loadQueue()).toHaveLength(0); // nothing filed against the wrong child
   });
 
   it('debounce: a stop is accepted once the window has passed', async () => {
