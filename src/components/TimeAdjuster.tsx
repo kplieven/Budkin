@@ -65,7 +65,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
   const isToday = new Date(value).toDateString() === new Date(now).toDateString();
 
   const stepBtn = {
-    paddingHorizontal: 11,
+    paddingHorizontal: 4,
     paddingVertical: 8,
     borderRadius: 11,
     backgroundColor: t.chip,
@@ -107,7 +107,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
         </Txt>
       )}
 
-      <View style={{ flexDirection: 'row', gap: 6, justifyContent: 'center', flexWrap: 'wrap' }}>
+      <View style={{ flexDirection: 'row', gap: 5, justifyContent: 'center', flexWrap: 'wrap' }}>
         {STEPS.map((d) => (
           <Pressable
             key={d}
@@ -117,7 +117,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             style={(s) => [stepBtn, isHovered(s) && { backgroundColor: t.elevated }]}
           >
             <Txt weight={700} size={13} style={{ fontVariant: ['tabular-nums'] }}>
-              {d > 0 ? `+${d}m` : `−${-d}m`}
+              {d > 0 ? `+${d}` : `−${-d}`}
             </Txt>
           </Pressable>
         ))}
