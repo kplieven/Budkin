@@ -61,7 +61,7 @@ import {
   type PendingOp,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, saveQueue } from '@/data/queue';
+import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -1446,6 +1446,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // `hydrate` above). Null for a child that was never pushed, which keeps
       // the old children[0] fallback.
       const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
+      // Read the write queue for the same reason `hydrate` does: this reload
+      // replaces `entries` wholesale with server data, and an entry that has
+      // not flushed yet is not in that data, so without merging it back the
+      // row just disappears from History. Read AFTER the fetch so an entry
+      // logged while the request was in flight is included. `flushQueue`
+      // removes an entry from the file as soon as the server accepts it, so
+      // anything still in here is genuinely not on the server and cannot
+      // duplicate a row in `data.entries`.
+      const q = await loadQueue();
       // Children are reconciled by `serverId`, not merged: a child already
       // known to the server keeps its local id (entries/measurements
       // reference it), and a child created offline (serverId == null) is kept
@@ -1482,7 +1491,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // `mergeHeldBackEntries`): they're already in `s.entries` (this is a
         // warm reload, not a cold restart), never on the server, so merge
         // them back the same way `hydrate()` does from the entity store.
-        entries: mergeHeldBackEntries(remappedEntries, s.entries, reconciledChildren),
+        entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), s.entries, reconciledChildren),
         treatments: mergeTreatments(data.treatments, s.treatments, reconciledChildren),
         selectedChildId,
         timers: reconcileTimers(localTimers, remappedTimers),
@@ -1771,25 +1780,41 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (!conn || conn.mode !== 'server' || s.offline) return;
       const q = await loadQueue();
       if (q.length === 0) return;
-      const remaining: Entry[] = [];
+      let failed = 0;
       for (const entry of q) {
         const childServerId = childServerIdFor(s.children, entry.childId);
         if (childServerId == null) {
           // The child still has no server id (e.g. its own push hasn't landed
           // yet): keep the entry queued for the next flush rather than sending
           // a local id the server would reject.
-          remaining.push(entry);
+          failed++;
           continue;
         }
         try {
           await pushEntryToServer(conn, entry, childServerId);
         } catch {
-          remaining.push(entry);
+          failed++;
+          continue;
         }
+        // Drop it the moment the server has it, one entry at a time, rather
+        // than saving what is left once the whole run finishes. The queue
+        // file is what `refresh()` merges back into `entries` to keep a
+        // still-queued row visible, so "in the file" has to keep meaning "the
+        // server does not have this". Saving only at the end broke that for
+        // the length of the run: a refresh landing mid-flush would show the
+        // server's copy and the queued copy as two rows for one feed.
+        //
+        // `removeQueuedEntry` re-reads the file and drops one id instead of
+        // overwriting it wholesale, so an entry enqueued while this ran (the
+        // nap widget enqueues from a headless task, in another process) is
+        // kept rather than clobbered.
+        const { queue } = await removeQueuedEntry(entry.id);
+        set(queueMirror(queue));
       }
-      await saveQueue(remaining);
-      set(queueMirror(remaining));
-      if (remaining.length === 0) {
+      // Re-read rather than trusting the last removal: anything enqueued
+      // during the run belongs in the count too.
+      set(queueMirror(await loadQueue()));
+      if (failed === 0) {
         get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
       }
     })();

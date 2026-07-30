@@ -19,6 +19,7 @@ import {
   loadInsightsHistory,
   loadProfileFromServer,
   loadTagsFromServer,
+  pushEntryToServer,
   serverHasData,
   updateChildOnServer,
 } from '@/data/repository';
@@ -1334,6 +1335,40 @@ describe('flushQueue', () => {
     expect(h.q).toHaveLength(0);
     expect(h.pushed).toHaveLength(1);
   });
+
+  it('drops each entry from the stored queue as soon as its own push succeeds', async () => {
+    // The queue file is what "not on the server yet" means: refresh() merges
+    // it back into `entries` so a still-queued row stays visible. Saving only
+    // once at the end of the run breaks that meaning for the length of the
+    // run, because an entry already accepted by the server sits in the file
+    // until the last push finishes. A refresh landing in that window shows
+    // the server's copy AND the queued copy: the same feed twice in History.
+    useAppStore.setState({ children: [SYNCED_C1] });
+    const first = { id: 'x1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    const second = { id: 'x2', childId: 'c1', type: 'diaper', time: NOW, wet: false, solid: true, color: null, tags: [] };
+    h.q = [first, second];
+    useAppStore.setState({ queueCount: 2, queuedIds: ['x1', 'x2'] });
+
+    // Snapshot the stored queue as the SECOND push starts: by then the first
+    // entry is on the server and must already be out of the file.
+    let queueDuringSecondPush: unknown[] = [];
+    vi.mocked(pushEntryToServer)
+      .mockImplementationOnce(async (_c: unknown, e: unknown) => {
+        h.pushed.push(e);
+        return 999;
+      })
+      .mockImplementationOnce(async (_c: unknown, e: unknown) => {
+        queueDuringSecondPush = [...h.q];
+        h.pushed.push(e);
+        return 999;
+      });
+
+    await s().flushQueue();
+
+    expect((queueDuringSecondPush as { id: string }[]).map((e) => e.id)).toEqual(['x2']);
+    expect(h.q).toHaveLength(0);
+    expect(s().queuedIds).toEqual([]);
+  });
 });
 
 describe('flushPendingOps', () => {
@@ -1979,6 +2014,48 @@ describe('queued entries survive killing the app', () => {
     await s().refresh();
     expect(s().entries).toHaveLength(1);
     expect(s().entries[0].id).toBe('diaper-9');
+  });
+
+  it('keeps a still-queued entry visible across a successful refresh', async () => {
+    // hydrate() merges the write queue back into `entries` so an offline
+    // create stays on screen; refresh() did not, so the first successful
+    // re-check replaced `entries` with server data alone and the row
+    // disappeared. The entry is not lost (it is still in the queue file, and
+    // the queue screen still lists it), but History stops showing it until
+    // some later load returns it from the server. The case that matters most
+    // is the entry that cannot flush at all, which is the one this test uses:
+    // it stays queued forever, so without the merge it is invisible forever,
+    // and it is exactly the row the "waiting to upload" clock exists for.
+    h.pushFails = true;
+    h.q = [queuedEntry('e3')];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().hydrate();
+    await flush();
+    expect(s().entries.map((e) => e.id)).toEqual(['e3']);
+
+    // The re-check succeeds and the server still knows nothing about it.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [mira],
+      entries: [],
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await s().refresh();
+    await flush();
+
+    expect(h.q).toHaveLength(1);
+    expect(s().entries.map((e) => e.id)).toEqual(['e3']);
+    expect(s().queuedIds).toEqual(['e3']);
   });
 });
 
