@@ -15,7 +15,7 @@ import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { fmtDur } from '@/lib/format';
 import { catchUpDueAt, type MilestoneDef, MILESTONES } from '@/lib/milestones';
-import { isTreatmentActiveToday, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
+import { isTreatmentActiveToday, runningTimer, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
 import type { ActivityType, Child, Treatment, Timer } from '@/types/models';
 
 /** Every identifier we own starts with this. `diffScheduled` refuses to cancel
@@ -387,14 +387,15 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   // TIMER, and separately an ongoing sleep ENTRY that carries no timer at all
   // (`asleepChildIds`; see its doc comment on ScheduleInput) — a running timer
   // does not exist for every ongoing sleep, e.g. one edited to "still
-  // ongoing". The `?? selectedChildId` fallback below is defensive, not the
-  // normal widget path: every current timer source, including the headless
-  // widget, stamps a childId, so this only resolves a timer persisted before
-  // that stamping existed.
+  // ongoing". `runningTimer` is the shared rule; note it is asked about THIS
+  // child, not the selected one, so an ownerless timer resolves to the selected
+  // child alone and cannot silence every child's nudge at once. That ownerless
+  // case is defensive, not the normal widget path: every current timer source,
+  // including the headless widget, stamps a childId, so it only resolves a timer
+  // persisted before that stamping existed.
   const asleep =
-    input.timers.some(
-      (t) => t.saveAs === 'sleep' && (t.childId ?? input.selectedChildId) === child.id,
-    ) || input.asleepChildIds[child.id] === true;
+    runningTimer(input.timers, 'sleep', child.id, input.selectedChildId) != null ||
+    input.asleepChildIds[child.id] === true;
   if (asleep) return [];
 
   // Documents the precondition rather than enforcing it: without this, wokeAt
