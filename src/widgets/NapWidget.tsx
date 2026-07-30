@@ -14,7 +14,9 @@
 //   idle:    6dp+6dp padding + a 20dp icon        = ~32dp
 //
 // Both clear 40dp. That is why the old stacked layout is gone: "● Napping" over
-// a 26sp duration over "tap to stop" came to ~90dp, more than two rows' worth.
+// a 26sp duration over "tap to stop" came to ~90dp, more than twice a one-row
+// cell. It fit the old `minHeight: "110dp"`, which is the two-row floor, and
+// that is exactly why it went unnoticed until the widget was declared 2x1.
 // The dropped copy is not lost information. The purple fill plus a running
 // duration already say "napping", and `accessibilityLabel` still spells out the
 // action for screen readers, which is where "tap to stop" actually mattered.
