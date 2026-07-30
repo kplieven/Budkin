@@ -11,6 +11,7 @@ import { fmtAgoShort, fmtClock, fmtDur } from '@/lib/format';
 import { useTheme } from '@/theme/useTheme';
 import { detailFor } from './detail';
 import { isTimer, type TimelineItem } from './groupByDay';
+import { timelineRowLabel } from './queuedMarker';
 
 const RAIL_W = 26;   // width of the spine column
 // Width of the clock column. Sized for the widest thing it holds, which is not a
@@ -102,9 +103,15 @@ function OngoingHalo({ color, top }: { color: string; top: number }) {
  * - The empty end-clock slot holds an elapsed pill instead. Tinted like the
  *   row's icon chip so it breaks the column's rhythm of right-aligned times and
  *   cannot be scanned as one.
+ *
+ * `queued` says the row is still sitting on the offline write queue and has not
+ * reached the server. The caller decides that (see
+ * `src/features/activity/queuedMarker.ts`) rather than this component reading
+ * the store, so History and the desktop rail cannot end up disagreeing, and so
+ * the rule stays testable: `vitest.config.ts` never loads a `.tsx`.
  */
-export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
-  item: TimelineItem; now: number; onPress: () => void; isFirst: boolean; isLast: boolean;
+export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = false }: {
+  item: TimelineItem; now: number; onPress: () => void; isFirst: boolean; isLast: boolean; queued?: boolean;
 }) {
   const t = useTheme();
   const timer = isTimer(item);
@@ -163,13 +170,15 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
       onPress={onPress}
       accessibilityRole="button"
       // An ongoing row carries its elapsed time in the label so a screen reader
-      // gets what the pill shows. Spelled with fmtDur ("1h 18m") rather than the
-      // pill's column-constrained fmtAgoShort ("1h18m"), which reads badly aloud.
-      accessibilityLabel={
-        ongoing
-          ? `Edit running ${ACTIVITY_LABEL[type]}${timer ? ' timer' : ''}, ${fmtDur(elapsedMin)} so far`
-          : `Edit ${ACTIVITY_LABEL[type]}`
-      }
+      // gets what the pill shows, and a queued row says so, so the clock marker
+      // below is never drawn without also being announced.
+      accessibilityLabel={timelineRowLabel({
+        activity: ACTIVITY_LABEL[type],
+        ongoing,
+        timer,
+        elapsed: fmtDur(elapsedMin),
+        queued,
+      })}
       style={(s) => [
         // A faint full-bleed wash in the entry's own activity color, spanning the
         // whole row (width and height). Kept very light so the timeline spine and
@@ -267,6 +276,11 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast }: {
               </Txt>
             </>
           ) : null}
+          {/* Still waiting to upload. A small faint clock and no words: the line
+              is already icon chip + label + rule + detail, and the state is
+              carried for screen readers by the row's accessibilityLabel above.
+              Last in the row so it stays put while the detail text shrinks. */}
+          {queued ? <Icon name="clock" color={t.faint} size={13} /> : null}
         </View>
       </View>
     </Pressable>
