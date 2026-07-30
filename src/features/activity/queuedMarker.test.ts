@@ -64,8 +64,8 @@ describe('isItemQueued', () => {
 
   it('marks a queued entry that already carries a serverId', () => {
     // `serverId` is not the test and must not become one. The reverse case
-    // below is the one that actually bites, but an entry can be re-queued by
-    // `commitWrite`'s push-failure catch after a serverId was stamped, and it
+    // below is the one that actually bites, but `undoDelete` re-queues through
+    // `commitWrite` with the original entry, serverId and all, and that entry
     // really is waiting to upload again.
     expect(isItemQueued(diaper('e1', 42), queuedIdSet(['e1'], true))).toBe(true);
   });

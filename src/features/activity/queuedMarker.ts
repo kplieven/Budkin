@@ -3,7 +3,7 @@
  *
  * Kept out of `TimelineEntry.tsx` because `vitest.config.ts` only matches
  * `.test.ts`: anything living in a component file is untestable by convention
- * here (same reason `queueView.ts` sits beside the queue screen).
+ * here (same reason `src/features/queue/queueView.ts` backs the queue screen).
  *
  * The population is `budkin.queue.v1` (see `src/data/queue.ts`) mirrored into
  * the store as `queuedIds`, and nothing else. Deliberately NOT `pendingOps`
