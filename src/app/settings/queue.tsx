@@ -4,14 +4,15 @@ import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { loadQueue } from '@/data/queue';
 import { detailFor } from '@/features/activity/detail';
+import { groupByDay } from '@/features/activity/groupByDay';
 import {
   attributionFor,
-  groupQueuedByDay,
+  queueSummaryHint,
   queueSummaryLine,
   queueTypeCounts,
   syncBlockedBy,
@@ -41,13 +42,16 @@ import type { Entry } from '@/types/models';
  *
  * Read-only by design. Nothing here removes an entry: `removeQueuedEntry` exists
  * for the write paths that own the record (a delete, a replace-by-timer), and a
- * discard offered from a viewer would drop a record the user can still see in
- * History, leaving the two screens disagreeing about what exists.
+ * discard offered from a viewer would drop a record the user can still see
+ * elsewhere in the app, leaving two screens disagreeing about what exists.
+ * Which screen that is depends on the type, so nothing here sends the user to
+ * one: a queued `note` shows in the Notes tab and a queued `milestone` in the
+ * Growth checklist, neither of them in History.
  *
  * The queue lives in AsyncStorage rather than in the store, which is what keeps
  * this screen clear of the zustand v5 selector trap: the list is `useState` fed
- * by `loadQueue()`, and the only things selected out of the store are an object
- * reference (`connection`, `children`) or a scalar (`queueCount`, `offline`).
+ * by `loadQueue()`, and the only things selected out of the store are object
+ * references (`connection`, `children`, `flushQueue`) or a scalar (`offline`).
  * No selector here returns a freshly built array.
  */
 export default function OfflineQueue() {
@@ -76,6 +80,10 @@ export default function OfflineQueue() {
     const q = await loadQueue();
     setQueue(q);
     setReadAt(Date.now());
+    // A sync result describes the flush that produced it and nothing else.
+    // Leaving it up would let "Uploaded 3 entries." sit over a queue read
+    // minutes later, on a return visit that uploaded nothing.
+    setResult(null);
     return q;
   }, []);
 
@@ -90,41 +98,53 @@ export default function OfflineQueue() {
     }, [read]),
   );
 
+  const loaded = queue != null;
   const serverMode = connection?.mode === 'server';
   const count = queue?.length ?? 0;
-  const block = syncBlockedBy({ serverMode, offline, count });
+  const block = syncBlockedBy({ loaded, serverMode, offline, count });
   const blockedHint = syncBlockedHint(block);
   const typeCounts = queueTypeCounts(queue ?? []);
-  const groups = groupQueuedByDay(queue ?? [], readAt);
+  // Grouped by the entry's OWN timestamp, not by when it was enqueued: the queue
+  // records no enqueue time (`Entry` has no such field and `budkin.queue.v1` is
+  // not migrated for this screen), and the entry's timestamp is the one the user
+  // recognises. Same grouping as History, so a queued entry sits under the day
+  // heading it will still have once it lands.
+  const groups = groupByDay(queue ?? [], readAt);
 
   const onSync = useCallback(async () => {
     setSyncing(true);
-    setResult(null);
-    const before = queue?.length ?? 0;
+    // A FRESH read for the baseline, not the last focus read. The widget's
+    // headless task enqueues out of process, so the count on screen can already
+    // be behind the file, and a stale baseline turns a partly successful flush
+    // into a reported failure.
+    const before = (await read()).length;
     try {
       await flushQueue();
-    } finally {
-      // Re-read whatever happened, including after a throw: `flushQueue` catches
-      // its own per-entry failures, so anything that escapes it left the queue in
-      // an unknown state and the file is the only thing worth believing.
-      const after = await read();
-      setResult(syncResultMessage(before, after.length));
-      setSyncing(false);
+    } catch {
+      // `flushQueue` catches its own per-entry failures, so nothing is expected
+      // to escape it. If something does, the re-read below is the only
+      // trustworthy account of what happened, and swallowing here keeps the
+      // rejection out of the discarded promise this is called through.
     }
-  }, [flushQueue, queue, read]);
+    const after = (await read()).length;
+    setResult(syncResultMessage(before, after));
+    setSyncing(false);
+  }, [flushQueue, read]);
 
   const { group, row, sectionLabel } = makeSettingsListStyles(t);
   const divider = { borderBottomWidth: 1, borderBottomColor: t.line };
 
   const summaryCard = (
     <View style={{ ...group, padding: 16, marginBottom: 4 }}>
+      {/* Headline AND hint gate on `loaded`, together. Splitting them is what
+          made the first paint of every visit read "Reading the queue" over
+          "Nothing is waiting right now.", which is the synced-and-settled claim
+          this screen exists to be trusted about. */}
       <Txt weight={700} size={16}>
-        {queue == null ? 'Reading the queue' : queueSummaryLine(count)}
+        {loaded ? queueSummaryLine(count) : 'Reading the queue'}
       </Txt>
       <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 4, lineHeight: 18 }}>
-        {count === 0
-          ? 'Entries you log while offline wait here until Budkin can reach the server. Nothing is waiting right now.'
-          : 'These are saved on this device and go up on their own once the server is reachable. They already show in History.'}
+        {queueSummaryHint(loaded, count)}
       </Txt>
 
       {typeCounts.length > 0 && (
@@ -142,7 +162,7 @@ export default function OfflineQueue() {
                 backgroundColor: hexA(t.activity[c.type], 0.16),
               }}
             >
-              <Icon name={c.type as IconName} color={t.activity[c.type]} size={14} />
+              <Icon name={c.type} color={t.activity[c.type]} size={14} />
               <Txt weight={600} size={12.5} color={t.activity[c.type]}>
                 {c.label}
               </Txt>
@@ -230,7 +250,7 @@ export default function OfflineQueue() {
                       marginRight: 12,
                     }}
                   >
-                    <Icon name={e.type as IconName} color={color} size={17} />
+                    <Icon name={e.type} color={color} size={17} />
                   </View>
                   <View style={{ flex: 1, paddingRight: 10 }}>
                     <Txt weight={700} size={15.5} tracking={-0.2}>

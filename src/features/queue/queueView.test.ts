@@ -3,19 +3,16 @@ import { describe, expect, it } from 'vitest';
 import {
   attributionFor,
   entryCountLabel,
-  groupQueuedByDay,
+  queueSummaryHint,
   queueSummaryLine,
   queueTypeCounts,
   syncBlockedBy,
   syncBlockedHint,
   syncResultMessage,
 } from '@/features/queue/queueView';
-import { dayGroupLabel } from '@/lib/format';
 import type { Entry } from '@/types/models';
 
 const NOW = 1_700_000_000_000;
-const M = 60000;
-const DAY = 86400000;
 
 const feed = (id: string, ts: number, childId = 'c1'): Entry => ({
   id,
@@ -109,21 +106,28 @@ describe('queueTypeCounts', () => {
   });
 });
 
-describe('groupQueuedByDay', () => {
-  it('groups by the timestamp on the entry itself, newest day first', () => {
-    const today = NOW - 10 * M;
-    const older = NOW - 3 * DAY;
-    const groups = groupQueuedByDay([feed('a', older), diaper('b', today)], NOW);
-    expect(groups.map((g) => g.label)).toEqual([dayGroupLabel(today, NOW), dayGroupLabel(older, NOW)]);
+describe('queueSummaryHint', () => {
+  it('says the read is still running rather than claiming nothing is waiting', () => {
+    // An unread queue counts 0, so the empty copy under a "Reading the queue"
+    // headline would tell a user everything is synced before anything is known.
+    expect(queueSummaryHint(false, 0)).toBe('Checking what is still waiting to upload.');
   });
 
-  it('keeps every queued entry exactly once', () => {
-    const queue = [feed('a', NOW - 10 * M), feed('b', NOW - 2 * DAY), diaper('c', NOW - 30 * M)];
-    expect(groupQueuedByDay(queue, NOW).reduce((n, g) => n + g.items.length, 0)).toBe(3);
+  it('claims nothing is waiting only once the queue really has been read', () => {
+    expect(queueSummaryHint(true, 0)).toContain('Nothing is waiting right now');
   });
 
-  it('has no groups for an empty queue', () => {
-    expect(groupQueuedByDay([], NOW)).toEqual([]);
+  it('never sends the user to History, which two queued types never reach', () => {
+    // commitWrite queues any Entry. A queued note shows only in the Notes tab
+    // and a queued milestone only in the Growth checklist, so a blanket "they
+    // already show in History" is false for both.
+    expect(queueSummaryHint(true, 3)).not.toContain('History');
+    expect(queueSummaryHint(true, 0)).not.toContain('History');
+    expect(queueSummaryHint(false, 0)).not.toContain('History');
+  });
+
+  it('reassures without a false claim once entries are waiting', () => {
+    expect(queueSummaryHint(true, 3)).toContain('saved on this device');
   });
 });
 
@@ -147,26 +151,35 @@ describe('attributionFor', () => {
 });
 
 describe('syncBlockedBy', () => {
-  it('lets the button run with a connected server, online, and something queued', () => {
-    expect(syncBlockedBy({ serverMode: true, offline: false, count: 2 })).toBeNull();
+  const live = { loaded: true, serverMode: true, offline: false, count: 2 };
+
+  it('lets the button run with a read queue, a connected server, online, and something queued', () => {
+    expect(syncBlockedBy(live)).toBeNull();
   });
 
   it('blocks in local mode, where there is no server to upload to', () => {
-    expect(syncBlockedBy({ serverMode: false, offline: false, count: 2 })).toBe('local');
+    expect(syncBlockedBy({ ...live, serverMode: false })).toBe('local');
   });
 
   it('blocks while offline, matching the flushQueue guard', () => {
     // flushQueue returns early on `offline`, so an enabled button would be a
     // no-op that looks like a working one.
-    expect(syncBlockedBy({ serverMode: true, offline: true, count: 2 })).toBe('offline');
+    expect(syncBlockedBy({ ...live, offline: true })).toBe('offline');
   });
 
   it('blocks on an empty queue', () => {
-    expect(syncBlockedBy({ serverMode: true, offline: false, count: 0 })).toBe('empty');
+    expect(syncBlockedBy({ ...live, count: 0 })).toBe('empty');
+  });
+
+  it('reports the read ahead of everything else, so the button does not flicker', () => {
+    // An unread queue counts 0, so without this every visit would grey the
+    // button as "empty" for the length of an AsyncStorage round trip and then
+    // enable it, for no reason the user can see.
+    expect(syncBlockedBy({ ...live, loaded: false, count: 0 })).toBe('loading');
   });
 
   it('reports local mode ahead of offline, since the missing server is the real reason', () => {
-    expect(syncBlockedBy({ serverMode: false, offline: true, count: 0 })).toBe('local');
+    expect(syncBlockedBy({ ...live, serverMode: false, offline: true, count: 0 })).toBe('local');
   });
 });
 
@@ -176,9 +189,10 @@ describe('syncBlockedHint', () => {
     expect(syncBlockedHint('offline')).toContain('No connection');
   });
 
-  it('says nothing when the queue is merely empty, or when the button is live', () => {
-    // The empty state card already says everything is synced; a second sentence
-    // under the button would only repeat it.
+  it('says nothing while reading, on a merely empty queue, or when the button is live', () => {
+    // The card above already says everything is synced, and a read is over
+    // before a sentence about it could be read.
+    expect(syncBlockedHint('loading')).toBeNull();
     expect(syncBlockedHint('empty')).toBeNull();
     expect(syncBlockedHint(null)).toBeNull();
   });
@@ -200,8 +214,13 @@ describe('syncResultMessage', () => {
     expect(syncResultMessage(2, 2)).toBe('Nothing uploaded. 2 entries still waiting.');
   });
 
-  it('handles a queue that grew during the flush without calling it a failure', () => {
-    expect(syncResultMessage(1, 2)).toBe('Nothing uploaded. 2 entries still waiting.');
+  it('does not call a flush a failure just because the queue grew during it', () => {
+    // 2 queued, both uploaded, the widget enqueues 3 while the flush runs. The
+    // old `after >= before` branch told the user "Nothing uploaded" after a
+    // flush that uploaded everything it had.
+    const msg = syncResultMessage(2, 3);
+    expect(msg).not.toContain('Nothing uploaded');
+    expect(msg).toBe('3 entries waiting now. More were logged while the sync ran, so what went up cannot be told apart.');
   });
 
   it('reports an empty queue rather than an upload of nothing', () => {
