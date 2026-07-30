@@ -51,8 +51,12 @@ import type { Entry } from '@/types/models';
  * The queue lives in AsyncStorage rather than in the store, which is what keeps
  * this screen clear of the zustand v5 selector trap: the list is `useState` fed
  * by `loadQueue()`, and the only things selected out of the store are object
- * references (`connection`, `children`, `flushQueue`) or a scalar (`offline`).
- * No selector here returns a freshly built array.
+ * references (`connection`, `children`, `flushQueue`, `refresh`) or a scalar
+ * (`offline`). No selector here returns a freshly built array.
+ *
+ * The one button re-checks the connection and then flushes, in that order, so it
+ * is the app's single retry affordance rather than a second, weaker one: see
+ * `onSync` below and `syncBlockedBy` in `queueView.ts`.
  */
 export default function OfflineQueue() {
   const t = useTheme();
@@ -63,6 +67,7 @@ export default function OfflineQueue() {
   const offline = useAppStore((s) => s.offline);
   const children = useAppStore((s) => s.children);
   const flushQueue = useAppStore((s) => s.flushQueue);
+  const refresh = useAppStore((s) => s.refresh);
 
   // `null` is "not read yet", which is distinct from an empty queue: the empty
   // card claims everything is synced, and it must not flash up before the read
@@ -119,17 +124,31 @@ export default function OfflineQueue() {
     // into a reported failure.
     const before = (await read()).length;
     try {
+      // Try the network again, exactly as the offline banner's Retry does, and
+      // in that order. `flushQueue` returns early while `offline` is set and
+      // `refresh` is the only call that can clear it, so a flush on its own is a
+      // no-op for the user this button now exists for: the one who arrived here
+      // from the banner with no connection.
+      await refresh();
+      // Awaited, and not left to the flushes `refresh` fires itself: those are
+      // deliberately fire-and-forget, so the re-read below would count the queue
+      // before the upload finished and report a successful sync as "Nothing
+      // uploaded. N still waiting."
       await flushQueue();
     } catch {
-      // `flushQueue` catches its own per-entry failures, so nothing is expected
-      // to escape it. If something does, the re-read below is the only
-      // trustworthy account of what happened, and swallowing here keeps the
-      // rejection out of the discarded promise this is called through.
+      // `flushQueue` catches its own per-entry failures and `refresh` catches an
+      // unreachable server, so nothing is expected to escape either. If
+      // something does, the re-read below is the only trustworthy account of
+      // what happened, and swallowing here keeps the rejection out of the
+      // discarded promise this is called through.
     }
     const after = (await read()).length;
-    setResult(syncResultMessage(before, after));
+    // Read from the store rather than the `offline` binding above: that one was
+    // captured when this callback was built, which is before the refresh that
+    // just decided the answer.
+    setResult(syncResultMessage({ offline: useAppStore.getState().offline, before, after }));
     setSyncing(false);
-  }, [flushQueue, read]);
+  }, [flushQueue, read, refresh]);
 
   const { group, row, sectionLabel } = makeSettingsListStyles(t);
   const divider = { borderBottomWidth: 1, borderBottomColor: t.line };
@@ -175,7 +194,7 @@ export default function OfflineQueue() {
         onPress={() => void onSync()}
         disabled={block != null || syncing}
         accessibilityRole="button"
-        accessibilityLabel="Sync now"
+        accessibilityLabel="Retry"
         accessibilityState={{ disabled: block != null || syncing }}
         style={(s) => [
           {
@@ -194,7 +213,10 @@ export default function OfflineQueue() {
       >
         {syncing && <ActivityIndicator size="small" color={block != null ? t.dim : t.onPrimary} />}
         <Txt unselectable weight={700} size={15} color={block != null ? t.faint : t.onPrimary}>
-          {syncing ? 'Syncing' : 'Sync now'}
+          {/* "Retry", not "Sync now": the press re-checks the connection first
+              and uploads second, so it is the same affordance as the offline
+              banner's Retry and says so. */}
+          {syncing ? 'Retrying…' : 'Retry'}
         </Txt>
       </Pressable>
 
