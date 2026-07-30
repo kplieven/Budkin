@@ -1,4 +1,4 @@
-import type { Entry } from '@/types/models';
+import type { Entry, Timer } from '@/types/models';
 
 export const DAY = 86400000;
 
@@ -135,6 +135,41 @@ export function sleepMsInWindow(entries: Entry[], winStart: number): number {
   for (const e of entries) {
     if (e.type !== 'sleep' || e.end == null) continue;
     ms += Math.max(0, Math.min(e.end, winEnd) - Math.max(e.start, winStart));
+  }
+  return ms;
+}
+
+/**
+ * `sleepMsInWindow` plus the part of any still-running sleep timer that has
+ * already elapsed inside the window — the "sleep so far today" number Home
+ * shows. Pass `now` from the store's ticking clock and it counts up live.
+ *
+ * A running timer is clipped to the window on both sides, exactly like a
+ * completed sleep: a nap that began before `winStart` contributes only its
+ * in-window part, and a `now` past the window end stops the count at the
+ * boundary. A `now` before the timer's start (clock skew, bad persisted data)
+ * contributes 0, never a negative.
+ *
+ * A timer counts by `saveAs`, not `activity`: `saveAs` is what the timer will
+ * actually be written as when stopped, so a quick timer started as feeding and
+ * switched to sleep belongs in this total. Timers are NOT scoped to a child
+ * here — pass `timersForChild(...)` output, the same way `entries` must already
+ * be `entriesForChild(...)` output. Every running sleep timer in the array
+ * contributes, so two overlapping ones would double-count; the app has no path
+ * that creates those, and filtering by child is what keeps a sibling's nap out.
+ *
+ * Deliberately a separate function rather than an option on `sleepMsInWindow`:
+ * the `totalSleep` trend and the heatmap must keep counting logged sleep only
+ * (a trend point that grows while a nap runs would make history look unstable),
+ * so the two intents stay visible at each call site instead of hiding behind a
+ * defaulted argument.
+ */
+export function liveSleepMsInWindow(entries: Entry[], timers: Timer[], winStart: number, now: number): number {
+  const winEnd = winStart + DAY;
+  let ms = sleepMsInWindow(entries, winStart);
+  for (const tm of timers) {
+    if (tm.saveAs !== 'sleep') continue;
+    ms += Math.max(0, Math.min(now, winEnd) - Math.max(tm.start, winStart));
   }
   return ms;
 }

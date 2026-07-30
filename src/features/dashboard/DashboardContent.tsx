@@ -10,10 +10,10 @@ import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
-import { sleepMsInWindow, windowStart } from '@/features/insights/compute';
+import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind } from '@/store/selectors';
+import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -92,18 +92,30 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
     .sort((a, b) => b.start - a.start)[0];
   const fedSide = lastFeeding ? METHOD_LABEL[lastFeeding.method] : null;
 
-  const runningSleep = timers.find((tm) => tm.activity === 'sleep');
+  // Scoped like `childEntries`: a sibling's running nap must not land in this
+  // child's sleep total. Keyed on `saveAs`, not `activity`, because that is what
+  // the timer will be written as when stopped — a quick timer switched to sleep
+  // is sleep. Same rule the sleep-aware notification scheduler uses.
+  const childTimers = timersForChild(timers, selectedChild?.id);
+  const runningSleep = childTimers.find((tm) => tm.saveAs === 'sleep');
   const lastSleep = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
     .sort((a, b) => (b.end as number) - (a.end as number))[0];
 
   const dayStartMs = windowStart(now, originHour);
-  // Apportion sleep at the window boundary: a sleep straddling it counts here
-  // only for the part inside today's window (the rest lands in the neighbouring
-  // day). Matches the Insights Rhythm graph and its totalSleep trend, which
-  // split sleep on the same seam; windowStart rebuilds from calendar fields so
-  // the boundary stays correct across DST.
-  const todaySleepMin = sleepMsInWindow(childEntries, dayStartMs) / 60000;
+  // Sleep so far in today's window: logged sleep plus the elapsed part of a nap
+  // that is still running, so the number keeps counting up instead of being
+  // replaced by the timer (`now` ticks every second, so this ticks too).
+  // Everything is apportioned at the window boundary — a sleep or a nap
+  // straddling it counts here only for its in-window part, the rest lands in the
+  // neighbouring day. Matches the Insights Rhythm graph and its totalSleep
+  // trend, which split sleep on the same seam; windowStart rebuilds from
+  // calendar fields so the boundary stays correct across DST.
+  const todaySleepMin = liveSleepMsInWindow(childEntries, childTimers, dayStartMs, now) / 60000;
+  // "since noon" / "since 7:00" / "since midnight" — names the boundary the
+  // total counts from, which is user-configurable in Settings and is not
+  // midnight by default. fmtDayStartHour is already lowercase for this use.
+  const daySinceLabel = `since ${fmtDayStartHour(originHour)}`;
 
   const dia = lastDiaper(childEntries);
   const diaperAgo = dia ? Math.round((now - dia.time) / 60000) : null;
@@ -153,10 +165,14 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       sub: lastFeedAgo != null ? `ago · ${fedSide ?? ''}` : 'no feeds',
     },
     {
+      // Always the day's running total, never just the current nap. No "—"
+      // empty state: a real zero is the answer to "how much sleep today", and
+      // fmtDur(0) says "0 min". A running nap is announced on the Sleep grid
+      // tile and the live-timer card, so the sub here stays the boundary label.
       label: 'Sleep',
       color: t.activity.sleep,
-      value: runningSleep ? fmtDur((now - runningSleep.start) / 60000) : fmtDur(todaySleepMin),
-      sub: runningSleep ? 'napping now' : 'today',
+      value: fmtDur(todaySleepMin),
+      sub: daySinceLabel,
     },
     {
       label: 'Diaper',
