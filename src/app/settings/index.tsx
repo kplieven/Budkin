@@ -18,6 +18,7 @@ import {
   fmtDayStartHour,
   fmtMinuteOfDay,
   parseMinuteOfDay,
+  selectServerMode,
   SMALL_WASHES_PER_BIG_MAX,
   SMALL_WASHES_PER_BIG_MIN,
 } from '@/store/selectors';
@@ -591,7 +592,7 @@ export default function Settings() {
             so the row would advertise a screen with permanently nothing on it.
             The ROUTE still renders in local mode with its own empty state, so a
             typed /settings/queue does not dead-end. */}
-        {connection?.mode === 'server' && (
+        {selectServerMode({ connection }) && (
           <Pressable
             onPress={() => router.navigate('/settings/queue')}
             accessibilityRole="button"
