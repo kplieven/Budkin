@@ -85,6 +85,16 @@ export async function toggleNapFromWidget(
     return;
   }
 
+  if (!snap.selectedChildId) {
+    // No child selected (a fresh install writes a baseline snapshot with an empty
+    // id before onboarding). There is nobody to file a nap against, and the
+    // scoped lookup below would never find a timer stamped with an empty id, so
+    // every tap would start another one and leave the widget stuck on "napping".
+    // Repaint so the tap still gets feedback.
+    render(snap);
+    return;
+  }
+
   // Debounce duplicate/rapid delivery: repaint the widget from the current
   // snapshot without mutating any timer or logging an entry. Repainting (rather
   // than doing nothing) keeps a swallowed tap from feeling dead.
@@ -118,7 +128,7 @@ export async function toggleNapFromWidget(
     // the lookback stays bounded. `rhythmOriginHour` rides along in `...snap`:
     // the app owns that field and rewrites the snapshot whenever it changes, so
     // there is nothing for the headless task to freshen.
-    const next: WidgetSnapshot = { ...snap, sleepStart: null, entries: pruneWidgetEntries([...snap.entries, entry], now) };
+    const next: WidgetSnapshot = { ...snap, sleepStart: null, entries: pruneWidgetEntries([...(snap.entries ?? []), entry], now) };
     await writeWidgetSnapshot(next);
     render(next); // repaint now — state is durable; dismiss the notification after.
     await dismissTimerNotification(running.id);

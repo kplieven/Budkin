@@ -82,7 +82,6 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
   const s = snapshot;
   const nextSide = s?.nextSide === 'right' ? 'Right' : 'Left';
   const age = s?.birth != null ? ageOrDueLabel(s.birth, s.expected, now) : '';
-  const napping = s?.sleepStart != null;
   // The whole day window, computed HERE from the snapshot's raw records against
   // the live `now`, so the boundary rollover self-corrects on the next refresh
   // instead of showing yesterday's totals off a frozen bitmap. All of the
@@ -91,8 +90,10 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
   //
   // The Sleep row is always the day total, live nap included, matching Home: the
   // old "current nap only while napping" discarded every logged sleep, the exact
-  // bug Home already fixed. The `Napping` label flip below keeps that signal, and
-  // the summary line names the boundary the numbers count from.
+  // bug Home already fixed. The napping signal moved into the value ("2h · napping")
+  // rather than flipping this row's label, because "Napping 2h" claims to be the
+  // nap's length when the number is the whole window. The summary line below names
+  // the boundary the figures count from.
   const today = widgetToday(s, now);
 
   return (
@@ -110,7 +111,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flex: 1, flexDirection: 'column', width: 'match_parent', justifyContent: 'space-around', marginTop: 6, marginBottom: 6 }}>
         <StatRow label="Fed" value={agoLabel(s?.lastFeedStart, now)} color={FEED} />
-        <StatRow label={napping ? 'Napping' : 'Sleep'} value={today.sleepValue} color={SLEEP} />
+        <StatRow label="Sleep" value={today.sleepValue} color={SLEEP} />
         <StatRow label="Diaper" value={agoLabel(s?.lastDiaper, now)} color={DIAPER} />
         <TextWidget text={today.todayLine} style={{ fontSize: 12, color: DIM }} />
       </FlexWidget>

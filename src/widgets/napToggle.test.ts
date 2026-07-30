@@ -268,6 +268,22 @@ describe('toggleNapFromWidget', () => {
     expect(await loadQueue()).toHaveLength(0); // nothing filed against the wrong child
   });
 
+  it('with no child selected: does nothing, and never accumulates phantom timers', async () => {
+    // A fresh install writes a baseline snapshot with an empty selectedChildId
+    // before onboarding. The scoped lookup can never match a timer stamped with
+    // an empty id, so without the guard each tap would start another timer and
+    // leave the widget stuck showing a nap that can never be stopped.
+    await writeWidgetSnapshot(snap({ selectedChildId: '' }));
+    const { render, last } = capture();
+    await toggleNapFromWidget(100000, render);
+    await toggleNapFromWidget(200000, render); // well past the debounce window
+    await toggleNapFromWidget(300000, render);
+    expect(await loadTimers()).toHaveLength(0);
+    expect(last()?.sleepStart).toBeNull(); // never claims to be napping
+    expect(postTimerNotification).not.toHaveBeenCalled();
+    expect(await loadQueue()).toHaveLength(0);
+  });
+
   it('debounce: a stop is accepted once the window has passed', async () => {
     await writeWidgetSnapshot(snap());
     await toggleNapFromWidget(1000, () => {}); // start
