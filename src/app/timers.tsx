@@ -343,7 +343,7 @@ export default function Timers() {
             />
           ) : undefined
         }
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
           <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/(tabs)')} accessibilityLabel="Back" />
