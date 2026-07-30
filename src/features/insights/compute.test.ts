@@ -286,6 +286,19 @@ describe('liveSleepMsInWindow', () => {
     expect(liveSleepMsInWindow([], future, win, now)).toBe(0);
     expect(liveSleepMsInWindow([napped], future, win, now)).toBe(sleepMsInWindow([napped], win));
   });
+
+  it('caps at a full day when a timer straddles both window edges', () => {
+    // started before noon Jul 5, still running past noon Jul 6: both clips bite at once
+    const ms = liveSleepMsInWindow([], [timer(at(2026, 6, 5, 8))], win, at(2026, 6, 6, 18));
+    expect(ms / 3600000).toBeCloseTo(24, 3);
+  });
+
+  it('double counts overlapping running timers, as documented', () => {
+    // Reachable state (two quick timers both set to save as sleep). Pinned so the
+    // behaviour the doc comment describes cannot change silently.
+    const both = [timer(at(2026, 6, 5, 14)), { ...timer(at(2026, 6, 5, 14)), id: 't-dup' }];
+    expect(liveSleepMsInWindow([], both, win, now) / 3600000).toBeCloseTo(2, 3);
+  });
 });
 
 describe('buildDiaperSeries', () => {
