@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend, noonWindowStart, sleepMsInWindow, windowStart } from './compute';
-import type { Entry } from '@/types/models';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, liveSleepMsInWindow, noonWindowStart, sleepMsInWindow, windowStart } from './compute';
+import type { Entry, Timer } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 const sleep = (start: number, end: number, nap: boolean): Entry => ({
   id: `s-${start}`, childId: 'c1', type: 'sleep', start, end, nap, tags: [],
+});
+/** A running sleep timer (no `end` exists on a Timer — it runs until stopped). */
+const timer = (start: number): Timer => ({
+  id: `t-${start}`, childId: 'c1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start,
 });
 
 describe('buildSleepHeatmap', () => {
@@ -88,6 +92,19 @@ describe('buildTrend', () => {
     );
     expect(pts).toHaveLength(1);
     expect(pts[0].value).toBeCloseTo(8, 1); // 3h + 5h in the same night window
+  });
+
+  it('totalSleep still counts logged sleep only, never a running timer', () => {
+    // Regression guard for liveSleepMsInWindow: the trend takes no timers and
+    // must stay that way, or a history point would creep upward while a nap
+    // runs. Same window, same entries — Home's live number is the bigger one.
+    const win = at(2026, 6, 5, 12);
+    const entries = [sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14), true)];
+    const pts = buildTrend(entries, 'totalSleep', now, 30);
+    const today = pts.find((p) => p.t === win)!;
+    expect(today.value).toBeCloseTo(1, 3);
+    expect(today.value).toBeCloseTo(sleepMsInWindow(entries, win) / 3600000, 3);
+    expect(liveSleepMsInWindow(entries, [timer(at(2026, 6, 5, 14))], win, now) / 3600000).toBeCloseTo(2, 3);
   });
 
   it('totalSleep splits a sleep crossing the window boundary between the two windows', () => {
@@ -219,6 +236,68 @@ describe('sleepMsInWindow', () => {
       at(2026, 6, 5, 12),
     );
     expect(ms / 3600000).toBeCloseTo(2, 3);
+  });
+});
+
+describe('liveSleepMsInWindow', () => {
+  const win = at(2026, 6, 5, 12);  // noon Jul 5 — the window under test
+  const now = at(2026, 6, 5, 15);  // 3pm, three hours into it
+  const napped = sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14), true); // logged 1h nap
+
+  it('matches sleepMsInWindow when no timer is running', () => {
+    const entries = [napped];
+    expect(liveSleepMsInWindow(entries, [], win, now)).toBe(sleepMsInWindow(entries, win));
+  });
+
+  it('adds the full elapsed time of a nap that started inside the window', () => {
+    const ms = liveSleepMsInWindow([], [timer(at(2026, 6, 5, 14))], win, now); // 2pm → 3pm
+    expect(ms / 3600000).toBeCloseTo(1, 3);
+  });
+
+  it('counts only the in-window part of a nap that started before the window began', () => {
+    // 11:30am under a noon window: the pre-noon half hour belongs to yesterday
+    const ms = liveSleepMsInWindow([], [timer(at(2026, 6, 5, 11, 30))], win, now);
+    expect(ms / 3600000).toBeCloseTo(3, 3);
+  });
+
+  it('stops counting a running nap at the window end', () => {
+    // clock has run past next noon without the timer being stopped
+    const ms = liveSleepMsInWindow([], [timer(at(2026, 6, 5, 22))], win, at(2026, 6, 6, 15));
+    expect(ms / 3600000).toBeCloseTo(14, 3); // 10pm → next noon, not → 3pm
+  });
+
+  it('sums logged sleep and the running nap without double counting', () => {
+    const ms = liveSleepMsInWindow([napped], [timer(at(2026, 6, 5, 14, 30))], win, now);
+    expect(ms / 3600000).toBeCloseTo(1.5, 3); // 1h logged + 30min still running
+  });
+
+  it('ignores a running timer that will not be saved as sleep', () => {
+    const feed: Timer = { ...timer(at(2026, 6, 5, 14)), activity: 'feeding', saveAs: 'feeding' };
+    expect(liveSleepMsInWindow([napped], [feed], win, now)).toBe(sleepMsInWindow([napped], win));
+  });
+
+  it('counts a timer switched to sleep after starting as something else (saveAs, not activity)', () => {
+    const switched: Timer = { ...timer(at(2026, 6, 5, 14)), activity: 'feeding', saveAs: 'sleep' };
+    expect(liveSleepMsInWindow([], [switched], win, now) / 3600000).toBeCloseTo(1, 3);
+  });
+
+  it('never lets a nap starting after `now` subtract from the total', () => {
+    const future = [timer(at(2026, 6, 5, 16))]; // 4pm start, now is 3pm (clock skew / bad data)
+    expect(liveSleepMsInWindow([], future, win, now)).toBe(0);
+    expect(liveSleepMsInWindow([napped], future, win, now)).toBe(sleepMsInWindow([napped], win));
+  });
+
+  it('caps at a full day when a timer straddles both window edges', () => {
+    // started before noon Jul 5, still running past noon Jul 6: both clips bite at once
+    const ms = liveSleepMsInWindow([], [timer(at(2026, 6, 5, 8))], win, at(2026, 6, 6, 18));
+    expect(ms / 3600000).toBeCloseTo(24, 3);
+  });
+
+  it('double counts overlapping running timers, as documented', () => {
+    // Reachable state (two quick timers both set to save as sleep). Pinned so the
+    // behaviour the doc comment describes cannot change silently.
+    const both = [timer(at(2026, 6, 5, 14)), { ...timer(at(2026, 6, 5, 14)), id: 't-dup' }];
+    expect(liveSleepMsInWindow([], both, win, now) / 3600000).toBeCloseTo(2, 3);
   });
 });
 
