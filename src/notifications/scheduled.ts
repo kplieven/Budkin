@@ -301,6 +301,25 @@ function ageReminders(child: Child, now: number): ScheduledNotification[] {
 export const PUMP_AHEAD = 8;
 
 /**
+ * Whether a pumping session is running right now.
+ *
+ * NOT keyed on a child, unlike the sleep check in `napReminders`, and that
+ * asymmetry is deliberate. Pumping reminders are a single global grid anchored
+ * on `lastPumpAt`, which `scheduleSync`'s `toInput` derives from every pumping
+ * entry with no child filter at all. Scoping the suppression per child would
+ * let the two halves of the same reminder disagree: a session logged against a
+ * sibling would move the anchor but not silence the nudge.
+ *
+ * Keyed on `saveAs`, never `activity`, for the reason `runningTimer` documents:
+ * `setTimerSaveAs` repoints a quick timer without touching `activity`, so an
+ * `activity`-keyed check cannot see a timer that will be written as a pumping
+ * session.
+ */
+function pumpingTimerRunning(timers: Timer[]): boolean {
+  return timers.some((t) => t.saveAs === 'pumping');
+}
+
+/**
  * Repeating reminder on a fixed interval, anchored to the last pumping entry
  * (or, before any entry exists, to when the toggle was switched on). Unlike
  * the other three kinds, this one is not a fixed calendar instant: it is a
@@ -308,6 +327,12 @@ export const PUMP_AHEAD = 8;
  * scheduled ahead so the chain survives the app never being reopened.
  */
 function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification[] {
+  // Mid-session, so there is nothing to ask for. The same shape of rule
+  // `napReminders` applies while the child is asleep, and self-healing for the
+  // same reason: stopping the timer writes a pumping entry, that moves
+  // `lastPumpAt`, and the store write triggers a reconcile that rebuilds the
+  // grid from the new anchor.
+  if (pumpingTimerRunning(input.timers)) return [];
   const { pumpingIntervalMin, pumpingEnabledAt } = input.prefs;
   const anchor = Math.max(input.lastPumpAt ?? 0, pumpingEnabledAt ?? 0);
   if (!anchor || pumpingIntervalMin <= 0) return [];
@@ -727,4 +752,163 @@ export function diffScheduled(
   });
   const toCancel = ours.filter((e) => !desiredIds.has(e.identifier)).map((e) => e.identifier);
   return { toSchedule, toCancel };
+}
+
+interface ParsedReminderId {
+  kind: string;
+  /** everything between the kind and the trailing fire time */
+  head: string;
+  fireAt: number;
+}
+
+/**
+ * Split `budkin:{kind}:{head}:{fireAt}` back apart, or null for anything that is
+ * not one of ours.
+ *
+ * Every identifier this file builds ends in its fire time, so the trailing field
+ * is read off the END rather than by position. `head` may itself contain colons
+ * (the pump grid's `{anchor}:{n}`, the age step's slug, the milestone batch's
+ * key list), so no fixed field count would hold across all seven kinds.
+ */
+function parseReminderId(id: string): ParsedReminderId | null {
+  const rest = id.slice(REMINDER_PREFIX.length);
+  const kindEnd = rest.indexOf(':');
+  if (kindEnd <= 0) return null;
+  const tail = rest.slice(kindEnd + 1);
+  const fireAtStart = tail.lastIndexOf(':');
+  if (fireAtStart <= 0) return null;
+  const fireAt = Number(tail.slice(fireAtStart + 1));
+  if (!Number.isFinite(fireAt)) return null;
+  return { kind: rest.slice(0, kindEnd), head: tail.slice(0, fireAtStart), fireAt };
+}
+
+/**
+ * Whether the dose one already-delivered treatment alert was asking for has been
+ * given.
+ *
+ * Reuses the two rules `treatmentDueState` already owns rather than inventing a
+ * third. Dose-to-treatment attribution is by trimmed, case-insensitive NAME and
+ * lives in `treatmentDoseScalars` (src/store/selectors.ts), because a
+ * `MedicationEntry` carries no treatment reference that survives sync; this
+ * layer only ever sees the derived scalars.
+ *
+ * Answers "not given" whenever it cannot answer confidently. A missing scalar
+ * entry means the treatment was never CONSIDERED, not that no dose was logged:
+ * `treatmentDoseScalars` gives every treatment it was handed a key, and
+ * `scheduleSync` hands it the SELECTED child's treatments only, because in
+ * server mode `entries` holds one child at a time and any other child's dose
+ * history would read as empty. Dismissing on that would tell a parent a dose had
+ * been given when the app had simply not loaded it.
+ */
+function treatmentDoseGiven(
+  input: ScheduleInput,
+  treatmentId: string,
+  fireAt: number,
+  now: number,
+): boolean {
+  const treatment = input.treatments.find((t) => t.id === treatmentId);
+  if (!treatment) return false;
+  const doses = input.treatmentDoses[treatment.id];
+  if (!doses) return false;
+
+  if (treatment.scheduleMode === 'everyHours') {
+    // `treatmentDueState`'s interval branch restated over the derived scalars:
+    // the treatment is owed until a dose lands, and settled for one interval
+    // after it. Logging the dose re-anchors the grid, which is the same event
+    // that retires the banner, so the two stay in step by construction.
+    if (treatment.everyHours == null || treatment.everyHours <= 0) return false;
+    return doses.lastAt != null && now < doses.lastAt + treatment.everyHours * 3_600_000;
+  }
+
+  const todayMidnight = startOfDay(now);
+  // A banner from an earlier day. `today` counts today's doses, which say
+  // nothing about a slot on a day that has already ended, and the counting rule
+  // below is explicitly today-only (see `treatmentTimesOfDayReminders`). Left in
+  // the tray rather than guessed at.
+  if (fireAt < todayMidnight) return false;
+  const slots = TIME_OF_DAY_ORDER.filter((tod) => treatment.timesOfDay?.includes(tod));
+  const k = slots.findIndex((tod) => timeOfDaySlotMs(todayMidnight, tod) === fireAt);
+  // A slot the parent has since removed from the regimen. It has no index left
+  // to count against, so nothing can settle it.
+  if (k < 0) return false;
+  // The kth slot today (0-based) is settled once k + 1 doses are logged today,
+  // which is `treatmentTimesOfDayReminders`' forward suppression applied
+  // backwards to a slot that has already fired. Counting rather than matching
+  // slot to dose is what makes a late dose behave: on a morning+evening
+  // treatment one dose given at 19:00 settles the earlier owed slot and leaves
+  // the later one owed.
+  return doses.today >= k + 1;
+}
+
+function isStaleDelivered(parsed: ParsedReminderId, input: ScheduleInput, now: number): boolean {
+  switch (parsed.kind) {
+    case 'nap':
+      // Asked about the identifier's OWN child, never `selectedChildId`, so one
+      // sibling falling asleep cannot sweep away the other's nudge. Otherwise
+      // exactly the condition `napReminders` uses to refuse to schedule at all,
+      // including the ongoing-sleep-entry case that carries no timer.
+      return (
+        runningTimer(input.timers, 'sleep', parsed.head, input.selectedChildId) != null ||
+        input.asleepChildIds[parsed.head] === true
+      );
+    case 'stale':
+      // The alert asks "still going?" about one timer. Stopping or discarding it
+      // takes it out of `timers`, and the question has answered itself.
+      return !input.timers.some((t) => t.id === parsed.head);
+    case 'pump':
+      // Either a session is running right now, or one was logged at or after the
+      // instant this occurrence was asking for. `lastPumpAt` is the same scalar
+      // the grid is anchored on, so the two halves cannot disagree.
+      return (
+        pumpingTimerRunning(input.timers) ||
+        (input.lastPumpAt != null && input.lastPumpAt >= parsed.fireAt)
+      );
+    case 'treatment':
+      return treatmentDoseGiven(input, parsed.head, parsed.fireAt, now);
+    default:
+      // `due`, `age` and `milestone` each report a calendar fact that stays true
+      // after it fires, so no condition retires them. Anything a later version
+      // adds lands here too, and staying is the safe default.
+      return false;
+  }
+}
+
+/**
+ * Which DELIVERED notifications have gone stale and should be swept out of the
+ * tray.
+ *
+ * The counterpart to `diffScheduled`, and deliberately not built the same way.
+ * `cancelScheduledNotificationAsync` only ever reaches PENDING alerts, and a
+ * notification leaves the pending set the moment it fires, so a banner already
+ * sitting in the shade is invisible to that diff. This is the pass that reaches
+ * it: the nudge fires at 15:00, the parent starts the nap at 15:02, and without
+ * this the suggestion sits there contradicting the app.
+ *
+ * CONDITION-DRIVEN, NOT DESIRED-SET-DRIVEN, and that distinction is the whole
+ * design. Every builder above drops an occurrence once `fireAt <= now`, so a
+ * reminder that has just legitimately fired is BY DEFINITION absent from the
+ * desired set. "Dismiss anything no longer desired" would therefore clear every
+ * banner the instant it arrived and the parent would never see one. So each kind
+ * is asked its own specific question instead: has the thing this alert was
+ * asking for actually happened?
+ *
+ * Pure, and `now`-parametrised like everything else here, so the native
+ * reconciler in `applySchedule.android.ts` only has to supply the tray's
+ * identifiers.
+ */
+export function staleDelivered(
+  input: ScheduleInput,
+  presentedIds: readonly string[],
+  now: number,
+): string[] {
+  const out: string[] = [];
+  for (const id of presentedIds) {
+    // The same ownership contract `diffScheduled` enforces. A bare-uuid timer
+    // notification belongs to `postNotification.android.ts` and is not ours to
+    // dismiss.
+    if (!id.startsWith(REMINDER_PREFIX)) continue;
+    const parsed = parseReminderId(id);
+    if (parsed && isStaleDelivered(parsed, input, now)) out.push(id);
+  }
+  return out;
 }

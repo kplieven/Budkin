@@ -13,9 +13,10 @@ interface TabBarProps {
   navigation: { navigate: (name: string) => void };
 }
 
-// Timers is intentionally absent: it folded into Home, so it never renders in the
-// bottom bar even though /timers still exists as a route (AppTabBar returns null
-// for any route without a meta entry).
+// Every tab route has an entry here. Timers is absent because it is no longer in
+// this group at all: it is a root Stack route pushed from Home. AppTabBar renders
+// no item for a route without a meta entry; the bar itself still renders, so a
+// screen inside this group can rely on the bar's own bottom safe-area padding.
 const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Home', icon: 'home' },
   history: { label: 'History', icon: 'list' },

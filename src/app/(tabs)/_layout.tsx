@@ -4,8 +4,8 @@ import { AppTabBar } from '@/components/TabBar';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 
 // Anchor the group's initial route to Home so a deep link that lands directly on
-// a non-default tab (e.g. budkin://timer -> /timers on a cold start) builds a
-// well-formed nested navigation state with a live target tab to jump to.
+// a non-default tab builds a well-formed nested navigation state with a live
+// target tab to jump to, rather than a group with no active screen under it.
 export const unstable_settings = { initialRouteName: 'index' };
 
 export default function TabsLayout() {
@@ -32,10 +32,6 @@ export default function TabsLayout() {
       <Tabs.Screen name="growth" options={{ title: 'Growth' }} />
       <Tabs.Screen name="milestones" options={{ title: 'Milestones' }} />
       <Tabs.Screen name="notes" options={{ title: 'Notes' }} />
-      {/* Timers is no longer a bottom tab: it is reached from Home (the live-timer
-          card + the "Timers" link) and the widget deep link. Kept as a route here
-          (AppTabBar omits it) so /timers still resolves. */}
-      <Tabs.Screen name="timers" options={{ title: 'Timers' }} />
     </Tabs>
   );
 }
