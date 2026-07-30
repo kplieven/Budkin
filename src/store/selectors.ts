@@ -4,7 +4,7 @@
  */
 
 import { parseClockInput } from '@/lib/timeParse';
-import type { Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
+import type { ActivityType, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -44,6 +44,21 @@ export function entriesForChild(entries: Entry[], childId: string | undefined): 
 }
 
 /**
+ * THE timer adoption rule, in one place: whether `t` belongs to `childId`, given
+ * which child is currently selected. A timer carrying no `childId` of its own
+ * counts as the SELECTED child's, and therefore as nobody else's.
+ *
+ * `??` rather than a `== null` test so a persisted `null` and an absent field
+ * (`childId` is optional on `Timer`) resolve identically.
+ *
+ * Both `timersForChild` and `runningTimer` are built on this, so the repo has one
+ * adoption rule instead of two subtly different ones.
+ */
+function timerBelongsTo(t: Timer, childId: string, selectedChildId: string | undefined): boolean {
+  return (t.childId ?? selectedChildId) === childId;
+}
+
+/**
  * The running timers belonging on one child's history. Scoped like
  * `entriesForChild`, with one deliberate difference: a timer with NO `childId`
  * counts as the selected child's. `childId` is optional on `Timer` and the rest
@@ -55,13 +70,64 @@ export function entriesForChild(entries: Entry[], childId: string | undefined): 
  * child's timers, so a sibling's timer stays stoppable. History is per-child, so
  * a sibling's timer belongs in the sibling's history, not this one's.
  *
+ * Every caller here asks about the SELECTED child, which is why `childId` serves
+ * as both arguments to `timerBelongsTo`: this function is the special case of the
+ * adoption rule where the child being asked about is the selected one. To ask
+ * about a sibling, or for one timer of one kind, use `runningTimer` below, which
+ * takes the two ids apart.
+ *
  * Pure, so it must be called in the render body over a raw-selected array, not
  * inside a `useAppStore` selector: returning a fresh array from a selector makes
  * zustand v5 see a perpetually-changed snapshot and loop forever.
  */
 export function timersForChild(timers: Timer[], childId: string | undefined): Timer[] {
   if (!childId) return [];
-  return timers.filter((t) => t.childId == null || t.childId === childId);
+  return timers.filter((t) => timerBelongsTo(t, childId, childId));
+}
+
+/**
+ * The timer running for one child and one kind of activity, or `undefined`. The
+ * single answer to "is a sleep (or feeding) timer running right now", so that the
+ * dashboard's live sleep total, the Insights heatmap's live bar and the
+ * nap-suggestion scheduler cannot drift apart the way they did when each site
+ * wrote its own `find`.
+ *
+ * Keyed on `saveAs`, NEVER on `activity`. `setTimerSaveAs` rewrites `saveAs` and
+ * `name` and deliberately leaves `activity` at whatever the timer was started as,
+ * so an `activity`-keyed lookup cannot see a quick timer repointed to sleep. That
+ * bug is visible: the Insights live bar would be drawn in the feeding colour and
+ * then change colour the instant the user stopped the timer, contradicting the
+ * timer's own name, its colour on the Timers tab, Home, and the entry it becomes.
+ * `saveAs` is what the timer will be written as, which is the one thing every
+ * surface already agrees on.
+ *
+ * BOTH child ids, because they answer different questions. `childId` is whose
+ * timer is being asked about; `selectedChildId` exists only to resolve a timer
+ * that carries no owner. Passing the selected child as both is the "the current
+ * child" case and behaves exactly like `timersForChild`. Passing a different
+ * `childId` asks about a sibling, and an unowned timer must NOT be adopted by
+ * them: `napReminders` walks every child, so a single ownerless sleep timer would
+ * otherwise silence every child's nap nudge at once.
+ *
+ * No child to scope to yields `undefined` rather than the first matching timer,
+ * for the reason `entriesForChild` yields `[]`: a permissive fallback resurrects
+ * the bug the scoping exists to prevent.
+ *
+ * Pure, and called in the render body over a raw-selected `timers` array like
+ * every other scoping helper here. It returns an element of that array rather
+ * than a fresh one, so unlike `timersForChild` a selector-resident call would not
+ * by itself loop zustand v5; keep it out of `useAppStore` selectors anyway, so
+ * that "derive in render, never in a selector" stays a rule with no exceptions to
+ * reason about and nothing allocates on every selector call.
+ */
+export function runningTimer(
+  timers: Timer[],
+  saveAs: ActivityType,
+  childId: string | undefined,
+  selectedChildId: string | undefined,
+): Timer | undefined {
+  if (!childId) return undefined;
+  return timers.find((t) => t.saveAs === saveAs && timerBelongsTo(t, childId, selectedChildId));
 }
 
 /** Measurements owned by one child. Same scoping rules as `entriesForChild`. */
