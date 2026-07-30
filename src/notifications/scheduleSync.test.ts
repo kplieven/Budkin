@@ -510,3 +510,22 @@ describe('treatment projection', () => {
     expect(desired.mock.calls.length).toBeGreaterThan(builds);
   });
 });
+
+describe('delivered-sweep projection', () => {
+  it('hands applyScheduled the SAME projection it built the desired set from', async () => {
+    // The reconciler's delivered-notification sweep answers its staleness
+    // questions from this projection. Rebuilding it there, or passing a second
+    // `now`, would let the two halves of one reconcile straddle local midnight
+    // and disagree about what "today" means.
+    const { apply, desired, useAppStore } = await setup();
+    useAppStore.setState({
+      children: [{ id: 'c1', first: 'Rowan', last: '', birth: Date.now() - 86_400_000, color: '#208AEF' }],
+    });
+    await flush();
+
+    const built = desired.mock.calls.at(-1)!;
+    const applied = apply.mock.calls.at(-1)!;
+    expect(applied[1]).toBe(built[0]);
+    expect(applied[2]).toBe(built[1]);
+  });
+});
