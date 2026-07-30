@@ -14,8 +14,9 @@ interface TabBarProps {
 }
 
 // Every tab route has an entry here. Timers is absent because it is no longer in
-// this group at all: it is a root Stack route pushed from Home. AppTabBar still
-// returns null for any route without a meta entry, so an unlisted one is skipped.
+// this group at all: it is a root Stack route pushed from Home. AppTabBar renders
+// no item for a route without a meta entry; the bar itself still renders, so a
+// screen inside this group can rely on the bar's own bottom safe-area padding.
 const TABS: Record<string, { label: string; icon: IconName }> = {
   index: { label: 'Home', icon: 'home' },
   history: { label: 'History', icon: 'list' },
