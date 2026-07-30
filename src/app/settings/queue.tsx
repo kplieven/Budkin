@@ -12,12 +12,13 @@ import { detailFor } from '@/features/activity/detail';
 import { groupByDay } from '@/features/activity/groupByDay';
 import {
   attributionFor,
+  offlineHint,
   queueSummaryHint,
   queueSummaryLine,
   queueTypeCounts,
+  runQueueRetry,
   syncBlockedBy,
   syncBlockedHint,
-  syncResultMessage,
 } from '@/features/queue/queueView';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
@@ -51,8 +52,13 @@ import type { Entry } from '@/types/models';
  * The queue lives in AsyncStorage rather than in the store, which is what keeps
  * this screen clear of the zustand v5 selector trap: the list is `useState` fed
  * by `loadQueue()`, and the only things selected out of the store are object
- * references (`connection`, `children`, `flushQueue`) or a scalar (`offline`).
- * No selector here returns a freshly built array.
+ * references (`connection`, `children`, `flushQueue`, `refresh`) or a scalar
+ * (`offline`). No selector here returns a freshly built array.
+ *
+ * The one button re-checks the connection and then flushes, in that order, so it
+ * is the app's single retry affordance rather than a second, weaker one. That
+ * sequence is `runQueueRetry` in `queueView.ts`, where it can be tested; `onSync`
+ * below is only the wiring.
  */
 export default function OfflineQueue() {
   const t = useTheme();
@@ -63,6 +69,7 @@ export default function OfflineQueue() {
   const offline = useAppStore((s) => s.offline);
   const children = useAppStore((s) => s.children);
   const flushQueue = useAppStore((s) => s.flushQueue);
+  const refresh = useAppStore((s) => s.refresh);
 
   // `null` is "not read yet", which is distinct from an empty queue: the empty
   // card claims everything is synced, and it must not flash up before the read
@@ -101,8 +108,13 @@ export default function OfflineQueue() {
   const loaded = queue != null;
   const serverMode = connection?.mode === 'server';
   const count = queue?.length ?? 0;
-  const block = syncBlockedBy({ loaded, serverMode, offline, count });
+  const block = syncBlockedBy({ loaded, serverMode });
+  // At most one line ever shows under the button: `offlineHint` stays quiet in
+  // local mode (the only state `syncBlockedHint` speaks in) and quiet again once
+  // a press has been answered below.
+  const showResult = result != null && !syncing;
   const blockedHint = syncBlockedHint(block);
+  const connectionHint = offlineHint({ offline, block, answered: showResult });
   const typeCounts = queueTypeCounts(queue ?? []);
   // Grouped by the entry's OWN timestamp, not by when it was enqueued: the queue
   // records no enqueue time (`Entry` has no such field and `budkin.queue.v1` is
@@ -113,23 +125,22 @@ export default function OfflineQueue() {
 
   const onSync = useCallback(async () => {
     setSyncing(true);
-    // A FRESH read for the baseline, not the last focus read. The widget's
-    // headless task enqueues out of process, so the count on screen can already
-    // be behind the file, and a stale baseline turns a partly successful flush
-    // into a reported failure.
-    const before = (await read()).length;
-    try {
-      await flushQueue();
-    } catch {
-      // `flushQueue` catches its own per-entry failures, so nothing is expected
-      // to escape it. If something does, the re-read below is the only
-      // trustworthy account of what happened, and swallowing here keeps the
-      // rejection out of the discarded promise this is called through.
-    }
-    const after = (await read()).length;
-    setResult(syncResultMessage(before, after));
+    // The whole sequence, including the order of the two awaits and when the
+    // counts are taken, lives in `runQueueRetry`. `read` doubles as this
+    // screen's own re-read, so the list and the counts always agree.
+    setResult(
+      await runQueueRetry({
+        read,
+        refresh,
+        flushQueue,
+        // From the store, not the `offline` binding above: that one was captured
+        // when this callback was built, which is before the refresh that decides
+        // the answer.
+        getOffline: () => useAppStore.getState().offline,
+      }),
+    );
     setSyncing(false);
-  }, [flushQueue, read]);
+  }, [flushQueue, read, refresh]);
 
   const { group, row, sectionLabel } = makeSettingsListStyles(t);
   const divider = { borderBottomWidth: 1, borderBottomColor: t.line };
@@ -171,11 +182,18 @@ export default function OfflineQueue() {
         </View>
       )}
 
+      {/* Labelled "Retry connection" to a screen reader because, announced on
+          its own with none of the card around it, a bare "Retry" says nothing
+          about what is being retried. Not a match with the offline banner any
+          more: wherever this screen is offered at all, the banner announces
+          "Offline, open the offline queue" instead (`offlineBanner.ts`). It
+          keeps the old wording only in local mode, which is the one mode that
+          never sends anyone here. */}
       <Pressable
         onPress={() => void onSync()}
         disabled={block != null || syncing}
         accessibilityRole="button"
-        accessibilityLabel="Sync now"
+        accessibilityLabel="Retry connection"
         accessibilityState={{ disabled: block != null || syncing }}
         style={(s) => [
           {
@@ -194,7 +212,11 @@ export default function OfflineQueue() {
       >
         {syncing && <ActivityIndicator size="small" color={block != null ? t.dim : t.onPrimary} />}
         <Txt unselectable weight={700} size={15} color={block != null ? t.faint : t.onPrimary}>
-          {syncing ? 'Syncing' : 'Sync now'}
+          {/* "Retry", not "Sync now": the press re-checks the connection first
+              and uploads second, so "Retry" names the whole of it. It is also
+              the app's one retry affordance now, the banner having become the
+              way here rather than a second, weaker re-check. */}
+          {syncing ? 'Retrying…' : 'Retry'}
         </Txt>
       </Pressable>
 
@@ -203,7 +225,15 @@ export default function OfflineQueue() {
           {blockedHint}
         </Txt>
       )}
-      {result != null && !syncing && (
+      {/* Under a LIVE button, not a greyed one: this route is a stack screen on
+          mobile with no offline banner over it, so without this the connection
+          being down is a fact the screen never states. */}
+      {connectionHint != null && (
+        <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 8, lineHeight: 18 }}>
+          {connectionHint}
+        </Txt>
+      )}
+      {showResult && (
         <Txt weight={600} size={12.5} color={t.dim} style={{ marginTop: 8, lineHeight: 18 }}>
           {result}
         </Txt>

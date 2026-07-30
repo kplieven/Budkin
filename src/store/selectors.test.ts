@@ -1,11 +1,32 @@
 import { describe, expect, it } from 'vitest';
 
-import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, runningTimer, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
+import type { Connection } from '@/data/repository';
+import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, runningTimer, selectServerMode, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
 import type { Treatment, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
 const M = 60000;
+
+describe('selectServerMode', () => {
+  it('is true for a server connection, false for local mode and for no connection', () => {
+    expect(selectServerMode({ connection: { mode: 'server', serverUrl: 'https://bb.example', token: 'tok' } })).toBe(true);
+    expect(selectServerMode({ connection: { mode: 'local' } })).toBe(false);
+    expect(selectServerMode({ connection: null })).toBe(false);
+  });
+
+  it('answers with a boolean, never the connection or a wrapper around it', () => {
+    // This goes straight into `useAppStore(selectServerMode)`, where a fresh
+    // reference per call is the zustand v5 render loop: the store compares
+    // snapshots with Object.is, so a new object every call never settles and the
+    // web build renders a blank screen.
+    const s: { connection: Connection | null } = {
+      connection: { mode: 'server', serverUrl: 'https://bb.example', token: 'tok' },
+    };
+    expect(typeof selectServerMode(s)).toBe('boolean');
+    expect(Object.is(selectServerMode(s), selectServerMode(s))).toBe(true);
+  });
+});
 
 describe('teEnd / teStart / teDurationMin', () => {
   it('point shape derives from agoMin; absTime takes precedence', () => {
