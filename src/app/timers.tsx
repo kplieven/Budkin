@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { IconButton } from '@/components/IconButton';
 import { PulsingDot } from '@/components/PulsingDot';
 import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
@@ -13,6 +14,7 @@ import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtElapsedClock } from '@/lib/format';
+import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
@@ -277,7 +279,21 @@ export default function Timers() {
     </>
   );
 
-  if (desktop) return <DesktopPage maxWidth={760}>{body}</DesktopPage>;
+  // Timers is a pushed root route, not a tab, so it needs its own way back on
+  // every width. Settings can skip the chevron on desktop because the sidebar
+  // still highlights it, but Timers is deliberately absent from the sidebar, so
+  // without this the wide layout would be a dead end. The heading is omitted
+  // here on purpose: the desktop top bar already renders "Timers" as the screen
+  // title, so repeating it would read as a duplicate.
+  if (desktop)
+    return (
+      <DesktopPage maxWidth={760}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 14 }}>
+          <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/(tabs)')} accessibilityLabel="Back" />
+        </View>
+        {body}
+      </DesktopPage>
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -329,9 +345,12 @@ export default function Timers() {
         }
         contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
       >
-        <Txt weight={800} size={27} tracking={-0.6} style={{ paddingHorizontal: 2, paddingTop: 4, paddingBottom: 18 }}>
-          Timers
-        </Txt>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
+          <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/(tabs)')} accessibilityLabel="Back" />
+          <Txt weight={800} size={27} tracking={-0.6}>
+            Timers
+          </Txt>
+        </View>
         {body}
       </ScrollView>
     </View>

@@ -111,6 +111,11 @@ function RootLayoutNav() {
       <Stack.Screen name="welcome" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="settings" />
+      {/* Timers sits on the root Stack beside Settings, not inside (tabs). It is
+          a detail screen reached from Home and from deep links, so it wants a
+          push transition and a back entry; a tab jump gives it neither. The URL
+          is still /timers, since group segments never appear in the path. */}
+      <Stack.Screen name="timers" />
       <Stack.Screen name="metric/[kind]" />
     </Stack>
   );
