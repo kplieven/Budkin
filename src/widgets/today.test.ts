@@ -164,6 +164,20 @@ describe('widgetToday labels', () => {
     expect(t.todayLine).toBe('since noon · 0 feeds · 0 changes');
     expect([t.sleepMin, t.feeds, t.diapers]).toEqual([0, 0, 0]);
   });
+
+  it('shows no figure for a child who is not born yet', () => {
+    // An unborn child has no sleep to total, so this is the no-data case, not a
+    // zero. "0 min" would read as a measurement of a baby who does not exist.
+    expect(widgetToday(src({ expected: true }), now).sleepValue).toBe('—');
+  });
+
+  it('marks a running nap on the value, keeping the total as the number', () => {
+    // The row's label stays the category ("Sleep"). Putting "Napping" there next
+    // to a whole-window total would claim the number IS the nap's length.
+    const t = widgetToday(src({ entries: [sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14))], sleepStart: at(2026, 6, 5, 14, 30) }), now);
+    expect(t.sleepMin).toBe(90); // 1h logged + 30 min still running
+    expect(t.sleepValue).toBe('1h 30m · napping');
+  });
 });
 
 describe('widgetToday recomputes the window from the SAME snapshot', () => {

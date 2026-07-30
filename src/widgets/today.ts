@@ -75,6 +75,8 @@ export interface WidgetTodaySource {
   sleepStart: number | null;
   /** the client-wide day boundary, hour of local day */
   rhythmOriginHour: number;
+  /** selected child not born yet: there is no sleep to total, so show no figure */
+  expected?: boolean;
 }
 
 export interface WidgetToday {
@@ -120,6 +122,7 @@ export function widgetToday(s: WidgetTodaySource | null, now: number): WidgetTod
   const originHour = clampHourOfDay(s?.rhythmOriginHour ?? RHYTHM_ORIGIN_DEFAULT, RHYTHM_ORIGIN_DEFAULT);
   const windowStartMs = windowStart(now, originHour);
   const entries = s?.entries ?? [];
+  const napping = s?.sleepStart != null;
   const sleepMin = liveSleepMsInWindow(entries, runningSleepTimers(s?.sleepStart ?? null), windowStartMs, now) / 60000;
   // Bucket by re-deriving each record's own window rather than by comparing
   // against `windowStartMs + DAY`: `windowStart` rebuilds the boundary from
@@ -138,7 +141,13 @@ export function widgetToday(s: WidgetTodaySource | null, now: number): WidgetTod
     sleepMin,
     feeds,
     diapers,
-    sleepValue: s ? fmtDur(sleepMin) : '—',
+    // A real zero reads "0 min", per Home: it is the honest answer to "how much
+    // sleep since the boundary". Two cases are NOT a real zero and keep the dash:
+    // no snapshot at all, and an unborn child, who has no sleep to total.
+    // "napping" rides on the value rather than flipping the row's label, because
+    // a label reading "Napping" next to a whole-window total claims to BE the
+    // nap's length. The label stays the category; the value carries the state.
+    sleepValue: !s || s.expected ? '—' : napping ? `${fmtDur(sleepMin)} · napping` : fmtDur(sleepMin),
     todayLine: `${since} · ${feeds} feeds · ${diapers} changes`,
   };
 }
