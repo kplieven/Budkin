@@ -404,6 +404,7 @@ beforeEach(() => {
     adoptSheet: false,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
+    queuedIds: [],
     profile: null,
     profileLoading: false,
     profileError: false,
@@ -1246,6 +1247,8 @@ describe('save', () => {
     await flush();
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
+    // The ids mirror too, so History can mark the row as waiting to upload.
+    expect(s().queuedIds).toEqual([(h.q[0] as Entry).id]);
     expect(h.pushed).toHaveLength(0);
   });
 
@@ -1276,10 +1279,17 @@ describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
     useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
+    useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
     await s().flushQueue();
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
     expect(s().queueCount).toBe(0);
+    // The History marker has to clear here and nowhere else. flushQueue does
+    // NOT stamp the pushed entry's `serverId` (it discards what
+    // pushEntryToServer returns), so the in-memory record stays
+    // `serverId == null` until the next refresh()/hydrate(): a serverId-based
+    // marker would keep claiming this row is waiting to upload.
+    expect(s().queuedIds).toEqual([]);
   });
 
   it('keeps entries that fail to push', async () => {
@@ -1288,6 +1298,41 @@ describe('flushQueue', () => {
     await s().flushQueue();
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
+    expect(s().queuedIds).toEqual(['x']);
+  });
+
+  it('pushes an entry once when two flushes overlap', async () => {
+    // `refresh()` fires a flush of its own on every successful re-check and does
+    // NOT await it, so a caller that awaits `flushQueue()` straight after
+    // awaiting `refresh()` (the queue screen's Retry button does exactly that,
+    // because it has to count the queue once the upload is finished) starts a
+    // second flush on top of one already in flight. Both read the same stored
+    // queue, neither has saved yet, and every entry gets POSTed twice: a
+    // duplicate feed on the server that the parent has to go and delete.
+    useAppStore.setState({ children: [SYNCED_C1] });
+    h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
+    useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
+
+    await Promise.all([s().flushQueue(), s().flushQueue()]);
+
+    expect(h.pushed).toHaveLength(1);
+    expect(h.q).toHaveLength(0);
+    expect(s().queueCount).toBe(0);
+  });
+
+  it('makes a second caller wait for the flush already running, not return early', async () => {
+    // The awaited call has to resolve AFTER the upload, otherwise the queue
+    // screen counts the queue mid-flush and reports a successful sync as
+    // "Nothing uploaded. 1 entry still waiting."
+    useAppStore.setState({ children: [SYNCED_C1] });
+    h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
+    useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
+
+    void s().flushQueue();
+    await s().flushQueue();
+
+    expect(h.q).toHaveLength(0);
+    expect(h.pushed).toHaveLength(1);
   });
 });
 

@@ -3,6 +3,7 @@
  * Kept separate from the store so they're trivially unit-testable.
  */
 
+import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
 import type { ActivityType, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
@@ -21,6 +22,27 @@ const M = 60000;
  */
 export function selectPendingCount(s: { queueCount: number; measurements: Measurement[] }): number {
   return s.queueCount + s.measurements.filter((m) => m.serverId == null).length;
+}
+
+/**
+ * Whether the app is talking to a Baby Buddy server, as opposed to local mode or
+ * no connection at all. The one predicate for it, because several surfaces gate
+ * server-only affordances on it and they have to agree: Home's offline banner
+ * and the desktop top bar's pill both feed it to `offlineBannerAction`
+ * (`src/features/queue/offlineBanner.ts`), Settings shows its Offline queue row
+ * on it, and History marks queued entries on it. Hand-copied, any one of them
+ * can be changed without the others, and the app starts contradicting itself
+ * about which mode it is in.
+ *
+ * Takes a structural subset so it doubles as a stable zustand selector:
+ * `useAppStore(selectServerMode)`. It returns a BOOLEAN and must keep doing so:
+ * a selector that builds a fresh object or array per call makes zustand v5 see a
+ * snapshot that never settles, which blank-screens the web build. Callers that
+ * already hold `connection` for other reasons can pass `{ connection }` directly
+ * instead of taking a second subscription.
+ */
+export function selectServerMode(s: { connection: Connection | null }): boolean {
+  return s.connection?.mode === 'server';
 }
 
 /**

@@ -122,6 +122,21 @@ interface AppState {
   hydrating: boolean;
   /** number of writes queued offline (for the banner) */
   queueCount: number;
+  /**
+   * The LOCAL ids of the entries currently sitting on the offline write queue
+   * (`budkin.queue.v1`), so History can mark a row as still waiting to upload.
+   * The queue itself is the only truthful source for that: `flushQueue` pushes
+   * an entry without stamping its `serverId` back onto the in-memory record, so
+   * `serverId == null` stays true long after an entry has gone up.
+   *
+   * A mirror of `queueCount`'s population, kept in sync at exactly the same
+   * sites, and it inherits the same known drift: the Android nap widget
+   * enqueues from a headless task in another process and never touches the
+   * store (see `src/widgets/napToggle.ts`), so both go stale until the next
+   * hydrate. Never derived inside a `useAppStore` selector, see
+   * `src/features/activity/queuedMarker.ts`.
+   */
+  queuedIds: string[];
   /** servers the user has connected to before (one-tap retry list) */
   savedServers: SavedServer[];
 
@@ -917,6 +932,16 @@ let lastDeleted: {
 } | null = null;
 
 /**
+ * The two pieces of state that mirror the offline write queue, derived together
+ * from the queue itself so no site can update the count and forget the ids (or
+ * the reverse), which would put a "waiting to upload" marker on History and the
+ * banner's number in direct contradiction.
+ */
+function queueMirror(q: Entry[]): { queueCount: number; queuedIds: string[] } {
+  return { queueCount: q.length, queuedIds: q.map((e) => e.id) };
+}
+
+/**
  * Take an entry out of circulation everywhere it might still exist, and record
  * what Undo needs to put it back. Shared by `deleteEntry` and by `save()`'s
  * convert-to-timer path, which removes the entry for the same reason: it is not
@@ -946,7 +971,7 @@ function detachEntry(get: Get, set: Set, entry: Entry, index: number, timerId?: 
   }
   void removeQueuedEntry(entry.id).then(({ removed, queue }) => {
     if (!removed) return;
-    set({ queueCount: queue.length });
+    set(queueMirror(queue));
     record.requeue = true;
   });
 }
@@ -957,6 +982,28 @@ let refreshInFlight = false;
 // Guards against overlapping flushUnsynced calls (e.g. setNetworkOnline(true)
 // and a foreground refresh() both firing at once) — see `flushUnsynced` below.
 let flushUnsyncedInFlight = false;
+// Guards against overlapping flushQueue calls, which would both read the same
+// stored queue before either saves and POST every entry on it twice. `refresh()`
+// fires a flush of its own on success and does not await it, so a caller that
+// awaits `flushQueue()` right after awaiting `refresh()` (the offline queue
+// screen's Retry button, which has to count the queue once the upload is done)
+// lands a second flush straight on top of the first.
+//
+// Holds the PROMISE rather than a boolean like the flag above: a second caller
+// has to be able to await the flush already running. A bare early return would
+// hand it back a queue that has not finished draining, and the screen would
+// report a successful sync as "Nothing uploaded".
+//
+// The trap that comes with joining: a caller handed this promise inherits the
+// RUNNING flush's view of the world, not its own. `const s = get()` and
+// `loadQueue()` both happen once, inside the run, so an entry enqueued after
+// those lines is not in the batch being uploaded, and the joiner still gets a
+// resolved promise for a flush that never saw its entry. Nothing does that
+// today (the write paths fire their flush and forget, and the queue screen
+// enqueues nothing), so this is documentation rather than a live bug. An
+// enqueue-then-await-flush caller would be the first one it bites, and it would
+// need a fresh flush after this one rather than a seat on it.
+let flushQueueInFlight: Promise<void> | null = null;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -966,6 +1013,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   connectError: null,
   hydrating: true,
   queueCount: 0,
+  queuedIds: [],
   savedServers: [],
 
   themeMode: 'dark',
@@ -1227,7 +1275,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ savedServers }); // merges; later set() calls in this fn keep it
     if (!conn) {
-      set({ hydrating: false, queueCount: q.length, timers: savedTimers });
+      set({ hydrating: false, ...queueMirror(q), timers: savedTimers });
       return;
     }
     if (conn.mode === 'local') {
@@ -1242,11 +1290,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         selectedChildId: e?.selectedChildId ?? '',
         lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
         timers: savedTimers,
-        queueCount: q.length,
+        ...queueMirror(q),
       });
       return;
     }
-    set({ connection: conn, queueCount: q.length });
+    set({ connection: conn, ...queueMirror(q) });
     // Read the durable entity store BEFORE fetching, so the persisted selection
     // can steer which child the fetch is for. Reused by both branches below, so
     // neither path reads it twice. It goes unused on the 401/403 branch, which
@@ -1696,6 +1744,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       measurements: [],
       selectedChildId: '',
       queueCount: 0,
+      queuedIds: [],
       profile: null,
       profileLoaded: false,
       profileError: false,
@@ -1712,31 +1761,43 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast('Removed');
   },
   flushQueue: async () => {
-    const s = get();
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server' || s.offline) return;
-    const q = await loadQueue();
-    if (q.length === 0) return;
-    const remaining: Entry[] = [];
-    for (const entry of q) {
-      const childServerId = childServerIdFor(s.children, entry.childId);
-      if (childServerId == null) {
-        // The child still has no server id (e.g. its own push hasn't landed
-        // yet): keep the entry queued for the next flush rather than sending
-        // a local id the server would reject.
-        remaining.push(entry);
-        continue;
+    // Join the flush already running instead of starting a rival one (see
+    // `flushQueueInFlight` above): two passes over the same stored queue push
+    // every entry twice.
+    if (flushQueueInFlight) return flushQueueInFlight;
+    const run = (async () => {
+      const s = get();
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server' || s.offline) return;
+      const q = await loadQueue();
+      if (q.length === 0) return;
+      const remaining: Entry[] = [];
+      for (const entry of q) {
+        const childServerId = childServerIdFor(s.children, entry.childId);
+        if (childServerId == null) {
+          // The child still has no server id (e.g. its own push hasn't landed
+          // yet): keep the entry queued for the next flush rather than sending
+          // a local id the server would reject.
+          remaining.push(entry);
+          continue;
+        }
+        try {
+          await pushEntryToServer(conn, entry, childServerId);
+        } catch {
+          remaining.push(entry);
+        }
       }
-      try {
-        await pushEntryToServer(conn, entry, childServerId);
-      } catch {
-        remaining.push(entry);
+      await saveQueue(remaining);
+      set(queueMirror(remaining));
+      if (remaining.length === 0) {
+        get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
       }
-    }
-    await saveQueue(remaining);
-    set({ queueCount: remaining.length });
-    if (remaining.length === 0) {
-      get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
+    })();
+    flushQueueInFlight = run;
+    try {
+      await run;
+    } finally {
+      flushQueueInFlight = null;
     }
   },
   flushPendingOps: async () => {
@@ -1931,13 +1992,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // entry to the server twice.
     if (child?.expected) return;
     if (s.offline) {
-      void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
+      void enqueueEntry(entry).then((q) => set(queueMirror(q)));
     } else {
       const childServerId = childServerIdFor(s.children, entry.childId);
       if (childServerId == null) {
         // The child is not on the server yet, so this entry cannot be either.
         // Queue it: the reconnect flush pushes it once the child exists.
-        void enqueueEntry(entry).then((q) => set({ queueCount: q.length }));
+        void enqueueEntry(entry).then((q) => set(queueMirror(q)));
       } else {
         void pushEntryToServer(conn, entry, childServerId)
           .then((serverId) => {
@@ -1954,7 +2015,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
               void deleteEntryFromServer(conn, entry.type, serverId).catch(() => {});
             }
           })
-          .catch(() => enqueueEntry(entry).then((q) => set({ queueCount: q.length })));
+          .catch(() => enqueueEntry(entry).then((q) => set(queueMirror(q))));
       }
     }
   },
@@ -1980,7 +2041,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // own re-entry (`refreshInFlight`) and no-ops for demo, no connection, and
     // the manual offline override, so this needs no further gating. A failed
     // fetch does leave the offline banner up, which is deliberate: it is the
-    // only thing that explains the empty history, and it carries the retry.
+    // only thing that explains the empty history. What it is not is the retry:
+    // in server mode, which is exactly the branch below, pressing it opens the
+    // offline queue screen, and the re-check lives on that screen's Retry.
     if (get().connection?.mode === 'server') void get().refresh();
   },
   openSwitcher: () => set({ showChildSwitcher: true }),
