@@ -19,6 +19,7 @@ import { IconButton } from '@/components/IconButton';
 import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
+import { QUEUE_ROUTE, offlineBannerA11yLabel, offlineBannerAction } from '@/features/queue/offlineBanner';
 import { hexA } from '@/lib/color';
 import { ageOrDueLabel } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
@@ -41,12 +42,24 @@ export default function Home() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
+  // A boolean out of the selector, never the `connection` object reshaped: a
+  // freshly built reference here is the zustand v5 render loop.
+  const serverMode = useAppStore((s) => s.connection?.mode === 'server');
 
-  // Tap the offline banner to retry the connection now (works on web + native).
-  const retry = useCallback(() => {
+  // Tap the offline banner to see what is waiting. `atQueue` is false because
+  // this banner belongs to `/` and cannot be rendered over its own destination;
+  // the desktop pill in `TopBar.tsx` is the one that has to answer that.
+  const bannerAction = offlineBannerAction({ serverMode, atQueue: false });
+  const onBannerPress = useCallback(() => {
+    if (bannerAction === 'open-queue') {
+      router.navigate(QUEUE_ROUTE);
+      return;
+    }
+    // Local mode: there is no queue screen to send anyone to, so the press keeps
+    // doing what it always did and re-checks the connection (works on web + native).
     showToast('Checking connection…');
     void refresh();
-  }, [refresh, showToast]);
+  }, [bannerAction, refresh, showToast]);
 
   // Pull-to-refresh. Native uses the platform RefreshControl. On web that
   // control is an inert stub, so touch-capable web (phones/tablets) gets a
@@ -91,9 +104,9 @@ export default function Home() {
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {offline && (
         <Pressable
-          onPress={retry}
+          onPress={onBannerPress}
           accessibilityRole="button"
-          accessibilityLabel="Retry connection"
+          accessibilityLabel={offlineBannerA11yLabel(bannerAction)}
           style={(pstate) => [
             {
               position: 'absolute',
@@ -123,9 +136,16 @@ export default function Home() {
               ? `Offline — ${pending} pending, will sync when reconnected`
               : 'Offline — changes will sync when reconnected'}
           </Txt>
-          <Txt weight={700} size={12.5} color="#E2B554">
-            Retry
-          </Txt>
+          {/* A chevron where the word "Retry" used to be: the press opens the
+              queue now, and the retry lives on that screen's own button. The
+              local-mode press still retries, so there it still says so. */}
+          {bannerAction === 'open-queue' ? (
+            <Icon name="chevron-right" color="#E2B554" size={16} />
+          ) : (
+            <Txt weight={700} size={12.5} color="#E2B554">
+              Retry
+            </Txt>
+          )}
         </Pressable>
       )}
 
