@@ -982,6 +982,28 @@ let refreshInFlight = false;
 // Guards against overlapping flushUnsynced calls (e.g. setNetworkOnline(true)
 // and a foreground refresh() both firing at once) — see `flushUnsynced` below.
 let flushUnsyncedInFlight = false;
+// Guards against overlapping flushQueue calls, which would both read the same
+// stored queue before either saves and POST every entry on it twice. `refresh()`
+// fires a flush of its own on success and does not await it, so a caller that
+// awaits `flushQueue()` right after awaiting `refresh()` (the offline queue
+// screen's Retry button, which has to count the queue once the upload is done)
+// lands a second flush straight on top of the first.
+//
+// Holds the PROMISE rather than a boolean like the flag above: a second caller
+// has to be able to await the flush already running. A bare early return would
+// hand it back a queue that has not finished draining, and the screen would
+// report a successful sync as "Nothing uploaded".
+//
+// The trap that comes with joining: a caller handed this promise inherits the
+// RUNNING flush's view of the world, not its own. `const s = get()` and
+// `loadQueue()` both happen once, inside the run, so an entry enqueued after
+// those lines is not in the batch being uploaded, and the joiner still gets a
+// resolved promise for a flush that never saw its entry. Nothing does that
+// today (the write paths fire their flush and forget, and the queue screen
+// enqueues nothing), so this is documentation rather than a live bug. An
+// enqueue-then-await-flush caller would be the first one it bites, and it would
+// need a fresh flush after this one rather than a seat on it.
+let flushQueueInFlight: Promise<void> | null = null;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -1739,31 +1761,43 @@ export const useAppStore = create<AppStore>((set, get) => ({
     get().showToast('Removed');
   },
   flushQueue: async () => {
-    const s = get();
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server' || s.offline) return;
-    const q = await loadQueue();
-    if (q.length === 0) return;
-    const remaining: Entry[] = [];
-    for (const entry of q) {
-      const childServerId = childServerIdFor(s.children, entry.childId);
-      if (childServerId == null) {
-        // The child still has no server id (e.g. its own push hasn't landed
-        // yet): keep the entry queued for the next flush rather than sending
-        // a local id the server would reject.
-        remaining.push(entry);
-        continue;
+    // Join the flush already running instead of starting a rival one (see
+    // `flushQueueInFlight` above): two passes over the same stored queue push
+    // every entry twice.
+    if (flushQueueInFlight) return flushQueueInFlight;
+    const run = (async () => {
+      const s = get();
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server' || s.offline) return;
+      const q = await loadQueue();
+      if (q.length === 0) return;
+      const remaining: Entry[] = [];
+      for (const entry of q) {
+        const childServerId = childServerIdFor(s.children, entry.childId);
+        if (childServerId == null) {
+          // The child still has no server id (e.g. its own push hasn't landed
+          // yet): keep the entry queued for the next flush rather than sending
+          // a local id the server would reject.
+          remaining.push(entry);
+          continue;
+        }
+        try {
+          await pushEntryToServer(conn, entry, childServerId);
+        } catch {
+          remaining.push(entry);
+        }
       }
-      try {
-        await pushEntryToServer(conn, entry, childServerId);
-      } catch {
-        remaining.push(entry);
+      await saveQueue(remaining);
+      set(queueMirror(remaining));
+      if (remaining.length === 0) {
+        get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
       }
-    }
-    await saveQueue(remaining);
-    set(queueMirror(remaining));
-    if (remaining.length === 0) {
-      get().showToast(`Synced ${q.length} ${q.length === 1 ? 'entry' : 'entries'}`);
+    })();
+    flushQueueInFlight = run;
+    try {
+      await run;
+    } finally {
+      flushQueueInFlight = null;
     }
   },
   flushPendingOps: async () => {
