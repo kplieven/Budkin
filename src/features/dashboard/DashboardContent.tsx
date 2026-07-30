@@ -228,7 +228,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         {timers.map((tm) => (
           <Pressable
             key={tm.id}
-            onPress={() => router.navigate('/timers')}
+            onPress={() => router.push('/timers')}
             accessibilityRole="button"
             accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running${isServer ? (tm.serverId != null ? ', synced' : ', pending sync') : ''}, view timers`}
             style={(s) => [
@@ -283,7 +283,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         <Pressable
           onPress={() => {
             startQuickTimer();
-            router.navigate('/timers');
+            router.push('/timers');
           }}
           accessibilityRole="button"
           accessibilityLabel="Start timer, save as any activity"
@@ -325,7 +325,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           Log activity
         </Txt>
         <Pressable
-          onPress={() => router.navigate('/timers')}
+          onPress={() => router.push('/timers')}
           accessibilityRole="button"
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
         >

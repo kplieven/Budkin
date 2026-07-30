@@ -54,4 +54,10 @@ describe('screenTitleFor', () => {
   it('titles the notifications settings route', () => {
     expect(screenTitleFor('/settings/notifications')).toBe('Notifications');
   });
+
+  it('titles the offline queue settings route', () => {
+    // Without its own case the desktop top bar would silently read "Budkin"
+    // over a screen that has a name.
+    expect(screenTitleFor('/settings/queue')).toBe('Offline queue');
+  });
 });

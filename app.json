@@ -64,10 +64,11 @@
             {
               "name": "Status",
               "label": "Budkin",
-              "minWidth": "200dp",
-              "minHeight": "250dp",
-              "targetCellWidth": 3,
-              "targetCellHeight": 4,
+              "minWidth": "110dp",
+              "minHeight": "180dp",
+              "targetCellWidth": 2,
+              "targetCellHeight": 3,
+              "resizeMode": "horizontal|vertical",
               "description": "Baby status + quick log",
               "previewImage": "./assets/images/icon.png",
               "updatePeriodMillis": 1800000
@@ -76,9 +77,10 @@
               "name": "Nap",
               "label": "Nap timer",
               "minWidth": "110dp",
-              "minHeight": "110dp",
+              "minHeight": "40dp",
               "targetCellWidth": 2,
               "targetCellHeight": 1,
+              "resizeMode": "horizontal|vertical",
               "description": "Start / stop a nap",
               "previewImage": "./assets/images/icon.png",
               "updatePeriodMillis": 1800000
@@ -91,7 +93,8 @@
         {
           "defaultChannel": "timers"
         }
-      ]
+      ],
+      "./plugins/withQuickLogShortcuts"
     ],
     "experiments": {
       "typedRoutes": true,
