@@ -20,8 +20,9 @@ interface NavItem {
 
 // Dashboard lives at the (tabs) group index, which resolves to "/".
 const NAV: NavItem[] = [
-  // Timers is not listed: like the phone bar, it folded into the Dashboard (the
-  // live-timer card + "Timers" link there open /timers).
+  // Timers is not listed: it is a pushed detail screen, not a top-level
+  // destination. The Dashboard's live-timer card and its "Timers" link open it,
+  // and its own back chevron returns here.
   { label: 'Dashboard', icon: 'home', href: '/(tabs)', match: (p) => p === '/' },
   { label: 'History', icon: 'list', href: '/history', match: (p) => p.startsWith('/history') },
   { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
