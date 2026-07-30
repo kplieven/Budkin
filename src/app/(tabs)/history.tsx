@@ -13,7 +13,7 @@ import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
-import { entriesForChild, timersForChild } from '@/store/selectors';
+import { entriesForChild, selectServerMode, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -37,7 +37,11 @@ export default function History() {
   // forever. The Set is derived below, in the render body.
   const queuedIds = useAppStore((s) => s.queuedIds);
   const connection = useAppStore((s) => s.connection);
-  const serverMode = connection?.mode === 'server';
+  // The shared predicate rather than a fourth hand-written copy of it, so this
+  // screen's queued markers cannot disagree with the offline banners about what
+  // mode the app is in. Called on the already-selected `connection` (no second
+  // subscription), which is exactly what it is shaped for.
+  const serverMode = selectServerMode({ connection });
   const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
   // Pull-to-refresh, mirroring Home: native uses RefreshControl, touch-web a

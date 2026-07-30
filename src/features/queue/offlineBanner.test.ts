@@ -6,6 +6,7 @@ import {
   offlineBannerA11yLabel,
   offlineBannerAction,
 } from '@/features/queue/offlineBanner';
+import { screenTitleFor } from '@/shell/labels';
 
 describe('offlineBannerAction', () => {
   it('opens the queue in server mode', () => {
@@ -32,8 +33,10 @@ describe('offlineBannerAction', () => {
 
 describe('isQueueRoute', () => {
   it('recognises the offline queue route', () => {
+    // The literal, not `QUEUE_ROUTE`: comparing the constant with itself only
+    // restates the implementation. This pins the constant to the path the route
+    // file actually serves (`src/app/settings/queue.tsx`).
     expect(isQueueRoute('/settings/queue')).toBe(true);
-    expect(isQueueRoute(QUEUE_ROUTE)).toBe(true);
   });
 
   it('rejects every other route the desktop pill rides on', () => {
@@ -45,12 +48,23 @@ describe('isQueueRoute', () => {
 });
 
 describe('offlineBannerA11yLabel', () => {
-  it('announces the destination when the press navigates', () => {
-    expect(offlineBannerA11yLabel('open-queue')).toBe('Offline, open the offline queue');
+  it('names the destination as that screen is titled', () => {
+    // The label is the whole announcement: a screen reader that reaches the
+    // banner reads it and never the text inside. Checked against
+    // `screenTitleFor`, so renaming the destination (or pointing QUEUE_ROUTE
+    // somewhere the title table does not know) cannot leave the banner
+    // announcing a screen that no longer goes by that name.
+    expect(offlineBannerA11yLabel('open-queue').toLowerCase()).toContain(
+      screenTitleFor(QUEUE_ROUTE).toLowerCase(),
+    );
   });
 
-  it('keeps announcing a retry when the press retries', () => {
-    expect(offlineBannerA11yLabel('retry')).toBe('Retry connection');
+  it('does not name the destination when the press goes nowhere', () => {
+    // `retry` is exactly the cases that navigate nowhere, so a label naming the
+    // queue screen would promise a press that never opens it.
+    expect(offlineBannerA11yLabel('retry').toLowerCase()).not.toContain(
+      screenTitleFor(QUEUE_ROUTE).toLowerCase(),
+    );
   });
 
   it('says something different for each action', () => {
