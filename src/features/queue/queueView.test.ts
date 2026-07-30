@@ -3,9 +3,11 @@ import { describe, expect, it } from 'vitest';
 import {
   attributionFor,
   entryCountLabel,
+  offlineHint,
   queueSummaryHint,
   queueSummaryLine,
   queueTypeCounts,
+  runQueueRetry,
   syncBlockedBy,
   syncBlockedHint,
   syncResultMessage,
@@ -151,79 +153,281 @@ describe('attributionFor', () => {
 });
 
 describe('syncBlockedBy', () => {
-  const live = { loaded: true, serverMode: true, offline: false, count: 2 };
+  // Neither the connection nor the queue count is an argument any more, so
+  // neither can grey the button out: being offline is the reason to press Retry
+  // (it re-checks the connection before it flushes) and an empty queue still has
+  // a connection worth re-checking. `offlineHint` says what is going on instead.
+  const live = { loaded: true, serverMode: true };
 
-  it('lets the button run with a read queue, a connected server, online, and something queued', () => {
+  it('lets the button run with a read queue and a server connection', () => {
     expect(syncBlockedBy(live)).toBeNull();
   });
 
-  it('blocks in local mode, where there is no server to upload to', () => {
+  it('blocks in local mode, where there is no server to reach', () => {
     expect(syncBlockedBy({ ...live, serverMode: false })).toBe('local');
   });
 
-  it('blocks while offline, matching the flushQueue guard', () => {
-    // flushQueue returns early on `offline`, so an enabled button would be a
-    // no-op that looks like a working one.
-    expect(syncBlockedBy({ ...live, offline: true })).toBe('offline');
-  });
-
-  it('blocks on an empty queue', () => {
-    expect(syncBlockedBy({ ...live, count: 0 })).toBe('empty');
-  });
-
-  it('reports the read ahead of everything else, so the button does not flicker', () => {
-    // An unread queue counts 0, so without this every visit would grey the
-    // button as "empty" for the length of an AsyncStorage round trip and then
-    // enable it, for no reason the user can see.
-    expect(syncBlockedBy({ ...live, loaded: false, count: 0 })).toBe('loading');
-  });
-
-  it('reports local mode ahead of offline, since the missing server is the real reason', () => {
-    expect(syncBlockedBy({ ...live, serverMode: false, offline: true, count: 0 })).toBe('local');
+  it('reports the read ahead of everything else, so a result cannot land on a card still reading', () => {
+    // An unread queue counts 0, and a result line under a card still headed
+    // "Reading the queue" answers a question the screen has not asked yet.
+    expect(syncBlockedBy({ ...live, loaded: false })).toBe('loading');
+    expect(syncBlockedBy({ loaded: false, serverMode: false })).toBe('loading');
   });
 });
 
 describe('syncBlockedHint', () => {
-  it('explains local mode and offline', () => {
+  it('explains local mode, the one state no retry can get out of', () => {
     expect(syncBlockedHint('local')).toContain('Local mode');
-    expect(syncBlockedHint('offline')).toContain('No connection');
   });
 
-  it('says nothing while reading, on a merely empty queue, or when the button is live', () => {
-    // The card above already says everything is synced, and a read is over
-    // before a sentence about it could be read.
+  it('says nothing while reading or when the button is live', () => {
+    // A read is over before a sentence about it could be read, and a live
+    // button needs no excuse.
     expect(syncBlockedHint('loading')).toBeNull();
-    expect(syncBlockedHint('empty')).toBeNull();
     expect(syncBlockedHint(null)).toBeNull();
+  });
+});
+
+describe('offlineHint', () => {
+  const unpressed = { block: null, answered: false } as const;
+
+  it('says the connection is down while the button stays live', () => {
+    // On mobile this route is a stack screen with no offline banner over it, so
+    // without this line an offline user sees a live Retry and nothing at all
+    // saying why entries are piling up.
+    const hint = offlineHint({ ...unpressed, offline: true });
+    expect(hint).toContain('No connection');
+    // Informational, never a block: the press is exactly what re-checks.
+    expect(syncBlockedBy({ loaded: true, serverMode: true })).toBeNull();
+  });
+
+  it('says nothing while the server is reachable', () => {
+    expect(offlineHint({ ...unpressed, offline: false })).toBeNull();
+    expect(offlineHint({ offline: false, block: 'loading', answered: false })).toBeNull();
+  });
+
+  it('stays quiet in local mode, where there is no server to be cut off from', () => {
+    // `syncBlockedHint('local')` owns the slot there, and two sentences under
+    // one button would have the screen blaming a connection that is not the
+    // reason anything is blocked.
+    expect(offlineHint({ offline: true, block: 'local', answered: false })).toBeNull();
+  });
+
+  it('speaks up while the queue is still being read', () => {
+    // The connection is known independently of the AsyncStorage read, so
+    // holding the line back would only make it appear a beat late.
+    expect(offlineHint({ offline: true, block: 'loading', answered: false })).toContain('No connection');
+  });
+
+  it('gives way to the result of a press, rather than repeating it', () => {
+    // Every offline `syncResultMessage` opens with "No connection to the
+    // server", so leaving this up would stack two lines saying the same thing,
+    // one of them answering a question the user has actually asked.
+    expect(offlineHint({ offline: true, block: null, answered: true })).toBeNull();
   });
 });
 
 describe('syncResultMessage', () => {
   it('reports a clean flush', () => {
-    expect(syncResultMessage(3, 0)).toBe('Uploaded 3 entries.');
-    expect(syncResultMessage(1, 0)).toBe('Uploaded 1 entry.');
+    expect(syncResultMessage({ offline: false, before: 3, after: 0 })).toBe('Uploaded 3 entries.');
+    expect(syncResultMessage({ offline: false, before: 1, after: 0 })).toBe('Uploaded 1 entry.');
   });
 
   it('reports a partial flush honestly', () => {
-    expect(syncResultMessage(4, 1)).toBe('Uploaded 3 of 4. 1 entry still waiting.');
+    expect(syncResultMessage({ offline: false, before: 4, after: 1 })).toBe('Uploaded 3 of 4. 1 entry still waiting.');
   });
 
   it('never claims success when everything was re-queued', () => {
     // flushQueue swallows a throwing push and puts the entry straight back, so
     // "nothing moved" is the only thing the screen can honestly say.
-    expect(syncResultMessage(2, 2)).toBe('Nothing uploaded. 2 entries still waiting.');
+    expect(syncResultMessage({ offline: false, before: 2, after: 2 })).toBe('Nothing uploaded. 2 entries still waiting.');
   });
 
   it('does not call a flush a failure just because the queue grew during it', () => {
     // 2 queued, both uploaded, the widget enqueues 3 while the flush runs. The
     // old `after >= before` branch told the user "Nothing uploaded" after a
     // flush that uploaded everything it had.
-    const msg = syncResultMessage(2, 3);
+    const msg = syncResultMessage({ offline: false, before: 2, after: 3 });
     expect(msg).not.toContain('Nothing uploaded');
     expect(msg).toBe('3 entries waiting now. More were logged while the sync ran, so what went up cannot be told apart.');
   });
 
-  it('reports an empty queue rather than an upload of nothing', () => {
-    expect(syncResultMessage(0, 0)).toBe('Nothing was waiting.');
+  it('says the connection is back when the queue was empty to begin with', () => {
+    // Pressing Retry with nothing queued is a connection check, so the answer
+    // has to be about the connection. "Nothing was waiting." alone would leave
+    // the one thing the user pressed for unanswered.
+    expect(syncResultMessage({ offline: false, before: 0, after: 0 })).toBe('Connected. Nothing was waiting to upload.');
+  });
+
+  it('blames the connection, not the queue, when the server still cannot be reached', () => {
+    // flushQueue returns early on exactly this flag, so nothing can have gone
+    // up: "Nothing uploaded" would read as a failed upload of entries that
+    // were never even attempted.
+    const msg = syncResultMessage({ offline: true, before: 2, after: 2 });
+    expect(msg).toBe('No connection to the server. 2 entries still waiting.');
+    expect(msg).not.toContain('Nothing uploaded');
+  });
+
+  it('never claims an upload when nothing left the queue, connection down or not', () => {
+    expect(syncResultMessage({ offline: true, before: 3, after: 3 })).not.toContain('Uploaded');
+    expect(syncResultMessage({ offline: true, before: 0, after: 0 })).not.toContain('Uploaded');
+  });
+
+  it('still reports what went up when the connection dropped after the upload', () => {
+    // The flush emptied the queue and the connection went down after it (the
+    // NetInfo listener, a server that stopped answering the next call). Judging
+    // by the flag alone hid three uploads behind "Nothing is waiting to
+    // upload.", which reads as a retry that achieved nothing.
+    expect(syncResultMessage({ offline: true, before: 3, after: 0 })).toBe(
+      'Uploaded 3 entries. No connection to the server.',
+    );
+  });
+
+  it('reports a part-finished upload that the connection cut short', () => {
+    expect(syncResultMessage({ offline: true, before: 4, after: 1 })).toBe(
+      'Uploaded 3 of 4. No connection to the server. 1 entry still waiting.',
+    );
+  });
+
+  it('does not call an empty queue a success while the server is unreachable', () => {
+    // Retry pressed offline with nothing queued: "Connected." would be a
+    // straight lie, and "Nothing was waiting." would quietly imply it worked.
+    expect(syncResultMessage({ offline: true, before: 0, after: 0 })).toBe(
+      'No connection to the server. Nothing is waiting to upload.',
+    );
+  });
+});
+
+describe('runQueueRetry', () => {
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  it('counts, re-checks the connection, flushes, counts again, and only then reads offline', async () => {
+    const calls: string[] = [];
+    await runQueueRetry({
+      read: async () => {
+        calls.push('read');
+        return [];
+      },
+      refresh: async () => {
+        calls.push('refresh');
+      },
+      flushQueue: async () => {
+        calls.push('flush');
+      },
+      getOffline: () => {
+        calls.push('offline');
+        return false;
+      },
+    });
+    expect(calls).toEqual(['read', 'refresh', 'flush', 'read', 'offline']);
+  });
+
+  it('does not start the flush until the refresh has settled', async () => {
+    // Not merely "refresh was called first": the flush has to wait for the
+    // re-check to finish, because `flushQueue` returns early while `offline` is
+    // still set and a flush racing the refresh is the no-op this button exists
+    // to stop being.
+    let releaseRefresh = () => {};
+    const refreshing = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let flushed = false;
+    const done = runQueueRetry({
+      read: async () => [],
+      refresh: () => refreshing,
+      flushQueue: async () => {
+        flushed = true;
+      },
+      getOffline: () => false,
+    });
+    await tick();
+    expect(flushed).toBe(false);
+    releaseRefresh();
+    await done;
+    expect(flushed).toBe(true);
+  });
+
+  it('reports the connection the retry left behind, not the one it started from', async () => {
+    // Pressed with no connection, and the re-check got through: reading the
+    // flag captured at press time would report a successful upload as a dead
+    // connection.
+    let offline = true;
+    let queue = ['a', 'b'];
+    const msg = await runQueueRetry({
+      read: async () => queue,
+      refresh: async () => {
+        offline = false;
+      },
+      flushQueue: async () => {
+        queue = [];
+      },
+      getOffline: () => offline,
+    });
+    expect(msg).toBe('Uploaded 2 entries.');
+  });
+
+  it('reads offline after the flush, not just after the refresh', async () => {
+    let offline = false;
+    let queue = ['a', 'b'];
+    const msg = await runQueueRetry({
+      read: async () => queue,
+      refresh: async () => {},
+      flushQueue: async () => {
+        queue = ['b'];
+        offline = true;
+      },
+      getOffline: () => offline,
+    });
+    expect(msg).toBe('Uploaded 1 of 2. No connection to the server. 1 entry still waiting.');
+  });
+
+  it('counts the queue after the flush has finished, not while it runs', async () => {
+    let queue = ['a', 'b', 'c'];
+    let flushing = false;
+    const msg = await runQueueRetry({
+      read: async () => {
+        // A read taken mid-flush would see the queue as it was and report
+        // "Nothing uploaded." after a flush that emptied it.
+        expect(flushing).toBe(false);
+        return queue;
+      },
+      refresh: async () => {},
+      flushQueue: async () => {
+        flushing = true;
+        await tick();
+        queue = [];
+        flushing = false;
+      },
+      getOffline: () => false,
+    });
+    expect(msg).toBe('Uploaded 3 entries.');
+  });
+
+  it('reports from the counts when the refresh throws instead of rejecting', async () => {
+    let queue = ['a'];
+    const msg = await runQueueRetry({
+      read: async () => queue,
+      refresh: async () => {
+        throw new Error('unreachable');
+      },
+      flushQueue: async () => {
+        queue = [];
+      },
+      getOffline: () => true,
+    });
+    // The flush never ran, so nothing moved and the flag is the whole story.
+    expect(msg).toBe('No connection to the server. 1 entry still waiting.');
+  });
+
+  it('reports from the counts when the flush throws', async () => {
+    const msg = await runQueueRetry({
+      read: async () => ['a', 'b'],
+      refresh: async () => {},
+      flushQueue: async () => {
+        throw new Error('boom');
+      },
+      getOffline: () => false,
+    });
+    expect(msg).toBe('Nothing uploaded. 2 entries still waiting.');
   });
 });
