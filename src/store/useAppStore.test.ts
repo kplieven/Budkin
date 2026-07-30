@@ -404,6 +404,7 @@ beforeEach(() => {
     adoptSheet: false,
     te: { shape: 'interval', tags: [] },
     queueCount: 0,
+    queuedIds: [],
     profile: null,
     profileLoading: false,
     profileError: false,
@@ -1246,6 +1247,8 @@ describe('save', () => {
     await flush();
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
+    // The ids mirror too, so History can mark the row as waiting to upload.
+    expect(s().queuedIds).toEqual([(h.q[0] as Entry).id]);
     expect(h.pushed).toHaveLength(0);
   });
 
@@ -1276,10 +1279,17 @@ describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
     useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
+    useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
     await s().flushQueue();
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
     expect(s().queueCount).toBe(0);
+    // The History marker has to clear here and nowhere else. flushQueue does
+    // NOT stamp the pushed entry's `serverId` (it discards what
+    // pushEntryToServer returns), so the in-memory record stays
+    // `serverId == null` until the next refresh()/hydrate(): a serverId-based
+    // marker would keep claiming this row is waiting to upload.
+    expect(s().queuedIds).toEqual([]);
   });
 
   it('keeps entries that fail to push', async () => {
@@ -1288,6 +1298,7 @@ describe('flushQueue', () => {
     await s().flushQueue();
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
+    expect(s().queuedIds).toEqual(['x']);
   });
 });
 

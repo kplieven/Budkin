@@ -1,10 +1,12 @@
 import { router } from 'expo-router';
+import { useMemo } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { entriesForChild, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -23,6 +25,13 @@ export function TimelineRail() {
   const now = useAppStore((s) => s.now);
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
+  // The queued markers, on exactly the terms History uses: same helper, same
+  // raw-select-then-derive shape (a Set built inside a selector loops zustand
+  // v5). Desktop and mobile must not disagree about what has reached the server.
+  const queuedIds = useAppStore((s) => s.queuedIds);
+  const connection = useAppStore((s) => s.connection);
+  const serverMode = connection?.mode === 'server';
+  const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
   // Scoped to the selected child, like History: `entries` holds every child's
   // records. Notes have their own dedicated tab, so keep them out of the rail.
@@ -91,6 +100,7 @@ export function TimelineRail() {
                     onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
                     isFirst={i === 0}
                     isLast={i === g.items.length - 1}
+                    queued={isItemQueued(e, queued)}
                   />
                 ))}
               </View>
