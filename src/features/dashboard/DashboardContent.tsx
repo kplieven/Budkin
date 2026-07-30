@@ -230,22 +230,31 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           >
             <PulsingDot color={t.activity[tm.saveAs]} />
             <View style={{ flex: 1 }}>
-              <Txt unselectable weight={600} size={12} color={t.dim} style={{ textTransform: 'uppercase' }}>
-                {ACTIVITY_LABEL[tm.saveAs]} running
-              </Txt>
+              {/* Eyebrow row: the "{ACTIVITY} RUNNING" label with the per-timer
+                  sync badge beside it. The badge's tallest part (12px icon,
+                  11.5px text) is no taller than the 12px label's own line box,
+                  so this row is 14px with or without it and the card height does
+                  not move. The label shrinks and truncates ahead of the badge
+                  because the badge is the part that can widen: "Pending sync" is
+                  materially wider than "Synced". In local mode the badge is
+                  gated off and the row is just the label. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                <Txt unselectable numberOfLines={1} weight={600} size={12} color={t.dim} style={{ flexShrink: 1, textTransform: 'uppercase' }}>
+                  {ACTIVITY_LABEL[tm.saveAs]} running
+                </Txt>
+                {isServer && <SyncBadge synced={tm.serverId != null} inline />}
+              </View>
               <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
                 {fmtDur((now - tm.start) / 60000)}
               </Txt>
             </View>
-            {/* Right column: one centred row of sync badge + chevron. The badge
-                takes the slot the word "View" used to hold, so the column is a
-                single line instead of two and the card never grows for it. The
-                chevron carries the "goes somewhere" affordance on its own, and
-                the card's accessibilityLabel above still announces both the sync
-                state and "view timers", so dropping the word costs nothing to a
-                screen reader. In local mode only the chevron renders. */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-              {isServer && <SyncBadge synced={tm.serverId != null} inline />}
+            {/* Right column: the "View" affordance and its chevron on one centred
+                row. The sync badge sits on the eyebrow row above instead of
+                stacked under here, so this column stays a single line. */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+              <Txt unselectable weight={600} size={13.5} color={t.dim}>
+                View
+              </Txt>
               <Icon name="chevron-right" color={t.dim} size={16} />
             </View>
           </Pressable>
