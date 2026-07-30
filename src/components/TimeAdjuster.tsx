@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { Pressable, TextInput, View } from 'react-native';
+import { Pressable, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
@@ -35,6 +35,8 @@ interface TimeAdjusterProps {
 
 export function TimeAdjuster({ mode, value, now, color, onChange, showRelative = false }: TimeAdjusterProps) {
   const t = useTheme();
+  // Only for the nudge cap below. react-native-web pins this to 1, so web layout is unaffected.
+  const { fontScale } = useWindowDimensions();
   const [text, setText] = useState<string | null>(null); // null = not editing
 
   const display = mode === 'clock' ? fmtClock(value) : fmtDur(value);
@@ -64,9 +66,31 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
   };
   const isToday = new Date(value).toDateString() === new Date(now).toDateString();
 
+  // The six nudges share the row's free space instead of hugging a 320dp-sized padding.
+  //
+  // · flexGrow + flexBasis 'auto', deliberately NOT flex:1. flex:1 expands to flexBasis 0%,
+  //   which throws away the intrinsic width and flattens all six to one size, squeezing the
+  //   wider "−15"/"+15" ink out over its padding. 'auto' keeps each label's own width as the
+  //   floor, so the wide ones stay wide and every chip takes an equal share of the slack.
+  // · alignItems 'center' is not a no-op just because the Pressable has one child: the default
+  //   'stretch' makes that Txt span the whole chip, which left-aligns the ink the moment the
+  //   chip grows wider than its text.
+  // · maxWidth caps the tap target so a wide row gives chips, not buttons, and so a lone chip
+  //   is still chip-sized if the row takes its flexWrap escape hatch. 56 sits just above the
+  //   47px widest chip in the Timers "Started earlier?" row, which is the geometry this row is
+  //   meant to match. It must scale with fontScale: maxWidth clamps the flex BASE size, so it
+  //   binds BEFORE line breaking. Held at a flat 56 it would stop the chip growing once the
+  //   label outgrew it and paint the glyphs outside the border, instead of letting the row wrap
+  //   (reachable for real users: Android a11y text reaches 2x, iOS Dynamic Type about 3x, and
+  //   nothing here passes allowFontScaling={false}). Scaling the cap keeps it binding at 1x and
+  //   lets it step aside when the text is large.
   const stepBtn = {
     paddingHorizontal: 4,
     paddingVertical: 8,
+    alignItems: 'center' as const,
+    flexGrow: 1,
+    flexBasis: 'auto' as const,
+    maxWidth: 56 * fontScale,
     borderRadius: 11,
     backgroundColor: t.chip,
     borderWidth: 1.5,
