@@ -1,11 +1,17 @@
-import { usePathname } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { Pressable, View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import {
+  QUEUE_ROUTE,
+  isQueueRoute,
+  offlineBannerA11yLabel,
+  offlineBannerAction,
+} from '@/features/queue/offlineBanner';
 import { greetingFor, screenTitleFor } from '@/shell/labels';
-import { selectPendingCount } from '@/store/selectors';
+import { selectPendingCount, selectServerMode } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -20,6 +26,15 @@ export function TopBar() {
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
+  // The shared predicate, so this and Home's banner cannot answer the question
+  // differently. It hands back a boolean and never a reshaped `connection`: a
+  // freshly built reference here is the zustand v5 render loop.
+  const serverMode = useAppStore(selectServerMode);
+
+  // `DesktopShell` wraps the whole navigator, so this pill rides every route
+  // including the queue screen itself. Sending it there from there is a no-op
+  // that reads as a broken button, hence `atQueue`.
+  const pillAction = offlineBannerAction({ serverMode, atQueue: isQueueRoute(pathname) });
 
   const greeting = greetingFor(new Date(now).getHours());
   const title = screenTitleFor(pathname, childFirst);
@@ -49,11 +64,20 @@ export function TopBar() {
         {offline && (
           <Pressable
             onPress={() => {
+              if (pillAction === 'open-queue') {
+                router.navigate(QUEUE_ROUTE);
+                return;
+              }
+              // Nowhere to navigate: the queue screen is either already on
+              // screen or, in local mode, deliberately unreachable. The press
+              // keeps the toast and the `refresh()` it always had, which on the
+              // queue screen re-checks the connection and in local mode does
+              // nothing at all (`refresh` returns early off server mode).
               showToast('Checking connection…');
               void refresh();
             }}
             accessibilityRole="button"
-            accessibilityLabel="Retry connection"
+            accessibilityLabel={offlineBannerA11yLabel(pillAction)}
             style={(pstate) => [
               {
                 flexDirection: 'row',
@@ -75,6 +99,10 @@ export function TopBar() {
             <Txt weight={600} size={12.5} color={t.text}>
               {pending > 0 ? `Offline · ${pending} pending` : 'Offline'}
             </Txt>
+            {/* The same chevron the phone banner grew, and for the same reason:
+                the pill opens a screen now, and nothing else here says so. It
+                is dropped in the two cases where the press opens nothing. */}
+            {pillAction === 'open-queue' && <Icon name="chevron-right" color="#E2B554" size={16} />}
           </Pressable>
         )}
 

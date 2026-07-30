@@ -28,8 +28,11 @@ const isTouchWeb =
  * Android-style rubber-band past the ceiling), and releasing past the threshold
  * runs `onRefresh`. Release always eases back with `withTiming`.
  *
- * No-op on native (use the platform `RefreshControl`) and on mouse-driven web
- * (use the tappable offline banner / pill instead). The indicator is driven
+ * No-op on native (use the platform `RefreshControl`) and on mouse-driven web,
+ * which has no manual refresh gesture at all: it leans on the auto-refresh when
+ * the app or the browser tab regains focus (`src/app/_layout.tsx`). The offline
+ * banner and the desktop pill are no longer a second one: in server mode they
+ * open the queue screen, and the re-check is its Retry button. The indicator is driven
  * entirely by the `pull` shared value, so at rest (0) it is simply transparent —
  * no mount/unmount bookkeeping.
  *
