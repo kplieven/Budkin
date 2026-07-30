@@ -993,6 +993,16 @@ let flushUnsyncedInFlight = false;
 // has to be able to await the flush already running. A bare early return would
 // hand it back a queue that has not finished draining, and the screen would
 // report a successful sync as "Nothing uploaded".
+//
+// The trap that comes with joining: a caller handed this promise inherits the
+// RUNNING flush's view of the world, not its own. `const s = get()` and
+// `loadQueue()` both happen once, inside the run, so an entry enqueued after
+// those lines is not in the batch being uploaded, and the joiner still gets a
+// resolved promise for a flush that never saw its entry. Nothing does that
+// today (the write paths fire their flush and forget, and the queue screen
+// enqueues nothing), so this is documentation rather than a live bug. An
+// enqueue-then-await-flush caller would be the first one it bites, and it would
+// need a fresh flush after this one rather than a seat on it.
 let flushQueueInFlight: Promise<void> | null = null;
 
 export const useAppStore = create<AppStore>((set, get) => ({
