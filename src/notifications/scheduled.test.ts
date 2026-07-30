@@ -13,6 +13,7 @@ import {
   diffScheduled,
   PUMP_AHEAD,
   REMINDER_PREFIX,
+  staleDelivered,
   STALE_AFTER_MIN,
   type ReminderPrefs,
   type ScheduleInput,
@@ -20,7 +21,7 @@ import {
 import type { Child, Treatment, Timer } from '@/types/models';
 
 /** Local-time construction, so the 09:00 assertions hold in any timezone. */
-const at = (y: number, m: number, d: number, h = 0) => new Date(y, m - 1, d, h).getTime();
+const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min).getTime();
 
 const prefs = (over: Partial<ReminderPrefs> = {}): ReminderPrefs => ({
   dueDateReminders: true,
@@ -478,6 +479,58 @@ describe('desiredScheduled: pumping', () => {
     expect(out.some((o) => o.fireAt === now)).toBe(false);
     expect(out[0].fireAt).toBe(at(2026, 9, 1, 6));
     expect(out[out.length - 1].fireAt).toBe(at(2026, 9, 2, 3));
+  });
+
+  it('schedules nothing while a pumping timer is running', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+        timers: [timer({ id: 'p1', activity: 'pumping', saveAs: 'pumping', start: at(2026, 9, 1, 6, 50) })],
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('suppresses on saveAs, so a quick timer repointed to pumping still counts', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+        timers: [timer({ id: 'p1', activity: 'feeding', saveAs: 'pumping', start: at(2026, 9, 1, 6, 50) })],
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
+  });
+
+  it('does not suppress for a running non-pumping timer', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+        timers: [timer({ id: 's1', activity: 'sleep', saveAs: 'sleep', start: at(2026, 9, 1, 6, 50) })],
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toHaveLength(PUMP_AHEAD);
+  });
+
+  it('suppresses on a pumping timer owned by any child, matching lastPumpAt\'s own scope', () => {
+    // `lastPumpAt` is derived from every pumping entry with no child filter (see
+    // scheduleSync's toInput), so the suppression is scoped the same way. Unlike
+    // naps, there is no per-child pump reminder for a sibling's timer to silence.
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
+        lastPumpAt: at(2026, 9, 1, 6),
+        selectedChildId: 'c1',
+        timers: [timer({ id: 'p1', childId: 'c2', activity: 'pumping', saveAs: 'pumping', start: at(2026, 9, 1, 6, 50) })],
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
   });
 });
 
@@ -1107,5 +1160,296 @@ describe('desiredScheduled: milestone catch-up', () => {
     const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
     const out = run({ children: [born, sibling] });
     expect(out.every((n) => n.identifier.includes(':c1:'))).toBe(true);
+  });
+});
+
+/**
+ * The delivered half of the reconcile. `diffScheduled` above only ever sees
+ * PENDING alerts, and a notification leaves the pending set the moment it
+ * fires, so nothing there can reach a banner already sitting in the tray.
+ */
+describe('staleDelivered', () => {
+  const rowan = child({ id: 'c1', first: 'Rowan', birth: at(2026, 9, 1) });
+  const wren = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
+  const now = at(2026, 10, 31, 10, 30);
+
+  const napId = (childId: string, fireAt: number) => `${REMINDER_PREFIX}nap:${childId}:${fireAt}`;
+  const staleId = (timerId: string, fireAt: number) => `${REMINDER_PREFIX}stale:${timerId}:${fireAt}`;
+  const pumpId = (anchor: number, n: number, fireAt: number) =>
+    `${REMINDER_PREFIX}pump:${anchor}:${n}:${fireAt}`;
+  const treatmentId = (id: string, fireAt: number) => `${REMINDER_PREFIX}treatment:${id}:${fireAt}`;
+
+  describe('ownership', () => {
+    it('never dismisses an identifier without the budkin prefix', () => {
+      // A timer notification's bare uuid. Different subsystem, not ours.
+      expect(
+        staleDelivered(input({ children: [rowan] }), ['3fa85f64-5717-4562-b3fc-2c963f66afa6'], now),
+      ).toEqual([]);
+    });
+
+    it('leaves due, age and milestone reminders delivered', () => {
+      // These three report a calendar fact that stays true once it fires. No
+      // condition can retire them, so they are out of scope.
+      const ids = [
+        `${REMINDER_PREFIX}due:c1:day:${now}`,
+        `${REMINDER_PREFIX}age:c1:3m:${now}`,
+        `${REMINDER_PREFIX}milestone:c1:lifts-head,first-smile:${now}`,
+      ];
+      expect(staleDelivered(input({ children: [rowan] }), ids, now)).toEqual([]);
+    });
+
+    it('ignores a malformed identifier rather than throwing', () => {
+      const ids = [REMINDER_PREFIX, `${REMINDER_PREFIX}nap`, `${REMINDER_PREFIX}nap:c1:not-a-number`];
+      expect(staleDelivered(input({ children: [rowan] }), ids, now)).toEqual([]);
+    });
+  });
+
+  describe('nap suggestions', () => {
+    const fireAt = at(2026, 10, 31, 10, 15);
+
+    it('dismisses the nudge once a sleep timer starts for that child', () => {
+      const i = input({
+        children: [rowan],
+        timers: [timer({ id: 't1', childId: 'c1', saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
+      });
+      expect(staleDelivered(i, [napId('c1', fireAt)], now)).toEqual([napId('c1', fireAt)]);
+    });
+
+    it('dismisses the nudge for an ongoing sleep ENTRY that carries no timer', () => {
+      const i = input({ children: [rowan], asleepChildIds: { c1: true } });
+      expect(staleDelivered(i, [napId('c1', fireAt)], now)).toEqual([napId('c1', fireAt)]);
+    });
+
+    it('KEEPS a nudge that just fired and is still true, the child being awake', () => {
+      // The whole feature turns on this one. A desired reminder leaves the
+      // desired set the instant it fires (`fireAt <= now` drops it), so a
+      // "dismiss anything not desired" rule would wipe every banner on arrival.
+      expect(staleDelivered(input({ children: [rowan] }), [napId('c1', fireAt)], now)).toEqual([]);
+    });
+
+    it("a sibling's nap does not dismiss this child's nudge", () => {
+      const i = input({
+        children: [rowan, wren],
+        selectedChildId: 'c1',
+        timers: [timer({ id: 't1', childId: 'c2', saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
+        asleepChildIds: { c2: true },
+      });
+      expect(staleDelivered(i, [napId('c1', fireAt)], now)).toEqual([]);
+    });
+
+    it("keys on the identifier's own child, not the selected one", () => {
+      // c2 is asleep and c2's banner must go, even though c1 is selected.
+      const i = input({ children: [rowan, wren], selectedChildId: 'c1', asleepChildIds: { c2: true } });
+      expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
+        napId('c2', fireAt),
+      ]);
+    });
+
+    it('resolves an ownerless sleep timer to the selected child, as napReminders does', () => {
+      const i = input({
+        children: [rowan, wren],
+        selectedChildId: 'c1',
+        timers: [timer({ id: 't1', childId: undefined, saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
+      });
+      expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
+        napId('c1', fireAt),
+      ]);
+    });
+
+    it('does not dismiss for a running non-sleep timer', () => {
+      const i = input({
+        children: [rowan],
+        timers: [timer({ id: 't1', childId: 'c1', saveAs: 'feeding', start: at(2026, 10, 31, 10, 20) })],
+      });
+      expect(staleDelivered(i, [napId('c1', fireAt)], now)).toEqual([]);
+    });
+  });
+
+  describe('stale timer alerts', () => {
+    const fireAt = at(2026, 10, 31, 10, 15);
+
+    it('dismisses the alert once its timer is gone', () => {
+      const i = input({ children: [rowan], timers: [] });
+      expect(staleDelivered(i, [staleId('t1', fireAt)], now)).toEqual([staleId('t1', fireAt)]);
+    });
+
+    it('KEEPS the alert while its timer is still running, which is the whole point of it', () => {
+      const i = input({ children: [rowan], timers: [timer({ id: 't1' })] });
+      expect(staleDelivered(i, [staleId('t1', fireAt)], now)).toEqual([]);
+    });
+
+    it('matches on the timer id alone, not on which child owns it', () => {
+      const i = input({ children: [rowan, wren], timers: [timer({ id: 't1', childId: 'c2' })] });
+      expect(staleDelivered(i, [staleId('t1', fireAt)], now)).toEqual([]);
+    });
+  });
+
+  describe('pumping', () => {
+    const anchor = at(2026, 10, 31, 7);
+    const fireAt = at(2026, 10, 31, 10);
+
+    it('dismisses while a pumping timer is running', () => {
+      const i = input({
+        timers: [timer({ id: 'p1', saveAs: 'pumping', start: at(2026, 10, 31, 10, 5) })],
+        lastPumpAt: anchor,
+      });
+      expect(staleDelivered(i, [pumpId(anchor, 1, fireAt)], now)).toEqual([pumpId(anchor, 1, fireAt)]);
+    });
+
+    it('dismisses once a pumping entry is logged at or after the fire time', () => {
+      expect(staleDelivered(input({ lastPumpAt: fireAt }), [pumpId(anchor, 1, fireAt)], now)).toEqual([
+        pumpId(anchor, 1, fireAt),
+      ]);
+    });
+
+    it('KEEPS the reminder when the last pump predates it and nothing is running', () => {
+      expect(staleDelivered(input({ lastPumpAt: anchor }), [pumpId(anchor, 1, fireAt)], now)).toEqual([]);
+    });
+
+    it('KEEPS the reminder when nothing has ever been pumped', () => {
+      expect(staleDelivered(input({ lastPumpAt: null }), [pumpId(anchor, 1, fireAt)], now)).toEqual([]);
+    });
+  });
+
+  describe('treatments, fixed times of day', () => {
+    const morning = at(2026, 10, 31, 8);
+    const evening = at(2026, 10, 31, 18);
+    const t = (over: Partial<Treatment> = {}): Treatment => ({
+      id: 'treatment1',
+      childId: 'c1',
+      name: 'Omeprazol',
+      scheduleMode: 'timesOfDay',
+      timesOfDay: ['morning', 'evening'],
+      fromDate: at(2026, 9, 1),
+      active: true,
+      ...over,
+    });
+
+    it('dismisses the morning slot once a dose is logged today', () => {
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 8, 5) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', morning)], now)).toEqual([
+        treatmentId('treatment1', morning),
+      ]);
+    });
+
+    it('KEEPS the morning slot while no dose has been logged today', () => {
+      const i = input({ treatments: [t()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } });
+      expect(staleDelivered(i, [treatmentId('treatment1', morning)], now)).toEqual([]);
+    });
+
+    it('settles the EARLIEST owed slot only, matching the counting rule', () => {
+      // Both slots have fired and one late dose arrived. Counting says the first
+      // slot is settled and the second is still owed. A per-slot "any later dose
+      // clears it" rule would wrongly clear both.
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 19, 5) } },
+      });
+      const ids = [treatmentId('treatment1', morning), treatmentId('treatment1', evening)];
+      expect(staleDelivered(i, ids, at(2026, 10, 31, 19, 30))).toEqual([treatmentId('treatment1', morning)]);
+    });
+
+    it('dismisses both slots once both doses are logged', () => {
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 2, lastAt: at(2026, 10, 31, 19, 5) } },
+      });
+      const ids = [treatmentId('treatment1', morning), treatmentId('treatment1', evening)];
+      expect(staleDelivered(i, ids, at(2026, 10, 31, 19, 30))).toEqual(ids);
+    });
+
+    it("KEEPS a slot from a previous day, which today's dose count says nothing about", () => {
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 2, lastAt: at(2026, 10, 31, 8, 5) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', at(2026, 10, 30, 18))], now)).toEqual([]);
+    });
+
+    it('KEEPS a slot for a treatment with no dose scalars, whose history is unreliable', () => {
+      // In server mode `entries` only holds the selected child, so another
+      // child's dose history reads as empty. `treatmentDoseScalars` gives every
+      // treatment it considered a key, so an absent key means "not considered",
+      // never "no doses".
+      const i = input({ treatments: [t({ id: 'treatment2', childId: 'c2' })], treatmentDoses: {} });
+      expect(staleDelivered(i, [treatmentId('treatment2', morning)], now)).toEqual([]);
+    });
+
+    it('KEEPS a slot for a treatment the store no longer holds', () => {
+      expect(
+        staleDelivered(input({ treatments: [], treatmentDoses: {} }), [treatmentId('treatment1', morning)], now),
+      ).toEqual([]);
+    });
+
+    it("KEEPS a fire time that matches none of the treatment's slots", () => {
+      // The parent removed the evening slot, so a banner from it can no longer
+      // be counted against the remaining schedule.
+      const i = input({
+        treatments: [t({ timesOfDay: ['morning'] })],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 8, 5) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', evening)], now)).toEqual([]);
+    });
+  });
+
+  describe('treatments, every N hours', () => {
+    const fireAt = at(2026, 10, 31, 10);
+    const t = (over: Partial<Treatment> = {}): Treatment => ({
+      id: 'treatment1',
+      childId: 'c1',
+      name: 'Amoxicilline',
+      scheduleMode: 'everyHours',
+      everyHours: 8,
+      fromDate: at(2026, 9, 1),
+      active: true,
+      ...over,
+    });
+
+    it('dismisses once a dose re-anchors the grid past now', () => {
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 10, 5) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', fireAt)], now)).toEqual([
+        treatmentId('treatment1', fireAt),
+      ]);
+    });
+
+    it('KEEPS the reminder while the interval since the last dose has elapsed', () => {
+      const i = input({
+        treatments: [t()],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 2) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', fireAt)], now)).toEqual([]);
+    });
+
+    it('KEEPS the reminder for a treatment that has never been dosed', () => {
+      const i = input({ treatments: [t()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } });
+      expect(staleDelivered(i, [treatmentId('treatment1', fireAt)], now)).toEqual([]);
+    });
+
+    it('KEEPS the reminder for an interval treatment with no interval set', () => {
+      const i = input({
+        treatments: [t({ everyHours: undefined })],
+        treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 10, 5) } },
+      });
+      expect(staleDelivered(i, [treatmentId('treatment1', fireAt)], now)).toEqual([]);
+    });
+  });
+
+  it('returns every stale identifier in one pass, preserving input order', () => {
+    const fireAt = at(2026, 10, 31, 10, 15);
+    const pump = pumpId(at(2026, 10, 31, 7), 1, at(2026, 10, 31, 10));
+    const i = input({
+      children: [rowan],
+      asleepChildIds: { c1: true },
+      timers: [],
+      lastPumpAt: at(2026, 10, 31, 10, 20),
+    });
+    const ids = [staleId('t1', fireAt), `${REMINDER_PREFIX}due:c1:day:${fireAt}`, napId('c1', fireAt), pump];
+    expect(staleDelivered(i, ids, now)).toEqual([staleId('t1', fireAt), napId('c1', fireAt), pump]);
   });
 });

@@ -117,9 +117,15 @@ function run(s: State): void {
   // One `now` for both, so the dose scalars and the schedule cannot straddle a
   // local midnight and disagree about what "today" means.
   const now = Date.now();
-  const desired = desiredScheduled(toInput(s, now), now);
+  // The projection is kept, not discarded after building `desired`: the
+  // reconciler's delivered-notification sweep asks it the staleness questions
+  // that only make sense once Android has reported what is actually in the tray.
+  // Same `now` for all three, so the desired set and the sweep cannot straddle a
+  // local midnight and disagree about what "today" means.
+  const input = toInput(s, now);
+  const desired = desiredScheduled(input, now);
   busy = true;
-  void applyScheduled(desired).finally(() => {
+  void applyScheduled(desired, input, now).finally(() => {
     busy = false;
     if (queued) {
       const next = queued;

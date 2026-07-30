@@ -2,7 +2,13 @@ import * as Notifications from 'expo-notifications';
 
 import { REMINDER_CHANNEL_ID } from '@/notifications/content';
 import { hasReminderPermission } from '@/notifications/permission';
-import { diffScheduled, type ExistingNotification, type ScheduledNotification } from '@/notifications/scheduled';
+import {
+  diffScheduled,
+  staleDelivered,
+  type ExistingNotification,
+  type ScheduleInput,
+  type ScheduledNotification,
+} from '@/notifications/scheduled';
 
 /** What Android currently holds, narrowed to the fields the diff compares. */
 async function readScheduled(): Promise<ExistingNotification[]> {
@@ -12,6 +18,37 @@ async function readScheduled(): Promise<ExistingNotification[]> {
     title: r.content.title ?? '',
     body: r.content.body ?? '',
   }));
+}
+
+/**
+ * Sweep reminders that have already been DELIVERED but have since stopped being
+ * true out of the notification tray.
+ *
+ * `applyScheduled`'s cancel loop cannot reach these.
+ * `cancelScheduledNotificationAsync` only affects PENDING alarms, and a
+ * notification leaves the pending set the moment it fires, so the nudge that
+ * fired at 15:00 is still sitting in the shade at 15:02 when the parent starts
+ * the nap. `staleDelivered` decides what has gone stale, from the condition each
+ * kind reports on rather than from the desired set (see its comment: a
+ * just-fired reminder is absent from the desired set by construction, so a
+ * diff-driven rule would clear every banner on arrival).
+ *
+ * Living inside the reconciler rather than at each mutation site is what makes
+ * it ride every existing trigger for free: a gated store write, the foreground
+ * resume in `_layout.tsx`, launch, and a dose that arrives from another device
+ * through `refresh()`. The reverse case needs no symmetric pass either, since
+ * nothing can un-deliver a notification.
+ */
+async function dismissStale(input: ScheduleInput, now: number): Promise<void> {
+  const presented = await Notifications.getPresentedNotificationsAsync();
+  const ids = presented.map((n) => n.request.identifier);
+  for (const id of staleDelivered(input, ids, now)) {
+    try {
+      await Notifications.dismissNotificationAsync(id);
+    } catch (e) {
+      console.warn('[scheduleSync] dismissNotificationAsync failed:', id, e);
+    }
+  }
 }
 
 /**
@@ -25,7 +62,11 @@ async function readScheduled(): Promise<ExistingNotification[]> {
  * one failing item must not abort the rest, and nothing may escape as an
  * unhandled rejection (the caller discards this promise with `void`).
  */
-export async function applyScheduled(desired: ScheduledNotification[]): Promise<void> {
+export async function applyScheduled(
+  desired: ScheduledNotification[],
+  input: ScheduleInput,
+  now: number,
+): Promise<void> {
   try {
     // Silently skip while permission is missing. Everything else keeps working.
     if (!(await hasReminderPermission())) return;
@@ -61,6 +102,11 @@ export async function applyScheduled(desired: ScheduledNotification[]): Promise<
         console.warn('[scheduleSync] scheduleNotificationAsync failed:', n.identifier, e);
       }
     }
+    // LAST, deliberately. A tray that cannot be read is a cosmetic loss; a
+    // reminder that never got scheduled is not. Ordering it after both loops
+    // means a native failure here (this whole pass rides the outer catch) can
+    // only cost the sweep, never the schedule.
+    await dismissStale(input, now);
   } catch (e) {
     console.warn('[scheduleSync] applyScheduled failed:', e);
   }
