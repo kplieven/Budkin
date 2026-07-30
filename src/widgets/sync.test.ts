@@ -68,13 +68,35 @@ describe('initWidgetSync gating', () => {
     expect(push.mock.calls.length).toBe(pushes);
   });
 
-  it('rebuilds and pushes when timer data changes', async () => {
+  it('rebuilds and pushes when the day boundary changes', async () => {
+    // The snapshot carries `rhythmOriginHour` for the widget to window against,
+    // so a Settings change that is not in this gate would never reach the widget.
     const { build, push, useAppStore } = await setup();
     const builds = build.mock.calls.length;
     const pushes = push.mock.calls.length;
 
+    useAppStore.setState({ rhythmOriginHour: 19 });
+    await flush();
+
+    expect(build.mock.calls.length).toBe(builds + 1);
+    expect(push.mock.calls.length).toBe(pushes + 1);
+  });
+
+  it('rebuilds and pushes when timer data changes', async () => {
+    const { build, push, useAppStore } = await setup();
+    // A child has to be selected first: the snapshot's running-nap lookup is
+    // scoped (`runningTimer`), so with no selected child a new timer changes
+    // nothing in the snapshot and the identical-key dedupe would skip the push.
     useAppStore.setState({
-      timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }],
+      children: [{ id: 'c1', first: 'Ada', last: 'L', birth: 0, color: '#ffffff' }],
+      selectedChildId: 'c1',
+    });
+    await flush();
+    const builds = build.mock.calls.length;
+    const pushes = push.mock.calls.length;
+
+    useAppStore.setState({
+      timers: [{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }],
     });
     await flush();
 
