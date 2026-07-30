@@ -31,6 +31,8 @@ export function screenTitleFor(pathname: string, childFirst?: string): string {
       return 'Settings';
     case '/settings/notifications':
       return 'Notifications';
+    case '/settings/queue':
+      return 'Offline queue';
     case '/insights':
       return 'Insights';
     default:
