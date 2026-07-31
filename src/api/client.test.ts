@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  ApiError,
   BabybuddyClient,
   bathToNoteBody,
   childBody,
@@ -1628,5 +1629,84 @@ describe('write requests survive a page freeze (keepalive)', () => {
     const calls = captureInit({ id: 1 }); // no document stub -> typeof document === 'undefined'
     await client().createEntry(entry, 1);
     expect(calls[0].keepalive).toBeFalsy();
+  });
+});
+
+// Away from the home LAN the server address often black-holes: `fetch` neither
+// resolves nor rejects until the platform's socket timeout, minutes on some
+// stacks, and a cold start used to wait that whole window out on the splash
+// screen. `request()` therefore arms an AbortController: 10s for a GET, 20s
+// for a mutation (a slow write gets more room than a slow read, because
+// aborting a write the server actually committed re-queues it and risks a
+// duplicate). The abort surfaces as ApiError(0, ...) with a message distinct
+// from the unreachable one; status 0 keeps every existing catch working.
+describe('requests abort instead of hanging on a black-holed server', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  const entry: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount: null, tags: [] };
+
+  /** A fetch that never settles on its own and only rejects once the caller's
+   *  abort signal fires: exactly how a black-holed socket behaves. */
+  function stubBlackHoleFetch() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          }),
+      ),
+    );
+  }
+
+  it('a GET rejects with the timeout ApiError after its 10s budget, not before', async () => {
+    vi.useFakeTimers();
+    stubBlackHoleFetch();
+    let outcome: unknown = 'pending';
+    const guard = new BabybuddyClient('https://x', 't').listChildren().catch((e: unknown) => {
+      outcome = e;
+      return e;
+    });
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(outcome).toBe('pending'); // one tick short of the budget: still waiting
+    await vi.advanceTimersByTimeAsync(1);
+    const err = await guard;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0, message: 'Server took too long to respond.' });
+  });
+
+  it('a mutation gets the longer 20s budget: alive past the GET deadline, aborted at 20s', async () => {
+    vi.useFakeTimers();
+    stubBlackHoleFetch();
+    let outcome: unknown = 'pending';
+    const guard = new BabybuddyClient('https://x', 't').createEntry(entry, 1).catch((e: unknown) => {
+      outcome = e;
+      return e;
+    });
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(outcome).toBe('pending'); // the GET budget must not abort a write
+    await vi.advanceTimersByTimeAsync(10000);
+    const err = await guard;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 0, message: 'Server took too long to respond.' });
+  });
+
+  it('clears the abort timer once the request settles (no stray timer left armed)', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ count: 0, next: null, previous: null, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://x', 't').listChildren();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a plain network failure still reads as unreachable, not as a timeout', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Network request failed')));
+    await expect(new BabybuddyClient('https://x', 't').listChildren()).rejects.toMatchObject({
+      status: 0,
+      message: "Couldn't reach server. Check the URL and your connection.",
+    });
   });
 });
