@@ -1393,146 +1393,59 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
       return;
     }
-    set({ connection: conn, ...queueMirror(q) });
-    // Read the durable entity store BEFORE fetching, so the persisted selection
-    // can steer which child the fetch is for. Reused by both branches below, so
-    // neither path reads it twice. It goes unused on the 401/403 branch, which
-    // clears the connection and drops to the reconnect screen; one storage read
-    // there is not worth splitting this into two conditional paths, and
-    // `loadEntities` never rejects (see its doc comment), so hoisting it out of
-    // the try changes no error handling.
+    // Cache-first: read the durable entity store, enter the app on it
+    // IMMEDIATELY, and leave the server to a background refresh(). The old
+    // shape awaited the complete server load before clearing `hydrating`, and
+    // _layout renders nothing while `hydrating`, so away from the home LAN
+    // (where the server address tends to black-hole rather than refuse) every
+    // cold start sat on the splash until the platform socket gave up. The
+    // entity store mirrors the last good load, so opening on it shows the
+    // same data a warm foreground shows before ITS refresh lands.
+    // `loadEntities` never rejects (see its doc comment), so no try is needed
+    // around the read.
     const saved = await loadEntities();
-    try {
-      // Fetch the child the user actually had selected, not whichever child the
-      // server happens to list first. `loadFromServer` speaks server ids, so
-      // bridge from the local id space with `childServerIdFor`; a child that
-      // was never pushed (an expecting one has no `serverId`) yields null and
-      // the fetch falls back to the server's first child, as before.
-      const preferredChildServerId = childServerIdFor(saved?.children ?? [], saved?.selectedChildId ?? '');
-      const data = await loadFromServer(conn, preferredChildServerId);
-      // Queued (not-yet-flushed) entries aren't in `data.entries` yet, so merge
-      // them in to keep them visible — flushQueue below pushes them, and the
-      // NEXT refresh()/hydrate() will replace `entries` with server data that
-      // includes them, naturally dropping the local copy.
-      // Children are reconciled by `serverId`, not merged: a child created
-      // offline (serverId == null) is kept under its local id, and a child
-      // already known to the server keeps its local id too, since entries and
-      // measurements reference it. See `reconcileChildren`. Measurements
-      // created offline have no flush yet (Phase 3), so read the durable copy
-      // and merge it back in. See `mergeUnsynced`. Entries are deliberately
-      // excluded from this merge (see `mergeUnsynced`'s doc comment).
-      const e = saved;
-      const localEntries = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
-      const reconciledChildren = reconcileChildren(data.children, e?.children ?? []);
-      // Incoming entries/measurements/timers carry the SERVER's child id
-      // (loadFromServer has no local state to translate with, since a running
-      // timer's `child` FK is mapped through the same server-shaped list, see
-      // `loadFromServer`'s own `childByServerId`); rewrite it to the local id
-      // now that reconciliation has produced the authoritative mapping. See
-      // `remapChildIds`.
-      const remappedEntries = remapChildIds(data.entries, reconciledChildren);
-      const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
-      // Keep the persisted local selection if it's still visible after
-      // reconciliation (mirrors refresh's fallback below); otherwise fall back
-      // to the server's selection, resolved into local id space (see
-      // `resolveSelectedChildId`). Without this a cold start right after
-      // selecting an offline-only child would silently deselect it, since
-      // `...data` below would otherwise always win with the server's choice.
-      const localSelectedChildId = e?.selectedChildId ?? '';
-      const selectedChildId = reconciledChildren.some((c) => c.id === localSelectedChildId)
-        ? localSelectedChildId
-        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
-      set({
-        connected: true,
-        hydrating: false,
-        ...data,
-        children: reconciledChildren,
-        measurements: mergeUnsynced(remappedMeasurements, e?.measurements ?? []),
-        // An expecting child's entries (e.g. pregnancy notes) are held back
-        // the same way, but were never queued: a note written in local mode
-        // never reaches `commitWrite`'s queue path (it returns early for
-        // local mode). Read them back from the durable entity store instead,
-        // via `mergeHeldBackEntries`, on top of the normal queue merge.
-        entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
-        // A null `timers` is "the fetch failed, unknown" (see
-        // `LoadResult.timers`), not "none running": keep the on-device copy
-        // untouched instead of reconciling against an answer we never got,
-        // which would drop every running synced timer as stopped elsewhere.
-        // This explicit key must stay AFTER the `...data` spread above, so
-        // the null never reaches state. Timers are remapped only when
-        // non-null (there is nothing to remap in the null case).
-        timers:
-          data.timers == null
-            ? savedTimers
-            : reconcileTimers(savedTimers, remapChildIds(data.timers, reconciledChildren)),
-        // `get().treatments` was filled from on-device storage a few lines up, so it
-        // is the offline cache the server list merges on top of.
-        treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
-        selectedChildId,
-      });
-      void get().flushQueue();
-      void get().flushPendingOps();
-      void get().flushUnsynced();
-    } catch (e) {
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-        await clearConnection();
-        set({
-          connection: null,
-          connected: false,
-          hydrating: false,
-          connectError: 'Session expired — please reconnect.',
-          profile: null,
-          profileLoaded: false,
-          profileError: false,
-          profileLoading: false,
-          tags: [],
-          tagsLoaded: false,
-          tagsLoading: false,
-        });
-      } else {
-        // network/server unreachable: enter the app in offline mode. There's
-        // no server data to merge with. Before expecting children, every
-        // local entry in server mode also lived on the write queue, so
-        // restoring from `q` alone was harmless; an expecting child's entries
-        // (or any entry whose owner has since been confirmed born, see
-        // `isHeldBackEntry`) are the first whose only home is the durable
-        // entity store, never the queue. Read it here and use it as the
-        // base: `entries` gets a new reference either way, and the
-        // persistence subscription writes that reference straight over the
-        // entity store, so building it from `q` alone would silently
-        // overwrite (permanently lose) anything the queue didn't have. Any
-        // queued entry not already in the entity store (belt-and-suspenders;
-        // in practice the two should already agree, see `commitWrite`) is
-        // layered on top. `children` and `measurements` need the exact same
-        // treatment as `entries` and for the exact same reason: they too get
-        // a new reference below, which the persistence subscription writes
-        // straight over the entity store. Leaving them out (as this branch
-        // used to) doesn't just fail to restore an expecting child, it
-        // ERASES one the moment the user re-adds it, since `saveChild` then
-        // persists a `children` array built from an empty in-memory list.
-        const e = saved;
-        const stored = backfillHeldBack(e?.entries ?? [], e?.children ?? []);
-        const storedIds = new Set(stored.map((entry) => entry.id));
-        const queueOnly = q.filter((entry) => !storedIds.has(entry.id));
-        set({
-          connected: true,
-          offline: true,
-          hydrating: false,
-          children: e?.children ?? [],
-          entries: [...queueOnly, ...stored],
-          measurements: e?.measurements ?? [],
-          // `children` getting a new reference above without also restoring
-          // the selection that names one of them is its own regression: a
-          // present-but-unselected child falls through Home's expecting
-          // branch straight to the activity tiles, and a write against it
-          // then carries `childId: ''` (flushQueue can never resolve that).
-          // Mirrors the local-mode branch and `enterLocal` above/below.
-          selectedChildId: e?.selectedChildId ?? '',
-          lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
-          timers: savedTimers,
-        });
-      }
-    }
+    const localEntries = backfillHeldBack(saved?.entries ?? [], saved?.children ?? []);
+    // Stored entries are the base, queue-only entries layered on top, never
+    // the queue alone: `entries` gets a new reference here, and the
+    // persistence subscription writes that reference straight back over the
+    // entity store, so a list built from `q` alone would silently overwrite
+    // (permanently lose) anything the queue didn't have, e.g. an expecting
+    // child's held-back notes, whose only home is the entity store. A queued
+    // entry the store doesn't already hold (belt-and-suspenders; in practice
+    // the two agree, see `commitWrite`) is prepended on top.
+    const storedIds = new Set(localEntries.map((entry) => entry.id));
+    const queueOnly = q.filter((entry) => !storedIds.has(entry.id));
+    set({
+      connection: conn,
+      connected: true,
+      hydrating: false,
+      // NOT `offline: true`: nothing has failed yet. The refresh below owns
+      // that verdict, exactly as it does for a warm foreground re-check.
+      children: saved?.children ?? [],
+      entries: [...queueOnly, ...localEntries],
+      measurements: saved?.measurements ?? [],
+      // Restoring `children` without the selection that names one of them
+      // would be its own regression: a present-but-unselected child falls
+      // through Home's expecting branch straight to the activity tiles, and
+      // a write against it then carries `childId: ''` (flushQueue can never
+      // resolve that). Mirrors the local-mode branch above.
+      selectedChildId: saved?.selectedChildId ?? '',
+      lastFeed: saved?.lastFeed ?? { feedType: 'breast', method: 'left' },
+      timers: savedTimers,
+      ...queueMirror(q),
+    });
+    // refresh() IS the fetch-reconcile-merge-flush pipeline, so reuse it
+    // rather than duplicating its body here: its 401/403 branch clears the
+    // connection and sets the 'Session expired' connectError (routing reacts
+    // a moment after the UI appears, the same UX a warm-session 401 already
+    // has), its unreachable branch sets `offline: true`, and its
+    // `timers: null` guard keeps running timers when only the timers fetch
+    // failed. It reads `s.children`/`s.selectedChildId` for the
+    // preferred-child fetch, which the set() above just populated from the
+    // entity store, so the persisted selection still steers which child is
+    // fetched; keep that ordering. Deliberately not awaited: hydrate's
+    // contract is now "the UI can render", not "the server has answered".
+    void get().refresh();
   },
   refresh: async () => {
     const s = get();
