@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   clearEntities,
   loadEntities,
+  loadEntityOrigin,
   resetEntityStoreForTests,
   saveChildren,
+  saveEntityOrigin,
   saveEntries,
   saveLastFeed,
   saveMeasurements,
@@ -200,6 +202,33 @@ describe('entityStore persistence', () => {
     await clearEntities();
 
     expect(chunkKeysInStore()).toEqual([]);
+    expect(await loadEntities()).toBeNull();
+  });
+});
+
+// F8 follow-up: which data set the stored entities belong to (a normalized
+// server URL, or 'local'). connect() reads it to decide whether a reconnect
+// may reconcile the stored entities with the incoming server load; its
+// lifecycle is paired with the DATA it labels, not with the connection, so
+// only clearEntities removes it and a session expiry (which clears just the
+// connection) leaves it in place alongside the entities it describes.
+describe('entity origin', () => {
+  it('is null until stamped, then round-trips', async () => {
+    expect(await loadEntityOrigin()).toBeNull();
+    await saveEntityOrigin('https://a.lan');
+    expect(await loadEntityOrigin()).toBe('https://a.lan');
+    await saveEntityOrigin('local');
+    expect(await loadEntityOrigin()).toBe('local');
+  });
+
+  it('clearEntities removes the origin together with the data it labels', async () => {
+    await saveChildren([child('a')]);
+    await saveEntityOrigin('https://a.lan');
+
+    await clearEntities();
+
+    expect(mem.store.has('budkin.entityOrigin.v1')).toBe(false);
+    expect(await loadEntityOrigin()).toBeNull();
     expect(await loadEntities()).toBeNull();
   });
 });
