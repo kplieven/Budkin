@@ -6,6 +6,8 @@ import {
   childBody,
   treatmentToNoteBody,
   durationToSec,
+  fromDateStr,
+  toDateStr,
   genderFromNote,
   genderToNoteBody,
   HIDDEN_TAGS,
@@ -84,6 +86,38 @@ describe('listChildren', () => {
 
     expect(children).toHaveLength(1);
     expect(children[0]).toMatchObject({ id: '7', serverId: 7, first: 'A' });
+  });
+
+  // birth_date is date-only ('YYYY-MM-DD') and the rest of the app treats birth
+  // as LOCAL midnight: clampBirth produces it, toDateStr serializes the local
+  // calendar day, matchServerChild compares local days and the child sheet
+  // seeds its Y/M/D fields with local getters. Parsing with `new Date(s)`
+  // lands on UTC midnight instead, which west of UTC displays the birthday a
+  // day early, walks the server value back a day on every edit round-trip and
+  // breaks the adopt dedup. Local midnight equals UTC midnight only in UTC
+  // itself, so this assertion needs no timezone manipulation to bite.
+  it('parses birth_date as local midnight, matching how the app serializes it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 7, first_name: 'A', birth_date: '2025-03-04' }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+
+    const children = await client.listChildren();
+
+    expect(children[0].birth).toBe(new Date(2025, 2, 4).getTime());
+  });
+
+  // The serialize half of the pair childBody uses: a parsed birth date must
+  // come back out as the same calendar day, or every edit round-trip
+  // (rename, gender, photo) would walk birth_date backwards on the server.
+  it('round-trips a date-only string through fromDateStr + toDateStr unchanged', () => {
+    expect(toDateStr(fromDateStr('2025-03-04'))).toBe('2025-03-04');
   });
 });
 
