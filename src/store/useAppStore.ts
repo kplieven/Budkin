@@ -61,7 +61,7 @@ import {
   type PendingOp,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry } from '@/data/queue';
+import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -2825,6 +2825,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!existing || existing.type !== 'milestone') return;
     const entry: MilestoneEntry = { ...existing, time: dateMs, note: note?.trim() || undefined };
     set({ entries: s.entries.map((e) => (e.id === id ? entry : e)) });
+    // Same queue rewrite as `save()`'s edit branch: a milestone logged offline
+    // is still on the write queue, and `flushQueue` pushes the file's copy,
+    // not this one, so the stale pre-edit version would land on reconnect.
+    void updateQueuedEntry(entry).then(({ updated, queue }) => {
+      if (updated) set(queueMirror(queue));
+    });
     get().showToast('Updated');
     if (s.connection && s.connection.mode === 'server' && !s.offline) {
       const childServerId = childServerIdFor(s.children, entry.childId);
@@ -3381,6 +3387,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set(patch);
     if (existing) {
       get().showToast('Updated');
+      // If the pre-edit copy still sits on the offline write queue, rewrite it
+      // there too: `flushQueue` pushes whatever the FILE holds without
+      // consulting `entries`, so leaving the old copy queued would POST the
+      // stale version on reconnect and the next refresh() would silently
+      // revert this edit (see `updateQueuedEntry`). Unconditional on purpose:
+      // on an empty or missing queue it is a cheap no-op, and gating it on
+      // connection state would only add ways to miss the rewrite.
+      void updateQueuedEntry(entry).then(({ updated, queue }) => {
+        if (updated) set(queueMirror(queue));
+      });
       if (s.connection && s.connection.mode === 'server' && !s.offline) {
         const childServerId = childServerIdFor(s.children, entry.childId);
         // No server id for the child: nothing sensible to update server-side,
