@@ -55,6 +55,22 @@ const ENTRY_CHUNK_PREFIX = 'budkin.entries.v2.';
 const KEY_MEASUREMENTS = 'budkin.measurements.v1';
 const KEY_SELECTED_CHILD = 'budkin.selectedChild.v1';
 const KEY_LAST_FEED = 'budkin.lastFeed.v1';
+/**
+ * Which data set the stored entities belong to: a NORMALIZED server URL
+ * (`normalizeServerUrl`) for server mode, or the literal 'local' for local
+ * mode. Stamped by connect()/adopt()/enterLocal() alongside their
+ * saveConnection, and read back by connect() to decide whether a reconnect
+ * may reconcile the stored entities with the incoming server load: serverIds
+ * are per-server numeric ids, so matching by them across two different
+ * servers would graft one account's records onto another's children.
+ *
+ * Its lifecycle is paired with the DATA it labels, not with the connection:
+ * a session expiry clears the connection but keeps the entities, and the
+ * origin must survive right alongside them, so only `clearEntities` removes
+ * it. Not a secret, just a label naming where the data came from; it never
+ * holds a token.
+ */
+const KEY_ENTITY_ORIGIN = 'budkin.entityOrigin.v1';
 
 const DEFAULT_LAST_FEED: { feedType: FeedType; method: FeedMethod } = {
   feedType: 'breast',
@@ -440,6 +456,40 @@ export async function saveLastFeed(v: { feedType: FeedType; method: FeedMethod }
   }
 }
 
+/**
+ * The stored entities' origin label (see `KEY_ENTITY_ORIGIN`), or null when
+ * never stamped, unreadable, or corrupt. All three degrade the same safe way:
+ * an unknown origin only ever DISABLES the reconnect merge, and the caller's
+ * own stamp then self-heals the label for the next time.
+ */
+export async function loadEntityOrigin(): Promise<string | null> {
+  try {
+    const raw = await AsyncStorage.getItem(KEY_ENTITY_ORIGIN);
+    if (raw == null) return null;
+    const parsed = parseOr<unknown>(raw, null);
+    return typeof parsed === 'string' ? parsed : null;
+  } catch (e) {
+    console.warn('[entityStore] failed to read the entity origin, treating as absent:', e);
+    return null;
+  }
+}
+
+/**
+ * Deliberately NOT wired into the read-failure write guard: every stamp is an
+ * authoritative re-label tied to the data replacement happening in the same
+ * connect/adopt/enterLocal flow, never an in-memory default being written
+ * back over unread data, and blocking it could only let the label drift from
+ * the data it names (e.g. a connect to server B that failed to re-stamp would
+ * leave server A's label on B's entities, wrongly licensing a later merge).
+ */
+export async function saveEntityOrigin(origin: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEY_ENTITY_ORIGIN, JSON.stringify(origin));
+  } catch (e) {
+    console.warn('[entityStore] saveEntityOrigin failed:', e);
+  }
+}
+
 /** Remove all entity keys, including every entry chunk (used on disconnect). */
 export async function clearEntities(): Promise<void> {
   // Disk state is unknown until the clear finishes, whichever way it ends.
@@ -454,6 +504,8 @@ export async function clearEntities(): Promise<void> {
       AsyncStorage.removeItem(KEY_MEASUREMENTS),
       AsyncStorage.removeItem(KEY_SELECTED_CHILD),
       AsyncStorage.removeItem(KEY_LAST_FEED),
+      // The origin goes with the data it labels (see KEY_ENTITY_ORIGIN).
+      AsyncStorage.removeItem(KEY_ENTITY_ORIGIN),
       ...(chunkKeys.length > 0 ? [AsyncStorage.multiRemove(chunkKeys)] : []),
     ]);
     // Every key the guard could be protecting was just destroyed on purpose,

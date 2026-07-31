@@ -23,6 +23,7 @@ import {
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
+  type LoadResult,
   loadTagsFromServer,
   pushChildToServer,
   pushTreatmentToServer,
@@ -39,13 +40,15 @@ import {
 } from '@/data/repository';
 import { reconcileTimers } from '@/data/serverTimers';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
-import { ApiError, childColor, isHiddenTag } from '@/api/client';
+import { ApiError, childColor, isHiddenTag, normalizeServerUrl } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
   clearEntities,
   loadEntities,
+  loadEntityOrigin,
   saveChildren,
+  saveEntityOrigin,
   saveEntries,
   saveLastFeed,
   saveMeasurements,
@@ -749,6 +752,92 @@ function buildUploadDeps(conn: Connection): UploadDeps {
 
 type Get = StoreApi<AppStore>['getState'];
 type Set = StoreApi<AppStore>['setState'];
+
+/**
+ * Apply a successful `loadFromServer` result over the local view of the same
+ * data, as ONE `set()`: reconcile children by `serverId` so local ids survive
+ * (see `reconcileChildren`), remap incoming child references into local id
+ * space (`remapChildIds`), merge back everything the server cannot know about
+ * (queued + held-back entries, unsynced measurements, on-device treatments),
+ * resolve the selected child, and null-guard the timers answer.
+ *
+ * This is THE post-fetch apply step: `refresh()` runs it on every warm
+ * reload, `hydrate()` reaches it through the background `refresh()` it fires,
+ * and `connect()` runs it so a reconnect after a session expiry cannot
+ * replace local-id children with server-shaped ones, which used to strand
+ * every queued entry whose `childId` only the local list could resolve
+ * (`childServerIdFor` missed forever), and dropped local-only running timers
+ * and unsynced measurements the same wholesale way. With no local data at all
+ * (a fresh connect) every merge input is empty and this degrades to taking
+ * the server load as-is, which is exactly what a first connect should do.
+ *
+ * `local` is the caller's not-yet-reconciled local side: in-memory state for
+ * a warm `refresh()`, in-memory or entity-store state for `connect()` (memory
+ * is empty after a post-expiry cold start). `local.q` is the write queue,
+ * read AFTER the fetch so an entry logged mid-request is included, and
+ * `local.timers` is the on-device timer list, the source of truth (see
+ * `refresh`). `extra` carries the caller's own connection-lifecycle keys,
+ * merged into the same `set()` so subscribers see one atomic update.
+ */
+function applyServerLoad(
+  set: Set,
+  data: LoadResult,
+  local: {
+    children: Child[];
+    entries: Entry[];
+    measurements: Measurement[];
+    treatments: Treatment[];
+    selectedChildId: string;
+    timers: Timer[];
+    q: Entry[];
+  },
+  extra: Partial<AppState> = {},
+): void {
+  // Children are reconciled by `serverId`, not merged: a child already known
+  // to the server keeps its local id (entries/measurements reference it), and
+  // a child created offline (serverId == null) is kept under its local id
+  // too. See `reconcileChildren`.
+  const reconciledChildren = reconcileChildren(data.children, local.children);
+  // Incoming entries/measurements/timers carry the SERVER's child id; rewrite
+  // it to the local id now that reconciliation has produced the authoritative
+  // mapping. See `remapChildIds`.
+  const remappedEntries = remapChildIds(data.entries, reconciledChildren);
+  const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+  // Keep the caller's current selection if it's still visible, checked
+  // against the RECONCILED list (not just the server's) so a local child kept
+  // visible by reconcileChildren above doesn't get silently deselected;
+  // otherwise fall back to the server's first child, resolved into local id
+  // space (see `resolveSelectedChildId`).
+  const selectedChildId = reconciledChildren.some((c) => c.id === local.selectedChildId)
+    ? local.selectedChildId
+    : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
+  set({
+    ...extra,
+    ...data,
+    children: reconciledChildren,
+    // Measurements created offline have no flush yet (Phase 3): merge the
+    // local unsynced ones back in so a wholesale reload doesn't drop them
+    // from view. Entries are deliberately excluded from that merge (see
+    // `mergeUnsynced`'s doc comment): the queue merge below is entries' only
+    // source, further merged by `mergeHeldBackEntries` for an expecting
+    // child's held-back entries.
+    measurements: mergeUnsynced(remappedMeasurements, local.measurements),
+    entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, local.q), local.entries, reconciledChildren),
+    treatments: mergeTreatments(data.treatments, local.treatments, reconciledChildren),
+    selectedChildId,
+    // A null `timers` is "the fetch failed, unknown" (see
+    // `LoadResult.timers`), not "none running": keep the on-device copy
+    // untouched instead of reconciling against an answer we never got, which
+    // would drop every running synced timer as stopped elsewhere. This
+    // explicit key must stay AFTER the `...data` spread above, so the null
+    // never reaches state. Timers are remapped only when non-null (there is
+    // nothing to remap in the null case).
+    timers:
+      data.timers == null
+        ? local.timers
+        : reconcileTimers(local.timers, remapChildIds(data.timers, reconciledChildren)),
+  });
+}
 
 /** Mirror a freshly-created local timer to the server (create + stamp serverId),
  *  reusing the offline-first optimistic pattern. No-op unless online + server
@@ -1476,56 +1565,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // anything still in here is genuinely not on the server and cannot
       // duplicate a row in `data.entries`.
       const q = await loadQueue();
-      // Children are reconciled by `serverId`, not merged: a child already
-      // known to the server keeps its local id (entries/measurements
-      // reference it), and a child created offline (serverId == null) is kept
-      // under its local id too. See `reconcileChildren`. Measurements created
-      // offline have no flush yet (Phase 3): merge the in-memory unsynced ones
-      // back in so a wholesale reload doesn't drop them from view. Entries are
-      // deliberately excluded from this merge (see `mergeUnsynced`'s doc
-      // comment); `remapChildIds` below is entries' only source, further
-      // merged by `mergeHeldBackEntries` for an expecting child's held-back
-      // entries (see below).
-      const reconciledChildren = reconcileChildren(data.children, s.children);
-      // Incoming entries/measurements/timers carry the SERVER's child id;
-      // rewrite it to the local id now that reconciliation has produced the
-      // authoritative mapping. See `remapChildIds` (mirrors `hydrate` above).
-      const remappedEntries = remapChildIds(data.entries, reconciledChildren);
-      const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
-      // Keep the user's current child if it's still visible — checked against
-      // the RECONCILED list (not just the server's), so a local child kept
-      // visible by reconcileChildren above doesn't get silently deselected;
-      // otherwise fall back to the server's first child, resolved into local
-      // id space (matches cold `hydrate`; see `resolveSelectedChildId`).
-      const selectedChildId = reconciledChildren.some((c) => c.id === s.selectedChildId)
-        ? s.selectedChildId
-        : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
-      set({
-        connected: true,
-        offline: false,
-        networkOnline: true,
-        ...data,
-        children: reconciledChildren,
-        measurements: mergeUnsynced(remappedMeasurements, s.measurements),
-        // An expecting child's entries are held back the same way (see
-        // `mergeHeldBackEntries`): they're already in `s.entries` (this is a
-        // warm reload, not a cold restart), never on the server, so merge
-        // them back the same way `hydrate()` does from the entity store.
-        entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), s.entries, reconciledChildren),
-        treatments: mergeTreatments(data.treatments, s.treatments, reconciledChildren),
-        selectedChildId,
-        // A null `timers` is "the fetch failed, unknown" (see
-        // `LoadResult.timers`), not "none running": keep the on-device copy
-        // untouched instead of reconciling against an answer we never got,
-        // which would drop every running synced timer as stopped elsewhere.
-        // This explicit key must stay AFTER the `...data` spread above, so
-        // the null never reaches state. Timers are remapped only when
-        // non-null (there is nothing to remap in the null case).
-        timers:
-          data.timers == null
-            ? localTimers
-            : reconcileTimers(localTimers, remapChildIds(data.timers, reconciledChildren)),
-      });
+      // The whole reconcile-and-merge is `applyServerLoad` (shared with
+      // `connect`); this warm reload's local side is in-memory state. The
+      // held-back entries the merge re-adds are already in `s.entries`: this
+      // is a warm reload, not a cold restart, so nothing reads the entity
+      // store here.
+      applyServerLoad(
+        set,
+        data,
+        {
+          children: s.children,
+          entries: s.entries,
+          measurements: s.measurements,
+          treatments: s.treatments,
+          selectedChildId: s.selectedChildId,
+          timers: localTimers,
+          q,
+        },
+        { connected: true, offline: false, networkOnline: true },
+      );
       void get().flushQueue();
       void get().flushPendingOps();
       void get().flushUnsynced();
@@ -1564,29 +1622,102 @@ export const useAppStore = create<AppStore>((set, get) => ({
         token,
         lastUsedAt: Date.now(),
       });
-      set({
-        connection: conn,
-        connected: true,
-        connecting: false,
-        savedServers,
-        ...data,
-        // A null `timers` is "the fetch failed, unknown" (see
-        // `LoadResult.timers`) and must never land in state through the
-        // `...data` spread above: keep whatever timers are in memory (e.g. a
-        // timer running in local mode across the switch). A non-null answer
-        // replaces them wholesale, exactly as the spread always did (connect
-        // has no reconcile pipeline).
-        timers: data.timers == null ? get().timers : data.timers,
-        // a newly-connected server's profile + tags haven't been fetched yet
-        profile: null,
-        profileLoaded: false,
-        profileError: false,
-        profileLoading: false,
-        tags: [],
-        tagsLoaded: false,
-        tagsLoading: false,
-      });
+      // Reconcile the server load with whatever this device already holds
+      // instead of taking `...data` wholesale. The case that bites: a session
+      // expiry (refresh's 401 branch) clears the connection but not the local
+      // data, and the user reconnects through this action. The wholesale
+      // spread re-keyed every child to its server-derived id, the persistence
+      // subscription then wrote that server-shaped list over the entity
+      // store, and a queued entry referencing an adopt-origin LOCAL child id
+      // could never resolve again (`childServerIdFor` missed forever), so it
+      // sat in the queue failing on every flush. Local-only running timers
+      // and unsynced measurements were dropped the same way.
+      //
+      // Cross-server gate: the reconcile matches by `serverId`, and numeric
+      // ids from DIFFERENT servers collide (child 501 exists on every
+      // server), so merging is only safe when the local data came from the
+      // server being connected to. The origin label lives with the DATA
+      // (stamped below, and by adopt/enterLocal; only clearEntities removes
+      // it), so it survives the 401 gap that clears the connection. On a
+      // mismatch, or on an install that predates the label, the local side is
+      // treated as empty and `applyServerLoad` degrades to the wholesale
+      // behavior; the stamp below then self-heals a missing label, so the
+      // NEXT expiry-reconnect merges. refresh() needs no such gate: it only
+      // runs under a live connection, and the entities can only belong to a
+      // different server than the connection across that 401 gap, which
+      // forces the user back through here.
+      //
+      // The local side is gathered like `hydrate` gathers it: in-memory state
+      // when populated (a warm-session expiry leaves it in place), else the
+      // durable entity store (a cold start after the expiry parks the app on
+      // the reconnect screen with memory empty). On a genuinely fresh connect
+      // every merge input is empty either way.
+      const s = get();
+      const sameOrigin = (await loadEntityOrigin()) === normalizeServerUrl(serverUrl);
+      const saved = sameOrigin && s.children.length === 0 ? await loadEntities() : null;
+      const local = !sameOrigin
+        ? { children: [], entries: [], measurements: [], selectedChildId: '' }
+        : s.children.length > 0
+          ? {
+              children: s.children,
+              entries: s.entries,
+              measurements: s.measurements,
+              selectedChildId: s.selectedChildId,
+            }
+          : {
+              children: saved?.children ?? [],
+              entries: backfillHeldBack(saved?.entries ?? [], saved?.children ?? []),
+              measurements: saved?.measurements ?? [],
+              selectedChildId: saved?.selectedChildId ?? '',
+            };
+      // Read AFTER the fetch, mirroring `refresh`: an entry queued while the
+      // request was in flight is included. The queue is deliberately NOT
+      // origin-gated: a cross-origin queued entry cannot flush anyway (its
+      // childId resolves no serverId in the wholesale-loaded list), staying
+      // visible in the queue view instead, and refresh() merges the queue
+      // file back ungated a moment later regardless. Timers come from
+      // on-device storage, their source of truth; the persistence subscribe
+      // keeps it current, so this also covers a timer running in local mode
+      // across the switch (the in-memory list `applyServerLoad`'s null-guard
+      // used to keep). Treatments are in memory unconditionally (`hydrate`
+      // loads them before any branch).
+      const q = await loadQueue();
+      const localTimers = await loadTimers();
+      applyServerLoad(
+        set,
+        data,
+        {
+          ...local,
+          treatments: sameOrigin ? s.treatments : [],
+          // Another origin's timers must not reconcile against this server's
+          // either (the same serverId collision as children), so the local
+          // list is empty on a mismatch too, EXCEPT when the timers fetch
+          // failed (null): keeping the current timers on a missing ANSWER is
+          // about the fetch, not about id spaces, and is exactly what the
+          // wholesale path always did.
+          timers: sameOrigin || data.timers == null ? localTimers : [],
+          q,
+        },
+        {
+          connection: conn,
+          connected: true,
+          connecting: false,
+          savedServers,
+          // a newly-connected server's profile + tags haven't been fetched yet
+          profile: null,
+          profileLoaded: false,
+          profileError: false,
+          profileLoading: false,
+          tags: [],
+          tagsLoaded: false,
+          tagsLoading: false,
+        },
+      );
       void saveConnection(conn);
+      // The entity store's contents (about to be written by the persistence
+      // subscription) now belong to this server: re-stamp the origin label
+      // the gate above reads.
+      void saveEntityOrigin(normalizeServerUrl(serverUrl));
       void persistServers(savedServers);
       void get().flushQueue();
       void get().flushPendingOps();
@@ -1692,6 +1823,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     set({ connection: conn, connected: true, savedServers });
     void saveConnection(conn);
+    // The just-uploaded (and below, reconciled) entities belong to this
+    // server now: stamp the origin label so a post-expiry reconnect through
+    // connect() is allowed to reconcile them. See `loadEntityOrigin`.
+    void saveEntityOrigin(normalizeServerUrl(serverUrl));
     void persistServers(savedServers);
     // Read the pre-existing local children/entries/measurements before the
     // set() below replaces them with the server's list.
@@ -1777,6 +1912,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       tagsLoading: false,
     });
     void saveConnection(conn);
+    // Local-mode data accumulates in the entity store from here: label it so
+    // a later server connect cannot merge it by serverId. See `loadEntityOrigin`.
+    void saveEntityOrigin('local');
   },
   disconnect: () => {
     void clearConnection();
