@@ -13,6 +13,17 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: vi.fn(async (k: string) => {
       mem.store.delete(k);
     }),
+    // The entity store's month-chunked entries (see src/data/entityStore.ts)
+    // use the batch API; without these the chunked saveEntries warns on every
+    // store write this file triggers.
+    getAllKeys: vi.fn(async () => [...mem.store.keys()]),
+    multiGet: vi.fn(async (keys: string[]) => keys.map((k) => [k, mem.store.get(k) ?? null] as const)),
+    multiSet: vi.fn(async (pairs: [string, string][]) => {
+      for (const [k, v] of pairs) mem.store.set(k, v);
+    }),
+    multiRemove: vi.fn(async (keys: string[]) => {
+      for (const k of keys) mem.store.delete(k);
+    }),
   },
 }));
 
