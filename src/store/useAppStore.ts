@@ -1432,7 +1432,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // `remapChildIds`.
       const remappedEntries = remapChildIds(data.entries, reconciledChildren);
       const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
-      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the persisted local selection if it's still visible after
       // reconciliation (mirrors refresh's fallback below); otherwise fall back
       // to the server's selection, resolved into local id space (see
@@ -1455,7 +1454,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // local mode). Read them back from the durable entity store instead,
         // via `mergeHeldBackEntries`, on top of the normal queue merge.
         entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), localEntries, reconciledChildren),
-        timers: reconcileTimers(savedTimers, remappedTimers),
+        // A null `timers` is "the fetch failed, unknown" (see
+        // `LoadResult.timers`), not "none running": keep the on-device copy
+        // untouched instead of reconciling against an answer we never got,
+        // which would drop every running synced timer as stopped elsewhere.
+        // This explicit key must stay AFTER the `...data` spread above, so
+        // the null never reaches state. Timers are remapped only when
+        // non-null (there is nothing to remap in the null case).
+        timers:
+          data.timers == null
+            ? savedTimers
+            : reconcileTimers(savedTimers, remapChildIds(data.timers, reconciledChildren)),
         // `get().treatments` was filled from on-device storage a few lines up, so it
         // is the offline cache the server list merges on top of.
         treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
@@ -1570,7 +1579,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // authoritative mapping. See `remapChildIds` (mirrors `hydrate` above).
       const remappedEntries = remapChildIds(data.entries, reconciledChildren);
       const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
-      const remappedTimers = remapChildIds(data.timers, reconciledChildren);
       // Keep the user's current child if it's still visible — checked against
       // the RECONCILED list (not just the server's), so a local child kept
       // visible by reconcileChildren above doesn't get silently deselected;
@@ -1593,7 +1601,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
         entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, q), s.entries, reconciledChildren),
         treatments: mergeTreatments(data.treatments, s.treatments, reconciledChildren),
         selectedChildId,
-        timers: reconcileTimers(localTimers, remappedTimers),
+        // A null `timers` is "the fetch failed, unknown" (see
+        // `LoadResult.timers`), not "none running": keep the on-device copy
+        // untouched instead of reconciling against an answer we never got,
+        // which would drop every running synced timer as stopped elsewhere.
+        // This explicit key must stay AFTER the `...data` spread above, so
+        // the null never reaches state. Timers are remapped only when
+        // non-null (there is nothing to remap in the null case).
+        timers:
+          data.timers == null
+            ? localTimers
+            : reconcileTimers(localTimers, remapChildIds(data.timers, reconciledChildren)),
       });
       void get().flushQueue();
       void get().flushPendingOps();
@@ -1639,6 +1657,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         connecting: false,
         savedServers,
         ...data,
+        // A null `timers` is "the fetch failed, unknown" (see
+        // `LoadResult.timers`) and must never land in state through the
+        // `...data` spread above: keep whatever timers are in memory (e.g. a
+        // timer running in local mode across the switch). A non-null answer
+        // replaces them wholesale, exactly as the spread always did (connect
+        // has no reconcile pipeline).
+        timers: data.timers == null ? get().timers : data.timers,
         // a newly-connected server's profile + tags haven't been fetched yet
         profile: null,
         profileLoaded: false,
@@ -1776,7 +1801,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // authoritative mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
     const remappedEntries = remapChildIds(data.entries, reconciledChildren);
     const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
-    const remappedTimers = remapChildIds(data.timers, reconciledChildren);
     // The expecting child's measurements are held back the same way its
     // record is: they never reach the server (uploadUnsynced skips them, no
     // server child to attach them to), so merge the local copy back in,
@@ -1803,7 +1827,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       entries: mergedEntries,
       measurements: mergedMeasurements,
       treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
-      timers: remappedTimers,
+      // A null `timers` is "the fetch failed, unknown" (see
+      // `LoadResult.timers`) and must never land in state through the
+      // `...data` spread above: keep the in-memory timers as they are. A
+      // non-null answer is remapped and taken wholesale, as before.
+      timers: data.timers == null ? get().timers : remapChildIds(data.timers, reconciledChildren),
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
