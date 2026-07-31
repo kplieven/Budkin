@@ -235,11 +235,21 @@ describe('timers', () => {
     expect(result.timers).toEqual([]);
   });
 
-  it('loadFromServer degrades to no timers when listTimers throws', async () => {
+  it('loadFromServer yields timers: null (unknown) when listTimers throws, while the rest still loads', async () => {
     listChildren.mockReset().mockResolvedValueOnce([{ id: '2', serverId: 2, first: 'A', last: '', birth: 0, color: '#fff' }]);
+    listFeedings.mockReset().mockResolvedValueOnce([
+      { id: 'f-1', type: 'feeding', childId: '2', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
+    ]);
     listTimers.mockReset().mockRejectedValueOnce(new Error('boom'));
+
     const result = await loadFromServer(conn);
-    expect(result.timers).toEqual([]);
+
+    // null ("fetch failed, unknown"), NOT [] ("known none"): a consumer that
+    // reconciled [] here would treat every local serverId-carrying timer as
+    // stopped elsewhere and drop it over one transient endpoint failure.
+    expect(result.timers).toBeNull();
+    expect(result.children).toHaveLength(1);
+    expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
   });
 
   it('pushTimerToServer creates a timer with the encoded name and returns its id', async () => {
