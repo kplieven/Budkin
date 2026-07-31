@@ -46,6 +46,34 @@ export async function addPendingOp(op: PendingOp): Promise<PendingOp[]> {
   return ops;
 }
 
+/**
+ * Remove ONE completed op from the log, by value: the first stored entry whose
+ * `JSON.stringify` equals the given op's is dropped, the shortened list is
+ * saved, and the remaining ops are returned.
+ *
+ * Stringify-equality is sound here because of who calls this: a flush run
+ * removes the very objects it got from `loadPendingOps`, so both sides of the
+ * comparison came out of the same serialize/parse round trip, with identical
+ * key order and values. That makes removal work with no persisted-shape change
+ * (no id field on `PendingOp`, no migration). Matching only the FIRST
+ * occurrence keeps duplicates multiset-correct: two identical offline renames
+ * queue two identical ops on purpose, and completing one replay must consume
+ * exactly one of them.
+ *
+ * Re-reads the file instead of overwriting it with a list the caller holds,
+ * so an op appended by `addPendingOp` while a flush is mid-run survives the
+ * removal rather than being clobbered by the run's stale snapshot.
+ */
+export async function removePendingOp(op: PendingOp): Promise<PendingOp[]> {
+  const ops = await loadPendingOps();
+  const key = JSON.stringify(op);
+  const idx = ops.findIndex((o) => JSON.stringify(o) === key);
+  if (idx === -1) return ops;
+  ops.splice(idx, 1);
+  await savePendingOps(ops);
+  return ops;
+}
+
 export async function clearPendingOps(): Promise<void> {
   try {
     await AsyncStorage.removeItem(KEY);
