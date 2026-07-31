@@ -761,11 +761,26 @@ function mirrorTimerCreate(get: Get, set: Set, timerId: string): void {
   if (!conn || conn.mode !== 'server' || s.offline) return;
   const timer = s.timers.find((t) => t.id === timerId);
   if (!timer) return;
+  // A genuine new create: give the retry chain a fresh budget, so a timer
+  // started an hour after some earlier failure isn't stuck with a spent one.
+  timerRetryAttempt = 0;
   const child = s.children.find((c) => c.id === (timer.childId ?? s.selectedChildId));
-  if (!child || child.serverId == null) return; // child not synced yet — reconnect flush handles it
+  // Child not on the server yet. `flushUnsynced` pushes the child first and the
+  // timer straight after (it re-reads state between the two for exactly this
+  // reason), so schedule it instead of leaving the timer for whenever a refresh
+  // or a reconnect next happens.
+  if (!child || child.serverId == null) {
+    scheduleUnsyncedTimerFlush(get);
+    return;
+  }
   void pushTimerToServer(conn, timer, child.serverId)
     .then((serverId) => {
-      if (serverId == null) return;
+      // A response with no id is a create that did not land: retry it rather
+      // than leaving the timer silently unsynced.
+      if (serverId == null) {
+        scheduleUnsyncedTimerFlush(get);
+        return;
+      }
       if (get().timers.some((t) => t.id === timerId)) {
         set((st) => ({ timers: st.timers.map((t) => (t.id === timerId ? { ...t, serverId } : t)) }));
       } else {
@@ -773,7 +788,11 @@ function mirrorTimerCreate(get: Get, set: Set, timerId: string): void {
         void deleteTimerFromServer(conn, serverId).catch(() => {});
       }
     })
-    .catch(() => {});
+    .catch((e) => {
+      // Was a bare swallow, which left no trace of why a timer never synced.
+      console.warn('[timers] create failed, retrying:', e);
+      scheduleUnsyncedTimerFlush(get);
+    });
 }
 
 /** Mirror an edit to an already-synced timer: PATCH online, queue offline.
@@ -974,6 +993,68 @@ function detachEntry(get: Get, set: Set, entry: Entry, index: number, timerId?: 
     set(queueMirror(queue));
     record.requeue = true;
   });
+}
+
+/**
+ * Retry schedule for a timer create that didn't land.
+ *
+ * A create has no queue of its own, and deliberately so: `PendingOp` has no
+ * `create` variant, because an unsynced record is already durable on its own
+ * (`serverId == null` in the persisted timers list) and `flushUnsynced` is the
+ * idempotent reconciler for exactly that state. What was missing is anything to
+ * RUN that reconciler. It only fires from hydrate, refresh, and the
+ * offline/network transitions, so two cases sat unsynced until the user
+ * happened to pull to refresh: a create the server rejected, and one started
+ * against a child that had not reached the server yet. Every other write
+ * already had a fallback (entries queue via `enqueueEntry`, timer edit/delete
+ * via `addPendingOp`); create was the one that dropped the failure on the floor.
+ *
+ * Bounded on purpose. After the last delay the ordinary paths take over
+ * (foreground refresh, reconnect), so a server that stays broken cannot keep a
+ * retry chain spinning for the life of the process. The budget is refreshed by
+ * the next create, since a fresh user action deserves a fresh set of attempts.
+ */
+const TIMER_RETRY_DELAYS_MS = [2000, 8000, 30000];
+let timerRetryAttempt = 0;
+let timerRetryHandle: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleUnsyncedTimerFlush(get: Get): void {
+  if (timerRetryHandle || timerRetryAttempt >= TIMER_RETRY_DELAYS_MS.length) return;
+  const delay = TIMER_RETRY_DELAYS_MS[timerRetryAttempt];
+  timerRetryAttempt += 1;
+  timerRetryHandle = setTimeout(() => {
+    timerRetryHandle = undefined;
+    const s = get();
+    // Offline or no longer on a server: `setNetworkOnline`/`setOffline` already
+    // flush on the way back up, so stand down rather than spend attempts here.
+    if (!s.connection || s.connection.mode !== 'server' || s.offline) {
+      timerRetryAttempt = 0;
+      return;
+    }
+    if (!s.timers.some((t) => t.serverId == null)) {
+      timerRetryAttempt = 0;
+      return;
+    }
+    // `catch` before `finally`: flushUnsynced does not catch its own uploader,
+    // so a bare `.finally()` here would leave the rejection unhandled.
+    void s
+      .flushUnsynced()
+      .catch(() => {})
+      .finally(() => {
+        // Still unsynced (server still refusing, child still not pushed): keep
+        // the chain going until the attempt budget runs out.
+        if (get().timers.some((t) => t.serverId == null)) scheduleUnsyncedTimerFlush(get);
+        else timerRetryAttempt = 0;
+      });
+  }, delay);
+}
+
+/** Drop any scheduled timer retry. Tests only: the handle is module state, so
+ *  without this a chain armed by one test fires during a later one. */
+export function resetTimerRetryForTests(): void {
+  if (timerRetryHandle) clearTimeout(timerRetryHandle);
+  timerRetryHandle = undefined;
+  timerRetryAttempt = 0;
 }
 
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
