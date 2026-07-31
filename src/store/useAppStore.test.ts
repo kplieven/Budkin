@@ -4045,6 +4045,127 @@ describe('refresh / reconnect', () => {
   });
 });
 
+// F8: connect() used to take the server load wholesale (`...data`), re-keying
+// every child to its server-derived id. After a session expiry (refresh's
+// 401 branch clears the connection; the entity store still holds the old
+// children under local ids + serverIds), reconnecting through connect()
+// destroyed the local-id mapping: the persistence subscription wrote the
+// server-shaped list over the entity store, and a queued entry referencing
+// an adopt-origin LOCAL child id could never resolve (`childServerIdFor`
+// misses), so it sat in the queue failing forever. Local-only running timers
+// and unsynced measurements were dropped the same wholesale way. connect()
+// now routes through the same `applyServerLoad` pipeline as refresh().
+describe('connect() reconciles the server load with local data (session-expiry reconnect)', () => {
+  it('a post-expiry reconnect keeps local child ids from the entity store, so a queued entry still resolves and flushes', async () => {
+    // Post-401 cold-start shape: no connection, memory empty, the entity
+    // store still holding the adopt-origin child under its LOCAL id, and a
+    // queued entry referencing that id.
+    const queued: Entry = { id: 'qx', childId: 'child1712-abc', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    h.q = [queued];
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      queueCount: 1,
+      queuedIds: ['qx'],
+    });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'child1712-abc', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [{ id: 'mLocal', childId: 'child1712-abc', kind: 'weight', value: 5.1, date: NOW }],
+      selectedChildId: 'child1712-abc',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush(); // let the post-connect flush trio settle
+
+    expect(s().connected).toBe(true);
+    expect(s().connecting).toBe(false);
+    // The child kept its LOCAL id (reconciled by serverId, not replaced).
+    expect(s().children.map((c) => c.id)).toEqual(['child1712-abc']);
+    expect(s().selectedChildId).toBe('child1712-abc');
+    expectSelectionNamesARealChild();
+    // The queued entry stayed visible AND flushed: its local childId resolved
+    // to serverId 501 through the kept child. The old wholesale replace left
+    // `childServerIdFor` missing forever, so nothing ever pushed.
+    expect(s().entries.map((e) => e.id)).toContain('qx');
+    expect(h.pushed).toHaveLength(1);
+    expect(h.q).toHaveLength(0);
+    // The unsynced measurement survived the reconnect too.
+    expect(s().measurements.map((m) => m.id)).toContain('mLocal');
+  });
+
+  it('a running local-only timer (serverId == null) survives connect even when the server answers an empty timers list', async () => {
+    const running: Timer = { id: 't-local', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 5 * M, childId: 'c1' };
+    // Warm post-expiry state: connection cleared, memory (and the on-device
+    // timer copy, via the persistence subscribe) still holds the timer.
+    useAppStore.setState({ connection: null, connected: false, timers: [running] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      // A real empty answer, NOT null: F7's null-guard never fires here, and
+      // the old wholesale spread dropped the running timer on exactly this
+      // shape.
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    // Assert on id only: the post-connect flushUnsynced may already have
+    // stamped a serverId on the kept timer (its child is synced).
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0]).toMatchObject({ id: 't-local' });
+  });
+
+  it('a fresh connect with no local data takes the server load as-is (children under server-derived ids, server selection)', async () => {
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      timers: [],
+    });
+    // The entity store is empty too (the loadEntities mock default is null).
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000, color: '#fff' }],
+      entries: [{ id: 'se1', serverId: 21, childId: '7', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
+      timers: [{ id: 'tsrv3', serverId: 3, childId: '7', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - M }],
+      selectedChildId: '7',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+      measurements: [{ id: 'sm1', serverId: 11, childId: '7', kind: 'weight', value: 4.4, date: NOW }],
+    });
+
+    await s().connect('http://x', 't');
+    await flush();
+
+    expect(s().children.map((c) => c.id)).toEqual(['7']);
+    expect(s().selectedChildId).toBe('7');
+    expect(s().entries.map((e) => e.id)).toEqual(['se1']);
+    expect(s().measurements.map((m) => m.id)).toEqual(['sm1']);
+    expect(s().timers.map((t) => t.id)).toEqual(['tsrv3']);
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expectSelectionNamesARealChild();
+  });
+});
+
 describe('selectedChildId fallback resolves in local id space (regression: a server-space id used as a local-space fallback)', () => {
   it('refresh: a sibling deleted server-side re-points selectedChildId at a REMAINING local child, not a bare server id', async () => {
     // Repro from the branch review: two children created in Budkin
