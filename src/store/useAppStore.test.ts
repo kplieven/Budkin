@@ -120,6 +120,11 @@ vi.mock('@/data/queue', () => ({
     h.q = (h.q as { id: string }[]).filter((e) => e.id !== id);
     return { removed, queue: h.q };
   }),
+  updateQueuedEntry: vi.fn(async (e: { id: string }) => {
+    const updated = (h.q as { id: string }[]).some((x) => x.id === e.id);
+    if (updated) h.q = (h.q as { id: string }[]).map((x) => (x.id === e.id ? e : x));
+    return { updated, queue: h.q };
+  }),
   clearQueue: vi.fn(async () => {
     h.q = [];
   }),
@@ -2377,6 +2382,100 @@ describe('edit / delete entry', () => {
     // The queued delete op must be removed, or a later flushPendingOps would
     // delete the just-restored entry from the server anyway.
     expect(h.pendingOps).toHaveLength(0);
+  });
+});
+
+describe('editing a still-queued entry rewrites its queued copy', () => {
+  // The offline write queue file is what `flushQueue` pushes, and it never
+  // consults `entries`. An edit that only updated the in-memory copy left the
+  // stale pre-edit version sitting on the file: the reconnect flush POSTed
+  // that stale copy, and the next refresh() then dropped the local edit
+  // (serverId null, not held back) in favor of the server's row, silently
+  // reverting the user's correction.
+
+  it('save() rewrites the queued copy in place, same position, and re-mirrors the queue', async () => {
+    useAppStore.setState({ offline: true });
+    s().openSheet('note');
+    s().setTE({ noteText: 'first wrods' });
+    s().save();
+    await flush();
+    expect(h.q).toHaveLength(1);
+    const id = (h.q[0] as Entry).id;
+    // A second write queued behind it, so "in place" is observable as
+    // position: a remove-and-append rewrite would move the edit to the back
+    // and reorder the reconnect upload.
+    const later: Entry = { id: 'q-later', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    h.q = [...h.q, later];
+
+    s().openEdit(id);
+    s().setTE({ noteText: 'first words' });
+    s().save();
+    await flush();
+
+    expect(h.q).toHaveLength(2);
+    expect(h.q[0]).toMatchObject({ id, type: 'note', text: 'first words' });
+    expect((h.q[1] as Entry).id).toBe('q-later');
+    // The mirror is refreshed from the rewritten file, so History's queued
+    // markers and the banner count stay truthful.
+    expect(s().queuedIds).toEqual([id, 'q-later']);
+    expect(s().queueCount).toBe(2);
+  });
+
+  it('a reconnect flush pushes the edited payload, not the stale pre-edit copy', async () => {
+    useAppStore.setState({ offline: true, children: [SYNCED_C1] });
+    s().openSheet('note');
+    s().setTE({ noteText: 'fed at teh wrong time' });
+    s().save();
+    await flush();
+    const id = (h.q[0] as Entry).id;
+
+    s().openEdit(id);
+    s().setTE({ noteText: 'fed at the right time' });
+    s().save();
+    await flush();
+
+    useAppStore.setState({ offline: false });
+    await s().flushQueue();
+
+    expect(h.pushed).toHaveLength(1);
+    expect(h.pushed[0]).toMatchObject({ id, text: 'fed at the right time' });
+    expect(h.q).toHaveLength(0);
+  });
+
+  it('editing an entry that is NOT queued leaves the queue file untouched', async () => {
+    useAppStore.setState({
+      children: [SYNCED_C1],
+      entries: [
+        { id: 'feeding-1', serverId: 1, childId: 'c1', type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null, tags: [] },
+      ],
+    });
+    const other: Entry = { id: 'q-other', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    h.q = [other];
+    useAppStore.setState({ queueCount: 1, queuedIds: ['q-other'] });
+
+    s().openEdit('feeding-1');
+    s().setTE({ method: 'right' });
+    s().save();
+    await flush();
+
+    expect(h.q).toEqual([other]);
+    expect(s().queuedIds).toEqual(['q-other']);
+    expect(s().queueCount).toBe(1);
+    expect(h.updated).toHaveLength(1); // the ordinary online update still went out
+  });
+
+  it('editMilestone on a queued milestone rewrites the queued copy too', async () => {
+    useAppStore.setState({ offline: true });
+    s().logMilestone('first-steps', NOW - 10 * M, 'wobbly');
+    await flush();
+    expect(h.q).toHaveLength(1);
+    const id = (h.q[0] as Entry).id;
+
+    s().editMilestone(id, NOW - 5 * M, 'three steady steps');
+    await flush();
+
+    expect(h.q).toHaveLength(1);
+    expect(h.q[0]).toMatchObject({ id, type: 'milestone', time: NOW - 5 * M, note: 'three steady steps' });
   });
 });
 

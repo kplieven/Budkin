@@ -52,6 +52,34 @@ export async function removeQueuedEntry(id: string): Promise<{ removed: Entry | 
   return { removed, queue };
 }
 
+/**
+ * Replace a queued entry, found by its LOCAL id, with a newer copy IN PLACE
+ * (same position), returning whether anything was replaced alongside the
+ * resulting queue. An id that is not on the queue writes nothing.
+ *
+ * This is what keeps an EDIT of a still-queued entry from silently reverting:
+ * `flushQueue` pushes whatever the FILE holds without consulting `entries`, so
+ * an edit that only updated the in-memory copy would still POST the stale
+ * pre-edit version on reconnect, and the next refresh() would replace the
+ * local edit (serverId null, not held back) with the server's stale row.
+ *
+ * Position matters too: the reconnect flush uploads in queue order, so the
+ * rewrite must not shuffle the edited entry to the back the way a
+ * remove-then-enqueue would.
+ *
+ * Accepted residual race: a flush that read the file microseconds before this
+ * rewrite still pushes the old copy. That window used to be "until the next
+ * refresh" and is now milliseconds; closing it entirely would need
+ * server-side idempotency Baby Buddy does not offer.
+ */
+export async function updateQueuedEntry(e: Entry): Promise<{ updated: boolean; queue: Entry[] }> {
+  const q = await loadQueue();
+  if (!q.some((x) => x.id === e.id)) return { updated: false, queue: q };
+  const queue = q.map((x) => (x.id === e.id ? e : x));
+  await saveQueue(queue);
+  return { updated: true, queue };
+}
+
 export async function clearQueue(): Promise<void> {
   try {
     await AsyncStorage.removeItem(KEY);
