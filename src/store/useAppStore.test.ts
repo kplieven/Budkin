@@ -1915,6 +1915,7 @@ describe('timer persistence across restarts', () => {
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
+    await flush(); // the unreachable verdict now comes from the background refresh
     expect(s().offline).toBe(true);
     expect(s().timers).toEqual(saved);
   });
@@ -1929,6 +1930,7 @@ describe('timer persistence across restarts', () => {
       timers: null,
     });
     await s().hydrate();
+    await flush(); // the null-guard now lives in the background refresh; let it run
     // The load as a whole succeeded (a timers-only failure is not "offline"),
     // and null skipped reconciliation: the running timer was not treated as
     // "stopped elsewhere" over one transient /api/timers/ failure.
@@ -2086,8 +2088,13 @@ describe('queued entries survive killing the app', () => {
       measurements: [],
     });
     await s().hydrate();
+    // Cache-first: the queued entry is already visible straight off hydrate,
+    // still counted as queued (nothing has flushed yet).
+    expect(s().entries.map((e) => e.id)).toEqual(['e1']);
+    expect(s().queueCount).toBe(1);
+    // The background refresh then merges the server entries in around it.
+    await flush();
     expect(s().entries.map((e) => e.id)).toEqual(['e1', 'srv-1']);
-    expect(s().queueCount).toBe(1); // still counted as queued (flush hasn't run yet)
   });
 
   it('restores a queued entry into `entries` when the server is unreachable at launch', async () => {
@@ -2095,6 +2102,7 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
+    await flush(); // the unreachable verdict now comes from the background refresh
     expect(s().offline).toBe(true);
     expect(s().entries).toEqual([queuedEntry('e2')]);
     expect(s().queueCount).toBe(1);
@@ -2123,6 +2131,7 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
+    await flush(); // the unreachable verdict now comes from the background refresh
 
     expect(s().offline).toBe(true);
     expect(s().entries.find((e) => e.id === 'storedOnly')).toBeDefined();
@@ -2158,6 +2167,7 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
+    await flush(); // the unreachable verdict now comes from the background refresh
 
     expect(s().offline).toBe(true);
     expect(s().children.find((c) => c.id === 'localDue')).toBeDefined();
@@ -2190,6 +2200,7 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
+    await flush(); // the unreachable verdict now comes from the background refresh
 
     expect(s().offline).toBe(true);
     expect(s().selectedChildId).toBe('localDue');
@@ -2303,6 +2314,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       measurements: [],
     });
     await s().hydrate();
+    await flush(); // let the background refresh finish its merge
     expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
   });
 
@@ -2328,6 +2340,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       measurements: [],
     });
     await s().hydrate();
+    await flush(); // let the background refresh finish its merge
     expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
     expect(s().selectedChildId).toBe('localY');
     expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
@@ -2387,7 +2400,117 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       measurements: [],
     });
     await s().hydrate();
+    await flush(); // let the background refresh finish its merge
     expect(s().entries.map((e) => e.id)).not.toContain('persisted-e');
+  });
+});
+
+// F6: cold start used to block the splash on the complete server load (and
+// `request()` had no timeout underneath it), so away from the home LAN, where
+// the server address black-holes rather than refusing, every cold start sat
+// on the splash until the platform socket gave up. Cache-first instead:
+// hydrate populates state from the durable entity store and finishes
+// immediately, then hands the fetch-reconcile-merge to a background
+// `refresh()`, which already owns the 401 and unreachable outcomes.
+describe('cache-first hydrate (server mode)', () => {
+  const storedChild: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
+  const storedEntry: Entry = { id: 'stored-1', childId: 'c1', type: 'note', time: NOW - 60 * M, text: 'from the entity store', tags: [] };
+
+  it('finishes hydrating on cached data BEFORE the server load settles, then merges the refresh result', async () => {
+    let resolveLoad!: (data: unknown) => void;
+    useAppStore.setState({ hydrating: true, connection: null, connected: false, children: [], entries: [], selectedChildId: '' });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [storedChild],
+      entries: [storedEntry],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    // A black-holed server: the load neither resolves nor rejects until told to.
+    vi.mocked(loadFromServer).mockImplementationOnce(() => new Promise((res) => (resolveLoad = res)) as never);
+
+    await s().hydrate();
+
+    // hydrate resolved while the server load is still hanging: the UI can render.
+    expect(s().hydrating).toBe(false);
+    expect(s().connected).toBe(true);
+    expect(s().offline).toBe(false); // nothing failed yet: refresh decides offline, not hydrate
+    expect(s().children.map((c) => c.id)).toEqual(['c1']);
+    expect(s().entries.map((e) => e.id)).toEqual(['stored-1']);
+    expect(s().selectedChildId).toBe('c1');
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+
+    // The background refresh was fired and asked the server for the persisted
+    // selection: children were populated from the entity store BEFORE the
+    // refresh read them, so the preferred-child fetch survives cache-first.
+    await flush();
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(501);
+
+    // Let the hanging load settle (refreshInFlight is module state: a test
+    // that leaves it pending would wedge every later refresh in this file)
+    // and check the refresh pipeline merged the server answer over the cache.
+    resolveLoad({
+      treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [{ id: 'srv-1', serverId: 5, childId: '501', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+    await flush();
+    expect(s().entries.map((e) => e.id)).toEqual(['srv-1']);
+    expect(s().children.map((c) => c.id)).toEqual(['c1']); // local id preserved by reconcile
+    expect(s().selectedChildId).toBe('c1');
+  });
+
+  it('a 401 at cold start opens on cached data, then the background refresh clears the session', async () => {
+    useAppStore.setState({ hydrating: true, connection: null, connected: false, connectError: null, children: [], entries: [] });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [storedChild],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token for this server.'));
+
+    await s().hydrate();
+
+    // hydrate itself never sees the 401: it resolved on the cached view.
+    expect(s().hydrating).toBe(false);
+    expect(s().connected).toBe(true);
+
+    // The refresh it fired lands the 401 a moment later: connection cleared,
+    // reconnect flow takes over (the same UX a warm-session 401 already has).
+    await flush();
+    expect(s().connection).toBeNull();
+    expect(s().connected).toBe(false);
+    expect(s().connectError).toBe('Session expired — please reconnect.');
+  });
+
+  it('a fresh-connect cold start with an empty entity store still opens immediately', async () => {
+    // The accepted trade: nothing cached yet means a briefly empty dashboard
+    // while the first refresh runs, never a splash held hostage by the fetch.
+    let rejectLoad!: (e: unknown) => void;
+    useAppStore.setState({ hydrating: true, connection: null, connected: false });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockImplementationOnce(() => new Promise((_res, rej) => (rejectLoad = rej)) as never);
+
+    await s().hydrate();
+
+    expect(s().hydrating).toBe(false);
+    expect(s().connected).toBe(true);
+    expect(s().children).toEqual([]);
+    expect(s().entries).toEqual([]);
+
+    // Settle the hanging load (refreshInFlight is module state, see above);
+    // an unreachable answer keeps this test's subject the empty cold open.
+    rejectLoad(new Error('network'));
+    await flush();
+    expect(s().offline).toBe(true);
   });
 });
 
@@ -3971,6 +4094,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     });
 
     await s().hydrate();
+    await flush(); // let the background refresh finish its merge
 
     expect(s().children.map((c) => c.id)).toEqual(['childAAA']);
     expect(s().selectedChildId).toBe('childAAA');

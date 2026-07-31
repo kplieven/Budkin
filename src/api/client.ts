@@ -642,6 +642,17 @@ export class BabybuddyClient {
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     let res: Response;
+    const method = init?.method ?? 'GET';
+    // Away from the home LAN the server address often black-holes: `fetch`
+    // then neither resolves nor rejects until the platform's socket timeout,
+    // which can be minutes. Abort instead of hanging: 10s for a read, 20s for
+    // a mutation. A slow write deliberately gets more room than a slow read,
+    // because aborting a write the server actually committed re-queues it and
+    // risks a duplicate, so the write budget errs on the generous side.
+    // RN's fetch supports AbortController natively; no polyfill involved.
+    const timeoutMs = method === 'GET' ? 10000 : 20000;
+    const controller = new AbortController();
+    const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData;
       // On web, let a mutating request outlive the page. An installed PWA freezes
@@ -653,12 +664,13 @@ export class BabybuddyClient {
       // the request regardless. Web only (native fetch has no such freeze and does
       // not support the flag); never for FormData (a photo upload can exceed
       // keepalive's 64KB body budget); writes only (a GET has no side effect to
-      // lose).
-      const method = init?.method ?? 'GET';
+      // lose). The abort timer above does not fight keepalive: freezing the page
+      // freezes the timer with it, so a keepalive write still completes.
       const keepalive = typeof document !== 'undefined' && !isForm && method !== 'GET';
       res = await fetch(`${this.apiBase}${path}`, {
         ...init,
         keepalive,
+        signal: controller.signal,
         headers: {
           Authorization: `Token ${this.token}`,
           // A FormData body must keep its auto-generated multipart boundary header.
@@ -668,7 +680,15 @@ export class BabybuddyClient {
         },
       });
     } catch {
+      // Timed out vs unreachable: distinct copy, so a hung server reads
+      // differently from a wrong address, but the same status 0, so every
+      // existing catch that switches on it keeps working.
+      if (controller.signal.aborted) {
+        throw new ApiError(0, 'Server took too long to respond.');
+      }
       throw new ApiError(0, "Couldn't reach server. Check the URL and your connection.");
+    } finally {
+      clearTimeout(abortTimer);
     }
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
