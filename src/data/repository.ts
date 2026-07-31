@@ -30,7 +30,15 @@ export type Connection =
 export interface LoadResult {
   children: Child[];
   entries: Entry[];
-  timers: Timer[];
+  /** Running timers mirrored on the server, or null when the /api/timers/
+   *  fetch itself failed. The distinction is load-bearing: an empty list is
+   *  an ANSWER ("no timers running anywhere"), which consumers reconcile by
+   *  dropping local serverId-carrying timers as stopped elsewhere; null is
+   *  the ABSENCE of an answer, and consumers must keep their local timers
+   *  and skip reconciliation, or one transient failure of that single
+   *  endpoint during a refresh would kill a running mirrored timer on the
+   *  very device that started it. */
+  timers: Timer[] | null;
   selectedChildId: string;
   lastFeed: { feedType: FeedType; method: FeedMethod };
   measurements: Measurement[];
@@ -127,8 +135,11 @@ export async function loadFromServer(
 
   // Running timers mirrored on the server (same-account cross device). Map each
   // timer's child FK back to a local child id; skip timers for a child we don't
-  // have loaded, and degrade to none if the endpoint is unavailable.
-  let timers: Timer[] = [];
+  // have loaded, and degrade to null (unknown) if the endpoint is unavailable:
+  // NOT [], which would be a positive "no timers running anywhere" answer that
+  // consumers reconcile by dropping local synced timers as stopped elsewhere.
+  // See `LoadResult.timers`.
+  let timers: Timer[] | null = [];
   try {
     const raw = await client.listTimers();
     const childByServerId = new Map<number, string>();
@@ -139,7 +150,7 @@ export async function loadFromServer(
       return childId ? [serverTimerToTimer(t, childId)] : [];
     });
   } catch {
-    timers = [];
+    timers = null;
   }
 
   return { children, entries, timers, selectedChildId, lastFeed, measurements, treatments };
