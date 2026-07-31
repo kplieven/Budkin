@@ -66,12 +66,17 @@ export interface ServerTimer {
 const toISO = (ms: number) => new Date(ms).toISOString();
 const fromISO = (s: string) => new Date(s).getTime();
 
-// Measurements use a date-only field ('YYYY-MM-DD').
-const toDateStr = (ms: number) => {
+// Date-only fields ('YYYY-MM-DD'): measurement dates, treatment from/to dates
+// and a child's birth_date. The whole app treats these as LOCAL calendar days
+// (clampBirth yields local midnight, the child sheet reads local Y/M/D), so
+// both directions must stay in local time. `new Date('YYYY-MM-DD')` is NOT a
+// substitute for fromDateStr: it parses to UTC midnight, which west of UTC
+// displays a day early and walks the value back a day on every edit round-trip.
+export const toDateStr = (ms: number) => {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-const fromDateStr = (s: string) => {
+export const fromDateStr = (s: string) => {
   const [y, m, d] = s.split('-').map(Number);
   return new Date(y, (m || 1) - 1, d || 1).getTime();
 };
@@ -706,7 +711,10 @@ export class BabybuddyClient {
       serverId: c.id,
       first: c.first_name ?? '',
       last: c.last_name ?? '',
-      birth: c.birth_date ? fromISO(c.birth_date) : Date.now(),
+      // birth_date is date-only: parse it as a LOCAL calendar day (fromDateStr),
+      // never with fromISO, which would read it as UTC midnight and desync it
+      // from clampBirth, matchServerChild and the childBody serialization.
+      birth: c.birth_date ? fromDateStr(c.birth_date) : Date.now(),
       color: childColor(i),
       slug: c.slug,
       picture: c.picture ?? null,
