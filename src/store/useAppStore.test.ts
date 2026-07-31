@@ -1789,6 +1789,58 @@ describe('timer server sync', () => {
     expect(s().timers.some((t) => t.id === 't-local')).toBe(true);
   });
 
+  // `loadFromServer` reports a failed /api/timers/ fetch as `timers: null`
+  // ("unknown"), distinct from `[]` ("known none"). Reconciling null as [] is
+  // what used to kill a running mirrored timer on the device that started it,
+  // over one transient failure of that single endpoint.
+  it('refresh keeps a running synced timer when the timers fetch failed (timers: null)', async () => {
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1',
+      timers: [syncedTimer({ id: 't5', serverId: 5 })],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: null,
+    });
+    await s().refresh();
+    // The refresh itself succeeded (a timers-only failure is not "offline")...
+    expect(s().offline).toBe(false);
+    // ...and the running timer survived: null skips reconciliation entirely.
+    expect(s().timers.some((t) => t.serverId === 5)).toBe(true);
+  });
+
+  it('refresh still drops a synced timer on an EMPTY timers list (a real "none running" answer)', async () => {
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1',
+      timers: [syncedTimer({ id: 't5', serverId: 5 })],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: [],
+    });
+    await s().refresh();
+    expect(s().timers.some((t) => t.serverId === 5)).toBe(false); // stopped elsewhere
+  });
+
+  it('connect keeps in-memory timers when the timers fetch failed, instead of writing null into state', async () => {
+    const localRunning: Timer = { id: 't-local', activity: 'feeding', saveAs: 'feeding', name: 'Feeding', start: NOW, childId: 'c1' };
+    useAppStore.setState({ connection: null, connected: false, timers: [localRunning] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: null,
+    });
+    await s().connect('http://x', 't');
+    expect(s().connected).toBe(true);
+    // `connect` spreads `...data` into state, so a null must be caught before
+    // it lands. Assert on id only: the post-connect flushUnsynced may already
+    // have stamped a serverId on the kept timer.
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0]).toMatchObject({ id: 't-local' });
+  });
+
   it('refresh remaps a server-loaded timer\'s childId from the server id to the local child id', async () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
@@ -1864,6 +1916,23 @@ describe('timer persistence across restarts', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
     expect(s().offline).toBe(true);
+    expect(s().timers).toEqual(saved);
+  });
+
+  it('hydrate keeps a persisted synced timer when only the timers fetch failed (timers: null)', async () => {
+    const saved = [{ ...savedTimer('t7'), serverId: 7, childId: 'c1' }];
+    h.timers = saved;
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [], entries: [], measurements: [], selectedChildId: '',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: null,
+    });
+    await s().hydrate();
+    // The load as a whole succeeded (a timers-only failure is not "offline"),
+    // and null skipped reconciliation: the running timer was not treated as
+    // "stopped elsewhere" over one transient /api/timers/ failure.
+    expect(s().offline).toBe(false);
     expect(s().timers).toEqual(saved);
   });
 
@@ -5727,6 +5796,27 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // selectedChildId still points at a child that exists in the resulting list.
     expect(s().selectedChildId).toBe('localF');
     expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
+  });
+
+  it('keeps running timers when the post-adopt reload\'s timers fetch failed (timers: null)', async () => {
+    const localChild: Child = { id: 'localT', first: 'Tia', last: '', birth: NOW, color: '#fff' };
+    const running: Timer = { id: 't-run', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 5 * M, childId: 'localT' };
+    useAppStore.setState({ children: [localChild], selectedChildId: 'localT', timers: [running] });
+    // The post-success reload answers everything except /api/timers/.
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Tia', last: '', birth: NOW, color: '#eee' }],
+      entries: [], measurements: [], selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      timers: null,
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    // null ("unknown") keeps the in-memory timers; only a real timers answer
+    // may replace them wholesale.
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0]).toMatchObject({ id: 't-run' });
   });
 
   it('on success, upserts the adopted server into savedServers (so it appears in the reconnect list)', async () => {
