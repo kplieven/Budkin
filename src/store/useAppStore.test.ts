@@ -6,6 +6,7 @@ import {
   mergeUnsynced,
   reconcileChildren,
   remapChildIds,
+  resetTimerRetryForTests,
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
@@ -61,6 +62,10 @@ const h = vi.hoisted(() => ({
   timerPushed: [] as unknown[],
   timerUpdated: [] as unknown[],
   timerDeleted: [] as unknown[],
+  /** How many `pushTimerToServer` calls should throw before one succeeds. Models
+   *  a server that rejects or drops the create, which is the case that used to
+   *  leave a timer unsynced with nothing scheduled to try again. */
+  timerPushFails: 0,
   pendingOps: [] as unknown[],
   adoptTarget: null as string | null,
   pushFails: false,
@@ -248,6 +253,10 @@ vi.mock('@/data/repository', () => ({
     h.childDeleted.push(child);
   }),
   pushTimerToServer: vi.fn(async (_c: unknown, timer: unknown, childServerId: unknown) => {
+    if (h.timerPushFails > 0) {
+      h.timerPushFails -= 1;
+      throw new Error('net');
+    }
     h.timerPushed.push({ timer, childServerId });
     return 555;
   }),
@@ -353,6 +362,10 @@ beforeEach(() => {
   h.timerPushed = [];
   h.timerUpdated = [];
   h.timerDeleted = [];
+  h.timerPushFails = 0;
+  // Module state in the store, not store state: an unsynced-timer retry armed by
+  // one test would otherwise fire in the middle of a later one.
+  resetTimerRetryForTests();
   h.pendingOps = [];
   h.adoptTarget = null;
   h.pushFails = false;
@@ -1563,6 +1576,49 @@ describe('timer server sync', () => {
     await flush();
     expect(h.timerPushed).toHaveLength(1);
     expect(s().timers.find((t) => t.id === id)?.serverId).toBe(555);
+  });
+
+  // A create that doesn't land is the case that sent the user to pull-to-refresh:
+  // `mirrorTimerCreate` swallowed the failure and nothing retried it, so the
+  // timer sat unsynced until a refresh/foreground/reconnect happened to run
+  // `flushUnsynced`. These two cover the failure being the server's, and the
+  // failure being a child that wasn't on the server yet.
+  it('retries a create the server rejected, with no manual refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      h.timerPushFails = 1;
+      useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
+      s().startQuickTimer();
+      const id = s().timers[0].id;
+      await vi.advanceTimersByTimeAsync(0);
+      // first POST threw, so nothing is stamped yet
+      expect(s().timers.find((t) => t.id === id)?.serverId).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(h.timerPushed).toHaveLength(1);
+      expect(s().timers.find((t) => t.id === id)?.serverId).toBe(555);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('pushes a timer started against an unsynced child once that child lands', async () => {
+    vi.useFakeTimers();
+    try {
+      useAppStore.setState({ connection: server, offline: false, children: [localChild], selectedChildId: 'c1', timers: [] });
+      s().startQuickTimer();
+      const id = s().timers[0].id;
+      await vi.advanceTimersByTimeAsync(0);
+      expect(h.timerPushed).toHaveLength(0); // no child serverId to POST against
+
+      // the child reaches the server (as its own push would do)
+      useAppStore.setState({ children: [syncedChild] });
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(h.timerPushed).toHaveLength(1);
+      expect(s().timers.find((t) => t.id === id)?.serverId).toBe(555);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not POST a timer while the child is unsynced', async () => {
