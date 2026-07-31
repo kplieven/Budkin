@@ -84,6 +84,10 @@ const h = vi.hoisted(() => ({
   prefs: {} as Record<string, unknown>,
   milestonePrompts: {} as Record<string, string[]>,
   treatments: [] as unknown[],
+  /** Mirrors the stored entity-origin label (see `loadEntityOrigin`): which
+   *  server (or 'local') the persisted entities belong to. Null models an
+   *  install that predates the key. */
+  entityOrigin: null as string | null,
 }));
 
 // Hoisted so the repository mock factory (also hoisted) can reference it.
@@ -148,12 +152,20 @@ vi.mock('@/data/timers', () => ({
 // mockResolvedValueOnce to simulate a restart with saved data.
 vi.mock('@/data/entityStore', () => ({
   loadEntities: vi.fn(async () => null),
+  loadEntityOrigin: vi.fn(async () => h.entityOrigin),
   saveChildren: vi.fn(async () => {}),
+  saveEntityOrigin: vi.fn(async (origin: string) => {
+    h.entityOrigin = origin;
+  }),
   saveEntries: vi.fn(async () => {}),
   saveMeasurements: vi.fn(async () => {}),
   saveSelectedChildId: vi.fn(async () => {}),
   saveLastFeed: vi.fn(async () => {}),
-  clearEntities: vi.fn(async () => {}),
+  // Faithful to the real module: the origin's lifecycle is paired with the
+  // data it labels, so clearing the entities clears the label too.
+  clearEntities: vi.fn(async () => {
+    h.entityOrigin = null;
+  }),
 }));
 
 // REQUIRED: `prefs.ts` imports AsyncStorage; without mocking it here the node
@@ -399,6 +411,7 @@ beforeEach(() => {
   h.prefs = {};
   h.milestonePrompts = {};
   h.treatments = [];
+  h.entityOrigin = null;
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
@@ -4045,6 +4058,222 @@ describe('refresh / reconnect', () => {
   });
 });
 
+// F8: connect() used to take the server load wholesale (`...data`), re-keying
+// every child to its server-derived id. After a session expiry (refresh's
+// 401 branch clears the connection; the entity store still holds the old
+// children under local ids + serverIds), reconnecting through connect()
+// destroyed the local-id mapping: the persistence subscription wrote the
+// server-shaped list over the entity store, and a queued entry referencing
+// an adopt-origin LOCAL child id could never resolve (`childServerIdFor`
+// misses), so it sat in the queue failing forever. Local-only running timers
+// and unsynced measurements were dropped the same wholesale way. connect()
+// now routes through the same `applyServerLoad` pipeline as refresh().
+describe('connect() reconciles the server load with local data (session-expiry reconnect)', () => {
+  it('a post-expiry reconnect keeps local child ids from the entity store, so a queued entry still resolves and flushes', async () => {
+    // Post-401 cold-start shape: no connection, memory empty, the entity
+    // store still holding the adopt-origin child under its LOCAL id, and a
+    // queued entry referencing that id. The stored data came from THIS
+    // server (the origin matches), which is what licenses the merge.
+    h.entityOrigin = 'http://x';
+    const queued: Entry = { id: 'qx', childId: 'child1712-abc', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    h.q = [queued];
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      queueCount: 1,
+      queuedIds: ['qx'],
+    });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'child1712-abc', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [{ id: 'mLocal', childId: 'child1712-abc', kind: 'weight', value: 5.1, date: NOW }],
+      selectedChildId: 'child1712-abc',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush(); // let the post-connect flush trio settle
+
+    expect(s().connected).toBe(true);
+    expect(s().connecting).toBe(false);
+    // The child kept its LOCAL id (reconciled by serverId, not replaced).
+    expect(s().children.map((c) => c.id)).toEqual(['child1712-abc']);
+    expect(s().selectedChildId).toBe('child1712-abc');
+    expectSelectionNamesARealChild();
+    // The queued entry stayed visible AND flushed: its local childId resolved
+    // to serverId 501 through the kept child. The old wholesale replace left
+    // `childServerIdFor` missing forever, so nothing ever pushed.
+    expect(s().entries.map((e) => e.id)).toContain('qx');
+    expect(h.pushed).toHaveLength(1);
+    expect(h.q).toHaveLength(0);
+    // The unsynced measurement survived the reconnect too.
+    expect(s().measurements.map((m) => m.id)).toContain('mLocal');
+  });
+
+  it('a running local-only timer (serverId == null) survives connect even when the server answers an empty timers list', async () => {
+    h.entityOrigin = 'http://x'; // same-server reconnect: the merge is licensed
+    const running: Timer = { id: 't-local', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 5 * M, childId: 'c1' };
+    // Warm post-expiry state: connection cleared, memory (and the on-device
+    // timer copy, via the persistence subscribe) still holds the timer.
+    useAppStore.setState({ connection: null, connected: false, timers: [running] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      // A real empty answer, NOT null: F7's null-guard never fires here, and
+      // the old wholesale spread dropped the running timer on exactly this
+      // shape.
+      timers: [],
+      selectedChildId: 'c1',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    // Assert on id only: the post-connect flushUnsynced may already have
+    // stamped a serverId on the kept timer (its child is synced).
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0]).toMatchObject({ id: 't-local' });
+  });
+
+  it('a fresh connect with no local data takes the server load as-is (children under server-derived ids, server selection)', async () => {
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      timers: [],
+    });
+    // The entity store is empty too (the loadEntities mock default is null).
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000, color: '#fff' }],
+      entries: [{ id: 'se1', serverId: 21, childId: '7', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
+      timers: [{ id: 'tsrv3', serverId: 3, childId: '7', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - M }],
+      selectedChildId: '7',
+      lastFeed: { feedType: 'formula', method: 'bottle' },
+      measurements: [{ id: 'sm1', serverId: 11, childId: '7', kind: 'weight', value: 4.4, date: NOW }],
+    });
+
+    await s().connect('http://x', 't');
+    await flush();
+
+    expect(s().children.map((c) => c.id)).toEqual(['7']);
+    expect(s().selectedChildId).toBe('7');
+    expect(s().entries.map((e) => e.id)).toEqual(['se1']);
+    expect(s().measurements.map((m) => m.id)).toEqual(['sm1']);
+    expect(s().timers.map((t) => t.id)).toEqual(['tsrv3']);
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expectSelectionNamesARealChild();
+    // connect stamps the origin, so the entity store's new contents are
+    // labeled with the server they came from (and a pre-origin install
+    // self-heals here: its NEXT expiry-reconnect gets the merge).
+    expect(h.entityOrigin).toBe('http://x');
+  });
+
+  it('connecting to a DIFFERENT server than the stored data came from takes the server load wholesale (no cross-server merge)', async () => {
+    // Same post-expiry shape as the merge test above, but the stored data
+    // belongs to another server. Numeric server ids collide across servers
+    // (child 501 exists on both), so a merge here would graft one family's
+    // local records onto another family's children; the origin gate must
+    // force the pre-reconcile wholesale behavior instead.
+    h.entityOrigin = 'https://old.lan';
+    const queued: Entry = { id: 'qx', childId: 'child1712-abc', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    h.q = [queued];
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      queueCount: 1,
+      queuedIds: ['qx'],
+    });
+    // Not `mockResolvedValueOnce`: the gate must not even need this read, and
+    // a leftover one-shot value would leak into a later test's loadEntities.
+    vi.mocked(loadEntities).mockResolvedValue({
+      children: [{ id: 'child1712-abc', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'child1712-abc',
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    // Server-derived ids only: the old server's local id must not survive.
+    expect(s().children.map((c) => c.id)).toEqual(['501']);
+    expect(s().selectedChildId).toBe('501');
+    expectSelectionNamesARealChild();
+    // The other family's queued entry must NOT flush into this server's
+    // children; it stays queued (visible in the queue view) instead.
+    expect(h.pushed).toHaveLength(0);
+    expect(h.q).toHaveLength(1);
+    // The data now stored belongs to the new server: origin re-stamped.
+    expect(h.entityOrigin).toBe('http://x');
+  });
+
+  it('in-memory children from another origin are not merged either (the gate sits ahead of both local sides)', async () => {
+    // Warm shape: a 401 cleared the connection but left server A's children
+    // in memory, serverIds and all. Connecting to server B, whose child list
+    // reuses the same numeric id, must not keep A's local id (that is the
+    // cross-server serverId collision graft).
+    h.entityOrigin = 'https://old.lan';
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [{ id: 'cA', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'cA',
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    expect(s().children.map((c) => c.id)).toEqual(['501']);
+    expect(s().selectedChildId).toBe('501');
+    expectSelectionNamesARealChild();
+  });
+
+  it('enterLocal stamps the entity origin as local, so a later server connect cannot merge local-mode data by serverId', async () => {
+    await s().enterLocal();
+    expect(h.entityOrigin).toBe('local');
+  });
+});
+
 describe('selectedChildId fallback resolves in local id space (regression: a server-space id used as a local-space fallback)', () => {
   it('refresh: a sibling deleted server-side re-points selectedChildId at a REMAINING local child, not a bare server id', async () => {
     // Repro from the branch review: two children created in Budkin
@@ -5893,6 +6122,10 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(s().connected).toBe(true);
     expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    // The adopted (uploaded + reconciled) entities now belong to this server:
+    // the origin is stamped alongside the connection, licensing a later
+    // post-expiry reconnect through connect() to reconcile them.
+    expect(h.entityOrigin).toBe('https://new.lan');
     // Full success clears the persisted adopt target (Finding 2) — a later
     // adopt against a different server has nothing stale to reset.
     expect(clearAdoptTarget).toHaveBeenCalled();
