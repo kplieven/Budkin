@@ -57,8 +57,8 @@ import {
   addPendingOp,
   clearPendingOps,
   loadPendingOps,
+  removePendingOp,
   savePendingOps,
-  type PendingOp,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
@@ -1085,6 +1085,24 @@ let flushUnsyncedInFlight = false;
 // enqueue-then-await-flush caller would be the first one it bites, and it would
 // need a fresh flush after this one rather than a seat on it.
 let flushQueueInFlight: Promise<void> | null = null;
+// Guards against overlapping flushPendingOps calls, the op-log twin of
+// `flushQueueInFlight` above. Foregrounding fires the AppState `refresh()`
+// (whose success schedules a flush of its own) and the network-state effect
+// (`setNetworkOnline`, a second one) within milliseconds of each other, so two
+// concurrent runs are the ordinary case: both would read the same stored op
+// log before either removes anything and replay every op twice, and the loser
+// of a replayed delete then sees a 404 for a record the winner already
+// removed.
+//
+// Holds the PROMISE rather than a boolean for the same reason flushQueue's
+// guard does: a second caller has to be able to await the flush already
+// running rather than being handed an early return while the log still
+// drains. The same joiner trap applies too: a joiner inherits the RUNNING
+// flush's view of the log (`loadPendingOps` happens once, inside the run), so
+// an op recorded after that read is not in the batch being replayed, and the
+// joiner still resolves. No caller records-then-awaits today; one that did
+// would need a fresh flush after this one, not a seat on it.
+let flushPendingOpsInFlight: Promise<void> | null = null;
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // ---- initial state ----
@@ -1907,70 +1925,106 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
   flushPendingOps: async () => {
-    const s = get();
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server' || s.offline) return;
-    const ops = await loadPendingOps();
-    if (ops.length === 0) return;
-    const remaining: PendingOp[] = [];
-    for (const op of ops) {
-      try {
-        if (op.op === 'update' && op.entity === 'child') {
-          // Address the child by the slug state holds RIGHT NOW, not the one
-          // frozen into the payload at enqueue time. Op payloads are snapshots
-          // and `addPendingOp` appends without dedup, so two offline renames of
-          // the same child queue two ops both carrying the ORIGINAL slug.
-          // Replaying the first moves the slug server-side, which staled the
-          // second before it was ever sent: it would 404, go back on the queue,
-          // and 404 again on every later flush, so the rename would never land
-          // and the op log would never drain. Read from `get()`, not the `s`
-          // snapshot above, so the re-stamp below is visible to the next op.
-          const live = get().children.find((c) => c.id === op.payload.id);
-          const payload = live?.slug ? { ...op.payload, slug: live.slug } : op.payload;
-          const res = await updateChildOnServer(conn, payload);
-          // A replayed rename moves the slug server-side, and the child
-          // endpoints are keyed by it, so re-stamp it here the same way
-          // saveChild's online edit does. Otherwise the next delete goes out
-          // with a stale slug, 404s, and the child comes back.
-          const slug = res?.slug;
-          if (slug) {
-            set((st) => ({
-              children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
-            }));
+    // Join the flush already running instead of starting a rival one (see
+    // `flushPendingOpsInFlight` above): two passes over the same stored op
+    // log replay every op twice.
+    if (flushPendingOpsInFlight) return flushPendingOpsInFlight;
+    const run = (async () => {
+      const s = get();
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server' || s.offline) return;
+      const ops = await loadPendingOps();
+      if (ops.length === 0) return;
+      for (const op of ops) {
+        try {
+          if (op.op === 'update' && op.entity === 'child') {
+            // Address the child by the slug state holds RIGHT NOW, not the one
+            // frozen into the payload at enqueue time. Op payloads are snapshots
+            // and `addPendingOp` appends without dedup, so two offline renames of
+            // the same child queue two ops both carrying the ORIGINAL slug.
+            // Replaying the first moves the slug server-side, which staled the
+            // second before it was ever sent: it would 404, go back on the queue,
+            // and 404 again on every later flush, so the rename would never land
+            // and the op log would never drain. Read from `get()`, not the `s`
+            // snapshot above, so the re-stamp below is visible to the next op.
+            const live = get().children.find((c) => c.id === op.payload.id);
+            const payload = live?.slug ? { ...op.payload, slug: live.slug } : op.payload;
+            const res = await updateChildOnServer(conn, payload);
+            // A replayed rename moves the slug server-side, and the child
+            // endpoints are keyed by it, so re-stamp it here the same way
+            // saveChild's online edit does. Otherwise the next delete goes out
+            // with a stale slug, 404s, and the child comes back.
+            const slug = res?.slug;
+            if (slug) {
+              set((st) => ({
+                children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
+              }));
+            }
+            // Gender lives in its own `gender`-tagged note, not on the child
+            // record, so replay it as a second write. Deliberately AFTER the slug
+            // re-stamp above and deliberately NOT caught: a failure here re-queues
+            // the whole op, and replaying the child PATCH is idempotent, so the
+            // gender change gets retried instead of being silently dropped.
+            if (payload.serverId != null) {
+              await setChildGenderOnServer(conn, payload.serverId, payload.gender, Date.now());
+            }
+          } else if (op.op === 'update' && op.entity === 'measurement') {
+            const childServerId = childServerIdFor(s.children, op.payload.childId);
+            // Child not on the server (edge case: the entity was synced but the
+            // child later lost its server id). Nothing sensible to send; fall
+            // through to the catch below so the op stays queued for retry.
+            if (childServerId == null) throw new Error('child not synced');
+            await updateMeasurementOnServer(conn, op.payload, childServerId);
+          } else if (op.op === 'update' && op.entity === 'entry') {
+            const childServerId = childServerIdFor(s.children, op.payload.childId);
+            if (childServerId == null) throw new Error('child not synced');
+            await updateEntryOnServer(conn, op.payload, childServerId);
+          } else if (op.op === 'update' && op.entity === 'treatment') {
+            const childServerId = childServerIdFor(s.children, op.payload.childId);
+            if (childServerId == null) throw new Error('child not synced');
+            await updateTreatmentOnServer(conn, op.payload, childServerId);
+          } else if (op.op === 'delete' && op.entity === 'treatment') await deleteTreatmentFromServer(conn, op.serverId);
+          else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
+          else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
+          else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
+          else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
+        } catch (e) {
+          if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+            // The token is dead: every op left on the log would fail the same
+            // way, so hammering the server with the rest of the run helps
+            // nobody. Stop here. The ops stay on file for after a reconnect,
+            // and refresh()'s session-expiry handling owns the situation.
+            break;
           }
-          // Gender lives in its own `gender`-tagged note, not on the child
-          // record, so replay it as a second write. Deliberately AFTER the slug
-          // re-stamp above and deliberately NOT caught: a failure here re-queues
-          // the whole op, and replaying the child PATCH is idempotent, so the
-          // gender change gets retried instead of being silently dropped.
-          if (payload.serverId != null) {
-            await setChildGenderOnServer(conn, payload.serverId, payload.gender, Date.now());
+          if (!(e instanceof ApiError && e.status === 404)) {
+            // Retryable (network ApiError(0), 5xx, the "child not synced"
+            // throws above): leave the op on the file for the next flush and
+            // move on to the next op.
+            continue;
           }
-        } else if (op.op === 'update' && op.entity === 'measurement') {
-          const childServerId = childServerIdFor(s.children, op.payload.childId);
-          // Child not on the server (edge case: the entity was synced but the
-          // child later lost its server id). Nothing sensible to send; fall
-          // through to the catch below so the op stays queued for retry.
-          if (childServerId == null) throw new Error('child not synced');
-          await updateMeasurementOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'update' && op.entity === 'entry') {
-          const childServerId = childServerIdFor(s.children, op.payload.childId);
-          if (childServerId == null) throw new Error('child not synced');
-          await updateEntryOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'update' && op.entity === 'treatment') {
-          const childServerId = childServerIdFor(s.children, op.payload.childId);
-          if (childServerId == null) throw new Error('child not synced');
-          await updateTreatmentOnServer(conn, op.payload, childServerId);
-        } else if (op.op === 'delete' && op.entity === 'treatment') await deleteTreatmentFromServer(conn, op.serverId);
-        else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
-        else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
-        else if (op.op === 'update' && op.entity === 'timer') await updateTimerOnServer(conn, op.payload);
-        else if (op.op === 'delete' && op.entity === 'timer') await deleteTimerFromServer(conn, op.serverId);
-      } catch {
-        remaining.push(op);
+          // ApiError 404: the target is already gone, deleted elsewhere or by
+          // the winner of an earlier replay race. Terminal for updates and
+          // deletes alike: retrying can never succeed, and before this
+          // classification such an op was replayed forever on every flush.
+          // Fall through and remove it like a success.
+        }
+        // Replayed, or terminally gone: drop the op from the file one at a
+        // time, by value, rather than saving a survivors list once the whole
+        // run finishes. The end-of-run save was last-write-wins: it could
+        // clobber an op recorded by `addPendingOp` mid-run (an offline edit
+        // silently lost), and, when two runs raced, resurrect ops the other
+        // run had already replayed. `removePendingOp` re-reads the file and
+        // drops one op instead of overwriting the list wholesale, so anything
+        // this run was not asked to remove is left alone.
+        await removePendingOp(op);
       }
+    })();
+    flushPendingOpsInFlight = run;
+    try {
+      await run;
+    } finally {
+      flushPendingOpsInFlight = null;
     }
-    await savePendingOps(remaining);
   },
   flushUnsynced: async () => {
     // Guards against overlapping flushes (e.g. setNetworkOnline(true) and a
