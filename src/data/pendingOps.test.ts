@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { addPendingOp, clearPendingOps, loadPendingOps, savePendingOps } from '@/data/pendingOps';
+import { addPendingOp, clearPendingOps, loadPendingOps, removePendingOp, savePendingOps } from '@/data/pendingOps';
 import type { PendingOp } from '@/data/pendingOps';
 import type { Child } from '@/types/models';
 
@@ -89,5 +89,51 @@ describe('pendingOps persistence', () => {
       { op: 'update', entity: 'timer', payload: timer },
       { op: 'delete', entity: 'timer', serverId: 9 },
     ]);
+  });
+});
+
+describe('removePendingOp (per-op removal, backs flushPendingOps bookkeeping)', () => {
+  it('removes the op by value, persists the rest, and returns the remaining list', async () => {
+    await addPendingOp(updateChildOp('a'));
+    await addPendingOp(updateChildOp('b'));
+    const remaining = await removePendingOp(updateChildOp('a'));
+    expect(remaining).toEqual([updateChildOp('b')]);
+    expect(await loadPendingOps()).toEqual([updateChildOp('b')]);
+  });
+
+  it('removes only the FIRST of two identical ops (multiset semantics)', async () => {
+    // Two identical offline renames queue two identical ops on purpose (no
+    // dedup); completing one replay must drop exactly one of them.
+    await addPendingOp(updateChildOp('a'));
+    await addPendingOp(updateChildOp('a'));
+    const remaining = await removePendingOp(updateChildOp('a'));
+    expect(remaining).toEqual([updateChildOp('a')]);
+    expect(await loadPendingOps()).toEqual([updateChildOp('a')]);
+  });
+
+  it('matches an op that went through a JSON round-trip (a reloaded file)', async () => {
+    // flushPendingOps removes the objects it got from loadPendingOps, i.e.
+    // parsed copies of what addPendingOp serialized. Removal must match those,
+    // not just the reference-identical original.
+    await addPendingOp(updateChildOp('a'));
+    const [reloaded] = await loadPendingOps();
+    expect(await removePendingOp(reloaded)).toEqual([]);
+    expect(await loadPendingOps()).toEqual([]);
+  });
+
+  it('leaves the file untouched when the op is not on it', async () => {
+    await addPendingOp(updateChildOp('a'));
+    const remaining = await removePendingOp(updateChildOp('zzz'));
+    expect(remaining).toEqual([updateChildOp('a')]);
+    expect(await loadPendingOps()).toEqual([updateChildOp('a')]);
+  });
+
+  it('keeps an op appended after the caller last read the file (no clobber)', async () => {
+    // The whole point of per-op removal: it re-reads the file, so an op
+    // appended mid-flush by addPendingOp survives instead of being overwritten
+    // by a stale end-of-run list.
+    await addPendingOp(updateChildOp('a'));
+    await addPendingOp(updateChildOp('late'));
+    expect(await removePendingOp(updateChildOp('a'))).toEqual([updateChildOp('late')]);
   });
 });

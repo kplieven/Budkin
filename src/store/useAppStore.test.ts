@@ -16,6 +16,7 @@ import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
 import {
+  deleteEntryFromServer,
   loadFromServer,
   loadInsightsHistory,
   loadProfileFromServer,
@@ -23,6 +24,7 @@ import {
   pushEntryToServer,
   serverHasData,
   updateChildOnServer,
+  updateEntryOnServer,
 } from '@/data/repository';
 import { matchServerChild, uploadUnsynced } from '@/data/sync';
 import { savePrefs } from '@/data/prefs';
@@ -33,7 +35,8 @@ import {
   saveChildren,
   saveEntries,
 } from '@/data/entityStore';
-import { clearPendingOps } from '@/data/pendingOps';
+import { addPendingOp, clearPendingOps } from '@/data/pendingOps';
+import type { PendingOp } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import type { Child, Treatment, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
 
@@ -307,9 +310,22 @@ vi.mock('@/data/pendingOps', () => ({
     h.pendingOps.push(op);
     return h.pendingOps;
   }),
-  loadPendingOps: vi.fn(async () => h.pendingOps),
+  // Returns a COPY, like the real module (every load is a fresh JSON.parse of
+  // the file). Handing out `h.pendingOps` itself would alias the flush run's
+  // snapshot to the live log, so an op appended mid-run would leak INTO the
+  // running batch, which the real storage-backed module can never do.
+  loadPendingOps: vi.fn(async () => [...h.pendingOps]),
   savePendingOps: vi.fn(async (ops: unknown[]) => {
     h.pendingOps = ops;
+  }),
+  // Same first-stringify-match semantics as the real removePendingOp: drop ONE
+  // occurrence by value, keep the rest (including anything appended since the
+  // caller last loaded).
+  removePendingOp: vi.fn(async (op: unknown) => {
+    const key = JSON.stringify(op);
+    const idx = h.pendingOps.findIndex((o) => JSON.stringify(o) === key);
+    if (idx !== -1) h.pendingOps = h.pendingOps.filter((_, i) => i !== idx);
+    return h.pendingOps;
   }),
   clearPendingOps: vi.fn(async () => {
     h.pendingOps = [];
@@ -1491,6 +1507,82 @@ describe('flushPendingOps', () => {
     await s().flushPendingOps();
     expect(h.measUpdated).toEqual([measurement]); // the other op still replayed
     expect(h.pendingOps).toEqual([{ op: 'update', entity: 'child', payload: child }]); // failed op retained
+  });
+
+  it('replays each op exactly once when two flushes overlap', async () => {
+    // Foregrounding fires the AppState refresh() (whose success schedules a
+    // flush) and the network-state effect (setNetworkOnline, a second one)
+    // within milliseconds, so two concurrent runs are the ordinary case, not
+    // a corner. Unguarded, both read the same stored log before either
+    // removes anything and every op is replayed twice; the loser of a
+    // replayed delete 404s and used to push the op back for a third try.
+    h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
+    await Promise.all([s().flushPendingOps(), s().flushPendingOps()]);
+    expect(h.deleted).toEqual([{ type: 'feeding', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('makes a second caller wait for the flush already running, not return early', async () => {
+    // Same joiner contract as flushQueue: the awaited call resolves once the
+    // running flush has drained, so a caller can trust the log afterwards.
+    h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
+    void s().flushPendingOps();
+    await s().flushPendingOps();
+    expect(h.deleted).toEqual([{ type: 'feeding', id: 1 }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('keeps an op recorded while a flush is mid-run', async () => {
+    // The old end-of-run savePendingOps(remaining) was last-write-wins: an op
+    // appended by addPendingOp after the run loaded the log was overwritten
+    // by the run's stale survivors list, silently losing an offline edit or
+    // delete. Per-op removal leaves anything it wasn't asked to remove alone.
+    const appended: PendingOp = { op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 9 };
+    h.pendingOps = [{ op: 'update', entity: 'entry', payload: entry }];
+    vi.mocked(updateEntryOnServer).mockImplementationOnce(async (_c: unknown, e: unknown) => {
+      // An offline delete lands while the replay is on the wire.
+      await addPendingOp(appended);
+      h.updated.push(e);
+    });
+    await s().flushPendingOps();
+    expect(h.updated).toEqual([entry]);
+    expect(h.pendingOps).toEqual([appended]);
+  });
+
+  it('drops an op whose target is already gone (404) instead of retrying it forever', async () => {
+    // A 404 means the record was deleted elsewhere (or the replayed delete
+    // already won a race). The old code could not tell that from a transient
+    // failure, so the op went back on the log and 404ed again on every later
+    // flush, immortal. Terminal for updates and deletes alike.
+    vi.mocked(deleteEntryFromServer).mockRejectedValueOnce(new ApiError(404, 'Not found.'));
+    h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
+    await s().flushPendingOps();
+    expect(h.deleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('keeps an op whose failure is network-level (ApiError 0) for the next flush', async () => {
+    vi.mocked(deleteEntryFromServer).mockRejectedValueOnce(new ApiError(0, "Couldn't reach server."));
+    const op: PendingOp = { op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 };
+    h.pendingOps = [op];
+    await s().flushPendingOps();
+    expect(h.pendingOps).toEqual([op]);
+  });
+
+  it('stops the run on 401, keeping every remaining op and making no further calls', async () => {
+    // A dead token fails every op identically; hammering the server with the
+    // rest of the log helps nobody. The ops stay on file for after reconnect,
+    // and refresh()'s session-expiry handling owns telling the user.
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token for this server.'));
+    h.pendingOps = [
+      { op: 'update', entity: 'child', payload: child },
+      { op: 'update', entity: 'measurement', payload: measurement },
+      { op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 },
+    ];
+    await s().flushPendingOps();
+    expect(h.measUpdated).toHaveLength(0);
+    expect(h.deleted).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(3);
   });
 
   it('is a no-op while offline', async () => {
@@ -2975,7 +3067,7 @@ describe('children', () => {
       ];
       h.genderWriteFails = true;
       await s().flushPendingOps();
-      // savePendingOps writes the survivors back to h.pendingOps.
+      // A retryable failure leaves the op on the log: nothing removes it.
       expect(h.pendingOps).toHaveLength(1);
     });
   });
