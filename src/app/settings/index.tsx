@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
+import { ConfirmDisconnectSheet } from '@/features/connect/ConfirmDisconnectSheet';
 import { entryCountLabel } from '@/features/queue/queueView';
 import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
 import { backOr } from '@/lib/nav';
@@ -265,6 +266,11 @@ export default function Settings() {
   const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openTreatmentEditor = useAppStore((s) => s.openTreatmentEditor);
+
+  // Whether the "Reconnect / change server" confirm is open. Screen-local on
+  // purpose: no other screen opens it, so it needs none of the store plumbing
+  // the `_layout.tsx` sheets have.
+  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -634,14 +640,15 @@ export default function Settings() {
             </View>
           </Pressable>
         )}
+        {/* Opens a confirm instead of disconnecting on the spot: disconnect()
+            clears the write queue and the offline op-log, which exist nowhere
+            else, so the loss has to be stated (with counts, see
+            ConfirmDisconnectSheet) before it can happen. */}
         {connection?.mode !== 'local' && (
           <Pressable
-            onPress={() => {
-              disconnect();
-              if (router.canDismiss()) router.dismissAll();
-              router.replace('/onboarding');
-            }}
+            onPress={() => setConfirmDisconnect(true)}
             accessibilityRole="button"
+            accessibilityLabel="Reconnect / change server"
             style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
           >
             <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
@@ -669,20 +676,46 @@ export default function Settings() {
     </>
   );
 
-  if (desktop) return <DesktopPage maxWidth={560}>{body}</DesktopPage>;
+  // A sibling of the scroll container, never part of `body`: BottomSheet
+  // absolute-fills its parent, and inside the ScrollView that parent is the
+  // scroll CONTENT, so the sheet would land wherever the user last scrolled
+  // to instead of over the screen. Mounted conditionally so its exit
+  // animation runs. On confirm this runs the exact sequence the row itself
+  // used to run.
+  const confirmSheet = confirmDisconnect ? (
+    <ConfirmDisconnectSheet
+      onConfirm={() => {
+        disconnect();
+        if (router.canDismiss()) router.dismissAll();
+        router.replace('/onboarding');
+      }}
+      onCancel={() => setConfirmDisconnect(false)}
+    />
+  ) : null;
+
+  if (desktop)
+    return (
+      <>
+        <DesktopPage maxWidth={560}>{body}</DesktopPage>
+        {confirmSheet}
+      </>
+    );
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
-    >
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
-        <IconButton name="chevron-left" color={t.text} onPress={() => backOr()} accessibilityLabel="Back" />
-        <Txt weight={800} size={27} tracking={-0.6}>
-          Settings
-        </Txt>
-      </View>
-      {body}
-    </ScrollView>
+    <>
+      <ScrollView
+        style={{ flex: 1, backgroundColor: t.bg }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
+          <IconButton name="chevron-left" color={t.text} onPress={() => backOr()} accessibilityLabel="Back" />
+          <Txt weight={800} size={27} tracking={-0.6}>
+            Settings
+          </Txt>
+        </View>
+        {body}
+      </ScrollView>
+      {confirmSheet}
+    </>
   );
 }
