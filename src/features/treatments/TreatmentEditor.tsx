@@ -50,10 +50,10 @@ function toDMY(ms: number): { d: string; m: string; y: string } {
 export function TreatmentEditor() {
   const editor = useAppStore((s) => s.treatmentEditor);
   if (!editor) return null;
-  return <Inner key={editor.editingId ?? 'new'} editingId={editor.editingId} />;
+  return <Inner key={editor.editingId ?? 'new'} editingId={editor.editingId} openedAt={editor.openedAt} />;
 }
 
-function Inner({ editingId }: { editingId: string | null }) {
+function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: number }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const treatments = useAppStore((s) => s.treatments);
@@ -64,7 +64,10 @@ function Inner({ editingId }: { editingId: string | null }) {
   const close = useAppStore((s) => s.closeTreatmentEditor);
 
   const editing: Treatment | null = editingId ? (treatments.find((c) => c.id === editingId) ?? null) : null;
-  const today = toDMY(Date.now());
+  // The sheet's open instant, stamped by `openTreatmentEditor` (never
+  // `Date.now()` here: render must stay pure, and Inner remounts per open via
+  // its key, so the stamp is exactly "when this sheet appeared").
+  const today = toDMY(openedAt);
   const fromInit = editing ? toDMY(editing.fromDate) : today;
   const toInit = editing?.toDate != null ? toDMY(editing.toDate) : today;
 

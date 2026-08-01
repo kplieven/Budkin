@@ -222,8 +222,11 @@ interface AppState {
    *  the selected child has active treatments today; picks a treatment to pre-fill a dose). */
   treatmentPicker: { open: boolean } | null;
   /** Treatment create/edit sheet: `editingId` null = creating a new treatment, otherwise
-   *  the id of the treatment being edited. null (the field itself) = closed. */
-  treatmentEditor: { editingId: string | null } | null;
+   *  the id of the treatment being edited. null (the field itself) = closed.
+   *  `openedAt` is `s.now` at open: the editor seeds its date fields from it,
+   *  so its render stays pure (no `Date.now()` in render, react-hooks/purity)
+   *  and the seed is computed against the same clock the rest of the app uses. */
+  treatmentEditor: { editingId: string | null; openedAt: number } | null;
 
   // data
   selectedChildId: string;
@@ -815,9 +818,11 @@ function applyServerLoad(
     ...extra,
     ...data,
     children: reconciledChildren,
-    // Measurements created offline have no flush yet (Phase 3): merge the
-    // local unsynced ones back in so a wholesale reload doesn't drop them
-    // from view. Entries are deliberately excluded from that merge (see
+    // Measurements created offline are pushed by `flushUnsynced`; until that
+    // flush lands, merging the local unsynced ones back in is what keeps a
+    // wholesale reload from dropping them from view (and from the entity
+    // store, via the persistence subscription). Entries are deliberately
+    // excluded from that merge (see
     // `mergeUnsynced`'s doc comment): the queue merge below is entries' only
     // source, further merged by `mergeHeldBackEntries` for an expecting
     // child's held-back entries.
@@ -3126,7 +3131,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (!s.offline) void deleteTreatmentFromServer(conn, treatment.serverId).catch(() => {});
     else void addPendingOp({ op: 'delete', entity: 'treatment', serverId: treatment.serverId });
   },
-  openTreatmentEditor: (id) => set({ treatmentEditor: { editingId: id ?? null } }),
+  openTreatmentEditor: (id) => set({ treatmentEditor: { editingId: id ?? null, openedAt: get().now } }),
   closeTreatmentEditor: () => set({ treatmentEditor: null }),
   openTreatmentPicker: () => set({ treatmentPicker: { open: true } }),
   closeTreatmentPicker: () => set({ treatmentPicker: null }),

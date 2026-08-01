@@ -310,7 +310,7 @@ describe('uploadUnsynced', () => {
       entries: [diaperEntry({ id: 'e1', childId: 'c1' })],
       measurements: [measurement({ id: 'm1', childId: 'c1' })],
     };
-    const calls: Array<[number, number]> = [];
+    const calls: [number, number][] = [];
 
     await uploadUnsynced(state, makeDeps(), (done, total) => calls.push([done, total]));
 

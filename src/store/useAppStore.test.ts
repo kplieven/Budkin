@@ -1059,7 +1059,7 @@ describe('treatments (medication regimens)', () => {
   });
 
   it('deleteTreatment closes the editor when it is open on that treatment', () => {
-    useAppStore.setState({ treatments: [treatment()], treatmentEditor: { editingId: 'treatment-1' } });
+    useAppStore.setState({ treatments: [treatment()], treatmentEditor: { editingId: 'treatment-1', openedAt: 0 } });
     s().deleteTreatment('treatment-1');
     expect(s().treatmentEditor).toBeNull();
   });
