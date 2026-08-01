@@ -54,9 +54,35 @@ describe('connection persistence', () => {
     expect(await loadConnection()).toEqual({ mode: 'server', serverUrl: 'https://x', token: 't' });
   });
 
+  // The migration also WRITES the converted shape back. A read-only migration
+  // leaves the legacy record in place forever (the web deploy's origin never
+  // changed, so browsers from before the `mode` union still hold it), which is
+  // what would keep the migration branch permanently load-bearing. Persisting
+  // the upgrade is what lets that branch be deleted once clients have cycled.
+  it('re-saves a migrated legacy demo:true record in the new shape', async () => {
+    mem.store.set(KEY, JSON.stringify({ demo: true, serverUrl: '', token: '' }));
+    await loadConnection();
+    expect(mem.store.get(KEY)).toBe(JSON.stringify({ mode: 'local' }));
+  });
+
+  it('re-saves a migrated legacy demo:false record in the new shape', async () => {
+    mem.store.set(KEY, JSON.stringify({ demo: false, serverUrl: 'https://x', token: 't' }));
+    await loadConnection();
+    expect(mem.store.get(KEY)).toBe(JSON.stringify({ mode: 'server', serverUrl: 'https://x', token: 't' }));
+  });
+
   it('loads a new-shape { mode: "local" } connection unchanged', async () => {
     mem.store.set(KEY, JSON.stringify({ mode: 'local' }));
     expect(await loadConnection()).toEqual({ mode: 'local' });
+  });
+
+  it('does not rewrite a record already in the new shape', async () => {
+    // Distinctive formatting: a re-save would JSON.stringify it back without
+    // the extra spaces, so an unchanged string proves no write happened.
+    const raw = '{ "mode":  "local" }';
+    mem.store.set(KEY, raw);
+    await loadConnection();
+    expect(mem.store.get(KEY)).toBe(raw);
   });
 
   it('returns null instead of throwing on corrupt persisted JSON', async () => {
