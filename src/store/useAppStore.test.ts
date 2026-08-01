@@ -1303,12 +1303,46 @@ describe('flushQueue', () => {
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
     expect(s().queueCount).toBe(0);
-    // The History marker has to clear here and nowhere else. flushQueue does
-    // NOT stamp the pushed entry's `serverId` (it discards what
-    // pushEntryToServer returns), so the in-memory record stays
-    // `serverId == null` until the next refresh()/hydrate(): a serverId-based
-    // marker would keep claiming this row is waiting to upload.
+    // The History marker has to clear here and nowhere else. It reads
+    // `queuedIds` and must keep doing so: `serverId` is not a marker test, since
+    // an entry can hold one for reasons that have nothing to do with the queue.
     expect(s().queuedIds).toEqual([]);
+  });
+
+  // The reported bug: an entry that reached the server through the QUEUE (a
+  // retried save, a reconnect flush) kept `serverId == null` locally, because
+  // this was the one push path that discarded what the server returned. It was
+  // off the queue by then too, so deleting it took `detachEntry`'s "never
+  // synced" branch: local-only removal, no server DELETE, no pending op. The
+  // server kept its copy and the row came back on the next refresh.
+  it('stamps the serverId it gets back, so a later delete reaches the server', async () => {
+    const entry: Entry = { id: 'x', childId: 'c1', type: 'sleep', start: NOW - 30 * M, end: NOW, nap: true, tags: [] };
+    useAppStore.setState({ children: [SYNCED_C1], entries: [entry], queueCount: 1, queuedIds: ['x'] });
+    h.q = [entry];
+
+    await s().flushQueue();
+    expect(h.pushed).toHaveLength(1);
+    expect(s().entries[0].serverId).toBe(999);
+
+    s().deleteEntry('x');
+    await flush();
+    expect(h.deleted).toContainEqual({ type: 'sleep', id: 999 });
+  });
+
+  it('stamps onto the CURRENT entry list, not the pre-push snapshot', async () => {
+    // A save landing mid-flush must not be dropped by the stamp, the same rule
+    // `flushUnsynced`'s merge follows.
+    const queued: Entry = { id: 'x', childId: 'c1', type: 'sleep', start: NOW - 30 * M, end: NOW, nap: true, tags: [] };
+    const later: Entry = { id: 'y', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    useAppStore.setState({ children: [SYNCED_C1], entries: [queued], queueCount: 1, queuedIds: ['x'] });
+    h.q = [queued];
+
+    const run = s().flushQueue();
+    useAppStore.setState({ entries: [later, queued] });
+    await run;
+
+    expect(s().entries.map((e) => e.id)).toEqual(['y', 'x']);
+    expect(s().entries.find((e) => e.id === 'x')?.serverId).toBe(999);
   });
 
   it('keeps entries that fail to push', async () => {
