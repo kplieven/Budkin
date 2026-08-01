@@ -109,7 +109,7 @@ export function detailFor(item: TimelineItem): string {
         .filter(Boolean)
         .join(' · ');
     case 'bath':
-      return e.wash === 'full' ? 'Big wash' : 'Small wash';
+      return e.wash === 'full' ? 'Full bath' : 'Quick wash';
     case 'temperature': {
       // `e.value` is canonical °C; relabel + convert to the user's units lens.
       // Read non-reactively from the store — the timeline re-renders often (the
