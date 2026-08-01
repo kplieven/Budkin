@@ -7,7 +7,7 @@
  * start disagreeing.
  */
 
-import { dayGroupLabel } from '@/lib/format';
+import { dayGroupLabel, dayKey } from '@/lib/format';
 import { ALL_ACTIVITIES } from '@/lib/activities';
 import type { ActivityType } from '@/types/models';
 
@@ -34,18 +34,6 @@ export interface DayOption {
  */
 export function itemActivity(item: TimelineItem): ActivityType {
   return isTimer(item) ? item.saveAs : item.type;
-}
-
-/**
- * Stable identity for a LOCAL calendar day, as `YYYY-MM-DD`.
- *
- * Not the day's label: labels are relative to `now` ("Today"), so they cannot
- * key a selection that has to survive the clock rolling past midnight. Zero
- * padding also makes the keys sort chronologically as plain strings.
- */
-export function dayKey(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
