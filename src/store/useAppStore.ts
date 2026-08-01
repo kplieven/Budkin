@@ -509,9 +509,11 @@ export function mergeQueuedEntries(serverEntries: Entry[], queuedEntries: Entry[
  * entry's currently-selected tags, MINUS the structural `HIDDEN_TAGS`. Server
  * tags come first (carrying their display color); a selected tag not in the
  * server list (created elsewhere) is appended colorless so it still shows as a
- * selected chip. De-duplicated by name. Structural markers (`bath`/`small`/`big`,
- * breastfeeding `left`/`right`) are dropped from BOTH sides so they never appear
- * as chips even though they still round-trip on the entries that carry them.
+ * selected chip. De-duplicated by name. Structural markers (the bath tags
+ * `bath`, `bath:quick`, `bath:full` plus the legacy bare `small`/`big`, and
+ * breastfeeding `left`/`right`) are dropped from BOTH sides so they never
+ * appear as chips even though they still round-trip on the entries that
+ * carry them.
  */
 export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
   const seen = new Set<string>();
@@ -2751,11 +2753,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Pre-select the wash that's due from this child's rhythm. Scoped to the
       // selected child: `entries` holds every child's records, so an unscoped
       // read would let a sibling's baths decide this child's next wash.
+      // `get().now` rather than `Date.now()`, same reasoning as the sleep
+      // branch above: the store clock is the one `save()` will resolve the
+      // draft with.
       const childId = get().selectedChildId;
       te.wash = washDueState(
         entriesForChild(get().entries, childId),
         rhythmForChild(get().bathRhythms, childId, get().legacyRhythm),
-        Date.now(),
+        get().now,
       ).nextKind;
     }
     if (type === 'temperature') {
@@ -3239,9 +3244,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }),
   createTag: (name) => {
     const trimmed = name.trim();
-    // Reject blanks and the structural tags (bath/small/big, breastfeeding
-    // left/right, milestone/mk:*), which must never be user-created. No server
-    // call: Baby Buddy auto-creates the tag when the entry is POSTed with the name.
+    // Reject blanks and the structural tags (bath/bath:quick/bath:full and the
+    // legacy bare small/big, breastfeeding left/right, milestone/mk:*), which
+    // must never be user-created. No server call: Baby Buddy auto-creates the
+    // tag when the entry is POSTed with the name.
     if (!trimmed || isHiddenTag(trimmed)) return;
     set((s) => (s.te.tags.includes(trimmed) ? {} : { te: { ...s.te, tags: [...s.te.tags, trimmed] } }));
   },

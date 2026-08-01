@@ -5,7 +5,7 @@
 
 import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
-import type { WashKind } from '@/lib/wash';
+import { normalizeWash, type WashKind } from '@/lib/wash';
 import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
@@ -397,7 +397,12 @@ export function washDueState(entries: Entry[], rhythm: BathRhythm, now: number):
   const fullEvery = clampBathInterval(rhythm.fullEveryDays, BATH_RHYTHM_DEFAULT.fullEveryDays);
   const quickEvery = clampBathInterval(rhythm.quickEveryDays, BATH_RHYTHM_DEFAULT.quickEveryDays);
 
-  const sinceFull = daysSince(baths.find((b) => b.wash === 'full'));
+  // normalizeWash rather than a raw `b.wash === 'full'` compare: a bath still
+  // sitting in the offline queue or pending-ops log from before the 2026-08
+  // rename carries the literal legacy `'big'`, and neither store runs it
+  // through entityStore.ts's load-time normalization, so a bare compare here
+  // would leave a legacy full bath unable to ever reset this clock.
+  const sinceFull = daysSince(baths.find((b) => normalizeWash(b.wash) === 'full'));
   const sinceAny = daysSince(baths[0]);
 
   const full = fullEvery > 0 && (sinceFull === null || sinceFull >= fullEvery);

@@ -10,6 +10,7 @@
  */
 
 import { INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
+import { normalizeWash } from '@/lib/wash';
 import type {
   ActivityType,
   BathEntry,
@@ -298,10 +299,16 @@ export function isBathNote(n: any): boolean {
   return tagNames(n?.tags).includes('bath');
 }
 
-/** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
+/** Encode a bath entry as the body for a Baby Buddy Note (create/update).
+ *  Runs `entry.wash` through `normalizeWash` rather than comparing it raw: an
+ *  entry sitting in the offline queue or pending-ops log since before the
+ *  2026-08 rename still carries the literal `'big'`, and those two stores are
+ *  not covered by `entityStore.ts`'s load-time normalization, so a bare
+ *  comparison here would silently downgrade a full bath to a quick wash on
+ *  the server. */
 export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
-  const full = entry.wash === 'full';
+  const full = normalizeWash(entry.wash) === 'full';
   return {
     child: childServerId,
     time: toISO(entry.time),

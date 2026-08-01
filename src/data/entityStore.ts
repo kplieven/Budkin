@@ -141,9 +141,14 @@ function parseOr<T>(raw: string | null, fallback: T): T {
  * Parses a persisted entry-array value; anything but an array counts as corrupt.
  *
  * Bath entries are additionally run through `normalizeWash`. Chunks written
- * before the 2026-08 rename hold `wash: 'small' | 'big'` verbatim, and this is
- * the single funnel every stored entry passes through, so normalising here is
- * what stops the old literals reaching the rhythm comparison in `washDueState`.
+ * before the 2026-08 rename hold `wash: 'small' | 'big'` verbatim, so this
+ * normalises them on the way out of AsyncStorage. It is NOT the single funnel
+ * every stored entry passes through: the offline queue (`src/data/queue.ts`)
+ * and the pending-ops log (`src/data/pendingOps.ts`) hold entries too, and
+ * neither loads through this function. Those two are covered instead by
+ * normalising at their comparison sites (`bathToNoteBody` in
+ * `src/api/client.ts`, `washDueState` in `src/store/selectors.ts`), so a
+ * legacy value reaching any of the three is defused wherever it is compared.
  */
 function parseEntryArray(raw: string | null): Entry[] {
   const parsed = parseOr<Entry[]>(raw, []);

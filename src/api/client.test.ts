@@ -288,6 +288,19 @@ describe('bath <-> note serialization', () => {
     expect(bathToNoteBody(entry, 3).tags).toEqual(['bath', 'bath:full', 'Fussy']);
   });
 
+  it('normalizes a legacy big wash value still sitting in the offline queue or pending-ops log before serializing', () => {
+    // `BathEntry.wash` is typed as `WashKind` ('quick' | 'full') post-rename, so
+    // a queue/pendingOps entry written by a pre-rename build reaches here only
+    // via an untyped JSON.parse, which the cast reproduces.
+    const entry = { id: 'e4', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: [] } as unknown as BathEntry;
+    expect(bathToNoteBody(entry, 3)).toEqual({
+      child: 3,
+      time: toISO(TIME),
+      note: 'Full bath',
+      tags: ['bath', 'bath:full'],
+    });
+  });
+
   it('reads a note back into a bath entry, deriving wash from the tags', () => {
     const note = { id: 42, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Full bath', tags: ['bath', 'bath:full', 'Fussy'] };
     expect(noteToBathEntry(note, 'c1')).toEqual({
