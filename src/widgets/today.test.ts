@@ -246,7 +246,7 @@ describe('pruneWidgetEntries', () => {
     const others: Entry[] = [
       { id: 'p1', childId: 'c1', type: 'pumping', start: at(2026, 6, 5, 13), end: at(2026, 6, 5, 13, 20), amount: 90, tags: [] },
       { id: 'tu1', childId: 'c1', type: 'tummy', start: at(2026, 6, 5, 13), end: at(2026, 6, 5, 13, 10), tags: [] },
-      { id: 'b1', childId: 'c1', type: 'bath', time: at(2026, 6, 5, 13), wash: 'small', tags: [] },
+      { id: 'b1', childId: 'c1', type: 'bath', time: at(2026, 6, 5, 13), wash: 'quick', tags: [] },
       { id: 'te1', childId: 'c1', type: 'temperature', time: at(2026, 6, 5, 13), value: 37, tags: [] },
       { id: 'm1', childId: 'c1', type: 'medication', time: at(2026, 6, 5, 13), name: 'x', tags: [] },
       { id: 'n1', childId: 'c1', type: 'note', time: at(2026, 6, 5, 13), text: 'x', tags: [] },

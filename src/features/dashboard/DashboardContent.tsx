@@ -137,7 +137,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const washKind = nextWashKind(childEntries, smallWashesPerBig);
   // Once a wash is logged today the tile switches to the "done" copy; otherwise
   // it keeps the forward-looking "due" hint.
-  const washHint = washedToday ? 'Washed today' : washKind === 'big' ? 'Big wash due today' : 'Small wash due';
+  const washHint = washedToday ? 'Washed today' : washKind === 'full' ? 'Big wash due today' : 'Small wash due';
   // Treatments get the same treatment as washes: a forward-looking "due" hint
   // and a done check once the day's doses are all logged. `null` means this
   // child keeps no treatments, so the tile falls back to the generic copy.
