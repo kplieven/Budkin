@@ -6,8 +6,6 @@
     "@expo-google-fonts/figtree": "^0.4.1",
     "@expo/ui": "~56.0.18",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "eslint": "^9.39.4",
-    "eslint-config-expo": "~56.0.4",
     "expo": "~56.0.12",
     "expo-build-properties": "~56.0.19",
     "expo-constants": "~56.0.18",
@@ -42,6 +40,8 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
+    "eslint": "^9.39.4",
+    "eslint-config-expo": "~56.0.4",
     "typescript": "~6.0.3",
     "vitest": "^3.2.6"
   },
