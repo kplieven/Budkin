@@ -303,6 +303,20 @@ export interface Measurement {
   notes?: string;
 }
 
+/**
+ * One child's bath rhythm: how often each kind of wash is due, in whole days.
+ * `0` means that kind is off and never comes due, which is how the rhythm
+ * survives the child growing up (a newborn has no full baths at all, a school-age
+ * child has no scheduled quick washes).
+ *
+ * Per child rather than global because a 4-month-old and a 3-year-old sit at
+ * opposite ends of that progression. Persisted by `src/data/bathRhythm.ts`.
+ */
+export interface BathRhythm {
+  fullEveryDays: number;
+  quickEveryDays: number;
+}
+
 /** The four coarse times of day a fixed-schedule treatment can be dosed at. */
 export type TreatmentTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
 
