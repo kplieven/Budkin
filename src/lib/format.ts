@@ -33,8 +33,17 @@ export function fmtAgo(ms: number, now: number): string {
   return h ? `${d}d ${h}h ago` : `${d}d ago`;
 }
 
-/** Compact form for stat values and anchors: "5m" / "1h18m" */
+/**
+ * Compact form for stat values and anchors: "5m" / "1h18m".
+ *
+ * Floors at zero exactly as `fmtDur` does, because a negative elapsed is
+ * reachable and "-1m" is never the right thing to show: an ongoing entry can
+ * carry a start the user set ahead of the clock, and History reads a
+ * minute-quantized `now` that sits behind real time, so a timer begun this
+ * minute is briefly "in the future" as far as the arithmetic is concerned.
+ */
 export function fmtAgoShort(min: number): string {
+  min = Math.max(0, min);
   if (min < 60) return `${min}m`;
   if (min < 1440) {
     const h = Math.floor(min / 60);

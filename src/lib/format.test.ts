@@ -55,6 +55,14 @@ describe('fmtAgoShort', () => {
     expect(fmtAgoShort(120)).toBe('2h');
     expect(fmtAgoShort(14824)).toBe('10d');
   });
+
+  it('floors a negative elapsed at zero rather than printing "-1m"', () => {
+    // Reachable two ways: an ongoing entry whose start the user set ahead of the
+    // clock, and History's minute-quantized `now`, which sits up to 59s behind
+    // real time and so lands before the start of a timer begun this minute.
+    expect(fmtAgoShort(-1)).toBe('0m');
+    expect(fmtAgoShort(-90)).toBe('0m');
+  });
 });
 
 describe('ageStr', () => {
