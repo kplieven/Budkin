@@ -148,7 +148,7 @@ describe('nextStartSide', () => {
 });
 
 describe('nextWashKind', () => {
-  const bath = (time: number, wash: 'small' | 'big'): Entry => ({
+  const bath = (time: number, wash: 'quick' | 'full'): Entry => ({
     id: `b-${time}`,
     childId: 'c1',
     type: 'bath',
@@ -157,70 +157,70 @@ describe('nextWashKind', () => {
     tags: [],
   });
 
-  /** `n` consecutive small washes, oldest first, ending one minute ago. */
-  const smalls = (n: number): Entry[] => Array.from({ length: n }, (_, i) => bath(NOW - (n - i) * M, 'small'));
+  /** `n` consecutive quick washes, oldest first, ending one minute ago. */
+  const quicks = (n: number): Entry[] => Array.from({ length: n }, (_, i) => bath(NOW - (n - i) * M, 'quick'));
 
   it('defaults to small with no bath history', () => {
-    expect(nextWashKind([])).toBe('small');
+    expect(nextWashKind([])).toBe('quick');
   });
   it('an omitted interval means three smalls, matching the historical rule', () => {
-    expect(nextWashKind(smalls(2))).toBe('small');
-    expect(nextWashKind(smalls(3))).toBe('big');
+    expect(nextWashKind(quicks(2))).toBe('quick');
+    expect(nextWashKind(quicks(3))).toBe('full');
   });
   it('is small with fewer washes on record than the interval', () => {
-    expect(nextWashKind(smalls(2), 3)).toBe('small');
-    expect(nextWashKind(smalls(6), 7)).toBe('small');
+    expect(nextWashKind(quicks(2), 3)).toBe('quick');
+    expect(nextWashKind(quicks(6), 7)).toBe('quick');
   });
   it('flips to big exactly on the configured number of smalls', () => {
     for (const n of [1, 2, 3, 4, 5, 6, 7, 30]) {
-      expect(nextWashKind(smalls(n - 1), n)).toBe('small');
-      expect(nextWashKind(smalls(n), n)).toBe('big');
+      expect(nextWashKind(quicks(n - 1), n)).toBe('quick');
+      expect(nextWashKind(quicks(n), n)).toBe('full');
     }
   });
   it('an interval of 1 alternates small, big, small, big', () => {
-    expect(nextWashKind([], 1)).toBe('small');
-    expect(nextWashKind([bath(NOW - M, 'small')], 1)).toBe('big');
-    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'big')], 1)).toBe('small');
+    expect(nextWashKind([], 1)).toBe('quick');
+    expect(nextWashKind([bath(NOW - M, 'quick')], 1)).toBe('full');
+    expect(nextWashKind([bath(NOW - 2 * M, 'quick'), bath(NOW - M, 'full')], 1)).toBe('quick');
   });
   it('an interval of 7 needs seven smalls before a big is due', () => {
-    expect(nextWashKind(smalls(7), 7)).toBe('big');
-    expect(nextWashKind([bath(NOW - 8 * M, 'big'), ...smalls(6)], 7)).toBe('small');
+    expect(nextWashKind(quicks(7), 7)).toBe('full');
+    expect(nextWashKind([bath(NOW - 8 * M, 'full'), ...quicks(6)], 7)).toBe('quick');
   });
   it('raising the interval takes a big wash back off the schedule', () => {
     // The same history reads differently under a different rhythm: derived from
     // history every time, never from a stored counter.
-    const history = smalls(3);
-    expect(nextWashKind(history, 3)).toBe('big');
-    expect(nextWashKind(history, 5)).toBe('small');
+    const history = quicks(3);
+    expect(nextWashKind(history, 3)).toBe('full');
+    expect(nextWashKind(history, 5)).toBe('quick');
   });
   it('a big as the most recent wash => back to small', () => {
     const entries: Entry[] = [
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'big'),
+      bath(NOW - 3 * M, 'quick'),
+      bath(NOW - 2 * M, 'quick'),
+      bath(NOW - M, 'full'),
     ];
-    expect(nextWashKind(entries, 3)).toBe('small');
+    expect(nextWashKind(entries, 3)).toBe('quick');
   });
   it('looks only at the most recent interval, ignoring older washes', () => {
     // three recent smalls => big, even though an older big precedes them
-    const entries: Entry[] = [bath(NOW - 4 * M, 'big'), ...smalls(3)];
-    expect(nextWashKind(entries, 3)).toBe('big');
+    const entries: Entry[] = [bath(NOW - 4 * M, 'full'), ...quicks(3)];
+    expect(nextWashKind(entries, 3)).toBe('full');
   });
   it('ignores non-bath entries when reading the rhythm', () => {
     const entries: Entry[] = [
       { id: 'f', childId: 'c1', type: 'feeding', start: NOW - M, end: NOW, feedType: 'breast', method: 'left', amount: null, tags: [] },
-      ...smalls(3),
+      ...quicks(3),
     ];
-    expect(nextWashKind(entries, 3)).toBe('big');
+    expect(nextWashKind(entries, 3)).toBe('full');
   });
   it('clamps a nonsense interval rather than reading an empty window as due', () => {
     // slice(0, 0) would be an empty array, and [].every() is vacuously true —
     // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
-    expect(nextWashKind([], 0)).toBe('small');
-    expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
-    expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
-    expect(nextWashKind(smalls(30), 99)).toBe('big');
-    expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
+    expect(nextWashKind([], 0)).toBe('quick');
+    expect(nextWashKind([bath(NOW - M, 'quick')], 0)).toBe('full');
+    expect(nextWashKind(quicks(29), 99)).toBe('quick'); // 99 clamps to the 30 maximum
+    expect(nextWashKind(quicks(30), 99)).toBe('full');
+    expect(nextWashKind(quicks(3), Number.NaN)).toBe('full'); // falls back to the default 3
   });
 });
 
@@ -231,7 +231,7 @@ describe('bathGivenToday', () => {
     childId,
     type: 'bath',
     time,
-    wash: 'small',
+    wash: 'quick',
     tags: [],
   });
 
@@ -758,7 +758,7 @@ describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAl
       expect(treatmentDueState(treatment(), entriesForChild([mine, sibling], 'c1'), at(9))).toMatchObject({ due: 0 });
     });
     it('ignores non-medication entries', () => {
-      const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'small', tags: [] };
+      const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'quick', tags: [] };
       expect(treatmentDueState(treatment(), [bath], at(9))).toMatchObject({ due: 1 });
     });
   });

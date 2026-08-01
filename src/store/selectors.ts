@@ -5,6 +5,7 @@
 
 import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
+import type { WashKind } from '@/lib/wash';
 import type { ActivityType, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
@@ -318,13 +319,13 @@ export function clampSmallWashesPerBig(n: number): number {
  * correct by definition: the rule is about the last N washes, not about where
  * some earlier cycle happened to be anchored.
  */
-export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL_WASHES_PER_BIG_DEFAULT): 'small' | 'big' {
+export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL_WASHES_PER_BIG_DEFAULT): WashKind {
   const n = clampSmallWashesPerBig(smallWashesPerBig);
   const recent = entries
     .filter((e): e is Extract<Entry, { type: 'bath' }> => e.type === 'bath')
     .sort((a, b) => b.time - a.time)
     .slice(0, n);
-  return recent.length === n && recent.every((b) => b.wash === 'small') ? 'big' : 'small';
+  return recent.length === n && recent.every((b) => b.wash === 'quick') ? 'full' : 'quick';
 }
 
 /**

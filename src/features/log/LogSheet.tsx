@@ -731,13 +731,13 @@ export function LogSheet() {
           </>
         )}
 
-        {/* bath fields — small vs big wash */}
+        {/* bath fields: quick vs full wash */}
         {type === 'bath' && (
           <>
             <FieldLabel hint="follows your rhythm">Wash</FieldLabel>
             <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
-              {(['small', 'big'] as const).map((w) => {
-                const selected = (te.wash ?? 'small') === w;
+              {(['quick', 'full'] as const).map((w) => {
+                const selected = (te.wash ?? 'quick') === w;
                 return (
                   <Pressable
                     key={w}
@@ -750,7 +750,7 @@ export function LogSheet() {
                     ]}
                   >
                     <Txt unselectable weight={700} size={14.5}>
-                      {w === 'small' ? 'Small wash' : 'Big wash'}
+                      {w === 'quick' ? 'Small wash' : 'Big wash'}
                     </Txt>
                   </Pressable>
                 );

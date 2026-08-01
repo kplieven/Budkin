@@ -294,11 +294,14 @@ export function isBathNote(n: any): boolean {
 /** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
 export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
+  // Task 2 replaces this mapping with the `bath:` prefixed tags. Until then the
+  // wire stays byte-identical so this task changes nothing a server can see.
+  const wireWash = entry.wash === 'full' ? 'big' : 'small';
   return {
     child: childServerId,
     time: toISO(entry.time),
-    note: `Bath, ${entry.wash} wash`,
-    tags: ['bath', entry.wash, ...userTags],
+    note: `Bath, ${wireWash} wash`,
+    tags: ['bath', wireWash, ...userTags],
   };
 }
 
@@ -311,7 +314,7 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
     childId,
     type: 'bath',
     time: fromISO(n.time),
-    wash: tags.includes('big') ? 'big' : 'small',
+    wash: tags.includes('big') ? 'full' : 'quick',
     tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
   };
 }

@@ -24,6 +24,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { normalizeWash } from '@/lib/wash';
 import type { Child, Entry, FeedMethod, FeedType, Measurement } from '@/types/models';
 import { entryTimestamp } from '@/types/models';
 
@@ -136,10 +137,20 @@ function parseOr<T>(raw: string | null, fallback: T): T {
   }
 }
 
-/** Parses a persisted entry-array value; anything but an array counts as corrupt. */
+/**
+ * Parses a persisted entry-array value; anything but an array counts as corrupt.
+ *
+ * Bath entries are additionally run through `normalizeWash`. Chunks written
+ * before the 2026-08 rename hold `wash: 'small' | 'big'` verbatim, and this is
+ * the single funnel every stored entry passes through, so normalising here is
+ * what stops the old literals reaching the rhythm comparison in `washDueState`.
+ */
 function parseEntryArray(raw: string | null): Entry[] {
   const parsed = parseOr<Entry[]>(raw, []);
-  return Array.isArray(parsed) ? parsed : [];
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((e) =>
+    e?.type === 'bath' ? { ...e, wash: normalizeWash((e as { wash?: unknown }).wash) } : e,
+  );
 }
 
 /**

@@ -755,38 +755,38 @@ describe('bath tracking', () => {
     const te = s().te;
     expect(te.shape).toBe('point');
     expect(te.agoMin).toBe(0);
-    expect(te.wash).toBe('small'); // no bath history => small is due
+    expect(te.wash).toBe('quick'); // no bath history => small is due
   });
   it('openSheet defaults to big when three recent washes are small', () => {
     useAppStore.setState({
       entries: [
-        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
-        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
-        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
+        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
       ],
     });
     s().openSheet('bath');
-    expect(s().te.wash).toBe('big');
+    expect(s().te.wash).toBe('full');
   });
   it('openSheet honours a configured rhythm shorter than three', () => {
     useAppStore.setState({
       smallWashesPerBig: 1,
-      entries: [{ id: 'b1', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] }],
+      entries: [{ id: 'b1', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] }],
     });
     s().openSheet('bath');
-    expect(s().te.wash).toBe('big');
+    expect(s().te.wash).toBe('full');
   });
   it('openSheet honours a configured rhythm longer than three', () => {
     useAppStore.setState({
       smallWashesPerBig: 5,
       entries: [
-        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
-        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
-        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
+        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
       ],
     });
     s().openSheet('bath');
-    expect(s().te.wash).toBe('small'); // three smalls no longer complete the cycle
+    expect(s().te.wash).toBe('quick'); // three smalls no longer complete the cycle
   });
   it('openSheet reads only the selected child\'s baths, not a sibling\'s', () => {
     useAppStore.setState({
@@ -797,30 +797,30 @@ describe('bath tracking', () => {
       selectedChildId: 'c1',
       entries: [
         // The sibling has completed a full small-wash cycle; Mira has not bathed.
-        { id: 'b1', childId: 'c2', type: 'bath', time: NOW - 3 * M, wash: 'small', tags: [] },
-        { id: 'b2', childId: 'c2', type: 'bath', time: NOW - 2 * M, wash: 'small', tags: [] },
-        { id: 'b3', childId: 'c2', type: 'bath', time: NOW - M, wash: 'small', tags: [] },
+        { id: 'b1', childId: 'c2', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
+        { id: 'b2', childId: 'c2', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
+        { id: 'b3', childId: 'c2', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
       ],
     });
     s().openSheet('bath');
-    expect(s().te.wash).toBe('small');
+    expect(s().te.wash).toBe('quick');
   });
   it('setWash selects the wash size', () => {
     s().openSheet('bath');
-    s().setWash('big');
-    expect(s().te.wash).toBe('big');
-    s().setWash('small');
-    expect(s().te.wash).toBe('small');
+    s().setWash('full');
+    expect(s().te.wash).toBe('full');
+    s().setWash('quick');
+    expect(s().te.wash).toBe('quick');
   });
   it('save builds a point bath entry and pushes it (to the notes endpoint)', async () => {
     useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
     s().openSheet('bath');
-    s().setWash('big');
+    s().setWash('full');
     s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'bath' }>;
     expect(e.type).toBe('bath');
     expect(e.time).toBe(NOW);
-    expect(e.wash).toBe('big');
+    expect(e.wash).toBe('full');
     expect(e.childId).toBe('c1');
     expect(s().sheet).toBeNull();
     await flush();

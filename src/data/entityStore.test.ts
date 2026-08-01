@@ -157,6 +157,23 @@ describe('entityStore persistence', () => {
     expect(loaded?.entries).toEqual(expect.arrayContaining(entries));
   });
 
+  it('normalizes pre-2026-08 wash values when loading entry chunks', async () => {
+    // A chunk exactly as a build before the rename would have left it.
+    mem.store.set(
+      'budkin.entries.v2.2026-03',
+      JSON.stringify([
+        { id: 'b1', childId: 'c1', type: 'bath', time: new Date(2026, 2, 4).getTime(), wash: 'small', tags: [] },
+        { id: 'b2', childId: 'c1', type: 'bath', time: new Date(2026, 2, 5).getTime(), wash: 'big', tags: [] },
+      ]),
+    );
+    const loaded = await loadEntities();
+    const washes = loaded!.entries
+      .filter((e): e is Extract<Entry, { type: 'bath' }> => e.type === 'bath')
+      .sort((a, b) => a.time - b.time)
+      .map((e) => e.wash);
+    expect(washes).toEqual(['quick', 'full']);
+  });
+
   it('defaults absent collections/fields when only some keys are present', async () => {
     await saveChildren([child('a')]);
     const loaded = await loadEntities();

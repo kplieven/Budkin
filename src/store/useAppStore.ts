@@ -77,6 +77,7 @@ import {
 import { loadTimers, saveTimers } from '@/data/timers';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
+import type { WashKind } from '@/lib/wash';
 import {
   activeTreatmentsForChildToday,
   clampHourOfDay,
@@ -425,8 +426,8 @@ interface AppActions {
   adjustAmount: (dir: 1 | -1) => void;
   toggleWet: () => void;
   toggleSolid: () => void;
-  /** bath: pick the wash size (small/big) */
-  setWash: (wash: 'small' | 'big') => void;
+  /** bath: pick the wash kind (quick/full) */
+  setWash: (wash: WashKind) => void;
   setNap: (nap: boolean) => void;
   toggleTag: (tag: string) => void;
   /** Add a brand-new free-form tag as selected. Trims, rejects blank / structural
@@ -3401,7 +3402,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         childId,
         type: 'bath',
         time: teEnd(te, now),
-        wash: te.wash ?? 'small',
+        wash: te.wash ?? 'quick',
         tags,
       };
     } else if (type === 'temperature') {

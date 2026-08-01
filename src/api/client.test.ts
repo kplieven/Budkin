@@ -258,7 +258,7 @@ describe('createChild', () => {
 
 describe('bath <-> note serialization', () => {
   it('encodes a small wash as a tagged note the tags own as the source of truth', () => {
-    const entry: BathEntry = { id: 'e1', childId: 'c1', type: 'bath', time: TIME, wash: 'small', tags: [] };
+    const entry: BathEntry = { id: 'e1', childId: 'c1', type: 'bath', time: TIME, wash: 'quick', tags: [] };
     expect(bathToNoteBody(entry, 1)).toEqual({
       child: 1,
       time: new Date(TIME).toISOString(),
@@ -268,7 +268,7 @@ describe('bath <-> note serialization', () => {
   });
 
   it('encodes a big wash and keeps user tags after the structural ones', () => {
-    const entry: BathEntry = { id: 'e2', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: ['Fussy'] };
+    const entry: BathEntry = { id: 'e2', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: ['Fussy'] };
     expect(bathToNoteBody(entry, 1)).toEqual({
       child: 1,
       time: new Date(TIME).toISOString(),
@@ -285,28 +285,28 @@ describe('bath <-> note serialization', () => {
       childId: 'c1',
       type: 'bath',
       time: TIME,
-      wash: 'big',
+      wash: 'full',
       tags: ['Fussy'],
     });
   });
 
   it('treats a note without a big tag as a small wash', () => {
     const note = { id: 7, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath — small wash', tags: ['bath', 'small'] };
-    expect(noteToBathEntry(note, 'c1').wash).toBe('small');
+    expect(noteToBathEntry(note, 'c1').wash).toBe('quick');
   });
 
   it('accepts object-shaped tags (taggit) as well as strings', () => {
     const note = { id: 8, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath — big wash', tags: [{ name: 'bath' }, { name: 'big' }] };
     const back = noteToBathEntry(note, 'c1');
-    expect(back.wash).toBe('big');
+    expect(back.wash).toBe('full');
     expect(back.tags).toEqual([]);
   });
 
   it('round-trips wash and user tags through encode -> server echo -> decode', () => {
-    const entry: BathEntry = { id: 'e3', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: ['Fussy'] };
+    const entry: BathEntry = { id: 'e3', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: ['Fussy'] };
     const body = bathToNoteBody(entry, 1);
     const back = noteToBathEntry({ id: 99, ...body }, 'c1');
-    expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'big', tags: ['Fussy'], serverId: 99 });
+    expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'full', tags: ['Fussy'], serverId: 99 });
   });
 });
 
@@ -515,7 +515,7 @@ describe('per-entry notes', () => {
 
   it('does not add a notes field to a bath note body (bath excluded)', async () => {
     const calls = stubFetch({ id: 1 });
-    const bath: BathEntry = { id: 'b1', childId: 'c1', type: 'bath', time: TIME, wash: 'small', tags: [] };
+    const bath: BathEntry = { id: 'b1', childId: 'c1', type: 'bath', time: TIME, wash: 'quick', tags: [] };
     await client().createEntry(bath, 1);
     expect('notes' in calls[0].body).toBe(false);
   });
@@ -912,7 +912,7 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
     expect(calls).toHaveLength(1); // single fetch — no double-read of /notes/
     expect(calls[0].url).toContain('/notes/');
     expect(baths).toHaveLength(1);
-    expect(baths[0]).toMatchObject({ type: 'bath', wash: 'small', serverId: 1 });
+    expect(baths[0]).toMatchObject({ type: 'bath', wash: 'quick', serverId: 1 });
     expect(notes).toHaveLength(2);
     expect(notes[0]).toEqual({
       id: 'note-2',
@@ -954,7 +954,7 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
 
   it('a bath still serializes as a bath on the shared endpoint (regression)', async () => {
     const calls = stubFetch({ id: 1 });
-    const bath: BathEntry = { id: 'b9', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: [] };
+    const bath: BathEntry = { id: 'b9', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: [] };
     await client().createEntry(bath, 1);
     expect(calls[0].url).toContain('/notes/');
     expect(calls[0].body.tags).toEqual(['bath', 'big']);
@@ -1145,7 +1145,7 @@ describe('listChildNotes three-way partition', () => {
     const client = new BabybuddyClient('https://example.com', 'tok');
     const { baths, milestones, notes } = await client.listChildNotes('5');
     expect(milestones.map((m) => m.key)).toEqual(['first-steps']);
-    expect(baths.map((b) => b.wash)).toEqual(['small']);
+    expect(baths.map((b) => b.wash)).toEqual(['quick']);
     expect(notes.map((n) => n.text)).toEqual(['plain note']);
   });
 
