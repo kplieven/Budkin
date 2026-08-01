@@ -118,8 +118,12 @@ export default function History() {
             <Txt weight={700} size={16}>
               Nothing to show here
             </Txt>
+            {/* Deliberately not spelled out per filter: the only way to reach
+                this state is the data moving underneath a selection (a refresh
+                drops the day, a child switch), since the two option lists
+                narrow symmetrically and cannot offer an empty combination. */}
             <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
-              This day and these activities have nothing logged together.
+              Nothing here matches the current filter.
             </Txt>
             <Pressable
               onPress={() => setFilter({ day: null, types: [] })}
