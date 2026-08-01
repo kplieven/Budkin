@@ -108,12 +108,23 @@ export function relDayLabel(ms: number, now: number): string {
   return 'Yesterday';
 }
 
-/** Day-group label for the timeline: "Today" / "Yesterday" / DD/MM/YYYY (nl-BE). */
+/**
+ * Day-group label for the timeline: "Today" / "Yesterday" / DD/MM/YYYY (nl-BE).
+ *
+ * "Yesterday" is the previous CALENDAR day, not a rolling 48-hour window. The
+ * window version called anything under 48h old yesterday, so at 01:00 an entry
+ * from 20:00 the day before yesterday (29h) claimed the same label as one from
+ * yesterday evening — and `groupByDay`, which keys its buckets by this label,
+ * then merged two calendar days into one group. Stepping a Date back one day
+ * also handles month and year rollover for free.
+ */
 export function dayGroupLabel(ms: number, now: number): string {
   const d = new Date(ms);
   const nowD = new Date(now);
   if (d.toDateString() === nowD.toDateString()) return 'Today';
-  if (now - ms < 2 * 86400000) return 'Yesterday';
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
   return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
 }
 

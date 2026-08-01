@@ -71,6 +71,18 @@ describe('relDayLabel / dayGroupLabel', () => {
     expect(dayGroupLabel(NOW - 5 * M, NOW)).toBe('Today');
     expect(dayGroupLabel(NOW - 26 * 3600000, NOW)).toBe('Yesterday');
   });
+
+  it('calls only the previous CALENDAR day yesterday, however early it is now', () => {
+    // 01:00, so "less than 48h ago" reaches back into the day before yesterday.
+    const earlyMorning = new Date(2026, 5, 22, 1, 0, 0).getTime();
+    expect(dayGroupLabel(new Date(2026, 5, 21, 20, 0, 0).getTime(), earlyMorning)).toBe('Yesterday');
+    expect(dayGroupLabel(new Date(2026, 5, 20, 20, 0, 0).getTime(), earlyMorning)).toBe('20/06/2026');
+  });
+
+  it('crosses a month boundary', () => {
+    const firstOfMonth = new Date(2026, 6, 1, 9, 0, 0).getTime();
+    expect(dayGroupLabel(new Date(2026, 5, 30, 22, 0, 0).getTime(), firstOfMonth)).toBe('Yesterday');
+  });
 });
 
 describe('fmtElapsedClock', () => {
