@@ -238,6 +238,18 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * "every N days" phrasing for one rhythm axis, to sit after "Full bath" or
+ * "quick wash": 0 reads as "off" (0 is the OFF switch, per
+ * `BATH_INTERVAL_MIN`'s doc comment in selectors.ts, not a degenerate "every 0
+ * days" that would contradict the helper text explaining the same rule), 1 is
+ * the singular "every day", and everything else is "every N days".
+ */
+function bathCadencePhrase(days: number): string {
+  if (days === 0) return 'off';
+  return days === 1 ? 'every day' : `every ${days} days`;
+}
+
 export default function Settings() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -389,19 +401,18 @@ export default function Settings() {
                   Bath rhythm for {child.first}
                 </Txt>
                 <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-                  Full bath every {rhythm.fullEveryDays === 1 ? 'day' : `${rhythm.fullEveryDays} days`}, quick wash every{' '}
-                  {rhythm.quickEveryDays === 1 ? 'day' : `${rhythm.quickEveryDays} days`}
+                  Full bath {bathCadencePhrase(rhythm.fullEveryDays)}, quick wash {bathCadencePhrase(rhythm.quickEveryDays)}
                 </Txt>
               </View>
               <CountField
-                label="Full bath, every N days"
+                label="Full bath days"
                 value={rhythm.fullEveryDays}
                 min={BATH_INTERVAL_MIN}
                 max={BATH_INTERVAL_MAX}
                 onCommit={(n) => setBathRhythm(child.id, { fullEveryDays: n })}
               />
               <CountField
-                label="Quick wash, every N days"
+                label="Quick wash days"
                 value={rhythm.quickEveryDays}
                 min={BATH_INTERVAL_MIN}
                 max={BATH_INTERVAL_MAX}

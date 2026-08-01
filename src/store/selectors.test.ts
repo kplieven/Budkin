@@ -247,6 +247,16 @@ describe('washDueState', () => {
     expect(washDueState([sleep, bath(0, 'full')], R(3, 1), NOON).full).toBe(false);
     expect(washDueState([sleep], R(3, 1), NOON).full).toBe(true);
   });
+
+  it('treats a legacy big wash value as a full bath, so it resets the full-bath clock', () => {
+    // A bath still sitting in the offline queue or pending-ops log from before
+    // the 2026-08 rename carries the literal legacy 'big', reachable here only
+    // via an untyped JSON.parse (reproduced with the cast, since `wash` is
+    // typed as `WashKind` post-rename).
+    const legacy: Entry = { id: 'b-legacy', childId: 'c1', type: 'bath', time: NOON, wash: 'big', tags: [] } as unknown as Entry;
+    const s = washDueState([legacy], R(3, 1), NOON);
+    expect(s.full).toBe(false);
+  });
 });
 
 describe('bath rhythm values', () => {

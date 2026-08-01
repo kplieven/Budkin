@@ -911,8 +911,9 @@ export function LogSheet() {
         )}
 
         {/* tags — the server list ∪ the entry's own tags, minus the structural
-            ones (bath/small/big, breastfeeding left/right). Server colors render
-            via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
+            ones (bath/bath:quick/bath:full and the legacy bare small/big,
+            breastfeeding left/right). Server colors render via the Chip
+            swatch; a "New tag…" field adds a brand-new tag. */}
         {!confirmMode && (
           <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
         )}
