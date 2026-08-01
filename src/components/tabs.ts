@@ -11,12 +11,13 @@
  * layout), and it is reached from Home.
  */
 
-import type { Href } from 'expo-router';
-
 import type { IconName } from '@/components/Icon';
 
 export const TABS = {
-  index: { label: 'Home', icon: 'home' },
+  // Home is a route GROUP holding a Stack (Home -> Timers), so the tab's route
+  // name carries its parentheses. The URL is unaffected: groups never appear in
+  // the path, so this tab is still "/".
+  '(home)': { label: 'Home', icon: 'home' },
   history: { label: 'History', icon: 'list' },
   insights: { label: 'Insights', icon: 'insights' },
   growth: { label: 'Growth', icon: 'chart' },
@@ -37,13 +38,4 @@ export const TAB_NAMES = Object.keys(TABS) as TabName[];
  */
 export function isTabName(name: string | null | undefined): name is TabName {
   return name != null && name in TABS;
-}
-
-/**
- * Where a tab lives, for a caller that has to navigate to it rather than
- * switch to it. Home is the group's initial route (`unstable_settings` in the
- * group layout), so it is addressed as the group itself.
- */
-export function tabHref(name: TabName): Href {
-  return name === 'index' ? '/(tabs)' : `/(tabs)/${name}`;
 }
