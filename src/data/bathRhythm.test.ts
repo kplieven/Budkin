@@ -37,4 +37,14 @@ describe('bathRhythm storage', () => {
     mem.store.set(KEY, '{not json');
     expect(await loadBathRhythms()).toEqual({});
   });
+
+  it('treats a stored array as empty', async () => {
+    mem.store.set(KEY, JSON.stringify([{ fullEveryDays: 3, quickEveryDays: 1 }]));
+    expect(await loadBathRhythms()).toEqual({});
+  });
+
+  it('treats a stored null as empty', async () => {
+    mem.store.set(KEY, JSON.stringify(null));
+    expect(await loadBathRhythms()).toEqual({});
+  });
 });

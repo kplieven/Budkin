@@ -25,7 +25,8 @@ export async function loadBathRhythms(): Promise<Record<string, BathRhythm>> {
     const s = await AsyncStorage.getItem(KEY);
     if (!s) return {};
     const parsed = JSON.parse(s) as Record<string, BathRhythm>;
-    return parsed && typeof parsed === 'object' ? parsed : {};
+    // Reject anything that is not a plain object (includes arrays, null, primitives).
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch (e) {
     console.warn('[bathRhythm] loadBathRhythms failed:', e);
     return {};
