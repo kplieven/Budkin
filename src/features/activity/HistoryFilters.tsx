@@ -1,0 +1,301 @@
+import { Pressable, ScrollView, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { BottomSheet } from '@/components/BottomSheet';
+import { Chip } from '@/components/Chip';
+import { isHovered } from '@/components/hover';
+import { Icon } from '@/components/Icon';
+import { Txt } from '@/components/Txt';
+import { ACTIVITY_LABEL } from '@/lib/activities';
+import { hexA } from '@/lib/color';
+import { useTheme } from '@/theme/useTheme';
+import type { ActivityType } from '@/types/models';
+
+import { dayKeyLabel, type DayOption, type TimelineFilter } from './filter';
+
+/** Which filter sheet is open, or null. Owned by the screen, because the chips
+ *  and the sheets cannot live in the same parent — see `HistoryFilterSheets`. */
+export type OpenFilterSheet = 'day' | 'activity' | null;
+
+/**
+ * The History timeline's filter row: a day chip and an activity chip, each
+ * opening a sheet, plus a clear button once either is set.
+ *
+ * Two chips rather than two rows of inline chips, because the alternative does
+ * not fit. There are eight activities and as many days as the child has been
+ * logged for, so anything inline is either horizontally scrollable (fiddly on a
+ * phone, and it hides its own options) or takes more vertical space than the
+ * timeline it is there to shorten. A chip that names its current value costs one
+ * line and stays readable at any number of options.
+ */
+export function HistoryFilterChips({
+  filter,
+  now,
+  onOpen,
+  onChange,
+}: {
+  filter: TimelineFilter;
+  now: number;
+  onOpen: (sheet: OpenFilterSheet) => void;
+  onChange: (next: TimelineFilter) => void;
+}) {
+  const t = useTheme();
+
+  const dayLabel = filter.day ? dayKeyLabel(filter.day, now) : 'All days';
+  const activityLabel =
+    filter.types.length === 0
+      ? 'All activities'
+      : filter.types.length === 1
+        ? ACTIVITY_LABEL[filter.types[0]]
+        : `${filter.types.length} activities`;
+  const filtered = filter.day != null || filter.types.length > 0;
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 20, marginBottom: 14 }}>
+      <DropdownChip
+        label={dayLabel}
+        accessibilityLabel={`Filter by day, showing ${dayLabel}`}
+        active={filter.day != null}
+        onPress={() => onOpen('day')}
+      />
+      <DropdownChip
+        label={activityLabel}
+        accessibilityLabel={`Filter by activity, showing ${activityLabel}`}
+        active={filter.types.length > 0}
+        onPress={() => onOpen('activity')}
+      />
+      {filtered && (
+        <Pressable
+          onPress={() => onChange({ day: null, types: [] })}
+          accessibilityRole="button"
+          accessibilityLabel="Clear filters"
+          style={(s) => [
+            {
+              width: 32,
+              height: 32,
+              borderRadius: 999,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: t.chip,
+              cursor: 'pointer',
+            },
+            isHovered(s) && { backgroundColor: t.elevated },
+          ]}
+        >
+          <Icon name="close" color={t.dim} size={15} />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
+/**
+ * The two filter sheets.
+ *
+ * Separate from the chips, and mounted by the screen OUTSIDE its scroll
+ * container, because a sheet is `position: absolute` against its nearest
+ * positioned ancestor. Rendered next to the chips — inside the timeline's own
+ * ScrollView — it anchors to the scrolled CONTENT instead of the viewport: the
+ * panel lands at the bottom of the list rather than the bottom of the screen,
+ * and the scrim only dims as far as the content reaches. Every other sheet in
+ * the app avoids this by being mounted at the root layout.
+ */
+export function HistoryFilterSheets({
+  open,
+  onClose,
+  days,
+  activities,
+  filter,
+  onChange,
+}: {
+  open: OpenFilterSheet;
+  onClose: () => void;
+  /** days that have items under the current activity filter, newest first */
+  days: DayOption[];
+  /** activities present on the currently selected day */
+  activities: ActivityType[];
+  filter: TimelineFilter;
+  onChange: (next: TimelineFilter) => void;
+}) {
+  const t = useTheme();
+  const insets = useSafeAreaInsets();
+
+  // Toggle one activity in or out. Removing the last one lands back on the
+  // cleared state, which is the same thing as "all" — see TimelineFilter.
+  const toggle = (a: ActivityType) => {
+    const next = filter.types.includes(a) ? filter.types.filter((x) => x !== a) : [...filter.types, a];
+    onChange({ ...filter, types: next });
+  };
+
+  return (
+    <>
+      {open === 'day' && (
+        <BottomSheet onClose={onClose} maxHeightRatio={0.7}>
+          <SheetHeader title="Jump to a day" subtitle="Only days with something logged" />
+          {/* flexGrow: 0 is load-bearing. react-native-web's ScrollView base
+              style sets flexGrow: 1, so a plain flexShrink: 1 leaves it growing
+              to the panel's maxHeight — a four-day list would open a sheet two
+              thirds of the screen tall with the rows stranded at the top. With
+              growth off it hugs its content and only shrinks (and scrolls) once
+              there are more days than fit. */}
+          <ScrollView
+            style={{ flexGrow: 0, flexShrink: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: insets.bottom + 10, gap: 6 }}
+          >
+            <DayRow
+              label="All days"
+              count={days.reduce((n, d) => n + d.count, 0)}
+              selected={filter.day == null}
+              onPress={() => {
+                onChange({ ...filter, day: null });
+                onClose();
+              }}
+            />
+            {days.map((d) => (
+              <DayRow
+                key={d.key}
+                label={d.label}
+                count={d.count}
+                selected={filter.day === d.key}
+                onPress={() => {
+                  onChange({ ...filter, day: d.key });
+                  onClose();
+                }}
+              />
+            ))}
+          </ScrollView>
+        </BottomSheet>
+      )}
+
+      {open === 'activity' && (
+        <BottomSheet onClose={onClose} maxHeightRatio={0.7}>
+          <SheetHeader title="Show" subtitle="Pick as many as you like" />
+          <ScrollView
+            style={{ flexGrow: 0, flexShrink: 1 }}
+            contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 6, paddingBottom: insets.bottom + 16 }}
+          >
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              <Chip
+                label="Everything"
+                color={t.primary}
+                selected={filter.types.length === 0}
+                onPress={() => onChange({ ...filter, types: [] })}
+              />
+              {activities.map((a) => (
+                <Chip
+                  key={a}
+                  label={ACTIVITY_LABEL[a]}
+                  color={t.activity[a]}
+                  selected={filter.types.includes(a)}
+                  onPress={() => toggle(a)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+        </BottomSheet>
+      )}
+    </>
+  );
+}
+
+function DropdownChip({
+  label,
+  accessibilityLabel,
+  active,
+  onPress,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ selected: active }}
+      style={(s) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 5,
+          paddingLeft: 13,
+          paddingRight: 9,
+          paddingVertical: 8,
+          borderRadius: 12,
+          backgroundColor: active ? hexA(t.primary, t.dark ? 0.16 : 0.1) : t.chip,
+          borderWidth: 1.5,
+          borderColor: active ? hexA(t.primary, 0.55) : t.line,
+          cursor: 'pointer',
+        },
+        !active && isHovered(s) && { borderColor: t.line2 },
+      ]}
+    >
+      <Txt unselectable weight={700} size={13.5} color={active ? t.primary : t.text}>
+        {label}
+      </Txt>
+      <Icon name="chevron-down" color={active ? t.primary : t.faint} size={16} />
+    </Pressable>
+  );
+}
+
+function SheetHeader({ title, subtitle }: { title: string; subtitle: string }) {
+  const t = useTheme();
+  return (
+    <View style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 6, flexShrink: 0 }}>
+      <Txt weight={800} size={18}>
+        {title}
+      </Txt>
+      <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+        {subtitle}
+      </Txt>
+    </View>
+  );
+}
+
+function DayRow({
+  label,
+  count,
+  selected,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${label}, ${count} ${count === 1 ? 'entry' : 'entries'}`}
+      style={(s) => [
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 12,
+          paddingVertical: 13,
+          paddingHorizontal: 14,
+          borderRadius: 16,
+          backgroundColor: selected ? hexA(t.primary, t.dark ? 0.16 : 0.1) : t.chip,
+          borderWidth: 1.5,
+          borderColor: selected ? hexA(t.primary, 0.55) : t.line,
+          cursor: 'pointer',
+        },
+        !selected && isHovered(s) && { borderColor: t.line2 },
+      ]}
+    >
+      <Txt unselectable weight={700} size={15.5} style={{ flex: 1 }} color={selected ? t.primary : t.text}>
+        {label}
+      </Txt>
+      <Txt unselectable weight={600} size={13} color={t.dim}>
+        {count}
+      </Txt>
+      {selected ? <Icon name="check" color={t.primary} size={17} /> : null}
+    </Pressable>
+  );
+}
