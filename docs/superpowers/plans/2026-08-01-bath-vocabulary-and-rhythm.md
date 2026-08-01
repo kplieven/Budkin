@@ -33,7 +33,12 @@ vitest, plain Node 18+ for the migration script.
   `big` tag is still READ, never written.
 - **Interval range is 0 to 30 inclusive. `0` means off**, not "every zero days".
 - **Test runner:** `npx vitest run <path>` for one file, `npm test` for all.
-- **Typecheck:** `npx tsc --noEmit` must pass at the end of every task.
+- **Typecheck:** `npx tsc --noEmit` must pass at the end of every task, with
+  three named exceptions. Task 5 deletes symbols that Tasks 6, 7 and 8 stop
+  importing, one file at a time, so the typecheck is expected to fail at the end
+  of Tasks 5, 6 and 7. Each of those tasks names the exact files that should
+  still be failing. A failure in any OTHER file is a real one. From Task 8
+  onward the typecheck must be fully clean.
 - Expo 56. Read `https://docs.expo.dev/versions/v56.0.0/` before using any Expo
   API (no task here needs one).
 
@@ -326,9 +331,14 @@ a legacy chunk is written by seeding that map directly rather than through
 ```
 
 Run: `npx vitest run src/data/entityStore.test.ts`
-Expected: FAIL before Step 6's change is in place (received `['small', 'big']`),
-PASS after. If it passes without Step 6, the normalizer is not on the load path
-and Step 6 was applied to the wrong function.
+Expected: PASS. Step 6 already put the normalizer on the load path, so this test
+is written after its implementation rather than before it.
+
+Because of that ordering, prove the test is load-bearing before moving on:
+temporarily comment out the `.map(...)` normalization inside `parseEntryArray`,
+re-run, and confirm this test FAILS with `['small', 'big']`. Then restore it.
+A test that passes with the normalizer removed is testing nothing, and this is
+the one test standing between the rename and a silently dead rhythm.
 
 - [ ] **Step 10: Update existing test fixtures**
 
@@ -856,11 +866,10 @@ describe('washDueState', () => {
     expect(washDueState([entry], R(3, 1), morning).quick).toBe(true);
   });
 
-  it('scopes nothing itself: a sibling filter is the caller job', () => {
-    // Documents the contract rather than the code: entries must already be
-    // scoped with entriesForChild, exactly like the other status helpers.
-    const mine = washDueState([bath(0, 'full')], R(3, 1), NOON);
-    expect(mine.full).toBe(false);
+  it('ignores non-bath entries entirely', () => {
+    const sleep: Entry = { id: 's1', childId: 'c1', type: 'sleep', start: NOON - DAY, end: NOON, tags: [] };
+    expect(washDueState([sleep, bath(0, 'full')], R(3, 1), NOON).full).toBe(false);
+    expect(washDueState([sleep], R(3, 1), NOON).full).toBe(true);
   });
 });
 
