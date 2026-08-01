@@ -6,7 +6,7 @@
 import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
 import type { WashKind } from '@/lib/wash';
-import type { ActivityType, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
+import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -278,54 +278,144 @@ export function lastSleepStartMinAgo(entries: Entry[], now: number): number | nu
   return s ? Math.round((now - s.start) / M) : null;
 }
 
-/**
- * The user's bath rhythm, counted in SMALL washes between two big ones. 3 means
- * three smalls then a big, i.e. a four-bath cycle. It counts smalls rather than
- * the whole cycle so the setting reads the way the UI phrases it ("big wash
- * after every 3 small washes"); reading it as a cycle length is off by one.
- *
- * 3 is the default because it reproduces the rhythm that used to be hardcoded.
- */
-export const SMALL_WASHES_PER_BIG_DEFAULT = 3;
-export const SMALL_WASHES_PER_BIG_MIN = 1;
-/**
- * A soft cap, not a real limit on anyone's rhythm: 30 is far past any bath
- * routine a person actually keeps, while still low enough that a typo like 500
- * is caught rather than quietly meaning "a big wash never comes due". The
- * minimum stays 1 for the harder reason given on `clampSmallWashesPerBig`.
- */
-export const SMALL_WASHES_PER_BIG_MAX = 30;
+const DAY = 24 * 60 * M;
 
 /**
- * Coerce a rhythm from anywhere (a persisted pref, a stale build's value) into
- * the supported range. 0 in particular must not survive: an empty lookback
- * window makes `every()` vacuously true, so a big wash would read as due
- * forever.
+ * The built-in rhythm for a child with nothing configured: a full bath every 3
+ * days, a quick wash daily. Three matches the mainstream 2-to-3-full-baths-a-week
+ * guidance for an infant.
  */
-export function clampSmallWashesPerBig(n: number): number {
-  if (!Number.isFinite(n)) return SMALL_WASHES_PER_BIG_DEFAULT;
-  return Math.min(SMALL_WASHES_PER_BIG_MAX, Math.max(SMALL_WASHES_PER_BIG_MIN, Math.round(n)));
+export const BATH_RHYTHM_DEFAULT: BathRhythm = { fullEveryDays: 3, quickEveryDays: 1 };
+
+/**
+ * 0 to 30 days. 0 is not a degenerate value here, it is the OFF switch: that
+ * kind of wash never comes due. This reverses the old count-model rule, which
+ * banned 0 because an empty lookback window made `every()` vacuously true and
+ * latched "big wash due" forever. That hazard is gone with the counting. Do not
+ * restore a minimum of 1 on the strength of the old comment.
+ *
+ * 30 is a soft cap: far past any rhythm a person keeps, but low enough that a
+ * typo like 500 is caught rather than quietly meaning "never".
+ */
+export const BATH_INTERVAL_MIN = 0;
+export const BATH_INTERVAL_MAX = 30;
+
+/**
+ * Coerce one interval into range. A non-finite value returns `fallback` rather
+ * than 0, because silently switching a reminder off is worse than keeping the
+ * previous cadence.
+ */
+export function clampBathInterval(n: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(BATH_INTERVAL_MAX, Math.max(BATH_INTERVAL_MIN, Math.round(n)));
+}
+
+/** Coerce a whole rhythm, filling each missing axis from `fallback`. */
+export function clampBathRhythm(r: Partial<BathRhythm> | undefined, fallback: BathRhythm): BathRhythm {
+  return {
+    fullEveryDays: clampBathInterval(r?.fullEveryDays ?? fallback.fullEveryDays, fallback.fullEveryDays),
+    quickEveryDays: clampBathInterval(r?.quickEveryDays ?? fallback.quickEveryDays, fallback.quickEveryDays),
+  };
 }
 
 /**
- * The wash due next, from the user's rhythm: a "small wash" most days, a "big
- * wash" every few days. Rule: if the last `smallWashesPerBig` washes are ALL
- * small, a big wash is due; otherwise small. Fewer washes on record than the
- * interval (or none at all) → small.
+ * The rhythm implied by the pre-2026-08 global pref, used as the fallback for a
+ * child with nothing stored. `smallWashesPerBig: 3` meant a full bath on the 4th
+ * bath of the cycle, which on daily bathing is every 4 days, so the translation
+ * is `+ 1`. That preserves the cadence an existing user already feels; a fresh
+ * install with no legacy value gets `BATH_RHYTHM_DEFAULT` instead.
  *
- * The answer is derived from history on every call, never from a stored
- * counter, so changing the interval re-reads the existing baths immediately.
- * Raising it can therefore take a big wash back off the schedule, which is
- * correct by definition: the rule is about the last N washes, not about where
- * some earlier cycle happened to be anchored.
+ * Stateless on purpose. Deriving the fallback on read rather than running a
+ * seeding pass at hydration means no write, no ordering dependency between prefs
+ * and children loading, and it stays idempotent.
  */
-export function nextWashKind(entries: Entry[], smallWashesPerBig: number = SMALL_WASHES_PER_BIG_DEFAULT): WashKind {
-  const n = clampSmallWashesPerBig(smallWashesPerBig);
-  const recent = entries
+export function legacyBathRhythm(smallWashesPerBig: number | undefined): BathRhythm {
+  if (smallWashesPerBig == null || !Number.isFinite(smallWashesPerBig)) return BATH_RHYTHM_DEFAULT;
+  return {
+    fullEveryDays: clampBathInterval(Math.round(smallWashesPerBig) + 1, BATH_RHYTHM_DEFAULT.fullEveryDays),
+    quickEveryDays: 1,
+  };
+}
+
+/** One child's rhythm: their stored entry if they have one, else `fallback`. */
+export function rhythmForChild(
+  map: Record<string, BathRhythm>,
+  childId: string | null,
+  fallback: BathRhythm,
+): BathRhythm {
+  const stored = childId ? map[childId] : undefined;
+  return stored ? clampBathRhythm(stored, fallback) : fallback;
+}
+
+/** The next wash to come due, once neither is due yet. */
+export interface WashUpcoming {
+  kind: WashKind;
+  inDays: number;
+}
+
+export interface WashDue {
+  /** a full bath is due today or overdue */
+  full: boolean;
+  /** a quick wash is due today or overdue */
+  quick: boolean;
+  /** what to pre-select in the log sheet; `full` wins when both are due */
+  nextKind: WashKind;
+  /** the sooner upcoming wash, or null while one is already due or both are off */
+  upcoming: WashUpcoming | null;
+}
+
+/**
+ * What each kind of wash owes today, from the child's rhythm and their bath
+ * history.
+ *
+ * The load-bearing asymmetry: ANY bath resets the quick-wash clock, but only a
+ * FULL bath resets the full-bath clock. A full bath is a quick wash and more, so
+ * it satisfies the lesser obligation. That is what lets the same two numbers
+ * describe a newborn (full off, quick 1) and a toddler (full 1, quick 1): once
+ * full baths are daily, every bath resets the quick clock, so the quick wash
+ * stops surfacing on its own without anyone disabling it.
+ *
+ * Distance is measured in local CALENDAR days, not 24-hour blocks, because the
+ * schedule is a bedtime routine: a Monday evening bath reads as two days by
+ * Wednesday morning. `Math.round` over the `startOfDay` difference absorbs the
+ * 23 and 25-hour days at a DST boundary.
+ *
+ * Derived from history on every call, never from a stored counter, so editing an
+ * interval re-reads the existing baths immediately. Never bathed means due.
+ *
+ * Pure and `now`-parametrised: scope the entries to the child first
+ * (`entriesForChild`), exactly like the other status helpers.
+ */
+export function washDueState(entries: Entry[], rhythm: BathRhythm, now: number): WashDue {
+  const baths = entries
     .filter((e): e is Extract<Entry, { type: 'bath' }> => e.type === 'bath')
-    .sort((a, b) => b.time - a.time)
-    .slice(0, n);
-  return recent.length === n && recent.every((b) => b.wash === 'quick') ? 'full' : 'quick';
+    .sort((a, b) => b.time - a.time);
+  const today = startOfDay(now);
+  const daysSince = (e: { time: number } | undefined): number | null =>
+    e ? Math.round((today - startOfDay(e.time)) / DAY) : null;
+
+  const fullEvery = clampBathInterval(rhythm.fullEveryDays, BATH_RHYTHM_DEFAULT.fullEveryDays);
+  const quickEvery = clampBathInterval(rhythm.quickEveryDays, BATH_RHYTHM_DEFAULT.quickEveryDays);
+
+  const sinceFull = daysSince(baths.find((b) => b.wash === 'full'));
+  const sinceAny = daysSince(baths[0]);
+
+  const full = fullEvery > 0 && (sinceFull === null || sinceFull >= fullEvery);
+  const quick = quickEvery > 0 && (sinceAny === null || sinceAny >= quickEvery);
+
+  let upcoming: WashUpcoming | null = null;
+  if (!full && !quick) {
+    const untilFull = fullEvery > 0 && sinceFull !== null ? fullEvery - sinceFull : null;
+    const untilQuick = quickEvery > 0 && sinceAny !== null ? quickEvery - sinceAny : null;
+    // Ties go to the full bath: it is the more significant of the two.
+    if (untilFull !== null && (untilQuick === null || untilFull <= untilQuick)) {
+      upcoming = { kind: 'full', inDays: untilFull };
+    } else if (untilQuick !== null) {
+      upcoming = { kind: 'quick', inDays: untilQuick };
+    }
+  }
+
+  return { full, quick, nextKind: full ? 'full' : 'quick', upcoming };
 }
 
 /**
