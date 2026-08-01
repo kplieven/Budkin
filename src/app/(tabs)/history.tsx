@@ -32,7 +32,23 @@ export default function History() {
   // Primitive selector, so no new reference per render (zustand v5); the
   // child-scoping filter itself runs in the render body below.
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  const now = useAppStore((s) => s.now);
+  // MINUTE-quantized, deliberately not the raw per-second `s.now`. Every change
+  // of this value re-runs the whole pipeline below (child scoping, both option
+  // lists, the filter, the grouping) over the child's entire timeline AND
+  // re-renders every mounted row, and nothing on this screen is finer-grained
+  // than a minute: an ongoing row's elapsed pill is whole minutes
+  // (`fmtAgoShort`), its capsule grows about a fifth of a pixel per minute, and
+  // the Today/Yesterday headings turn over at midnight. Subscribing to `s.now`
+  // bought 59 extra full-list passes a minute that all rendered identically —
+  // and kept paying them while the user sat on another tab, since a visited tab
+  // screen stays mounted.
+  //
+  // The selector returns a NUMBER, never a fresh reference (zustand v5), and
+  // holds the same number for a whole minute, so the subscription itself is what
+  // goes quiet — a useMemo here would have saved the recompute but not the
+  // re-render.
+  const nowMinute = useAppStore((s) => Math.floor(s.now / 60000));
+  const now = nowMinute * 60000;
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openEdit = useAppStore((s) => s.openEdit);
