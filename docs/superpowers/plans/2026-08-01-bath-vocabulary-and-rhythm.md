@@ -33,6 +33,11 @@ vitest, plain Node 18+ for the migration script.
   `big` tag is still READ, never written.
 - **Interval range is 0 to 30 inclusive. `0` means off**, not "every zero days".
 - **Test runner:** `npx vitest run <path>` for one file, `npm test` for all.
+- **Typecheck baseline:** `npx tsc --noEmit` reports 10 PRE-EXISTING errors on
+  this branch, all of the form `Type '"/(tabs)"' is not assignable`, from
+  expo-router's stale generated route union in `.expo/types/router.d.ts`. They
+  are unrelated to this work and are not yours to fix. "Typecheck passes" below
+  means "still exactly those 10, none in a file you touched".
 - **Typecheck:** `npx tsc --noEmit` must pass at the end of every task, with
   three named exceptions. Task 5 deletes symbols that Tasks 6, 7 and 8 stop
   importing, one file at a time, so the typecheck is expected to fail at the end

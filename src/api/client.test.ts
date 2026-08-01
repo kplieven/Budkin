@@ -43,6 +43,12 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
 
+// Local stand-ins for client.ts's module-private toISO/fromISO: same semantics,
+// kept here so the bath serialization tests below can assert against them
+// without widening client.ts's exports.
+const toISO = (ms: number) => new Date(ms).toISOString();
+const fromISO = (s: string) => new Date(s).getTime();
+
 // birth built via a local Date so toDateStr (local-time) is timezone-stable
 const CHILD: Child = { id: '5', first: 'Mira', last: 'Doe', birth: new Date(2025, 0, 15).getTime(), color: '#EC9A66' };
 
@@ -257,56 +263,57 @@ describe('createChild', () => {
 });
 
 describe('bath <-> note serialization', () => {
-  it('encodes a small wash as a tagged note the tags own as the source of truth', () => {
+  it('encodes a quick wash as a tagged note the tags own as the source of truth', () => {
     const entry: BathEntry = { id: 'e1', childId: 'c1', type: 'bath', time: TIME, wash: 'quick', tags: [] };
-    expect(bathToNoteBody(entry, 1)).toEqual({
-      child: 1,
-      time: new Date(TIME).toISOString(),
-      note: 'Bath, small wash',
-      tags: ['bath', 'small'],
+    expect(bathToNoteBody(entry, 3)).toEqual({
+      child: 3,
+      time: toISO(TIME),
+      note: 'Quick wash',
+      tags: ['bath', 'bath:quick'],
     });
   });
 
-  it('encodes a big wash and keeps user tags after the structural ones', () => {
+  it('encodes a full bath and keeps user tags after the structural ones', () => {
     const entry: BathEntry = { id: 'e2', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: ['Fussy'] };
-    expect(bathToNoteBody(entry, 1)).toEqual({
-      child: 1,
-      time: new Date(TIME).toISOString(),
-      note: 'Bath, big wash',
-      tags: ['bath', 'big', 'Fussy'],
+    expect(bathToNoteBody(entry, 3)).toEqual({
+      child: 3,
+      time: toISO(TIME),
+      note: 'Full bath',
+      tags: ['bath', 'bath:full', 'Fussy'],
     });
+  });
+
+  it('never writes the legacy bare tags back, even when the entry carried them', () => {
+    const entry: BathEntry = { id: 'e3', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: ['big', 'small', 'Fussy'] };
+    expect(bathToNoteBody(entry, 3).tags).toEqual(['bath', 'bath:full', 'Fussy']);
   });
 
   it('reads a note back into a bath entry, deriving wash from the tags', () => {
-    const note = { id: 42, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath — big wash', tags: ['bath', 'big', 'Fussy'] };
+    const note = { id: 42, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Full bath', tags: ['bath', 'bath:full', 'Fussy'] };
     expect(noteToBathEntry(note, 'c1')).toEqual({
       id: 'bath-42',
       serverId: 42,
       childId: 'c1',
       type: 'bath',
-      time: TIME,
+      time: fromISO('2026-03-04T18:30:00Z'),
       wash: 'full',
       tags: ['Fussy'],
     });
   });
 
-  it('treats a note without a big tag as a small wash', () => {
-    const note = { id: 7, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath — small wash', tags: ['bath', 'small'] };
+  it('reads a pre-migration note through the legacy bare big tag', () => {
+    const note = { id: 43, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath, big wash', tags: ['bath', 'big'] };
+    expect(noteToBathEntry(note, 'c1').wash).toBe('full');
+  });
+
+  it('treats a note with neither full marker as a quick wash', () => {
+    const note = { id: 7, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath, small wash', tags: ['bath', 'small'] };
     expect(noteToBathEntry(note, 'c1').wash).toBe('quick');
   });
 
-  it('accepts object-shaped tags (taggit) as well as strings', () => {
-    const note = { id: 8, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'Bath — big wash', tags: [{ name: 'bath' }, { name: 'big' }] };
-    const back = noteToBathEntry(note, 'c1');
-    expect(back.wash).toBe('full');
-    expect(back.tags).toEqual([]);
-  });
-
-  it('round-trips wash and user tags through encode -> server echo -> decode', () => {
-    const entry: BathEntry = { id: 'e3', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: ['Fussy'] };
-    const body = bathToNoteBody(entry, 1);
-    const back = noteToBathEntry({ id: 99, ...body }, 'c1');
-    expect(back).toMatchObject({ type: 'bath', childId: 'c1', time: TIME, wash: 'full', tags: ['Fussy'], serverId: 99 });
+  it('strips both tag vocabularies from the entry tags', () => {
+    const note = { id: 8, child: 'c1', time: '2026-03-04T18:30:00Z', note: 'x', tags: ['bath', 'big', 'bath:full', 'Fussy'] };
+    expect(noteToBathEntry(note, 'c1').tags).toEqual(['Fussy']);
   });
 });
 
@@ -957,7 +964,7 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
     const bath: BathEntry = { id: 'b9', childId: 'c1', type: 'bath', time: TIME, wash: 'full', tags: [] };
     await client().createEntry(bath, 1);
     expect(calls[0].url).toContain('/notes/');
-    expect(calls[0].body.tags).toEqual(['bath', 'big']);
+    expect(calls[0].body.tags).toEqual(['bath', 'bath:full']);
   });
 
   it('round-trips a note through create -> server echo -> listChildNotes (lands in notes, not baths)', async () => {
