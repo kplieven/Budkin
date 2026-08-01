@@ -2051,11 +2051,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
           failed++;
           continue;
         }
+        let serverId: number | undefined;
         try {
-          await pushEntryToServer(conn, entry, childServerId);
+          serverId = await pushEntryToServer(conn, entry, childServerId);
         } catch {
           failed++;
           continue;
+        }
+        // Tell the in-memory record what the server just called it. This path
+        // used to discard the id, which left the entry `serverId == null` while
+        // the server held a copy, and off the queue as well a moment later.
+        // `detachEntry` reads exactly that field to decide whether a delete
+        // needs a server DELETE, so deleting such a row removed it locally
+        // only and the next refresh brought it straight back. Everything else
+        // that pushes an entry (`commitWrite`, `flushUnsynced`) already stamps;
+        // this was the gap.
+        //
+        // Functional `set` so it merges into the CURRENT list rather than a
+        // pre-await snapshot: a save landing mid-flush must not be dropped.
+        // An entry that has since gone (deleted during the push) simply isn't
+        // matched, which leaves the pre-existing narrow race as it was.
+        if (serverId != null) {
+          set((st) => ({
+            entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
+          }));
         }
         // Drop it the moment the server has it, one entry at a time, rather
         // than saving what is left once the whole run finishes. The queue

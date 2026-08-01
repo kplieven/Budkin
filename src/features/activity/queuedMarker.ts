@@ -11,12 +11,17 @@
  * held-back entries (an expecting child's records are never queued at all, see
  * `commitWrite`).
  *
- * `serverId == null` is NOT the test and must never become one. `flushQueue`
- * pushes each entry and DISCARDS `pushEntryToServer`'s return value, so it
- * never stamps `serverId` back onto the in-memory record; an entry keeps
- * `serverId == null` until the next `refresh()`/`hydrate()` replaces `entries`
- * wholesale. A `serverId`-based marker would keep claiming "queued" on rows
- * that went up minutes ago.
+ * `serverId == null` is NOT the test and must never become one. "Unsynced" and
+ * "waiting on the write queue" are different questions: a held-back entry (an
+ * expecting child's) has no `serverId` and is never queued at all, and
+ * `flushUnsynced` pushes records the queue never sees. Only the queue can
+ * answer the one this marker asks.
+ *
+ * `flushQueue` DOES stamp `serverId` back onto the in-memory record as it
+ * pushes, which it did not always do: discarding it left an entry the server
+ * held looking local, so deleting the row never reached the server and it
+ * returned on the next refresh. That is a fix to the record, not a licence to
+ * test on it here.
  */
 
 import { isTimer, type TimelineItem } from './groupByDay';
