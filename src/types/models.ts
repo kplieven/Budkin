@@ -6,6 +6,8 @@
  * works with); the API layer converts to/from ISO 8601 strings.
  */
 
+import type { WashKind } from '@/lib/wash';
+
 export type ActivityType = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'medication' | 'note' | 'milestone';
 
 export type FeedType = 'breast' | 'formula' | 'fortified' | 'solid';
@@ -141,15 +143,14 @@ export interface TummyEntry extends EntryBase {
 }
 
 /**
- * A bath (small/big wash). Baby Buddy has no bath resource, so these are stored
- * server-side as tagged Notes (see the API client). Point event — a single time,
- * no duration. `wash` distinguishes the daily "small wash" from the periodic
- * "big wash".
+ * A bath (Baby Buddy has no bath resource, so it rides on `/api/notes/` behind
+ * a `bath` tag). Point event, no duration. `wash` distinguishes the frequent
+ * quick wash from the periodic full bath.
  */
 export interface BathEntry extends EntryBase {
   type: 'bath';
   time: number;
-  wash: 'small' | 'big';
+  wash: WashKind;
 }
 
 /**
@@ -300,6 +301,20 @@ export interface Measurement {
   /** measurement date, epoch ms (local midnight) */
   date: number;
   notes?: string;
+}
+
+/**
+ * One child's bath rhythm: how often each kind of wash is due, in whole days.
+ * `0` means that kind is off and never comes due, which is how the rhythm
+ * survives the child growing up (a newborn has no full baths at all, a school-age
+ * child has no scheduled quick washes).
+ *
+ * Per child rather than global because a 4-month-old and a 3-year-old sit at
+ * opposite ends of that progression. Persisted by `src/data/bathRhythm.ts`.
+ */
+export interface BathRhythm {
+  fullEveryDays: number;
+  quickEveryDays: number;
 }
 
 /** The four coarse times of day a fixed-schedule treatment can be dosed at. */

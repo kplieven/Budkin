@@ -16,12 +16,13 @@ import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import {
+  BATH_INTERVAL_MAX,
+  BATH_INTERVAL_MIN,
   fmtDayStartHour,
   fmtMinuteOfDay,
   parseMinuteOfDay,
+  rhythmForChild,
   selectServerMode,
-  SMALL_WASHES_PER_BIG_MAX,
-  SMALL_WASHES_PER_BIG_MIN,
 } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { fontFamily } from '@/theme/fonts';
@@ -237,6 +238,18 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+/**
+ * "every N days" phrasing for one rhythm axis, to sit after "Full bath" or
+ * "quick wash": 0 reads as "off" (0 is the OFF switch, per
+ * `BATH_INTERVAL_MIN`'s doc comment in selectors.ts, not a degenerate "every 0
+ * days" that would contradict the helper text explaining the same rule), 1 is
+ * the singular "every day", and everything else is "every N days".
+ */
+function bathCadencePhrase(days: number): string {
+  if (days === 0) return 'off';
+  return days === 1 ? 'every day' : `every ${days} days`;
+}
+
 export default function Settings() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -249,8 +262,10 @@ export default function Settings() {
   const queueCount = useAppStore((s) => s.queueCount);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setUnitSystem = useAppStore((s) => s.setUnitSystem);
-  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
-  const setSmallWashesPerBig = useAppStore((s) => s.setSmallWashesPerBig);
+  const children = useAppStore((s) => s.children);
+  const bathRhythms = useAppStore((s) => s.bathRhythms);
+  const legacyRhythm = useAppStore((s) => s.legacyRhythm);
+  const setBathRhythm = useAppStore((s) => s.setBathRhythm);
   const napWindowStartMin = useAppStore((s) => s.napWindowStartMin);
   const napWindowEndMin = useAppStore((s) => s.napWindowEndMin);
   const setNapWindow = useAppStore((s) => s.setNapWindow);
@@ -261,7 +276,6 @@ export default function Settings() {
   const profile = useAppStore((s) => s.profile);
   const loadProfile = useAppStore((s) => s.loadProfile);
   const openAdopt = useAppStore((s) => s.openAdopt);
-  const children = useAppStore((s) => s.children);
   const entries = useAppStore((s) => s.entries);
   const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
@@ -375,31 +389,43 @@ export default function Settings() {
         Rhythm
       </Txt>
       <View style={group}>
-        {/* The value counts SMALL washes between big ones, so the copy has to
-            say "after every N small washes" — "every N baths" would be off by
-            one, since the big wash is the (N+1)th bath of the cycle. */}
-        <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}>
-          <View>
-            <Txt weight={600} size={16}>
-              Big wash
-            </Txt>
-            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-              After every {smallWashesPerBig} small {smallWashesPerBig === 1 ? 'wash' : 'washes'}
-            </Txt>
-          </View>
-          <CountField
-            label="Small washes"
-            value={smallWashesPerBig}
-            min={SMALL_WASHES_PER_BIG_MIN}
-            max={SMALL_WASHES_PER_BIG_MAX}
-            onCommit={setSmallWashesPerBig}
-          />
-          <Txt weight={500} size={12} color={t.faint}>
-            Type a number or use − and +, anywhere from {SMALL_WASHES_PER_BIG_MIN} to{' '}
-            {SMALL_WASHES_PER_BIG_MAX}. The rhythm is read off the baths already logged, so a change
-            shows up straight away in what&apos;s due next.
-          </Txt>
-        </View>
+        {children.map((child) => {
+          const rhythm = rhythmForChild(bathRhythms, child.id, legacyRhythm);
+          return (
+            <View
+              key={child.id}
+              style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}
+            >
+              <View>
+                <Txt weight={600} size={16}>
+                  Bath rhythm for {child.first}
+                </Txt>
+                <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+                  Full bath {bathCadencePhrase(rhythm.fullEveryDays)}, quick wash {bathCadencePhrase(rhythm.quickEveryDays)}
+                </Txt>
+              </View>
+              <CountField
+                label="Full bath days"
+                value={rhythm.fullEveryDays}
+                min={BATH_INTERVAL_MIN}
+                max={BATH_INTERVAL_MAX}
+                onCommit={(n) => setBathRhythm(child.id, { fullEveryDays: n })}
+              />
+              <CountField
+                label="Quick wash days"
+                value={rhythm.quickEveryDays}
+                min={BATH_INTERVAL_MIN}
+                max={BATH_INTERVAL_MAX}
+                onCommit={(n) => setBathRhythm(child.id, { quickEveryDays: n })}
+              />
+              <Txt weight={500} size={12} color={t.faint}>
+                Type a number or use − and +, anywhere from {BATH_INTERVAL_MIN} to {BATH_INTERVAL_MAX}. Set one to 0 to turn
+                that reminder off. The rhythm is read off the baths already logged, so a change shows up straight away in
+                what&apos;s due next.
+              </Txt>
+            </View>
+          );
+        })}
 
         {/* Nap window. A sleep is pre-set to Nap when it STARTS inside this
             window and to Night sleep otherwise; the log sheet always offers a

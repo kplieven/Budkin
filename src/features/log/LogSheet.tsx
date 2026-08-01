@@ -731,13 +731,13 @@ export function LogSheet() {
           </>
         )}
 
-        {/* bath fields — small vs big wash */}
+        {/* bath fields, quick wash vs full bath */}
         {type === 'bath' && (
           <>
-            <FieldLabel hint="follows your rhythm">Wash</FieldLabel>
+            <FieldLabel hint="follows your rhythm">Bath type</FieldLabel>
             <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
-              {(['small', 'big'] as const).map((w) => {
-                const selected = (te.wash ?? 'small') === w;
+              {(['quick', 'full'] as const).map((w) => {
+                const selected = (te.wash ?? 'quick') === w;
                 return (
                   <Pressable
                     key={w}
@@ -750,7 +750,7 @@ export function LogSheet() {
                     ]}
                   >
                     <Txt unselectable weight={700} size={14.5}>
-                      {w === 'small' ? 'Small wash' : 'Big wash'}
+                      {w === 'quick' ? 'Quick wash' : 'Full bath'}
                     </Txt>
                   </Pressable>
                 );
@@ -911,8 +911,9 @@ export function LogSheet() {
         )}
 
         {/* tags — the server list ∪ the entry's own tags, minus the structural
-            ones (bath/small/big, breastfeeding left/right). Server colors render
-            via the Chip swatch; a "New tag…" field adds a brand-new tag. */}
+            ones (bath/bath:quick/bath:full and the legacy bare small/big,
+            breastfeeding left/right). Server colors render via the Chip
+            swatch; a "New tag…" field adds a brand-new tag. */}
         {!confirmMode && (
           <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
         )}
