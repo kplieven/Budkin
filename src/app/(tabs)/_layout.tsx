@@ -1,6 +1,7 @@
 import { Tabs } from 'expo-router';
 
 import { AppTabBar } from '@/components/TabBar';
+import { isTabName } from '@/components/tabs';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 
 // Anchor the group's initial route to Home so a deep link that lands directly on
@@ -24,7 +25,19 @@ export default function TabsLayout() {
   return (
     <Tabs
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: 'transparent' } }}
-      tabBar={desktop ? () => null : (props) => <AppTabBar state={props.state} navigation={props.navigation} />}
+      tabBar={
+        desktop
+          ? () => null
+          : (props) => {
+              const active = props.state.routes[props.state.index]?.name;
+              return (
+                <AppTabBar
+                  activeName={isTabName(active) ? active : null}
+                  onSelect={(name) => props.navigation.navigate(name)}
+                />
+              );
+            }
+      }
     >
       <Tabs.Screen name="index" options={{ title: 'Home' }} />
       <Tabs.Screen name="history" options={{ title: 'History' }} />

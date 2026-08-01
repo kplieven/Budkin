@@ -2,31 +2,26 @@ import { Pressable, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
+import { TABS, TAB_NAMES, type TabName } from '@/components/tabs';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
 
-/** Minimal subset of expo-router's tab bar props (avoids importing react-navigation). */
 interface TabBarProps {
-  state: { index: number; routes: { key: string; name: string }[] };
-  navigation: { navigate: (name: string) => void };
+  /** The tab to light up, or null for none. */
+  activeName: TabName | null;
+  onSelect: (name: TabName) => void;
 }
 
-// Every tab route has an entry here. Timers is absent because it is no longer in
-// this group at all: it is a root Stack route pushed from Home. AppTabBar renders
-// no item for a route without a meta entry; the bar itself still renders, so a
-// screen inside this group can rely on the bar's own bottom safe-area padding.
-const TABS: Record<string, { label: string; icon: IconName }> = {
-  index: { label: 'Home', icon: 'home' },
-  history: { label: 'History', icon: 'list' },
-  insights: { label: 'Insights', icon: 'insights' },
-  growth: { label: 'Growth', icon: 'chart' },
-  milestones: { label: 'Milestones', icon: 'milestone' },
-  notes: { label: 'Notes', icon: 'note' },
-};
-
-export function AppTabBar({ state, navigation }: TabBarProps) {
+/**
+ * The bottom bar. Driven by the shared `TABS` table rather than by the
+ * navigator's route list, so it can also be rendered by a screen that has no
+ * tab navigator above it — the Timers screen, which lives on the root Stack
+ * and passes a router navigation instead. The bar always renders all six
+ * items, so a screen can rely on its bottom safe-area padding either way.
+ */
+export function AppTabBar({ activeName, onSelect }: TabBarProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -42,15 +37,14 @@ export function AppTabBar({ state, navigation }: TabBarProps) {
         paddingBottom: insets.bottom > 0 ? insets.bottom : 12,
       }}
     >
-      {state.routes.map((route, i) => {
-        const meta = TABS[route.name];
-        if (!meta) return null;
-        const active = state.index === i;
+      {TAB_NAMES.map((name) => {
+        const meta = TABS[name];
+        const active = activeName === name;
         const color = active ? t.primary : t.faint;
         return (
           <Pressable
-            key={route.key}
-            onPress={() => navigation.navigate(route.name)}
+            key={name}
+            onPress={() => onSelect(name)}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             accessibilityLabel={meta.label}
@@ -63,7 +57,7 @@ export function AppTabBar({ state, navigation }: TabBarProps) {
               name={meta.icon}
               color={color}
               size={24}
-              fill={active && route.name === 'index' ? hexA(t.primary, 0.22) : undefined}
+              fill={active && name === 'index' ? hexA(t.primary, 0.22) : undefined}
             />
             <Txt unselectable weight={700} size={11} color={color}>
               {meta.label}

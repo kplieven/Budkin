@@ -1,3 +1,4 @@
+import { router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -8,6 +9,8 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { PulsingDot } from '@/components/PulsingDot';
 import { SyncBadge } from '@/components/SyncBadge';
+import { AppTabBar } from '@/components/TabBar';
+import { tabHref } from '@/components/tabs';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -343,7 +346,7 @@ export default function Timers() {
             />
           ) : undefined
         }
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: insets.bottom + 24 }}
+        contentContainerStyle={{ paddingTop: insets.top + 8, paddingHorizontal: 18, paddingBottom: 24 }}
       >
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4, marginBottom: 14 }}>
           <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/(tabs)')} accessibilityLabel="Back" />
@@ -353,6 +356,20 @@ export default function Timers() {
         </View>
         {body}
       </ScrollView>
+
+      {/* Timers keeps its push transition and its back chevron, but it is still
+          somewhere you land mid-session, so the bottom bar comes along rather
+          than leaving the screen a one-exit dead end. It belongs to this screen
+          (the root Stack has no navigator to hang it off), so it travels in
+          with the push instead of standing still like the group's own bar.
+          Home stays lit because that is where Timers is reached from and where
+          its back chevron returns to. A tap is a router.navigate, which the
+          v56 docs define as "push a new page onto the stack OR unwind to an
+          existing route on the stack" — the (tabs) group is already below this
+          screen, so every tab unwinds to it rather than stacking a second copy
+          on top. Desktop never reaches here: it returns above, and the sidebar
+          is its nav. */}
+      <AppTabBar activeName="index" onSelect={(name) => router.navigate(tabHref(name))} />
     </View>
   );
 }
