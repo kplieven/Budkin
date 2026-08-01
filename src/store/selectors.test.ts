@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Connection } from '@/data/repository';
-import { activeTreatmentsForChildToday, bathGivenToday, clampMinuteOfDay, clampSmallWashesPerBig, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, minuteOfDayIsNap, nextStartSide, measurementsForChild, nextWashKind, overruleLasted, parseMinuteOfDay, runningTimer, selectServerMode, SMALL_WASHES_PER_BIG_DEFAULT, startOfDay, teDurationMin, teEnd, teStart, timersForChild } from '@/store/selectors';
-import type { Treatment, Entry, Measurement, Timer } from '@/types/models';
+import { activeTreatmentsForChildToday, bathGivenToday, BATH_RHYTHM_DEFAULT, clampBathInterval, clampMinuteOfDay, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, legacyBathRhythm, minuteOfDayIsNap, nextStartSide, measurementsForChild, overruleLasted, parseMinuteOfDay, rhythmForChild, runningTimer, selectServerMode, startOfDay, teDurationMin, teEnd, teStart, timersForChild, washDueState } from '@/store/selectors';
+import type { BathRhythm, Treatment, Entry, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -147,80 +147,151 @@ describe('nextStartSide', () => {
   });
 });
 
-describe('nextWashKind', () => {
-  const bath = (time: number, wash: 'small' | 'big'): Entry => ({
-    id: `b-${time}`,
+describe('washDueState', () => {
+  const DAY = 86400000;
+  // Midday, so adding whole days never lands on a DST boundary edge.
+  const NOON = new Date(2026, 5, 15, 12, 0, 0).getTime();
+
+  const bath = (daysAgo: number, wash: 'quick' | 'full'): Entry => ({
+    id: `b-${daysAgo}-${wash}`,
     childId: 'c1',
     type: 'bath',
-    time,
+    time: NOON - daysAgo * DAY,
     wash,
     tags: [],
   });
 
-  /** `n` consecutive small washes, oldest first, ending one minute ago. */
-  const smalls = (n: number): Entry[] => Array.from({ length: n }, (_, i) => bath(NOW - (n - i) * M, 'small'));
+  const R = (fullEveryDays: number, quickEveryDays: number) => ({ fullEveryDays, quickEveryDays });
 
-  it('defaults to small with no bath history', () => {
-    expect(nextWashKind([])).toBe('small');
+  it('reads both kinds as due with no bath history at all', () => {
+    const s = washDueState([], R(3, 1), NOON);
+    expect(s.full).toBe(true);
+    expect(s.quick).toBe(true);
+    expect(s.nextKind).toBe('full');
   });
-  it('an omitted interval means three smalls, matching the historical rule', () => {
-    expect(nextWashKind(smalls(2))).toBe('small');
-    expect(nextWashKind(smalls(3))).toBe('big');
+
+  it('is not due on the day of the bath', () => {
+    const s = washDueState([bath(0, 'full')], R(3, 1), NOON);
+    expect(s.full).toBe(false);
+    expect(s.quick).toBe(false);
   });
-  it('is small with fewer washes on record than the interval', () => {
-    expect(nextWashKind(smalls(2), 3)).toBe('small');
-    expect(nextWashKind(smalls(6), 7)).toBe('small');
+
+  it('brings a quick wash due the next day', () => {
+    const s = washDueState([bath(1, 'full')], R(3, 1), NOON);
+    expect(s.quick).toBe(true);
+    expect(s.full).toBe(false);
+    expect(s.nextKind).toBe('quick');
   });
-  it('flips to big exactly on the configured number of smalls', () => {
-    for (const n of [1, 2, 3, 4, 5, 6, 7, 30]) {
-      expect(nextWashKind(smalls(n - 1), n)).toBe('small');
-      expect(nextWashKind(smalls(n), n)).toBe('big');
-    }
+
+  it('brings a full bath due exactly on its interval', () => {
+    expect(washDueState([bath(2, 'full')], R(3, 1), NOON).full).toBe(false);
+    expect(washDueState([bath(3, 'full')], R(3, 1), NOON).full).toBe(true);
+    expect(washDueState([bath(9, 'full')], R(3, 1), NOON).full).toBe(true);
   });
-  it('an interval of 1 alternates small, big, small, big', () => {
-    expect(nextWashKind([], 1)).toBe('small');
-    expect(nextWashKind([bath(NOW - M, 'small')], 1)).toBe('big');
-    expect(nextWashKind([bath(NOW - 2 * M, 'small'), bath(NOW - M, 'big')], 1)).toBe('small');
+
+  it('prefers the full bath when both are due', () => {
+    expect(washDueState([bath(5, 'full')], R(3, 1), NOON).nextKind).toBe('full');
   });
-  it('an interval of 7 needs seven smalls before a big is due', () => {
-    expect(nextWashKind(smalls(7), 7)).toBe('big');
-    expect(nextWashKind([bath(NOW - 8 * M, 'big'), ...smalls(6)], 7)).toBe('small');
+
+  // The asymmetry that makes the model survive the child growing up.
+  it('lets any bath satisfy the quick-wash clock', () => {
+    const s = washDueState([bath(4, 'full'), bath(0, 'quick')], R(3, 1), NOON);
+    expect(s.quick).toBe(false);
+    expect(s.full).toBe(true);
   });
-  it('raising the interval takes a big wash back off the schedule', () => {
-    // The same history reads differently under a different rhythm: derived from
-    // history every time, never from a stored counter.
-    const history = smalls(3);
-    expect(nextWashKind(history, 3)).toBe('big');
-    expect(nextWashKind(history, 5)).toBe('small');
+
+  it('does not let a quick wash satisfy the full-bath clock', () => {
+    const entries = [bath(3, 'full'), bath(2, 'quick'), bath(1, 'quick'), bath(0, 'quick')];
+    expect(washDueState(entries, R(3, 1), NOON).full).toBe(true);
   });
-  it('a big as the most recent wash => back to small', () => {
-    const entries: Entry[] = [
-      bath(NOW - 3 * M, 'small'),
-      bath(NOW - 2 * M, 'small'),
-      bath(NOW - M, 'big'),
-    ];
-    expect(nextWashKind(entries, 3)).toBe('small');
+
+  it('never surfaces a quick wash of its own once full baths are daily', () => {
+    const s = washDueState([bath(1, 'full')], R(1, 1), NOON);
+    expect(s.full).toBe(true);
+    expect(s.nextKind).toBe('full');
   });
-  it('looks only at the most recent interval, ignoring older washes', () => {
-    // three recent smalls => big, even though an older big precedes them
-    const entries: Entry[] = [bath(NOW - 4 * M, 'big'), ...smalls(3)];
-    expect(nextWashKind(entries, 3)).toBe('big');
+
+  it('treats 0 as off, per axis, independently', () => {
+    expect(washDueState([bath(9, 'quick')], R(0, 1), NOON).full).toBe(false);
+    expect(washDueState([bath(9, 'quick')], R(3, 0), NOON).quick).toBe(false);
+    const off = washDueState([], R(0, 0), NOON);
+    expect(off.full).toBe(false);
+    expect(off.quick).toBe(false);
+    expect(off.upcoming).toBeNull();
   });
-  it('ignores non-bath entries when reading the rhythm', () => {
-    const entries: Entry[] = [
-      { id: 'f', childId: 'c1', type: 'feeding', start: NOW - M, end: NOW, feedType: 'breast', method: 'left', amount: null, tags: [] },
-      ...smalls(3),
-    ];
-    expect(nextWashKind(entries, 3)).toBe('big');
+
+  it('reports the sooner upcoming wash when nothing is due', () => {
+    expect(washDueState([bath(1, 'full')], R(4, 3), NOON).upcoming).toEqual({ kind: 'quick', inDays: 2 });
+    expect(washDueState([bath(1, 'full')], R(3, 5), NOON).upcoming).toEqual({ kind: 'full', inDays: 2 });
   });
-  it('clamps a nonsense interval rather than reading an empty window as due', () => {
-    // slice(0, 0) would be an empty array, and [].every() is vacuously true —
-    // i.e. "big wash due" forever. 0 must clamp up to the 1 minimum instead.
-    expect(nextWashKind([], 0)).toBe('small');
-    expect(nextWashKind([bath(NOW - M, 'small')], 0)).toBe('big');
-    expect(nextWashKind(smalls(29), 99)).toBe('small'); // 99 clamps to the 30 maximum
-    expect(nextWashKind(smalls(30), 99)).toBe('big');
-    expect(nextWashKind(smalls(3), Number.NaN)).toBe('big'); // falls back to the default 3
+
+  it('reports no upcoming wash while one is already due', () => {
+    expect(washDueState([bath(5, 'quick')], R(3, 1), NOON).upcoming).toBeNull();
+  });
+
+  it('skips an axis that is off when choosing the upcoming wash', () => {
+    expect(washDueState([bath(1, 'full')], R(4, 0), NOON).upcoming).toEqual({ kind: 'full', inDays: 3 });
+  });
+
+  it('counts calendar days, not 24-hour periods', () => {
+    // Bathed at 19:00 yesterday, asked at 08:00 today: one calendar day, so a
+    // daily quick wash is due even though only 13 hours have passed.
+    const evening = new Date(2026, 5, 14, 19, 0, 0).getTime();
+    const morning = new Date(2026, 5, 15, 8, 0, 0).getTime();
+    const entry: Entry = { id: 'b', childId: 'c1', type: 'bath', time: evening, wash: 'full', tags: [] };
+    expect(washDueState([entry], R(3, 1), morning).quick).toBe(true);
+  });
+
+  it('ignores non-bath entries entirely', () => {
+    const sleep: Entry = { id: 's1', childId: 'c1', type: 'sleep', start: NOON - DAY, end: NOON, nap: true, tags: [] };
+    expect(washDueState([sleep, bath(0, 'full')], R(3, 1), NOON).full).toBe(false);
+    expect(washDueState([sleep], R(3, 1), NOON).full).toBe(true);
+  });
+
+  it('treats a legacy big wash value as a full bath, so it resets the full-bath clock', () => {
+    // A bath still sitting in the offline queue or pending-ops log from before
+    // the 2026-08 rename carries the literal legacy 'big', reachable here only
+    // via an untyped JSON.parse (reproduced with the cast, since `wash` is
+    // typed as `WashKind` post-rename).
+    const legacy: Entry = { id: 'b-legacy', childId: 'c1', type: 'bath', time: NOON, wash: 'big', tags: [] } as unknown as Entry;
+    const s = washDueState([legacy], R(3, 1), NOON);
+    expect(s.full).toBe(false);
+  });
+});
+
+describe('bath rhythm values', () => {
+  it('clamps an interval into 0..30 and rounds', () => {
+    expect(clampBathInterval(-4, 3)).toBe(0);
+    expect(clampBathInterval(0, 3)).toBe(0);
+    expect(clampBathInterval(2.4, 3)).toBe(2);
+    expect(clampBathInterval(500, 3)).toBe(30);
+  });
+
+  it('falls back rather than inventing a value for a non-number', () => {
+    expect(clampBathInterval(NaN, 3)).toBe(3);
+    expect(clampBathInterval(Infinity, 3)).toBe(3);
+  });
+
+  it('translates the legacy count rhythm to days, plus one', () => {
+    expect(legacyBathRhythm(3)).toEqual({ fullEveryDays: 4, quickEveryDays: 1 });
+    expect(legacyBathRhythm(1)).toEqual({ fullEveryDays: 2, quickEveryDays: 1 });
+  });
+
+  it('uses the built-in default when no legacy value was ever stored', () => {
+    expect(legacyBathRhythm(undefined)).toEqual(BATH_RHYTHM_DEFAULT);
+    expect(BATH_RHYTHM_DEFAULT).toEqual({ fullEveryDays: 3, quickEveryDays: 1 });
+  });
+
+  it('prefers a stored per-child rhythm over the fallback', () => {
+    const map = { c1: { fullEveryDays: 1, quickEveryDays: 0 } };
+    expect(rhythmForChild(map, 'c1', BATH_RHYTHM_DEFAULT)).toEqual({ fullEveryDays: 1, quickEveryDays: 0 });
+    expect(rhythmForChild(map, 'c2', BATH_RHYTHM_DEFAULT)).toEqual(BATH_RHYTHM_DEFAULT);
+    expect(rhythmForChild(map, null, BATH_RHYTHM_DEFAULT)).toEqual(BATH_RHYTHM_DEFAULT);
+  });
+
+  it('clamps a stored rhythm on the way out, so a bad write cannot poison it', () => {
+    const map = { c1: { fullEveryDays: 999, quickEveryDays: -2 } } as Record<string, BathRhythm>;
+    expect(rhythmForChild(map, 'c1', BATH_RHYTHM_DEFAULT)).toEqual({ fullEveryDays: 30, quickEveryDays: 0 });
   });
 });
 
@@ -231,7 +302,7 @@ describe('bathGivenToday', () => {
     childId,
     type: 'bath',
     time,
-    wash: 'small',
+    wash: 'quick',
     tags: [],
   });
 
@@ -275,29 +346,6 @@ describe('bathGivenToday', () => {
     const sibling = bath(new Date(2026, 0, 15, 9, 0, 0).getTime(), 'c2');
     expect(bathGivenToday(entriesForChild([mine, sibling], 'c1'), NOON)).toBe(true);
     expect(bathGivenToday(entriesForChild([sibling], 'c1'), NOON)).toBe(false);
-  });
-});
-
-describe('clampSmallWashesPerBig', () => {
-  it('passes every supported rhythm through untouched', () => {
-    for (let n = 1; n <= 30; n++) expect(clampSmallWashesPerBig(n)).toBe(n);
-  });
-  it('clamps to the 1..30 range', () => {
-    expect(clampSmallWashesPerBig(0)).toBe(1);
-    expect(clampSmallWashesPerBig(-4)).toBe(1);
-    expect(clampSmallWashesPerBig(31)).toBe(30);
-    expect(clampSmallWashesPerBig(1000)).toBe(30);
-  });
-  it('rounds a fractional rhythm', () => {
-    expect(clampSmallWashesPerBig(2.4)).toBe(2);
-    expect(clampSmallWashesPerBig(2.6)).toBe(3);
-  });
-  it('falls back to the default for a non-finite value', () => {
-    expect(clampSmallWashesPerBig(Number.NaN)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
-    expect(clampSmallWashesPerBig(Number.POSITIVE_INFINITY)).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
-  });
-  it('the default is 3 smalls between bigs, preserving the original rhythm', () => {
-    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
   });
 });
 
@@ -758,7 +806,7 @@ describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAl
       expect(treatmentDueState(treatment(), entriesForChild([mine, sibling], 'c1'), at(9))).toMatchObject({ due: 0 });
     });
     it('ignores non-medication entries', () => {
-      const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'small', tags: [] };
+      const bath: Entry = { id: 'b', childId: 'c1', type: 'bath', time: at(8, 5), wash: 'quick', tags: [] };
       expect(treatmentDueState(treatment(), [bath], at(9))).toMatchObject({ due: 1 });
     });
   });

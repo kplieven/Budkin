@@ -24,6 +24,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { normalizeWash } from '@/lib/wash';
 import type { Child, Entry, FeedMethod, FeedType, Measurement } from '@/types/models';
 import { entryTimestamp } from '@/types/models';
 
@@ -136,10 +137,25 @@ function parseOr<T>(raw: string | null, fallback: T): T {
   }
 }
 
-/** Parses a persisted entry-array value; anything but an array counts as corrupt. */
+/**
+ * Parses a persisted entry-array value; anything but an array counts as corrupt.
+ *
+ * Bath entries are additionally run through `normalizeWash`. Chunks written
+ * before the 2026-08 rename hold `wash: 'small' | 'big'` verbatim, so this
+ * normalises them on the way out of AsyncStorage. It is NOT the single funnel
+ * every stored entry passes through: the offline queue (`src/data/queue.ts`)
+ * and the pending-ops log (`src/data/pendingOps.ts`) hold entries too, and
+ * neither loads through this function. Those two are covered instead by
+ * normalising at their comparison sites (`bathToNoteBody` in
+ * `src/api/client.ts`, `washDueState` in `src/store/selectors.ts`), so a
+ * legacy value reaching any of the three is defused wherever it is compared.
+ */
 function parseEntryArray(raw: string | null): Entry[] {
   const parsed = parseOr<Entry[]>(raw, []);
-  return Array.isArray(parsed) ? parsed : [];
+  if (!Array.isArray(parsed)) return [];
+  return parsed.map((e) =>
+    e?.type === 'bath' ? { ...e, wash: normalizeWash((e as { wash?: unknown }).wash) } : e,
+  );
 }
 
 /**

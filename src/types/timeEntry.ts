@@ -11,6 +11,8 @@
  * POINT shape (diaper) is a single timestamp via `agoMin`/`absTime`.
  */
 
+import type { WashKind } from '@/lib/wash';
+
 import type { DiaperColor, FeedMethod, FeedType } from './models';
 
 export type TimeEntryShape = 'interval' | 'point';
@@ -67,7 +69,7 @@ export interface TimeEntryState {
   nap?: boolean;
   milestone?: string;
   /** bath (point): which wash was given */
-  wash?: 'small' | 'big';
+  wash?: WashKind;
   /** temperature (point): the numeric reading being entered (°C) */
   temperature?: number;
   /** medication (point): the medication name being entered (required to save) */

@@ -10,6 +10,7 @@
  */
 
 import { INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
+import { normalizeWash } from '@/lib/wash';
 import type {
   ActivityType,
   BathEntry,
@@ -177,19 +178,26 @@ export function secToDuration(sec: number): string {
 }
 
 // --- bath <-> Baby Buddy Note (tagged-note) serialization ---
-// Baby Buddy has no bath resource, so a bath is a Note tagged `bath` + the wash
-// size (`small`/`big`). The tags are the source of truth on read (a `big` tag
-// means a big wash; anything else is small). The note text reads sensibly on its
-// own so other Baby Buddy clients see a meaningful entry. User tags are kept
+// Baby Buddy has no bath resource, so a bath is a Note tagged `bath` plus the
+// wash size. The tags are the source of truth on read; the body is human copy
+// only, so other Baby Buddy clients see a meaningful entry. User tags are kept
 // distinct from these structural tags so they survive a round-trip untouched.
-const BATH_STRUCTURAL_TAGS = ['bath', 'small', 'big'];
+//
+// The size tag was a bare `small`/`big` until 2026-08 and is now `bath:quick`/
+// `bath:full`, matching the `intake:` and `mk:` prefix convention. The bare
+// words are still READ (a note the migration script has not reached, or one an
+// older Budkin wrote, must not come back as the wrong wash) and never written.
+// They stay in the structural list so they remain stripped from user tags and
+// hidden from the picker: freeing two ordinary English words would let a user
+// tag literally named `big` read back as a full bath.
+const BATH_STRUCTURAL_TAGS = ['bath', 'bath:quick', 'bath:full', 'small', 'big'];
 
 /**
  * Tags the tag picker must never surface or let the user create: the bath
- * structural tags (`bath`/`small`/`big`) plus the breastfeeding "both" side
- * markers (`left`/`right`) that `save()` folds into an entry's tags. They must
- * still round-trip untouched on entries that legitimately carry them — this set
- * only gates the UI (display + creation), not serialization.
+ * structural tags plus the breastfeeding "both" side markers (`left`/`right`)
+ * that `save()` folds into an entry's tags. They must still round-trip untouched
+ * on entries that legitimately carry them, so this set only gates the UI
+ * (display + creation), not serialization.
  */
 export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'right']);
 
@@ -291,14 +299,22 @@ export function isBathNote(n: any): boolean {
   return tagNames(n?.tags).includes('bath');
 }
 
-/** Encode a bath entry as the body for a Baby Buddy Note (create/update). */
+/** Encode a bath entry as the body for a Baby Buddy Note (create/update).
+ *  Runs `entry.wash` through `normalizeWash` rather than comparing it raw: an
+ *  entry sitting in the offline queue or pending-ops log since before the
+ *  2026-08 rename still carries the literal `'big'`, and those two stores are
+ *  not covered by `entityStore.ts`'s load-time normalization, so a bare
+ *  comparison here would silently downgrade a full bath to a quick wash on
+ *  the server. */
 export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
+  const full = normalizeWash(entry.wash) === 'full';
   return {
     child: childServerId,
     time: toISO(entry.time),
-    note: `Bath, ${entry.wash} wash`,
-    tags: ['bath', entry.wash, ...userTags],
+    // Self-contained, so it reads as a real entry in Baby Buddy's own note list.
+    note: full ? 'Full bath' : 'Quick wash',
+    tags: ['bath', full ? 'bath:full' : 'bath:quick', ...userTags],
   };
 }
 
@@ -311,7 +327,10 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
     childId,
     type: 'bath',
     time: fromISO(n.time),
-    wash: tags.includes('big') ? 'big' : 'small',
+    // `bath:full` is current, a bare `big` is pre-2026-08. Reading both means a
+    // note the migration has not reached still yields the right wash, and it
+    // self-heals: the next edit rewrites the note with the current tags.
+    wash: tags.includes('bath:full') || tags.includes('big') ? 'full' : 'quick',
     tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
   };
 }

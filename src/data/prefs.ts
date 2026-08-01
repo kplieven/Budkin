@@ -55,12 +55,6 @@ export interface Prefs {
    */
   milestoneCatchUp: boolean;
   /**
-   * Bath rhythm: how many SMALL washes fall between two big ones (default 3,
-   * range 1..30). Purely local — Baby Buddy has no notion of wash size, so this
-   * only drives Budkin's "what's due next" pre-selection.
-   */
-  smallWashesPerBig: number;
-  /**
    * Sleep rhythm: the window in which a sleep counts as a NAP rather than night
    * sleep, as minutes since local midnight (default 420/1140 = 07:00 to 19:00).
    * Start inclusive, end exclusive; a start later than the end wraps midnight.
@@ -92,12 +86,25 @@ export interface Prefs {
   showGrowthReference: boolean;
 }
 
+/**
+ * Fields Budkin no longer writes, kept readable so a stored value can be
+ * migrated forward. Not part of `Prefs`, so nothing can accidentally save one.
+ */
+export interface LegacyPrefs {
+  /**
+   * Pre-2026-08 bath rhythm: SMALL washes between two big ones. Superseded by
+   * the per-child day intervals in src/data/bathRhythm.ts, and read only to
+   * derive the fallback for a child with nothing stored (`legacyBathRhythm`).
+   */
+  smallWashesPerBig?: number;
+}
+
 /** A persisted file may predate a field, so callers get a Partial back. */
-export async function loadPrefs(): Promise<Partial<Prefs>> {
+export async function loadPrefs(): Promise<Partial<Prefs> & LegacyPrefs> {
   try {
     const s = await AsyncStorage.getItem(KEY);
     if (!s) return {};
-    return JSON.parse(s) as Partial<Prefs>;
+    return JSON.parse(s) as Partial<Prefs> & LegacyPrefs;
   } catch (e) {
     console.warn('[prefs] loadPrefs failed:', e);
     return {};
