@@ -13,7 +13,7 @@ import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
-import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, nextWashKind, runningTimer, timersForChild } from '@/store/selectors';
+import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, washDueState, rhythmForChild, runningTimer, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import type { ActivityType, FeedMethod } from '@/types/models';
@@ -60,7 +60,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const openSheet = useAppStore((s) => s.openSheet);
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
-  const smallWashesPerBig = useAppStore((s) => s.smallWashesPerBig);
+  const bathRhythms = useAppStore((s) => s.bathRhythms);
+  const legacyRhythm = useAppStore((s) => s.legacyRhythm);
   // Raw select (stable reference); the due list is derived in the render body
   // below, never in the selector, per the zustand v5 rule.
   const treatments = useAppStore((s) => s.treatments);
@@ -134,10 +135,26 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   // Today's-wash "checked" state: >=1 bath on today's local date. `now`-keyed, so
   // it clears itself at local midnight without any reset logic.
   const washedToday = bathGivenToday(childEntries, now);
-  const washKind = nextWashKind(childEntries, smallWashesPerBig);
-  // Once a wash is logged today the tile switches to the "done" copy; otherwise
-  // it keeps the forward-looking "due" hint.
-  const washHint = washedToday ? 'Washed today' : washKind === 'full' ? 'Full bath due today' : 'Quick wash due';
+  const washDue = washDueState(
+    childEntries,
+    rhythmForChild(bathRhythms, selectedChild?.id ?? null, legacyRhythm),
+    now,
+  );
+  // Once a wash is logged today the tile switches to the "done" copy. Otherwise
+  // it reports what is due, and failing that how long until the next one is. A
+  // child with both intervals off has no schedule at all, so it falls back to
+  // the same generic copy the tiles with no state use.
+  const washHint = washedToday
+    ? 'Washed today'
+    : washDue.full
+      ? 'Full bath due today'
+      : washDue.quick
+        ? 'Quick wash due'
+        : washDue.upcoming
+          ? `${washDue.upcoming.kind === 'full' ? 'Full bath' : 'Quick wash'} ${
+              washDue.upcoming.inDays === 1 ? 'tomorrow' : `in ${washDue.upcoming.inDays} days`
+            }`
+          : 'Tap to log';
   // Treatments get the same treatment as washes: a forward-looking "due" hint
   // and a done check once the day's doses are all logged. `null` means this
   // child keeps no treatments, so the tile falls back to the generic copy.
