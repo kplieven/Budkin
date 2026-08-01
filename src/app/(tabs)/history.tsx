@@ -8,7 +8,13 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
+import { activityOptions, dayOptions, filterItems, type TimelineFilter } from '@/features/activity/filter';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import {
+  HistoryFilterChips,
+  HistoryFilterSheets,
+  type OpenFilterSheet,
+} from '@/features/activity/HistoryFilters';
 import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -69,7 +75,25 @@ export default function History() {
   // a timer, so without this the row the user was looking at would vanish from
   // the very list they marked it in.
   const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
-  const groups = groupByDay(items, now);
+
+  // Day + activity filters, session-local: a filter is a way to read the list you
+  // are looking at now, not a preference to carry into the next launch.
+  //
+  // Each option list is narrowed by the OTHER half of the filter, so the two
+  // narrow symmetrically and no combination reachable from the UI can come back
+  // empty: the days offered are days that have the chosen activities, and the
+  // activities offered are the ones present on the chosen day. (A combination
+  // can still empty out under the user, e.g. a refresh drops the selected day —
+  // hence the no-matches state below.)
+  const [filter, setFilter] = useState<TimelineFilter>({ day: null, types: [] });
+  // Which filter sheet is open lives here, not in the chip row, because the two
+  // sheets have to be mounted outside the scroll container the chips sit in
+  // (see HistoryFilterSheets).
+  const [filterSheet, setFilterSheet] = useState<OpenFilterSheet>(null);
+  const dayChoices = dayOptions(filterItems(items, { day: null, types: filter.types }), now);
+  const activityChoices = activityOptions(filterItems(items, { day: filter.day, types: [] }));
+  const visible = filterItems(items, filter);
+  const groups = groupByDay(visible, now);
 
   const body =
     // A running timer counts as something logged, so the empty state stays away
@@ -87,34 +111,84 @@ export default function History() {
         </Txt>
       </View>
     ) : (
-      groups.map((g) => (
-        <View key={g.label} style={{ marginBottom: 14 }}>
-          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 22, marginBottom: 6, textTransform: 'uppercase' }}>
-            {g.label}
-          </Txt>
-          {/* A continuous timeline spine per day. Tap a row to open the
-              editor, where entries can be edited or deleted. A timer row opens
-              the RUNNING-timer editor instead: `openEdit` looks the id up in
-              `entries` and returns early on a miss, so sending a timer there
-              would make the row silently dead. */}
-          <View>
-            {g.items.map((e, i) => (
-              <TimelineEntry
-                key={isTimer(e) ? `timer:${e.id}` : e.id}
-                item={e}
-                now={now}
-                onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
-                isFirst={i === 0}
-                isLast={i === g.items.length - 1}
-                queued={isItemQueued(e, queued)}
-              />
-            ))}
+      <>
+        <HistoryFilterChips filter={filter} now={now} onOpen={setFilterSheet} onChange={setFilter} />
+        {visible.length === 0 ? (
+          <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
+            <Txt weight={700} size={16}>
+              Nothing to show here
+            </Txt>
+            {/* Deliberately not spelled out per filter: the only way to reach
+                this state is the data moving underneath a selection (a refresh
+                drops the day, a child switch), since the two option lists
+                narrow symmetrically and cannot offer an empty combination. */}
+            <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+              Nothing here matches the current filter.
+            </Txt>
+            <Pressable
+              onPress={() => setFilter({ day: null, types: [] })}
+              accessibilityRole="button"
+              style={(s) => [
+                { marginTop: 2, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22, cursor: 'pointer' },
+                isHovered(s) && { boxShadow: t.shadow },
+              ]}
+            >
+              <Txt unselectable weight={700} size={14} color={t.onPrimary}>
+                Clear filters
+              </Txt>
+            </Pressable>
           </View>
-        </View>
-      ))
+        ) : (
+          groups.map((g) => (
+            <View key={g.label} style={{ marginBottom: 14 }}>
+              <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 22, marginBottom: 6, textTransform: 'uppercase' }}>
+                {g.label}
+              </Txt>
+              {/* A continuous timeline spine per day. Tap a row to open the
+                  editor, where entries can be edited or deleted. A timer row opens
+                  the RUNNING-timer editor instead: `openEdit` looks the id up in
+                  `entries` and returns early on a miss, so sending a timer there
+                  would make the row silently dead. */}
+              <View>
+                {g.items.map((e, i) => (
+                  <TimelineEntry
+                    key={isTimer(e) ? `timer:${e.id}` : e.id}
+                    item={e}
+                    now={now}
+                    onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
+                    isFirst={i === 0}
+                    isLast={i === g.items.length - 1}
+                    queued={isItemQueued(e, queued)}
+                  />
+                ))}
+              </View>
+            </View>
+          ))
+        )}
+      </>
     );
 
-  if (desktop) return <DesktopPage maxWidth={600}>{body}</DesktopPage>;
+  // Mounted as a sibling of the scroll container on both layouts, never inside
+  // it: a sheet positions itself against its nearest positioned ancestor, and
+  // inside the list that is the scrolled content rather than the screen.
+  const filterSheets = (
+    <HistoryFilterSheets
+      open={filterSheet}
+      onClose={() => setFilterSheet(null)}
+      days={dayChoices}
+      activities={activityChoices}
+      filter={filter}
+      onChange={setFilter}
+    />
+  );
+
+  if (desktop)
+    return (
+      <View style={{ flex: 1 }}>
+        <DesktopPage maxWidth={600}>{body}</DesktopPage>
+        {filterSheets}
+      </View>
+    );
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -181,6 +255,8 @@ export default function History() {
         </View>
         {body}
       </ScrollView>
+
+      {filterSheets}
     </View>
   );
 }
