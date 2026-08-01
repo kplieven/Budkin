@@ -48,6 +48,38 @@ describe('groupByDay', () => {
     const total = groupByDay(entries, NOW).reduce((n, g) => n + g.items.length, 0);
     expect(total).toBe(3);
   });
+
+  it('labels every group, across more days than Today/Yesterday cover', () => {
+    // Buckets are keyed by calendar day but LABELLED by dayGroupLabel, so a long
+    // history has to keep the two in step: one group per day, each carrying that
+    // day's own label, days descending.
+    const days = [0, 1, 2, 3, 10, 40, 400];
+    const groups = groupByDay(
+      // Shuffled input: the grouping owns the ordering, not the caller.
+      days.map((d, i) => feed(`d${d}`, NOW - d * DAY - i * M)).reverse(),
+      NOW,
+    );
+
+    expect(groups).toHaveLength(days.length);
+    expect(groups.map((g) => g.label)).toEqual(
+      days.map((d, i) => dayGroupLabel(NOW - d * DAY - i * M, NOW)),
+    );
+    expect(groups.map((g) => g.items.map((e) => e.id))).toEqual(days.map((d) => [`d${d}`]));
+  });
+
+  it('puts a future-dated entry in its own group, ahead of today', () => {
+    // Reachable from the UI: the time panels let an entry be logged ahead of the
+    // clock. It is a calendar day of its own, and sorts newest-first like any
+    // other.
+    const tomorrow = NOW + DAY;
+    const groups = groupByDay([feed('today', NOW - 10 * M), feed('ahead', tomorrow)], NOW);
+
+    expect(groups.map((g) => g.label)).toEqual([
+      dayGroupLabel(tomorrow, NOW),
+      dayGroupLabel(NOW - 10 * M, NOW),
+    ]);
+    expect(groups[0].items.map((e) => e.id)).toEqual(['ahead']);
+  });
 });
 
 const timer = (id: string, start: number): Timer => ({

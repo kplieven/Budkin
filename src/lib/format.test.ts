@@ -7,6 +7,7 @@ import {
   ANCHOR_LABEL,
   anchorLabel,
   dayGroupLabel,
+  dayKey,
   fmtAgo,
   fmtAgoShort,
   fmtClock,
@@ -54,6 +55,14 @@ describe('fmtAgoShort', () => {
     expect(fmtAgoShort(120)).toBe('2h');
     expect(fmtAgoShort(14824)).toBe('10d');
   });
+
+  it('floors a negative elapsed at zero rather than printing "-1m"', () => {
+    // Reachable two ways: an ongoing entry whose start the user set ahead of the
+    // clock, and History's minute-quantized `now`, which sits up to 59s behind
+    // real time and so lands before the start of a timer begun this minute.
+    expect(fmtAgoShort(-1)).toBe('0m');
+    expect(fmtAgoShort(-90)).toBe('0m');
+  });
 });
 
 describe('ageStr', () => {
@@ -82,6 +91,32 @@ describe('relDayLabel / dayGroupLabel', () => {
   it('crosses a month boundary', () => {
     const firstOfMonth = new Date(2026, 6, 1, 9, 0, 0).getTime();
     expect(dayGroupLabel(new Date(2026, 5, 30, 22, 0, 0).getTime(), firstOfMonth)).toBe('Yesterday');
+  });
+});
+
+describe('dayKey', () => {
+  it('is the same for two times on one local day and differs across midnight', () => {
+    const morning = new Date(2026, 5, 22, 0, 30, 0).getTime();
+    const evening = new Date(2026, 5, 22, 23, 30, 0).getTime();
+    const nextDay = new Date(2026, 5, 23, 0, 30, 0).getTime();
+
+    expect(dayKey(morning)).toBe(dayKey(evening));
+    expect(dayKey(nextDay)).not.toBe(dayKey(morning));
+  });
+
+  it('pads month and day so keys sort chronologically as strings', () => {
+    expect(dayKey(new Date(2026, 0, 5, 12, 0, 0).getTime())).toBe('2026-01-05');
+  });
+
+  it('agrees with dayGroupLabel about where a day starts', () => {
+    // groupByDay keys its buckets with one and heads them with the other, so a
+    // disagreement about the local midnight boundary would split or merge a day.
+    const lateYesterday = new Date(2026, 5, 21, 23, 59, 0).getTime();
+    const earlyToday = new Date(2026, 5, 22, 0, 1, 0).getTime();
+
+    expect(dayKey(lateYesterday)).not.toBe(dayKey(earlyToday));
+    expect(dayGroupLabel(lateYesterday, NOW)).toBe('Yesterday');
+    expect(dayGroupLabel(earlyToday, NOW)).toBe('Today');
   });
 });
 

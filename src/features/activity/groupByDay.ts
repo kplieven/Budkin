@@ -1,4 +1,4 @@
-import { dayGroupLabel } from '@/lib/format';
+import { dayGroupLabel, dayKey } from '@/lib/format';
 import { entryTimestamp, type Entry, type Timer } from '@/types/models';
 
 /**
@@ -38,18 +38,33 @@ export interface DayGroup<T extends TimelineItem = TimelineItem> {
  *
  * Generic in the item type so widening it to accept timers costs the entry-only
  * callers nothing: pass `NoteEntry[]` and the groups still hold `NoteEntry`.
+ *
+ * Written to stay flat in the number of items, because History re-runs it on
+ * every render over the child's WHOLE timeline. Two things it therefore does not
+ * do: derive a timestamp inside the comparator, and reach for `dayGroupLabel`
+ * per item. See the two comments below.
  */
 export function groupByDay<T extends TimelineItem>(items: T[], now: number): DayGroup<T>[] {
-  const sorted = [...items].sort((a, b) => timelineTimestamp(b) - timelineTimestamp(a));
-  const groups: DayGroup<T>[] = [];
-  for (const e of sorted) {
-    const label = dayGroupLabel(timelineTimestamp(e), now);
-    let g = groups.find((x) => x.label === label);
+  // Decorate-sort-undecorate. `timelineTimestamp` is a type test plus a branch
+  // per entry shape, and a bare comparator re-derives it O(n log n) times.
+  const dated = items.map((item) => ({ item, ts: timelineTimestamp(item) }));
+  dated.sort((a, b) => b.ts - a.ts);
+
+  // Bucket by calendar-day KEY, and label each bucket once, when it is created.
+  // Bucketing by the label instead is correct (a label is 1:1 with a day) but
+  // pays `dayGroupLabel`'s three Date allocations for every ITEM, on top of a
+  // linear scan of the buckets to find the match: O(items x days). A Map keeps
+  // its insertion order, so the groups still come out in the sorted order the
+  // items arrived in, newest day first.
+  const byKey = new Map<string, DayGroup<T>>();
+  for (const { item, ts } of dated) {
+    const key = dayKey(ts);
+    let g = byKey.get(key);
     if (!g) {
-      g = { label, items: [] };
-      groups.push(g);
+      g = { label: dayGroupLabel(ts, now), items: [] };
+      byKey.set(key, g);
     }
-    g.items.push(e);
+    g.items.push(item);
   }
-  return groups;
+  return [...byKey.values()];
 }

@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   activityOptions,
-  dayKey,
   dayKeyLabel,
   dayOptions,
   filterItems,
   itemActivity,
 } from '@/features/activity/filter';
+import { dayKey } from '@/lib/format';
 import type { Entry, Timer } from '@/types/models';
 
 const NOW = new Date(2026, 5, 22, 12, 0, 0).getTime(); // local noon
@@ -56,21 +56,6 @@ describe('itemActivity', () => {
     // saveAs, not activity: the same rule Home and the reminder scheduler use.
     const repointed = { ...timer('t', NOW, 'sleep'), saveAs: 'feeding' as const };
     expect(itemActivity(repointed)).toBe('feeding');
-  });
-});
-
-describe('dayKey', () => {
-  it('is the same for two times on one local day and differs across midnight', () => {
-    const morning = new Date(2026, 5, 22, 0, 30, 0).getTime();
-    const evening = new Date(2026, 5, 22, 23, 30, 0).getTime();
-    const nextDay = new Date(2026, 5, 23, 0, 30, 0).getTime();
-
-    expect(dayKey(morning)).toBe(dayKey(evening));
-    expect(dayKey(nextDay)).not.toBe(dayKey(morning));
-  });
-
-  it('pads month and day so keys sort chronologically as strings', () => {
-    expect(dayKey(new Date(2026, 0, 5, 12, 0, 0).getTime())).toBe('2026-01-05');
   });
 });
 
