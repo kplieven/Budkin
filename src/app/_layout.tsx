@@ -111,11 +111,12 @@ function RootLayoutNav() {
       <Stack.Screen name="welcome" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="settings" />
-      {/* Timers sits on the root Stack beside Settings, not inside (tabs). It is
-          a detail screen reached from Home and from deep links, so it wants a
-          push transition and a back entry; a tab jump gives it neither. The URL
-          is still /timers, since group segments never appear in the path. */}
-      <Stack.Screen name="timers" />
+      {/* Timers is NOT here. It lives on a Stack inside the Home tab
+          (src/app/(tabs)/(home)/), which is what lets it be pushed — transition
+          and back entry — while the bottom bar, owned by the tab layout above
+          that Stack, stays put instead of sliding in with it. On the root Stack
+          it could have one or the other, never both. The URL is /timers either
+          way: group segments never appear in the path. */}
       <Stack.Screen name="metric/[kind]" />
     </Stack>
   );

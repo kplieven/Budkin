@@ -57,7 +57,7 @@ export function AppTabBar({ activeName, onSelect }: TabBarProps) {
               name={meta.icon}
               color={color}
               size={24}
-              fill={active && name === 'index' ? hexA(t.primary, 0.22) : undefined}
+              fill={active && name === '(home)' ? hexA(t.primary, 0.22) : undefined}
             />
             <Txt unselectable weight={700} size={11} color={color}>
               {meta.label}
