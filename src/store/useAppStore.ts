@@ -1166,6 +1166,63 @@ export function resetTimerRetryForTests(): void {
   timerRetryAttempt = 0;
 }
 
+/**
+ * The write queue's twin of `scheduleUnsyncedTimerFlush` above, and it exists
+ * for the same reason.
+ *
+ * `commitWrite` makes a rejected push DURABLE (`enqueueEntry`), which the
+ * comment on the timer chain counted as entries already having "a fallback".
+ * Durable is not delivered: nothing DRAINS the queue except hydrate, refresh,
+ * and the offline/network transitions. So a write the server refused at the
+ * moment it was made sat on the queue, with the History row marked "waiting to
+ * upload", until the user happened to pull to refresh.
+ *
+ * Stopping a timer is where that bites hardest: the entry's `end` is exactly
+ * `Date.now()`, and the stop fires a second write (the timer DELETE) alongside
+ * it, so the first attempt is the one most likely to be refused and the same
+ * payload then succeeds seconds later.
+ *
+ * Bounded on the same terms as the timer chain: after the last delay the
+ * ordinary paths take over, so a server that stays broken cannot keep a chain
+ * spinning for the life of the process, and the next write refreshes the budget.
+ */
+const QUEUE_RETRY_DELAYS_MS = [2000, 8000, 30000];
+let queueRetryAttempt = 0;
+let queueRetryHandle: ReturnType<typeof setTimeout> | undefined;
+
+function scheduleQueueFlush(get: Get): void {
+  if (queueRetryHandle || queueRetryAttempt >= QUEUE_RETRY_DELAYS_MS.length) return;
+  const delay = QUEUE_RETRY_DELAYS_MS[queueRetryAttempt];
+  queueRetryAttempt += 1;
+  queueRetryHandle = setTimeout(() => {
+    queueRetryHandle = undefined;
+    const s = get();
+    // Offline or no longer on a server: `setNetworkOnline`/`setOffline` already
+    // flush on the way back up, so stand down rather than spend attempts here.
+    if (!s.connection || s.connection.mode !== 'server' || s.offline) {
+      queueRetryAttempt = 0;
+      return;
+    }
+    if (s.queueCount === 0) {
+      queueRetryAttempt = 0;
+      return;
+    }
+    // `flushQueue` swallows its own per-entry failures and resolves either way,
+    // so the re-arm decision is the queue count, not a rejection.
+    void s.flushQueue().finally(() => {
+      if (get().queueCount > 0) scheduleQueueFlush(get);
+      else queueRetryAttempt = 0;
+    });
+  }, delay);
+}
+
+/** Drop any scheduled queue retry. Tests only, same reason as the timer twin. */
+export function resetQueueRetryForTests(): void {
+  if (queueRetryHandle) clearTimeout(queueRetryHandle);
+  queueRetryHandle = undefined;
+  queueRetryAttempt = 0;
+}
+
 // Guards against overlapping refreshes (e.g. a foreground event landing while a
 // pull-to-refresh is still in flight).
 let refreshInFlight = false;
@@ -2263,11 +2320,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (childServerId == null) {
         // The child is not on the server yet, so this entry cannot be either.
         // Queue it: the reconnect flush pushes it once the child exists.
+        console.warn('[entries] no server id for child, queued:', entry.type, entry.childId);
         void enqueueEntry(entry).then((q) => set(queueMirror(q)));
       } else {
+        // A genuine new write: give the retry chain a fresh budget, so a save
+        // made an hour after some earlier failure isn't stuck with a spent one.
+        // Mirrors `mirrorTimerCreate`.
+        queueRetryAttempt = 0;
         void pushEntryToServer(conn, entry, childServerId)
           .then((serverId) => {
-            if (serverId == null) return;
+            if (serverId == null) {
+              console.warn('[entries] push returned no id, left unsynced:', entry.type, entry.id);
+              return;
+            }
             if (get().entries.some((e) => e.id === entry.id)) {
               set((st) => ({
                 entries: st.entries.map((e) => (e.id === entry.id ? { ...e, serverId } : e)),
@@ -2280,7 +2345,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
               void deleteEntryFromServer(conn, entry.type, serverId).catch(() => {});
             }
           })
-          .catch(() => enqueueEntry(entry).then((q) => set(queueMirror(q))));
+          .catch((e) => {
+            // Was a bare swallow, which left no trace of WHY an entry ended up
+            // on the queue instead of the server. Mirrors the timer create
+            // path's `[timers] create failed` log.
+            console.warn('[entries] push failed, queued:', entry.type, e?.status, e?.message);
+            return enqueueEntry(entry).then((q) => {
+              set(queueMirror(q));
+              // Queued is not delivered: without this the entry waits for the
+              // next refresh/foreground/reconnect. See `scheduleQueueFlush`.
+              scheduleQueueFlush(get);
+            });
+          });
       }
     }
   },

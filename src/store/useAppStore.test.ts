@@ -6,6 +6,7 @@ import {
   mergeUnsynced,
   reconcileChildren,
   remapChildIds,
+  resetQueueRetryForTests,
   resetTimerRetryForTests,
   useAppStore,
   visibleTags,
@@ -69,6 +70,13 @@ const h = vi.hoisted(() => ({
    *  a server that rejects or drops the create, which is the case that used to
    *  leave a timer unsynced with nothing scheduled to try again. */
   timerPushFails: 0,
+  /** How many `pushEntryToServer` calls should throw before one succeeds. The
+   *  entry twin of `timerPushFails`: models a server that refuses the write the
+   *  moment it is made but accepts the identical payload a few seconds later
+   *  (clock skew on the `end == now` timestamp, a locked SQLite file behind a
+   *  concurrent timer DELETE), which is the case that left the entry sitting on
+   *  the write queue until the user pulled to refresh. */
+  entryPushFails: 0,
   pendingOps: [] as unknown[],
   adoptTarget: null as string | null,
   pushFails: false,
@@ -219,6 +227,10 @@ vi.mock('@/data/repository', () => ({
   })),
   pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown) => {
     if (h.pushFails) throw new Error('net');
+    if (h.entryPushFails > 0) {
+      h.entryPushFails -= 1;
+      throw new Error('net');
+    }
     h.pushed.push(e);
     return 999;
   }),
@@ -406,9 +418,11 @@ beforeEach(() => {
   h.timerUpdated = [];
   h.timerDeleted = [];
   h.timerPushFails = 0;
-  // Module state in the store, not store state: an unsynced-timer retry armed by
-  // one test would otherwise fire in the middle of a later one.
+  h.entryPushFails = 0;
+  // Module state in the store, not store state: a retry armed by one test would
+  // otherwise fire in the middle of a later one.
   resetTimerRetryForTests();
+  resetQueueRetryForTests();
   h.pendingOps = [];
   h.adoptTarget = null;
   h.pushFails = false;
@@ -1583,6 +1597,67 @@ describe('stopTimer', () => {
     expect(s().entries[0].type).toBe('sleep');
     await flush();
     expect(h.pushed).toHaveLength(1);
+  });
+
+  // The reported bug: stopping a timer while genuinely online ("Saved as sleep",
+  // not "queued offline") left the entry on the write queue, with the History
+  // row marked "waiting to upload", until the user pulled to refresh.
+  // `commitWrite` made the rejected push DURABLE (`enqueueEntry`) but nothing
+  // DRAINED the queue — `flushQueue` only runs from hydrate, refresh, and the
+  // offline/network transitions. Same gap `scheduleUnsyncedTimerFlush` already
+  // closes for timer creates.
+  it('retries a rejected entry push with no manual refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      h.entryPushFails = 1;
+      useAppStore.setState({
+        connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+        offline: false,
+        children: [SYNCED_C1],
+        selectedChildId: 'c1',
+        timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep', childId: 'c1' }],
+        entries: [],
+      });
+
+      s().stopTimer('t1');
+      await vi.advanceTimersByTimeAsync(0);
+      // The push threw, so the entry is queued and the row reads as waiting.
+      expect(h.pushed).toHaveLength(0);
+      expect(h.q).toHaveLength(1);
+      expect(s().queuedIds).toHaveLength(1);
+
+      // No refresh, no foreground, no network event: the retry alone lands it.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(h.pushed).toHaveLength(1);
+      expect(h.q).toHaveLength(0);
+      expect(s().queuedIds).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops retrying once the attempt budget is spent, leaving the entry queued', async () => {
+    vi.useFakeTimers();
+    try {
+      h.pushFails = true; // server stays broken for the whole chain
+      useAppStore.setState({
+        connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+        offline: false,
+        children: [SYNCED_C1],
+        selectedChildId: 'c1',
+        timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep', childId: 'c1' }],
+        entries: [],
+      });
+
+      s().stopTimer('t1');
+      await vi.advanceTimersByTimeAsync(120000);
+      // Still durable and still marked, but the chain is not spinning forever:
+      // refresh/foreground/reconnect take it from here.
+      expect(h.q).toHaveLength(1);
+      expect(s().queuedIds).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
