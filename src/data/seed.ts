@@ -44,9 +44,9 @@ export function makeSeed(now: number): SeedData {
       { id: 'e5', childId: c1, type: 'sleep', start: now - 300 * M, end: now - 182 * M, nap: true, tags: [] },
       { id: 'e6', childId: c1, type: 'diaper', time: now - 250 * M, wet: true, solid: true, color: 'yellow', tags: [] },
       { id: 'e7', childId: c1, type: 'tummy', start: now - 330 * M, end: now - 322 * M, milestone: 'Lifted head', tags: [] },
-      // A quick/full wash rhythm: a full bath four days ago, then three quick
-      // washes, so a full bath reads as due today at the default rhythm of three
-      // quicks per full (configurable in Settings, see nextWashKind).
+      // A bath rhythm mid-cycle: a full bath four days ago, then three quick
+      // washes, so a full bath reads as due today at the default rhythm of
+      // every three days.
       { id: 'e8', childId: c1, type: 'bath', time: now - 4 * DAY, wash: 'full', tags: [] },
       { id: 'e9', childId: c1, type: 'bath', time: now - 3 * DAY, wash: 'quick', tags: [] },
       { id: 'e10', childId: c1, type: 'bath', time: now - 2 * DAY, wash: 'quick', tags: [] },
