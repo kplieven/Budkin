@@ -1,25 +1,32 @@
+import { readdirSync } from 'node:fs';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { isTabName, TABS, TAB_NAMES, tabHref } from '@/components/tabs';
+import { isTabName, TABS, TAB_NAMES } from '@/components/tabs';
+
+const TABS_DIR = path.resolve(__dirname, '../app/(tabs)');
+
+/** The route names the (tabs) group actually contains: every screen file and
+ *  every nested directory in it, minus the layout itself. */
+function routeNamesOnDisk(): string[] {
+  return readdirSync(TABS_DIR, { withFileTypes: true })
+    .filter((e) => e.name !== '_layout.tsx' && !e.name.endsWith('.test.ts'))
+    .map((e) => (e.isDirectory() ? e.name : e.name.replace(/\.tsx?$/, '')))
+    .sort();
+}
 
 describe('tab metadata', () => {
+  it('has an entry for every route in the group, and no others', () => {
+    // The bar renders from this table, not from the navigator's route list, so
+    // a screen added to the group without a table entry would silently not
+    // appear in the bar — and a table entry with no screen would render a tab
+    // that navigates nowhere. This is the only thing keeping the two in step.
+    expect([...TAB_NAMES].sort()).toEqual(routeNamesOnDisk());
+  });
+
   it('keeps Home first, since it is the group’s initial route', () => {
-    expect(TAB_NAMES[0]).toBe('index');
-  });
-
-  it('sends every tab to its own route inside the group', () => {
-    // The bar is rendered from OUTSIDE the tab navigator too (the Timers
-    // screen), where a tap is a router.navigate rather than a tab jump. A href
-    // that does not match its route name would quietly send that tab
-    // somewhere else, and only from that one screen.
-    for (const name of TAB_NAMES) {
-      if (name === 'index') continue;
-      expect(tabHref(name)).toBe(`/(tabs)/${name}`);
-    }
-  });
-
-  it('sends Home to the group itself, not to an index path', () => {
-    expect(tabHref('index')).toBe('/(tabs)');
+    expect(TAB_NAMES[0]).toBe('(home)');
   });
 
   it('recognises its own names and nothing else', () => {
