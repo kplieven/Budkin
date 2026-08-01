@@ -10,7 +10,7 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { entriesForChild, isActive, selectPendingCount, SMALL_WASHES_PER_BIG_DEFAULT, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { toDisplay } from '@/lib/units';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -84,6 +84,7 @@ const h = vi.hoisted(() => ({
   prefs: {} as Record<string, unknown>,
   milestonePrompts: {} as Record<string, string[]>,
   treatments: [] as unknown[],
+  bathRhythms: {} as Record<string, unknown>,
   /** Mirrors the stored entity-origin label (see `loadEntityOrigin`): which
    *  server (or 'local') the persisted entities belong to. Null models an
    *  install that predates the key. */
@@ -194,6 +195,15 @@ vi.mock('@/data/treatments', () => ({
   }),
   clearTreatments: vi.fn(async () => {
     h.treatments = [];
+  }),
+}));
+
+// Per-child bath rhythm, AsyncStorage-backed like the modules above, so it is
+// mocked for the same reason: keep the native module out of the node test env.
+vi.mock('@/data/bathRhythm', () => ({
+  loadBathRhythms: vi.fn(async () => h.bathRhythms),
+  saveBathRhythms: vi.fn(async (m: Record<string, unknown>) => {
+    h.bathRhythms = m;
   }),
 }));
 
@@ -411,6 +421,7 @@ beforeEach(() => {
   h.prefs = {};
   h.milestonePrompts = {};
   h.treatments = [];
+  h.bathRhythms = {};
   h.entityOrigin = null;
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
@@ -462,7 +473,8 @@ beforeEach(() => {
     tagsLoading: false,
     toast: null,
     savedServers: [],
-    smallWashesPerBig: 3,
+    bathRhythms: {},
+    legacyRhythm: BATH_RHYTHM_DEFAULT,
     napWindowStartMin: 420,
     napWindowEndMin: 1140,
   });
@@ -750,61 +762,6 @@ describe('draft amounts snap to the step grid, so no stepper press looks dead', 
 });
 
 describe('bath tracking', () => {
-  it('openSheet: point shape, wash defaults to the due kind', () => {
-    s().openSheet('bath');
-    const te = s().te;
-    expect(te.shape).toBe('point');
-    expect(te.agoMin).toBe(0);
-    expect(te.wash).toBe('quick'); // no bath history => small is due
-  });
-  it('openSheet defaults to big when three recent washes are small', () => {
-    useAppStore.setState({
-      entries: [
-        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
-        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
-        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
-      ],
-    });
-    s().openSheet('bath');
-    expect(s().te.wash).toBe('full');
-  });
-  it('openSheet honours a configured rhythm shorter than three', () => {
-    useAppStore.setState({
-      smallWashesPerBig: 1,
-      entries: [{ id: 'b1', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] }],
-    });
-    s().openSheet('bath');
-    expect(s().te.wash).toBe('full');
-  });
-  it('openSheet honours a configured rhythm longer than three', () => {
-    useAppStore.setState({
-      smallWashesPerBig: 5,
-      entries: [
-        { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
-        { id: 'b2', childId: 'c1', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
-        { id: 'b3', childId: 'c1', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
-      ],
-    });
-    s().openSheet('bath');
-    expect(s().te.wash).toBe('quick'); // three smalls no longer complete the cycle
-  });
-  it('openSheet reads only the selected child\'s baths, not a sibling\'s', () => {
-    useAppStore.setState({
-      children: [
-        { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' },
-        { id: 'c2', first: 'Theo', last: 'O', birth: NOW - 90 * 86400000, color: '#eee' },
-      ],
-      selectedChildId: 'c1',
-      entries: [
-        // The sibling has completed a full small-wash cycle; Mira has not bathed.
-        { id: 'b1', childId: 'c2', type: 'bath', time: NOW - 3 * M, wash: 'quick', tags: [] },
-        { id: 'b2', childId: 'c2', type: 'bath', time: NOW - 2 * M, wash: 'quick', tags: [] },
-        { id: 'b3', childId: 'c2', type: 'bath', time: NOW - M, wash: 'quick', tags: [] },
-      ],
-    });
-    s().openSheet('bath');
-    expect(s().te.wash).toBe('quick');
-  });
   it('setWash selects the wash size', () => {
     s().openSheet('bath');
     s().setWash('full');
@@ -5791,56 +5748,38 @@ describe('rhythm-layer persistence', () => {
   });
 });
 
-describe('wash-rhythm persistence', () => {
-  it('setSmallWashesPerBig updates state and persists via savePrefs', () => {
-    s().setSmallWashesPerBig(5);
-    expect(s().smallWashesPerBig).toBe(5);
-    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 5 });
-  });
-
-  it('setSmallWashesPerBig clamps out-of-range input before storing it', () => {
-    s().setSmallWashesPerBig(99);
-    expect(s().smallWashesPerBig).toBe(30);
-    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 30 });
-    s().setSmallWashesPerBig(0);
-    expect(s().smallWashesPerBig).toBe(1);
-    expect(savePrefs).toHaveBeenCalledWith({ smallWashesPerBig: 1 });
-  });
-
-  it('hydrate applies a persisted wash rhythm', async () => {
-    h.prefs = { smallWashesPerBig: 6 };
+describe('bath rhythm persistence', () => {
+  // `AsyncStorage.setItem('budkin.prefs.v1', ...)` in the task brief becomes
+  // `h.prefs = {...}` here: `@/data/prefs` is mocked file-wide (see the
+  // "REQUIRED" comment above), so `loadPrefs()` reads `h.prefs`, never real
+  // AsyncStorage, exactly like every other hydrate test in this file.
+  it('seeds a child rhythm from the legacy pref, plus one day', async () => {
+    h.prefs = { smallWashesPerBig: 5 };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
-    await s().hydrate();
-    expect(s().smallWashesPerBig).toBe(6);
+    await useAppStore.getState().hydrate();
+    expect(useAppStore.getState().legacyRhythm).toEqual({ fullEveryDays: 6, quickEveryDays: 1 });
+    expect(useAppStore.getState().bathRhythms).toEqual({});
   });
 
-  it('hydrate applies a persisted rhythm at the low end of the range', async () => {
-    // A truthiness guard (`if (prefs.smallWashesPerBig)`) would survive 1 but
-    // silently drop a 0, so keep the `!= null` check honest at the boundary.
-    h.prefs = { smallWashesPerBig: 1 };
+  it('falls back to the built-in default with no legacy pref stored', async () => {
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
-    await s().hydrate();
-    expect(s().smallWashesPerBig).toBe(1);
+    await useAppStore.getState().hydrate();
+    expect(useAppStore.getState().legacyRhythm).toEqual({ fullEveryDays: 3, quickEveryDays: 1 });
   });
 
-  it('hydrate clamps a persisted rhythm from outside the supported range', async () => {
-    h.prefs = { smallWashesPerBig: 0 };
-    vi.mocked(loadConnection).mockResolvedValueOnce(null);
-    await s().hydrate();
-    expect(s().smallWashesPerBig).toBe(1);
+  it('writes one child rhythm without disturbing another', async () => {
+    useAppStore.setState({ bathRhythms: { c2: { fullEveryDays: 7, quickEveryDays: 2 } } });
+    useAppStore.getState().setBathRhythm('c1', { fullEveryDays: 1 });
+    expect(useAppStore.getState().bathRhythms).toEqual({
+      c1: { fullEveryDays: 1, quickEveryDays: 1 },
+      c2: { fullEveryDays: 7, quickEveryDays: 2 },
+    });
   });
 
-  it('hydrate leaves the rhythm alone when nothing was persisted', async () => {
-    h.prefs = {};
-    vi.mocked(loadConnection).mockResolvedValueOnce(null);
-    useAppStore.setState({ smallWashesPerBig: 5 });
-    await s().hydrate();
-    expect(s().smallWashesPerBig).toBe(5);
-  });
-
-  it('the store boots on the default rhythm of 3, preserving the old behaviour', () => {
-    expect(useAppStore.getInitialState().smallWashesPerBig).toBe(SMALL_WASHES_PER_BIG_DEFAULT);
-    expect(SMALL_WASHES_PER_BIG_DEFAULT).toBe(3);
+  it('clamps on the way in, so persistence never holds an out-of-range value', () => {
+    useAppStore.setState({ bathRhythms: {} });
+    useAppStore.getState().setBathRhythm('c1', { fullEveryDays: 900, quickEveryDays: -3 });
+    expect(useAppStore.getState().bathRhythms.c1).toEqual({ fullEveryDays: 30, quickEveryDays: 0 });
   });
 });
 

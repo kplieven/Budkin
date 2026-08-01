@@ -75,31 +75,35 @@ import {
   type SavedServer,
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
+import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
 import {
   activeTreatmentsForChildToday,
+  BATH_RHYTHM_DEFAULT,
+  clampBathRhythm,
   clampHourOfDay,
   clampMinuteOfDay,
-  clampSmallWashesPerBig,
   entriesForChild,
   isNapStart,
+  legacyBathRhythm,
   NAP_WINDOW_END_DEFAULT,
   NAP_WINDOW_START_DEFAULT,
   nextStartSide,
-  nextWashKind,
   overruleLasted,
   reorder,
   RHYTHM_ORIGIN_DEFAULT,
-  SMALL_WASHES_PER_BIG_DEFAULT,
+  rhythmForChild,
   startOfDay,
   teEnd,
   teStart,
+  washDueState,
 } from '@/store/selectors';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
+  BathRhythm,
   Child,
   ChildGender,
   Treatment,
@@ -167,10 +171,19 @@ interface AppState {
   milestoneCatchUp: boolean;
   /** Growth charts: whether the WHO percentile reference is drawn (default true). */
   showGrowthReference: boolean;
-  /** Bath rhythm: how many SMALL washes fall between two big ones (default 3,
-   *  range 1..30). Global rather than per-child, like every other pref. Local
-   *  only: it drives the wash pre-selection, never anything sent to the server. */
-  smallWashesPerBig: number;
+  /**
+   * Bath rhythm per child, keyed by child id. Local only: Baby Buddy has no
+   * notion of wash cadence, so this drives the due hints and the log-sheet
+   * pre-selection and nothing else. Persisted by src/data/bathRhythm.ts.
+   */
+  bathRhythms: Record<string, BathRhythm>;
+  /**
+   * The rhythm used for a child with no stored entry, derived once at hydration
+   * from the retired `smallWashesPerBig` pref, or the built-in default when that
+   * pref was never written. See `legacyBathRhythm`.
+   */
+  legacyRhythm: BathRhythm;
+  setBathRhythm: (childId: string, patch: Partial<BathRhythm>) => void;
   /** Sleep rhythm: the window in which a sleep counts as a NAP, as minutes
    *  since local midnight (default 420/1140 = 07:00 to 19:00). Start inclusive,
    *  end exclusive; a start later than the end wraps midnight. Global, like
@@ -301,7 +314,6 @@ interface AppActions {
     value: boolean,
   ) => void;
   setPumpingInterval: (minutes: number) => void;
-  setSmallWashesPerBig: (n: number) => void;
   setNapWindow: (startMin: number, endMin: number) => void;
   setRhythmOriginHour: (hour: number) => void;
   /** Toggle one Insights "Rhythm" graph layer on/off and persist the choice. */
@@ -1224,7 +1236,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   treatmentReminders: true,
   treatmentRemindersEnabledAt: null,
   milestoneCatchUp: false,
-  smallWashesPerBig: SMALL_WASHES_PER_BIG_DEFAULT,
+  bathRhythms: {},
+  legacyRhythm: BATH_RHYTHM_DEFAULT,
   napWindowStartMin: NAP_WINDOW_START_DEFAULT,
   napWindowEndMin: NAP_WINDOW_END_DEFAULT,
   rhythmOriginHour: RHYTHM_ORIGIN_DEFAULT,
@@ -1332,12 +1345,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ pumpingIntervalMin: minutes });
     void savePrefs({ pumpingIntervalMin: minutes });
   },
-  setSmallWashesPerBig: (n) => {
+  setBathRhythm: (childId, patch) => {
     // Clamp before storing so a bad value can never reach persistence, and so
-    // the number shown in Settings is the one the rhythm actually uses.
-    const v = clampSmallWashesPerBig(n);
-    set({ smallWashesPerBig: v });
-    void savePrefs({ smallWashesPerBig: v });
+    // the number shown in Settings is the one the rhythm actually uses. The
+    // child's current rhythm is the fallback, so a patch touching one axis
+    // cannot reset the other.
+    const s = get();
+    const current = rhythmForChild(s.bathRhythms, childId, s.legacyRhythm);
+    const next = clampBathRhythm({ ...current, ...patch }, current);
+    const map = { ...s.bathRhythms, [childId]: next };
+    set({ bathRhythms: map });
+    void saveBathRhythms(map);
   },
   setNapWindow: (startMin, endMin) => {
     // Both endpoints move together in one action, so the pair is always written
@@ -1423,11 +1441,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.treatmentRemindersEnabledAt !== undefined)
       set({ treatmentRemindersEnabledAt: prefs.treatmentRemindersEnabledAt });
     if (prefs.milestoneCatchUp != null) set({ milestoneCatchUp: prefs.milestoneCatchUp });
-    // `!= null`, not a truthy guard: this one is a number, and a truthy check
-    // would silently discard a legitimately stored value at the low end.
-    if (prefs.smallWashesPerBig != null) {
-      set({ smallWashesPerBig: clampSmallWashesPerBig(prefs.smallWashesPerBig) });
-    }
+    // The retired per-app rhythm pref, read once to derive the fallback for a
+    // child with nothing of their own. `!= null`, not a truthy guard: it is a
+    // number and a truthy check would discard a legitimately stored 1.
+    set({ legacyRhythm: legacyBathRhythm(prefs.smallWashesPerBig ?? undefined) });
     // Same `!= null` reasoning, and it bites harder here: 0 is midnight, a
     // perfectly ordinary boundary, and a truthy guard would silently drop it.
     if (prefs.napWindowStartMin != null) {
@@ -1447,6 +1464,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Answered milestone prompts are independent of connection state, so load
     // them once here (merges into state like the prefs above).
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
+    set({ bathRhythms: await loadBathRhythms() });
     // Treatments are user data that survives disconnect, so load the on-device copy
     // unconditionally here, exactly like timers below. In server mode this is
     // the offline cache the freshly-loaded server list merges on top of (see
@@ -2730,10 +2748,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       });
     }
     if (type === 'bath') {
-      // Pre-select the wash that's due from the small/big rhythm. Scoped to the
+      // Pre-select the wash that's due from this child's rhythm. Scoped to the
       // selected child: `entries` holds every child's records, so an unscoped
       // read would let a sibling's baths decide this child's next wash.
-      te.wash = nextWashKind(entriesForChild(get().entries, get().selectedChildId), get().smallWashesPerBig);
+      const childId = get().selectedChildId;
+      te.wash = washDueState(
+        entriesForChild(get().entries, childId),
+        rhythmForChild(get().bathRhythms, childId, get().legacyRhythm),
+        Date.now(),
+      ).nextKind;
     }
     if (type === 'temperature') {
       // Seed a normal baseline so the decimal input opens on a sensible value.
