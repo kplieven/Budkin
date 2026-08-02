@@ -113,8 +113,10 @@ export async function toggleNapFromWidget(
   // filing the stopped nap against `snap.selectedChildId` whoever it belonged to.
   // (The Timers tab stays the multi-child surface where any timer is stoppable.)
   // A timer carrying NO owner matches nobody here. Migrating those is the store's
-  // job, in `hydrate`, and this task runs with no store: a legacy unowned timer
-  // is invisible to the widget until the app has been opened once.
+  // job, in `hydrate`, and this task runs with no store, so a legacy unowned
+  // timer is invisible to the widget until the app next cold-starts WITH a
+  // connection and a born child selected (see `stampTimerOwners` for why merely
+  // opening the app is not always enough).
   const running = runningTimer(timers, 'sleep', snap.selectedChildId);
 
   if (running) {

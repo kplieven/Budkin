@@ -256,7 +256,7 @@ export interface Timer {
   /** local child id this timer belongs to: whoever started it, and nobody else.
    *  Every creation path stamps one and `hydrate` stamps the ones persisted
    *  before that existed (`stampTimerOwners`), so an absent value means "not
-   *  attributable", never "the selected child" — the read sites stopped adopting
+   *  attributable", never "the selected child": the read sites stopped adopting
    *  (see `timerBelongsTo`). Stays OPTIONAL because `budkin.pendingOps.v1` and
    *  `budkin.timers.v1` hold whole `Timer` payloads that are cast, never
    *  validated, so requiring it would only be a lie about what is on disk. */
