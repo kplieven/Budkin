@@ -25,6 +25,7 @@ import {
   loadInsightsHistory,
   loadProfileFromServer,
   type LoadResult,
+  type LoadSlice,
   loadTagsFromServer,
   pushChildToServer,
   pushTreatmentToServer,
@@ -918,6 +919,101 @@ type Get = StoreApi<AppStore>['getState'];
 type Set = StoreApi<AppStore>['setState'];
 
 /**
+ * A server load's degraded slices (see `LoadResult.incompleteSlices`) put into
+ * LOCAL child id space: which of each child's record slices came back as a
+ * FLOOR rather than an answer because their fetch failed. Those rows must be
+ * kept rather than replaced, exactly as a null `timers` keeps the on-device
+ * timers.
+ *
+ * An absent map names nobody: it means every slice of every fetched child came
+ * back whole, which is the field's own contract and what lets a caller that
+ * cannot degrade say nothing at all. A load names only children it FETCHED and
+ * failed for, so a sibling it skipped is never in here; what happens to a
+ * sibling's records is a separate question from this one.
+ *
+ * Keyed by `serverId` against the reconciled list, the way `remapChildIds`
+ * translates an incoming record's `childId`. A named child absent from that
+ * list (deleted server-side mid-request) has nothing left to protect and is
+ * dropped.
+ */
+function degradedSlicesByChild(
+  incompleteSlices: LoadResult['incompleteSlices'],
+  reconciledChildren: Child[],
+): ReadonlyMap<string, ReadonlySet<LoadSlice>> {
+  const out = new Map<string, ReadonlySet<LoadSlice>>();
+  if (incompleteSlices == null) return out;
+  for (const c of reconciledChildren) {
+    if (c.serverId == null) continue;
+    const slices = incompleteSlices[String(c.serverId)];
+    if (slices != null && slices.length > 0) out.set(c.id, new Set(slices));
+  }
+  return out;
+}
+
+/**
+ * Keep the rows this device already holds for a child's DEGRADED slices (see
+ * `degradedSlicesByChild`) rather than letting the load's empty answer for
+ * them through. Without this, one timed-out per-type request empties that
+ * slice in state, and the persistence subscription then has `saveEntries`
+ * delete the month chunks the emptying just produced.
+ *
+ * Kept, deliberately NOT unioned with whatever the load did return for the
+ * slice: a union would keep a record deleted in Baby Buddy's own UI alive for
+ * as long as that slice kept coming back degraded, while keeping the rows is
+ * one refresh late and no more. Again exactly what a null `timers` does.
+ *
+ * A degraded slice the device holds NO rows for is taken as-is. Nothing is on
+ * disk there for an empty answer to delete, so accepting it is strictly safer
+ * than discarding rows the server did return. This arm changes nothing under
+ * today's producer, which empties a degraded slice completely: the answer has
+ * no rows in it to discard either, so per-slice granularity alone is what
+ * keeps a first connect to a server with one permanently failing endpoint from
+ * opening blank. It is here for the producer that returns PARTIAL rows for a
+ * degraded slice (a fetch that fails one page of several), which is where
+ * discarding them would blank a first connect for real.
+ *
+ * `previous` may hold rows the merged list has too (callers fold the write
+ * queue into both), so a row already present is skipped rather than
+ * duplicated. Returns the input untouched when there is nothing to protect, so
+ * an ordinary load does not churn the reference.
+ *
+ * Exported for its own unit tests, like the merge helpers above. Two arms of
+ * this contract cannot be reached through today's producer, which empties a
+ * slice completely whenever it degrades, so no answer of its ever carries a
+ * row in a degraded slice: "kept, not unioned" and "taken as-is when nothing
+ * is held" both need one that does. The unit tests pin them anyway, because
+ * that producer is not the contract and the next fetch shape (a per-page
+ * failure, more than one child) can reach both.
+ */
+export function carryOverIncomplete<T extends { id: string; childId: string }>(
+  merged: T[],
+  previous: T[],
+  // `ReadonlyMap`/`ReadonlySet`, not `Map`/`Set`: the store's own `type Set`
+  // alias (the zustand setter, above) shadows the global one for every TYPE
+  // position in this file.
+  degradedSlices: ReadonlyMap<string, ReadonlySet<LoadSlice>>,
+  sliceOf: (record: T) => LoadSlice,
+): T[] {
+  if (degradedSlices.size === 0) return merged;
+  const sliceKey = (r: T) => `${r.childId} ${sliceOf(r)}`;
+  const degraded = (r: T) => degradedSlices.get(r.childId)?.has(sliceOf(r)) === true;
+  // The (child, slice) pairs that are degraded AND populated on this device. A
+  // degraded slice missing from here is one there is nothing to protect in.
+  const held = new Set<string>();
+  for (const r of previous) if (degraded(r)) held.add(sliceKey(r));
+  if (held.size === 0) return merged;
+  const frozen = (r: T) => degraded(r) && held.has(sliceKey(r));
+  const out = merged.filter((r) => !frozen(r));
+  const seen = new Set(out.map((r) => r.id));
+  for (const r of previous) {
+    if (!frozen(r) || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
  * Apply a successful `loadFromServer` result over the local view of the same
  * data, as ONE `set()`: reconcile children by `serverId` so local ids survive
  * (see `reconcileChildren`), remap incoming child references into local id
@@ -968,6 +1064,14 @@ function applyServerLoad(
   // mapping. See `remapChildIds`.
   const remappedEntries = remapChildIds(data.entries, reconciledChildren);
   const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+  // The record slices this load emptied rather than answered for (see
+  // `LoadResult.incompleteSlices`); `applied` is the rest of the load, which
+  // the spread below lands in state. Destructured apart because that metadata
+  // is not an `AppState` key and must not ride the spread into the store.
+  const { incompleteSlices, ...applied } = data;
+  // Each of the three record merges below keeps the device's own rows for a
+  // degraded slice instead of taking the floor the load returned.
+  const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
   // Keep the caller's current selection if it's still visible, checked
   // against the RECONCILED list (not just the server's) so a local child kept
   // visible by reconcileChildren above doesn't get silently deselected;
@@ -978,7 +1082,7 @@ function applyServerLoad(
     : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
   set({
     ...extra,
-    ...data,
+    ...applied,
     children: reconciledChildren,
     // Measurements created offline are pushed by `flushUnsynced`; until that
     // flush lands, merging the local unsynced ones back in is what keeps a
@@ -988,9 +1092,28 @@ function applyServerLoad(
     // `mergeUnsynced`'s doc comment): the queue merge below is entries' only
     // source, further merged by `mergeHeldBackEntries` for an expecting
     // child's held-back entries.
-    measurements: mergeUnsynced(remappedMeasurements, local.measurements),
-    entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, local.q), local.entries, reconciledChildren),
-    treatments: mergeTreatments(data.treatments, local.treatments, reconciledChildren),
+    measurements: carryOverIncomplete(
+      mergeUnsynced(remappedMeasurements, local.measurements),
+      local.measurements,
+      degradedSlices,
+      (m) => m.kind,
+    ),
+    entries: carryOverIncomplete(
+      mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, local.q), local.entries, reconciledChildren),
+      // What this device holds is state PLUS the write queue, which callers
+      // read after the fetch: an entry logged while the request was in flight
+      // is in neither the state snapshot nor a floor of an answer, and dropping
+      // it here would be the very loss this guard exists to prevent.
+      [...local.q, ...local.entries],
+      degradedSlices,
+      (e) => e.type,
+    ),
+    treatments: carryOverIncomplete(
+      mergeTreatments(data.treatments, local.treatments, reconciledChildren),
+      local.treatments,
+      degradedSlices,
+      () => 'treatment',
+    ),
     selectedChildId,
     // A null `timers` is "the fetch failed, unknown" (see
     // `LoadResult.timers`), not "none running": keep the on-device copy
@@ -2208,6 +2331,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // server (uploadUnsynced skips them: no server child to attach them to),
     // so this can never duplicate one that already flushed.
     const mergedEntries = mergeHeldBackEntries(remappedEntries, localEntries, reconciledChildren);
+    // The partial-load guard, at adopt's own hand-rolled copy of the merge: a
+    // slice the reload emptied rather than answered for keeps the records this
+    // device already holds, or one degraded request deletes the history this
+    // adopt has just uploaded. See `degradedSlicesByChild`. Nothing to fold in
+    // from the write queue here: adopt pushes the unsynced records itself and
+    // reads no queue. `applied` is the load minus that metadata, which is not
+    // an `AppState` key and must not ride the spread below into the store.
+    const { incompleteSlices, ...applied } = data;
+    const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
     // Keep the current selection if it's still visible after reconciliation
     // (checked against the RECONCILED list, not just the server's, so an
     // expecting child kept visible by reconcileChildren above doesn't get
@@ -2218,11 +2350,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ? localSelectedChildId
       : resolveSelectedChildId(reconciledChildren, data.selectedChildId);
     set({
-      ...data,
+      ...applied,
       children: reconciledChildren,
-      entries: mergedEntries,
-      measurements: mergedMeasurements,
-      treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
+      entries: carryOverIncomplete(mergedEntries, localEntries, degradedSlices, (e) => e.type),
+      measurements: carryOverIncomplete(mergedMeasurements, localMeasurements, degradedSlices, (m) => m.kind),
+      treatments: carryOverIncomplete(
+        mergeTreatments(data.treatments, get().treatments, reconciledChildren),
+        get().treatments,
+        degradedSlices,
+        () => 'treatment',
+      ),
       // A null `timers` is "the fetch failed, unknown" (see
       // `LoadResult.timers`) and must never land in state through the
       // `...data` spread above: keep the in-memory timers as they are. A
@@ -2720,11 +2857,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         picture: change.kind === 'none' ? existing.picture : pending,
       };
       const genderChanged = existing.gender !== child.gender;
-      set({
-        children: s.children.map((c) => (c.id === child.id ? child : c)),
+      set((st) => ({
+        children: st.children.map((c) => (c.id === child.id ? child : c)),
         childSheet: false,
         editingChildId: null,
-      });
+      }));
       get().showToast('Updated');
       const conn = s.connection;
       if (conn && conn.mode === 'server' && !s.offline) {
@@ -2746,12 +2883,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 // next rename or delete, and a 404'd delete is exactly how a
                 // deleted child used to come back.
                 const slug = res.slug ?? c.slug;
+                if (change.kind === 'none') return { ...c, slug };
                 // Swap the ephemeral local file URI for the durable server URL.
-                return change.kind === 'none' ? { ...c, slug } : { ...c, slug, picture: res.picture };
+                // On a remove, `null` IS the answer and must be kept; on a set it
+                // means the server stored nothing, and taking it would throw away
+                // the only copy of the photo the device still has.
+                const picture = change.kind === 'remove' ? res.picture : (res.picture ?? c.picture);
+                return { ...c, slug, picture };
               }),
             }));
           })
-          .catch(() => {});
+          .catch(() => {
+            // An online edit is queued nowhere (only the offline branch below
+            // records a pending op), so a failure here is lost work the next
+            // refresh will quietly undo. Say so rather than leaving the
+            // optimistic "Updated" standing, as deleteChild does on its own
+            // failure.
+            get().showToast(`Could not save ${child.first}`);
+          });
       } else if (conn && conn.mode === 'server' && s.offline && child.serverId != null) {
         // Already on the server, editing while offline: record the update so
         // it replays on reconnect instead of being silently overwritten by the
@@ -2776,8 +2925,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       color: nextChildColor(s.children),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
-    set({
-      children: [...s.children, child],
+    set((st) => ({
+      children: [...st.children, child],
       selectedChildId: localId,
       childSheet: false,
       editingChildId: null,
@@ -2785,7 +2934,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsLoaded: false,
       insightsEntries: [],
       insightsError: false,
-    });
+    }));
     get().showToast('Saved');
     const conn = s.connection;
     // An expected child holds a DUE date in `birth`, which the server's
@@ -2814,7 +2963,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
             void setChildGenderOnServer(conn, res.id, child.gender, Date.now()).catch(() => {});
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          // The child itself is not lost: it stays local with no serverId, and
+          // the next flush pushes it. A photo picked in the same save IS lost
+          // though, because `buildUploadDeps` pushes children with no
+          // PhotoChange, so this cannot pass silently under the "Saved" above.
+          get().showToast(`Could not save ${child.first}`);
+        });
     }
   },
 

@@ -7,13 +7,13 @@ import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
 import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
-import { entriesForChild, timersForChild } from '@/store/selectors';
+import { entriesForChild, selectServerMode, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 /**
  * Desktop dashboard's right-hand timeline rail (fixed 372px): day-grouped recent
- * activity, sharing ActivityRow + groupByDay with the History screen. Rendered
+ * activity, sharing TimelineEntry + groupByDay with the History screen. Rendered
  * only above the rail breakpoint (see showRail / the dashboard's desktop branch).
  */
 export function TimelineRail() {
@@ -30,7 +30,9 @@ export function TimelineRail() {
   // v5). Desktop and mobile must not disagree about what has reached the server.
   const queuedIds = useAppStore((s) => s.queuedIds);
   const connection = useAppStore((s) => s.connection);
-  const serverMode = connection?.mode === 'server';
+  // The shared predicate, like History: called on the already-selected
+  // `connection` rather than taking a second subscription.
+  const serverMode = selectServerMode({ connection });
   const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
   // Scoped to the selected child, like History: `entries` holds every child's
