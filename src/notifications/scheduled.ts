@@ -13,6 +13,7 @@
 import { treatmentDosageLabel, TIME_OF_DAY_ORDER } from '@/features/treatments/treatmentLabels';
 import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
+import { withChildParam } from '@/lib/deepLink';
 import { fmtDur } from '@/lib/format';
 import { catchUpDueAt, type MilestoneDef, MILESTONES } from '@/lib/milestones';
 import { isTreatmentActiveToday, runningTimer, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
@@ -144,7 +145,9 @@ function dueReminders(child: Child, now: number): ScheduledNotification[] {
       title: `${child.first} is due next week`,
       body: 'Budkin is ready when they are.',
       fireAt: lead,
-      data: { url: '/' },
+      // Every reminder names the child it is about, so the tap selects them
+      // before it lands. See `childToSelectOnOpen`.
+      data: { url: withChildParam('/', child.id) },
     });
   }
   if (day > now) {
@@ -154,7 +157,7 @@ function dueReminders(child: Child, now: number): ScheduledNotification[] {
       title: `Today is ${child.first}'s due date`,
       body: 'Tap when your baby arrives.',
       fireAt: day,
-      data: { url: '/' },
+      data: { url: withChildParam('/', child.id) },
     });
   }
   return out;
@@ -207,7 +210,10 @@ function staleReminders(timer: Timer, children: Child[], now: number): Scheduled
       title: child?.first ? `${child.first} · ${label}` : label,
       body: `Running for ${spanLabel(threshold)}. Still going?`,
       fireAt,
-      data: { url: '/timers' },
+      // `child` is the timer's OWN child and may be missing: an unattributable
+      // timer names nobody rather than adopting the selection, exactly as the
+      // title above does.
+      data: { url: withChildParam('/timers', child?.id) },
     },
   ];
 }
@@ -265,7 +271,7 @@ function ageReminders(child: Child, now: number): ScheduledNotification[] {
       title,
       body: 'Tap to look back.',
       fireAt,
-      data: { url: '/history' },
+      data: { url: withChildParam('/history', child.id) },
     });
   };
 
@@ -361,6 +367,8 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
       // every occurrence after the first.
       body: 'Tap to log a session.',
       fireAt,
+      // The one kind that names no child: pumping is parent-side, scheduled once
+      // for the device rather than per child, so there is nobody to select.
       data: { url: '/timers' },
     });
   }
@@ -447,7 +455,7 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
       // "1.25 hours". fmtDur gives "1h 15m".
       body: `Awake ${fmtDur(awakeMin)}.`,
       fireAt,
-      data: { url: '/timers' },
+      data: { url: withChildParam('/timers', child.id) },
     },
   ];
 }
@@ -496,7 +504,10 @@ function treatmentNote(treatment: Treatment, fireAt: number): ScheduledNotificat
     // Lands on the existing medication deep link with the treatment named, which
     // seeds the confirm sheet from it. See src/lib/logDeepLink.ts. The tap
     // opens, it never writes, so "tap to log the dose" stays literally true.
-    data: { url: `/log/medication?treatment=${encodeURIComponent(treatment.id)}` },
+    // The child rides along too: this one opens a WRITE surface, so the route
+    // refuses an unknown child rather than seeding the sheet against whoever
+    // happens to be selected when the alert is tapped.
+    data: { url: withChildParam(`/log/medication?treatment=${encodeURIComponent(treatment.id)}`, treatment.childId) },
   };
 }
 
@@ -690,7 +701,7 @@ function milestoneReminders(
         ? `${defs[0].title}. Most babies do this by ${defs[0].maxMonths} months.`
         : `${defs.map((d) => d.title).join(', ')}.`,
       fireAt,
-      data: { url: '/milestones' },
+      data: { url: withChildParam('/milestones', child.id) },
     });
   }
   return out;

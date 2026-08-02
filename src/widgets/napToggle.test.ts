@@ -144,7 +144,9 @@ describe('toggleNapFromWidget', () => {
     expect(postTimerNotification).toHaveBeenCalledTimes(1);
     expect(vi.mocked(postTimerNotification).mock.calls[0][0]).toMatchObject({
       title: 'Ada · Sleep',
-      data: { url: '/timers', timerId: 't1000' },
+      // Named from the timer's own child, so a tap lands on whoever the widget
+      // started the nap for even if the app is sitting on a sibling.
+      data: { url: '/timers?child=c1', timerId: 't1000' },
     });
   });
 

@@ -1,6 +1,7 @@
-import { Redirect } from 'expo-router';
+import { Redirect, useLocalSearchParams } from 'expo-router';
 import { useEffect } from 'react';
 
+import { resolveTimerDeepLink } from '@/lib/deepLink';
 import { useAppStore } from '@/store/useAppStore';
 
 /** Deep-link target `budkin://timer` (widget "Timer" button): start a timer
@@ -14,21 +15,40 @@ import { useAppStore } from '@/store/useAppStore';
  *  <Redirect> navigates via useFocusEffect and re-emits until the route actually
  *  changes, so it survives that window.
  *
- *  When the selected child is expected (not yet born), starting a timer would
- *  log an activity against a due date rather than a birth date, so the effect
- *  below refuses and this redirects to Home instead of Timers, matching the
- *  guard in log/[type].tsx. */
+ *  `?child=<localId>` names who the button was rendered for, since the widget's
+ *  bitmap outlives the selection it was built from. The decision itself lives in
+ *  `resolveTimerDeepLink`, where a test can reach it: it refuses for a child the
+ *  roster no longer holds, and for one still expected (not yet born), because
+ *  starting a timer for them would log an activity against a due date rather
+ *  than a birth date. Both refusals redirect to Home instead of Timers, matching
+ *  the guard in log/[type].tsx. */
 export default function TimerDeepLink() {
+  const { child } = useLocalSearchParams<{ child?: string }>();
   const connected = useAppStore((s) => s.connected);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
-  const expected = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.expected ?? false);
+  const selectChild = useAppStore((s) => s.selectChild);
+  // Raw slices, never a derived object or array: returning a fresh reference
+  // from a useAppStore selector loops zustand v5 forever.
+  const children = useAppStore((s) => s.children);
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
+  const refused = resolveTimerDeepLink({ child, connected, children, selectedChildId }).kind === 'none';
 
   useEffect(() => {
-    if (!connected || expected) return;
+    // Resolved again HERE, off `getState()`, rather than reusing the value the
+    // render computed: selecting the child moves `selectedChildId`, so a
+    // subscribed value in the dep list would re-run this effect on its own write
+    // and start a second timer. `child` and `connected` do not move underneath
+    // it that way.
+    const s = useAppStore.getState();
+    const action = resolveTimerDeepLink({ child, connected, children: s.children, selectedChildId: s.selectedChildId });
+    if (action.kind !== 'start') return;
+    // Before starting: `startQuickTimer` stamps the timer with whoever is
+    // selected, which is the whole reason the link carries a child at all.
+    if (action.selectChildId) selectChild(action.selectChildId);
     startQuickTimer();
-  }, [connected, expected, startQuickTimer]);
+  }, [child, connected, selectChild, startQuickTimer]);
 
   if (!connected) return <Redirect href="/onboarding" />;
-  if (expected) return <Redirect href="/(tabs)" />;
+  if (refused) return <Redirect href="/(tabs)" />;
   return <Redirect href="/timers" />;
 }

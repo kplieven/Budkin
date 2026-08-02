@@ -10,6 +10,7 @@
 import Constants from 'expo-constants';
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 
+import { withChildParam } from '@/lib/deepLink';
 import { ageOrDueLabel, fmtAgoShort } from '@/lib/format';
 import type { WidgetSnapshot } from '@/widgets/snapshot';
 import { widgetToday } from '@/widgets/today';
@@ -38,6 +39,19 @@ const SCHEME = (() => {
   if (Array.isArray(s)) return s[0] ?? 'budkin';
   return s ?? 'budkin';
 })();
+
+/**
+ * A button's deep link, naming the child whose stats it sits under. The bitmap
+ * is frozen and Android's refresh floor is 30 minutes, so the selection can have
+ * moved on since it was drawn; without the child, a tap would log against
+ * whoever is selected NOW while the widget still shows someone else. The route
+ * refuses rather than retargets when that child is gone, see
+ * `resolveLogDeepLink`. An empty snapshot names nobody and keeps the old
+ * behaviour of running against the current selection.
+ */
+function buttonUri(path: string, s: WidgetSnapshot | null): string {
+  return withChildParam(`${SCHEME}://${path}`, s?.selectedChildId);
+}
 
 function agoLabel(ms: number | null | undefined, now: number): string {
   if (ms == null) return '—';
@@ -118,12 +132,12 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
 
       <FlexWidget style={{ flexDirection: 'column', width: 'match_parent' }}>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="feeding" label="Feed" color={FEED} uri={`${SCHEME}://log/feeding`} />
-          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri={`${SCHEME}://log/diaper`} />
+          <IconButton kind="feeding" label="Feed" color={FEED} uri={buttonUri('log/feeding', s)} />
+          <IconButton kind="diaper" label="Diaper" color={DIAPER} uri={buttonUri('log/diaper', s)} />
         </FlexWidget>
         <FlexWidget style={{ flexDirection: 'row', width: 'match_parent' }}>
-          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri={`${SCHEME}://log/sleep`} />
-          <IconButton kind="timer" label="Timer" color={PRIMARY} uri={`${SCHEME}://timer`} />
+          <IconButton kind="sleep" label="Sleep" color={SLEEP} uri={buttonUri('log/sleep', s)} />
+          <IconButton kind="timer" label="Timer" color={PRIMARY} uri={buttonUri('timer', s)} />
         </FlexWidget>
       </FlexWidget>
     </FlexWidget>

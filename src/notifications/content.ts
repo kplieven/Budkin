@@ -8,6 +8,7 @@
  */
 
 import { ACTIVITY_LABEL } from '@/lib/activities';
+import { withChildParam } from '@/lib/deepLink';
 import type { Child, Timer } from '@/types/models';
 
 /** Android channel id, shared by the channel *creation* (register.android) and the
@@ -47,7 +48,11 @@ export function buildNamedTimerNotification(timer: Timer, childName: string): Ti
     identifier: timer.id,
     title: childName ? `${childName} · ${label}` : label,
     body: `Started ${formatClock(timer.start)}`,
-    data: { url: '/timers', timerId: timer.id },
+    // The tap names the timer's OWN child, taken from `childId` rather than from
+    // the name above: the headless widget caller resolves that name from a
+    // one-child snapshot, so it is the id that is trustworthy in both callers. An
+    // unattributable timer names nobody and lands on the current selection.
+    data: { url: withChildParam('/timers', timer.childId), timerId: timer.id },
   };
 }
 

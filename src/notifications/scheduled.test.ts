@@ -100,7 +100,7 @@ describe('desiredScheduled: due date', () => {
     expect(out[0].title).toBe('Rowan is due next week');
     expect(out[1].title).toBe("Today is Rowan's due date");
     expect(out.every((n) => n.identifier.startsWith(REMINDER_PREFIX))).toBe(true);
-    expect(out.every((n) => n.data.url === '/')).toBe(true);
+    expect(out.every((n) => n.data.url === '/?child=c1')).toBe(true);
   });
 
   it('encodes the fire time in the identifier so editing the due date reschedules', () => {
@@ -168,6 +168,19 @@ describe('desiredScheduled: stale timers', () => {
     expect(out[0].fireAt).toBe(at(2026, 9, 1, 20) + STALE_AFTER_MIN.sleep! * 60_000);
     expect(out[0].title).toBe('Rowan · Sleep');
     expect(out[0].body).toBe('Running for 14 hours. Still going?');
+    expect(out[0].data.url).toBe('/timers?child=c1');
+  });
+
+  it('names no child for a timer nobody owns', () => {
+    // `childId` is optional on Timer, because the persisted payloads are cast and
+    // never validated, and an absent one means "not attributable" rather than
+    // "the selected child". So the tap carries no child either, and lands on the
+    // current selection. Same permanent shape as a reminder scheduled before the
+    // parameter existed.
+    const out = desiredScheduled(
+      input({ children: [born], timers: [timer({ childId: undefined })], prefs: prefs({ ageMilestones: false }) }),
+      at(2026, 9, 1, 21),
+    );
     expect(out[0].data.url).toBe('/timers');
   });
 
@@ -280,7 +293,7 @@ describe('desiredScheduled: age milestones', () => {
     expect(out[0].title).toBe('Rowan is one week old today.');
     expect(out[2].title).toBe('Rowan is three months old today.');
     expect(out[5].title).toBe('Happy first birthday, Rowan.');
-    expect(out.every((n) => n.data.url === '/history')).toBe(true);
+    expect(out.every((n) => n.data.url === '/history?child=c1')).toBe(true);
   });
 
   it('clamps a month step to the last day of a short month', () => {
@@ -351,6 +364,9 @@ describe('desiredScheduled: pumping', () => {
     expect(out[1].fireAt).toBe(at(2026, 9, 1, 12));
     expect(out[0].title).toBe('Time to pump');
     expect(out[0].body).toBe('Tap to log a session.');
+    // Deliberately childless, unlike every other kind: pumping is parent-side,
+    // scheduled once for the device rather than per child, so there is nobody
+    // for the tap to select.
     expect(out[0].data.url).toBe('/timers');
   });
 
@@ -598,7 +614,7 @@ describe('nap suggestions', () => {
     expect(n.fireAt).toBe(at(2026, 10, 31, 10) + 15 * 60_000); // 09:00 + 1h15
     expect(n.title).toBe('Rowan may be ready for a nap');
     expect(n.body).toBe('Awake 1h 15m.');
-    expect(n.data.url).toBe('/timers');
+    expect(n.data.url).toBe('/timers?child=c1');
     expect(n.identifier).toBe(`${REMINDER_PREFIX}nap:c1:${n.fireAt}`);
   });
 
@@ -774,7 +790,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     expect(out[0].kind).toBe('treatment');
     expect(out[0].title).toBe('Omeprazol due');
     expect(out[0].body).toBe('5 mg');
-    expect(out[0].data.url).toBe('/log/medication?treatment=treatment1');
+    expect(out[0].data.url).toBe('/log/medication?treatment=treatment1&child=c1');
     expect(out[0].identifier).toBe(`${REMINDER_PREFIX}treatment:treatment1:${at(2026, 9, 2, 8)}`);
   });
 
@@ -1123,7 +1139,7 @@ describe('desiredScheduled: milestone catch-up', () => {
     const solo = out.find((n) => n.identifier.includes('lifts-head'));
     expect(solo?.title).toBe('A milestone to check for Rowan.');
     expect(solo?.body).toBe('Lifts head. Most babies do this by 3 months.');
-    expect(solo?.data.url).toBe('/milestones');
+    expect(solo?.data.url).toBe('/milestones?child=c1');
   });
 
   it('skips milestones already logged or already answered', () => {
