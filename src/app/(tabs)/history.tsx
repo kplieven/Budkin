@@ -8,6 +8,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
+import { childAttribution } from '@/features/activity/childAttribution';
 import { activityOptions, dayOptions, filterItems, type TimelineFilter } from '@/features/activity/filter';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
 import {
@@ -17,6 +18,7 @@ import {
 } from '@/features/activity/HistoryFilters';
 import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
+import { eligibleTargetChildren } from '@/lib/logTargets';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { entriesForChild, selectServerMode, timersForChild } from '@/store/selectors';
@@ -50,6 +52,10 @@ export default function History() {
   const nowMinute = useAppStore((s) => Math.floor(s.now / 60000));
   const now = nowMinute * 60000;
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  // Raw array out of the store, derived below in the render body (zustand v5:
+  // `eligibleTargetChildren` returns a fresh array, so a selector wrapping it
+  // would make every snapshot look changed and loop forever).
+  const children = useAppStore((s) => s.children);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
@@ -78,19 +84,47 @@ export default function History() {
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
+  // The household view: show every child's activity at once, each row naming
+  // whose it is. Session-local like the filters below, and for the same reason:
+  // it is a way to read the list you are looking at now, not a preference to
+  // carry into the next launch.
+  //
+  // Offered only from two children who can OWN activity. An expecting child is
+  // excluded by `eligibleTargetChildren`, because their `birth` is a due date
+  // and nothing can be logged against them, so counting them would offer a
+  // toggle that adds no rows. The same rule the log sheet's target picker uses,
+  // so the two cannot disagree about what a household is.
+  const householdChildren = eligibleTargetChildren(children);
+  const canShowHousehold = householdChildren.length > 1;
+  const [household, setHousehold] = useState(false);
+  // Gated rather than reset, so deleting a sibling (or switching to a server
+  // that has one child) quietly falls back to the single-child view and
+  // re-adding one restores what the user had chosen, instead of a stale `true`
+  // rendering an unattributed list with no chip left to explain it.
+  const showHousehold = household && canShowHousehold;
+
   // `entries` holds every child's records, so scope to the selected child first:
   // otherwise switching child (or selecting an expecting one, which owns no
   // activity at all) shows the previous child's timeline. General notes live in
   // the same shared array (for queue/undo/sync reuse) but have their OWN
   // dedicated tab, so they're excluded from the activity timeline too.
-  const activityEntries = entriesForChild(entries, selectedChildId).filter(
-    (e) => e.type !== 'note' && e.type !== 'milestone',
-  );
-  // Running timers belong here too: they are this child's activity, just not
+  const isActivity = (e: { type: string }) => e.type !== 'note' && e.type !== 'milestone';
+  // Running timers belong here too: they are the child's activity, just not
   // finished. Marking an already-logged entry "still ongoing" converts it into
   // a timer, so without this the row the user was looking at would vanish from
   // the very list they marked it in.
-  const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
+  //
+  // Built per child through the SAME two scoping helpers in both modes, rather
+  // than by dropping the filters when the household view is on. That keeps the
+  // documented per-child rules in force: `timersForChild` refuses to adopt an
+  // unowned timer (the Timers tab deliberately lists the raw array instead, so
+  // a legacy timer stays stoppable, but here an unattributable row would draw a
+  // chipless entry in an attributed list), and `entriesForChild` refuses an
+  // entry whose child it cannot resolve. `groupByDay` sorts, so assembling
+  // child by child costs no ordering.
+  const items = showHousehold
+    ? householdChildren.flatMap((c) => [...entriesForChild(entries, c.id).filter(isActivity), ...timersForChild(timers, c.id)])
+    : [...entriesForChild(entries, selectedChildId).filter(isActivity), ...timersForChild(timers, selectedChildId)];
 
   // Day + activity filters, session-local: a filter is a way to read the list you
   // are looking at now, not a preference to carry into the next launch.
@@ -128,7 +162,17 @@ export default function History() {
       </View>
     ) : (
       <>
-        <HistoryFilterChips filter={filter} now={now} onOpen={setFilterSheet} onChange={setFilter} />
+        <HistoryFilterChips
+          filter={filter}
+          now={now}
+          onOpen={setFilterSheet}
+          onChange={setFilter}
+          // null offers no toggle at all. The label names the CURRENT state, the
+          // way the day and activity chips beside it do.
+          household={canShowHousehold ? showHousehold : null}
+          householdLabel={showHousehold ? 'Everyone' : (child?.first ?? 'This child')}
+          onToggleHousehold={() => setHousehold((v) => !v)}
+        />
         {visible.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
             <Txt weight={700} size={16}>
@@ -142,6 +186,13 @@ export default function History() {
               Nothing here matches the current filter.
             </Txt>
             <Pressable
+              // The second of the two hard-coded cleared-state literals (the
+              // other is in `HistoryFilterChips`). Both spell `TimelineFilter`
+              // out in full, so neither touches the household toggle, which is
+              // deliberately not part of that type: clearing a day and an
+              // activity must not also throw the user back to one child. If the
+              // toggle is ever moved INTO `TimelineFilter`, these two literals
+              // decide that by accident.
               onPress={() => setFilter({ day: null, types: [] })}
               accessibilityRole="button"
               style={(s) => [
@@ -175,6 +226,12 @@ export default function History() {
                     isFirst={i === 0}
                     isLast={i === g.items.length - 1}
                     queued={isItemQueued(e, queued)}
+                    // Only while the household view is on: with one child's rows
+                    // on screen the answer is never in doubt, and
+                    // `childAttribution` would fall silent anyway below two
+                    // children. Passed the ROW's own child, never the selected
+                    // one, which is the whole point of the view.
+                    child={showHousehold ? childAttribution(e.childId, children) : undefined}
                   />
                 ))}
               </View>

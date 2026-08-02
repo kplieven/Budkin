@@ -285,7 +285,8 @@ interface AppState {
    * What each child was last fed, keyed by child id: the seed the feeding sheet
    * opens on. See `LastFeed` for why it is per child. Written by `save()`'s
    * feeding branch, persisted to `budkin.lastFeed.v1`, and topped up by the
-   * server load for the one child a refresh fetched (see `mergeLastFeed`).
+   * server load for every child a refresh fetched that has ever been fed (see
+   * `mergeLastFeed`).
    */
   lastFeed: Record<string, LastFeed>;
   /**
@@ -945,11 +946,13 @@ function stampTimerOwners(timers: Timer[], children: Child[], selectedChildId: s
  *  record's `childId`, and for the same reason: the load has no local state to
  *  consult. Must run AFTER `reconcileChildren`, on its output.
  *
- *  Merged, never replaced. A load only ever covers the ONE child it fetched, and
- *  `refresh()` fires on every child switch, so replacing would wipe the
- *  sibling's prefill on each A-to-B-to-A round trip. An empty answer therefore
- *  changes nothing and returns the same reference, so the persistence
- *  subscription doesn't rewrite the key on every refresh. */
+ *  Merged, never replaced. A load now covers every child, but it still answers
+ *  only for those that have ever been fed: a child with no feeds is ABSENT from
+ *  the incoming map rather than keyed to a default, so replacing would wipe the
+ *  prefill of every never-fed child on each refresh. It also answers for no
+ *  child at all whose feeding slice degraded. An empty answer therefore changes
+ *  nothing and returns the same reference, so the persistence subscription
+ *  doesn't rewrite the key on every refresh. */
 function mergeLastFeed(
   local: Record<string, LastFeed>,
   incoming: Record<string, LastFeed>,
@@ -1083,9 +1086,12 @@ function degradedSlicesByChild(
  * this contract cannot be reached through today's producer, which empties a
  * slice completely whenever it degrades, so no answer of its ever carries a
  * row in a degraded slice: "kept, not unioned" and "taken as-is when nothing
- * is held" both need one that does. The unit tests pin them anyway, because
- * that producer is not the contract and the next fetch shape (a per-page
- * failure, more than one child) can reach both.
+ * is held" both need one that does. Fanning the load out to every child did
+ * NOT unlock them, and could not have: a slice is degraded per (child, slice)
+ * pair, so siblings never share a verdict however many of them there are. What
+ * would unlock them is a producer that answers PARTIALLY within one slice, such
+ * as a per-page failure inside a paginated fetch. The unit tests pin both arms
+ * anyway, because that producer is not the contract.
  */
 export function carryOverIncomplete<T extends { id: string; childId: string }>(
   merged: T[],
@@ -1242,10 +1248,11 @@ function applyServerLoad(
         ? local.timers
         : reconcileTimers(local.timers, remapChildIds(data.timers, reconciledChildren)),
     // Another key that must stay AFTER the `...data` spread, for a different
-    // reason than `timers`: the answer is right but PARTIAL. It covers only the
-    // child this load fetched, so spreading it wholesale would drop every
-    // sibling's prefill on a refresh, which fires on each child switch. See
-    // `mergeLastFeed`, which also puts the incoming key into local id space.
+    // reason than `timers`: the answer is right but PARTIAL. It names only the
+    // children that have ever been fed, so spreading it wholesale would drop the
+    // prefill of every child who has not, and of any child whose feeding slice
+    // degraded. See `mergeLastFeed`, which also puts the incoming keys into
+    // local id space.
     lastFeed: mergeLastFeed(local.lastFeed, data.lastFeed, reconciledChildren),
   });
 }
@@ -2106,10 +2113,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // a moment after the UI appears, the same UX a warm-session 401 already
     // has), its unreachable branch sets `offline: true`, and its
     // `timers: null` guard keeps running timers when only the timers fetch
-    // failed. It reads `s.children`/`s.selectedChildId` for the
-    // preferred-child fetch, which the set() above just populated from the
-    // entity store, so the persisted selection still steers which child is
-    // fetched; keep that ordering. Deliberately not awaited: hydrate's
+    // failed. It reads `s.children`/`s.selectedChildId` to nominate the
+    // preferred child, which the set() above just populated from the entity
+    // store, so the persisted selection survives the load; keep that ordering.
+    // It no longer steers WHICH children are fetched (they all are), so this is
+    // now about the selection alone. Deliberately not awaited: hydrate's
     // contract is now "the UI can render", not "the server has answered".
     void get().refresh();
   },
@@ -2129,9 +2137,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // until connectivity returns. Mirrors cold `hydrate`.
     const localTimers = await loadTimers();
     try {
-      // Fetch the currently selected child, not the server's first (see
-      // `hydrate` above). Null for a child that was never pushed, which keeps
-      // the old children[0] fallback.
+      // Every child's records come back, not just the selected one's (see
+      // `loadFromServer`). The id passed here no longer steers the fetch: it is
+      // only what the answer nominates as its `selectedChildId`, and it is null
+      // for a child that was never pushed, which keeps the old children[0]
+      // fallback. `applyServerLoad` prefers the caller's own selection over it
+      // anyway whenever that child is still visible.
       const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
       // Read the write queue for the same reason `hydrate` does: this reload
       // replaces `entries` wholesale with server data, and an entry that has
@@ -2512,8 +2523,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // non-null answer is remapped and taken wholesale, as before.
       timers: data.timers == null ? get().timers : remapChildIds(data.timers, reconciledChildren),
       // Explicit and AFTER the spread for the same reason as in
-      // `applyServerLoad`: the server's answer covers one child, so taking it
-      // wholesale would drop every sibling's feeding prefill.
+      // `applyServerLoad`: the server's answer names only the children that have
+      // ever been fed, so taking it wholesale would drop the prefill of every
+      // child who has not.
       lastFeed: mergeLastFeed(get().lastFeed, data.lastFeed, reconciledChildren),
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
@@ -2949,6 +2961,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // ---- child switcher ----
+  // Purely local, in BOTH modes, and deliberately so. This used to fire a
+  // refresh in server mode, because `entries`/`measurements` then held only the
+  // one child the last fetch asked for and the sibling we just switched to would
+  // otherwise show an empty History, Growth and status strip. Since 0.15.0 a
+  // load fetches every child (see `loadFromServer`), so their records are
+  // already resident and a switch has nothing to wait for: refetching here would
+  // cost 13 requests per child on every tap of the switcher, to redraw what is
+  // already on screen. Freshness comes from the foreground refresh and
+  // pull-to-refresh, as it does everywhere else.
+  //
+  // `insightsEntries` is the exception that still clears: it is a 90-day deep
+  // history fetched per child on demand, not part of the load, so it is genuinely
+  // stale for the child being switched to. `loadInsights` refills it lazily.
   selectChild: (id) => {
     set({
       selectedChildId: id,
@@ -2957,22 +2982,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsEntries: [],
       insightsError: false,
     });
-    // In server mode `entries`/`measurements` only ever hold the ONE child the
-    // last fetch asked for (see `loadFromServer`'s `preferredChildServerId`),
-    // so scoping the display by child is only half the fix: without this the
-    // sibling we just switched to shows an empty History, Growth and status
-    // strip until the user happens to pull to refresh. Local mode already has
-    // every child's records in memory, so there is nothing to fetch.
-    //
-    // Fire-and-forget, like the flushes elsewhere: the switch itself is a local
-    // UI action and must land whatever the network does. `refresh` guards its
-    // own re-entry (`refreshInFlight`) and no-ops for demo, no connection, and
-    // the manual offline override, so this needs no further gating. A failed
-    // fetch does leave the offline banner up, which is deliberate: it is the
-    // only thing that explains the empty history. What it is not is the retry:
-    // in server mode, which is exactly the branch below, pressing it opens the
-    // offline queue screen, and the re-check lives on that screen's Retry.
-    if (get().connection?.mode === 'server') void get().refresh();
   },
   openSwitcher: () => set({ showChildSwitcher: true }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
@@ -3302,12 +3311,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     }
     get().showToast(`${child.first} deleted`);
-    // The re-point above assigns `selectedChildId` directly rather than going
-    // through `selectChild`, so it does not inherit selectChild's refetch. In
-    // server mode `entries`/`measurements` only ever hold the ONE child the last
-    // fetch asked for, so without this the surviving child's History, Growth and
-    // status strip would sit empty until the user happened to pull to refresh.
-    // Local mode already has every child's records in memory.
+    // Reconcile after the DELETE this action just sent, which Baby Buddy
+    // cascades server-side over the child's whole history.
+    //
+    // This is no longer about filling an empty screen. It existed because a load
+    // fetched only the selected child, so the survivor this re-point lands on had
+    // no records in memory and sat empty until a pull-to-refresh; since 0.15.0
+    // every child's records are already resident (see `loadFromServer`) and the
+    // survivor draws immediately. What is left is the ordinary reason to re-read
+    // after a destructive write, and it stays because a delete is a rare,
+    // deliberate action rather than something on a hot path: the same 13N cost
+    // that argued the refetch out of `selectChild` (once per tap of the child
+    // switcher) is paid here at most once per deleted child.
     //
     // Deliberately after the awaited DELETE above, never before it. (A refresh
     // that was ALREADY in flight when this ran is a separate, pre-existing race:

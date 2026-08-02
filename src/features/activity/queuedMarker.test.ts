@@ -109,4 +109,35 @@ describe('timelineRowLabel', () => {
       'Edit running Sleep, 20m so far, waiting to upload',
     );
   });
+
+  it("names the row's child, so the chip History draws is also announced", () => {
+    expect(
+      timelineRowLabel({ activity: 'Diaper', ongoing: false, timer: false, elapsed: '', queued: false, child: ', Mara' }),
+    ).toBe('Edit Diaper, Mara');
+  });
+
+  it('puts the child with the activity, before the elapsed time', () => {
+    // Whose row this is is part of WHAT the row is, not something still true of
+    // it, so it goes in the first clause rather than trailing the sentence.
+    expect(
+      timelineRowLabel({ activity: 'Sleep', ongoing: true, timer: true, elapsed: '20m', queued: false, child: ', Tom' }),
+    ).toBe('Edit running Sleep timer, Tom, 20m so far');
+  });
+
+  it('keeps the queued clause last even with a child named', () => {
+    expect(
+      timelineRowLabel({ activity: 'Sleep', ongoing: true, timer: false, elapsed: '20m', queued: true, child: ', Tom' }),
+    ).toBe('Edit running Sleep, Tom, 20m so far, waiting to upload');
+  });
+
+  it('says nothing extra when the household view is off or the household has one child', () => {
+    // `childAttribution` returns '' rather than null for the spoken form, and an
+    // absent prop is the desktop rail, which never attributes at all. Both must
+    // land on the byte-identical label the row had before this existed.
+    const bare = timelineRowLabel({ activity: 'Diaper', ongoing: false, timer: false, elapsed: '', queued: false });
+    expect(
+      timelineRowLabel({ activity: 'Diaper', ongoing: false, timer: false, elapsed: '', queued: false, child: '' }),
+    ).toBe(bare);
+    expect(bare).toBe('Edit Diaper');
+  });
 });
