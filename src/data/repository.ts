@@ -84,9 +84,16 @@ export interface LoadResult {
    *  Accepted residual: a slice whose endpoint keeps failing with something
    *  other than a 404 stays at the rows the device already holds, so a record
    *  added or deleted elsewhere in THAT slice lands only once the endpoint
-   *  answers again. Bounded to the broken slice, and consumers take the answer
-   *  as-is for a slice they hold no rows for, so it cannot present as an empty
-   *  app.
+   *  answers again. Bounded to the broken slice: every other slice of the same
+   *  child keeps flowing, which is what stops a broken endpoint from presenting
+   *  as an empty app.
+   *
+   *  This signal FAILS CLOSED, and that is the trade: an unreported failure is
+   *  read as a real answer, so its rows are deleted rather than preserved. Any
+   *  new per-type fetch MUST therefore route its catch through `orEmpty` with
+   *  the slices it covers. Coverage is asserted in the tests against the whole
+   *  `ActivityType`/`MeasurementKind` vocabulary, so a new activity that no
+   *  fetch reports for fails a test rather than quietly losing its records.
    *
    *  `listGenders` is deliberately not counted: gender is account-wide rather
    *  than part of any child's record slice, it is merged onto `children` rather

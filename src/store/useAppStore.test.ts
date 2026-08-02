@@ -5100,9 +5100,11 @@ describe('a partial server load never deletes history', () => {
 
   it('takes a degraded slice AS-IS when the device holds no rows for it', async () => {
     // Nothing on disk for that slice means nothing an empty answer can delete,
-    // so there is nothing to protect and the answer is taken. This is what stops
-    // a permanently failing endpoint from freezing a slice that was never
-    // populated, and it is what keeps a first connect from opening blank.
+    // so there is nothing to protect and the answer is taken. Through this
+    // pipeline that is the per-slice granularity doing the work, not the
+    // holds-nothing arm: the feeding is in a slice that answered, so nothing
+    // would filter it either way. The arm itself is pinned as a unit test
+    // below, where an answer can carry rows in a degraded slice.
     const feed: Entry = { id: 'feed-new', serverId: 13, childId: '501', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
     useAppStore.setState({ children: [SYNCED_C1], selectedChildId: 'c1', entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
@@ -5244,8 +5246,10 @@ describe('a partial server load never deletes history', () => {
 
     it('takes the answer as-is for a degraded slice it holds nothing for', () => {
       // Nothing on disk to lose, so the rows the server did return are strictly
-      // better than none: this is what stops a permanently broken endpoint from
-      // blanking a slice that was never populated.
+      // better than none. Only reachable with an answer that carries rows in a
+      // degraded slice, which is why it is pinned here and not through the
+      // store: a producer that fails one page of several would build one, and
+      // discarding those rows is what would blank a first connect for real.
       const answer = [row('n-3', 'c1', 'note')];
 
       const out = carryOverIncomplete(answer, [], degraded('c1', 'note'), (r) => r.type as LoadSlice);
@@ -5264,9 +5268,10 @@ describe('a partial server load never deletes history', () => {
 
   it('a FIRST connect to a server with one broken endpoint still opens on the rows it did return', async () => {
     // The worst way to get this wrong: a device with nothing stored yet, and a
-    // server whose /api/medication/ 500s on every load. Guarding a slice the
-    // device holds no rows for would show a blank history and blank
-    // measurements, and would keep showing them on every later refresh.
+    // server whose /api/medication/ 500s on every load. Guarding the whole
+    // CHILD on that one broken endpoint, as a per-child signal must, shows a
+    // blank history and blank measurements and keeps showing them on every
+    // later refresh. Naming the slice that failed is what fixes it.
     useAppStore.setState({ connection: null, connected: false, children: [], entries: [], measurements: [], selectedChildId: '' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [serverMira],

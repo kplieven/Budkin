@@ -964,9 +964,13 @@ function degradedSlicesByChild(
  *
  * A degraded slice the device holds NO rows for is taken as-is. Nothing is on
  * disk there for an empty answer to delete, so accepting it is strictly safer
- * than discarding rows the server did return, and it is what keeps a first
- * connect to a server with one permanently failing endpoint from opening
- * blank, and staying blank on every refresh after it.
+ * than discarding rows the server did return. This arm changes nothing under
+ * today's producer, which empties a degraded slice completely: the answer has
+ * no rows in it to discard either, so per-slice granularity alone is what
+ * keeps a first connect to a server with one permanently failing endpoint from
+ * opening blank. It is here for the producer that returns PARTIAL rows for a
+ * degraded slice (a fetch that fails one page of several), which is where
+ * discarding them would blank a first connect for real.
  *
  * `previous` may hold rows the merged list has too (callers fold the write
  * queue into both), so a row already present is skipped rather than
