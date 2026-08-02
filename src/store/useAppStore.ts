@@ -3140,7 +3140,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const m: Measurement = {
       id: existing ? existing.id : 'm' + Date.now(),
       serverId: existing?.serverId,
-      childId: s.selectedChildId,
+      // Same rule `save()` follows: an edit keeps the record with whoever it
+      // was about, and re-stamping the selected child would move it on the
+      // server too.
+      childId: existing?.childId ?? s.selectedChildId,
       kind,
       value,
       date,
@@ -3457,8 +3460,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (type === 'medication' && !s.te.medName?.trim()) return;
     const te = s.te;
     const now = s.now;
-    const childId = s.selectedChildId;
     const existing = s.editingId ? s.entries.find((e) => e.id === s.editingId) : null;
+    // An edit keeps the record with whoever it was about. Re-stamping the
+    // selected child here would also move it server-side, since the update
+    // PATCHes `child:` along with everything else.
+    const childId = existing?.childId ?? s.selectedChildId;
     const id = existing ? existing.id : 'e' + Date.now();
     // for breastfeeding "both", record the starting side as a left/right tag
     const tags =
@@ -3607,8 +3613,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Undo is transactional (see `undoDelete`): it restores the entry and
     // discards the timer together, so the user can never hold both.
     if (te.ongoing && te.shape === 'interval') {
-      // A timer belongs to whoever the record was about, not to whoever happens
-      // to be selected. Same rule `stopTimer` follows in reverse.
+      // Spelled out rather than just reusing `childId`: on an edit the two are
+      // now equal (see where `childId` is bound), but on a fresh draft
+      // `childId` IS the selection, and a timer belongs to whoever the record
+      // was about. Same rule `stopTimer` follows in reverse.
       const timerChildId = existing?.childId ?? childId;
       const timer = buildTimerFromDraft(
         't' + Date.now(),
