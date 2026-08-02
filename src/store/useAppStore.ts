@@ -3228,16 +3228,30 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const purgedEntries = s.entries.filter((e) => e.childId === id);
     const purgedMeasurements = s.measurements.filter((m) => m.childId === id);
     const purgedTimers = s.timers.filter((t) => t.childId === id);
-    // Purge the deleted child's entries/measurements. In local mode every
-    // child's data lives in state, so this drops the orphans — and, via the
-    // persistence subscription, from the durable entity store (saveEntries /
-    // saveMeasurements fire on the new array refs). In server mode only the
-    // selected child's entries are loaded, so this is a no-op for a
-    // non-selected child there.
+    const purgedTreatments = s.treatments.filter((c) => c.childId === id);
+    // Purge the deleted child's records. Every child's data lives in state in
+    // BOTH modes now (since 0.15.0 a server load fetches them all, see
+    // `loadFromServer`), so this drops the orphans wherever they came from, and
+    // the persistence subscription carries the same removal to disk
+    // (saveEntries / saveMeasurements / saveTreatments all fire on the new array
+    // refs). It used to be a no-op for a non-selected child in server mode,
+    // because only the selected child's records were loaded, which left that
+    // child's rows in the entity store with no child to own them.
+    //
+    // `lastFeed` and `bathRhythms` are deliberately NOT purged. Both are keyed
+    // by child id rather than being lists of records, both are tiny, and both
+    // are re-seeded from the child's own history if that id is ever reused; the
+    // two are consistent with each other and neither can strand a visible row.
     const patch: Partial<AppState> = {
       children: nextChildren,
       entries: s.entries.filter((e) => e.childId !== id),
       measurements: s.measurements.filter((m) => m.childId !== id),
+      // Treatments were the one record list this missed. They persist through
+      // their own store (`saveTreatments`), so leaving them behind kept a
+      // deleted child's medication regimens on disk forever, and
+      // `treatmentReminders` would keep scheduling doses for a child the app no
+      // longer has.
+      treatments: s.treatments.filter((c) => c.childId !== id),
       // The deleted child's running timers, and only those. Ungated on the
       // selection on purpose, and it fixes a bug in both directions: this used
       // to wipe EVERY timer when the deleted child happened to be selected
@@ -3293,11 +3307,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
           const entryIds = new Set(st.entries.map((e) => e.id));
           const measurementIds = new Set(st.measurements.map((m) => m.id));
           const timerIds = new Set(st.timers.map((t) => t.id));
+          const treatmentIds = new Set(st.treatments.map((c) => c.id));
           return {
             children,
             entries: [...purgedEntries.filter((e) => !entryIds.has(e.id)), ...st.entries],
             measurements: [...purgedMeasurements.filter((m) => !measurementIds.has(m.id)), ...st.measurements],
             timers: [...purgedTimers.filter((t) => !timerIds.has(t.id)), ...st.timers],
+            // Restored with the rest: the purge above is what made this
+            // necessary. A treatment lives only on this device until it syncs,
+            // so a failed delete that put the child back but not their regimens
+            // would lose them for good.
+            treatments: [...purgedTreatments.filter((c) => !treatmentIds.has(c.id)), ...st.treatments],
             // Only reclaim the selection if nothing else has claimed it since
             // (the user may have switched children while this was in flight).
             selectedChildId:

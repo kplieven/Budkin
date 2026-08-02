@@ -4497,6 +4497,63 @@ describe('deleteChild', () => {
     expect(s().toast).toBe('Could not delete Mira');
   });
 
+  it("purges the deleted child's treatments, and only theirs", async () => {
+    // Treatments were the one record list the purge missed. They persist
+    // through their own store, so a deleted child's medication regimens
+    // survived on disk forever and `treatmentReminders` kept scheduling doses
+    // for a child the app no longer had.
+    const treatment = (id: string, childId: string): Treatment => ({
+      id,
+      childId,
+      name: `med-${id}`,
+      dosage: 2.5,
+      dosageUnit: 'mL',
+      scheduleMode: 'everyHours',
+      everyHours: 8,
+      timesOfDay: [],
+      fromDate: NOW,
+      active: true,
+    });
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      treatments: [treatment('t-mira', '5'), treatment('t-nova', '6')],
+    });
+
+    await s().deleteChild('5');
+
+    expect(s().treatments.map((c) => c.id)).toEqual(['t-nova']);
+  });
+
+  it("a failed server delete restores the child's treatments too", async () => {
+    // The purge made this necessary: a treatment lives only on this device
+    // until it syncs, so putting the child back without their regimens would
+    // lose them for good.
+    h.childDeleteFails = true;
+    const treatment: Treatment = {
+      id: 't-mira',
+      childId: '5',
+      name: 'Paracetamol',
+      dosage: 2.5,
+      dosageUnit: 'mL',
+      scheduleMode: 'everyHours',
+      everyHours: 8,
+      timesOfDay: [],
+      fromDate: NOW,
+      active: true,
+    };
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira')],
+      selectedChildId: '5',
+      treatments: [treatment],
+    });
+
+    await s().deleteChild('5');
+
+    expect(s().children.map((c) => c.id)).toEqual(['5']);
+    expect(s().treatments.map((c) => c.id)).toEqual(['t-mira']);
+  });
+
   it('a failed server delete keeps entries written during the round trip', async () => {
     // The restore merges rather than snapping state back wholesale, so a write
     // that landed while the DELETE was in flight is not lost.
