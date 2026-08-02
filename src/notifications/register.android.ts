@@ -67,17 +67,20 @@ function openFromResponse(response: Notifications.NotificationResponse | null): 
  *  overwrite anything set before it lands, so waiting is the only correct order.
  *  A warm tap runs straight through.
  *
- *  Two orderings here are load-bearing. `unsubscribe` before `apply`, because
+ *  One ordering here is load-bearing: `unsubscribe` before `apply`, because
  *  `apply` calls `selectChild`, which re-enters `set()` synchronously and would
  *  otherwise re-invoke this listener. Today's `apply` recomputes to a no-op on
  *  that second pass, the child it names being the selected one by then, so this
- *  order is what stops a later, less idempotent one from recursing. And
- *  `refreshInFlight` being set before `refresh`'s first await: `apply` runs from
- *  inside hydrate's own `set()`, so in server mode `selectChild`'s `refresh()`
- *  starts first and hydrate's own `void get().refresh()` then no-ops. That is
- *  the better of the two outcomes, the fetch targeting the deep-linked child
- *  rather than the persisted one, but it only holds while that flag is set
- *  synchronously. */
+ *  order is what stops a later, less idempotent one from recursing.
+ *
+ *  There used to be a second one. `selectChild` fired a `refresh()` in server
+ *  mode, and because `apply` runs from inside hydrate's own `set()`, that fetch
+ *  won the race against hydrate's own `void get().refresh()` and left it to
+ *  no-op on `refreshInFlight`. Which of the two won mattered, because a fetch
+ *  covered ONE child and the winner decided whether that was the deep-linked
+ *  child or the persisted one. Since 0.15.0 `selectChild` fires nothing and a
+ *  load covers every child, so hydrate's refresh simply runs and the deep-linked
+ *  child's records arrive in it either way. */
 function whenHydrated(apply: () => void): void {
   if (!useAppStore.getState().hydrating) return apply();
   const unsubscribe = useAppStore.subscribe((state) => {

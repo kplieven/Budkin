@@ -110,31 +110,83 @@ describe('loadProfileFromServer', () => {
   });
 });
 
-describe('loadFromServer child selection', () => {
+describe('loadFromServer fans out to every child', () => {
   const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
   const serverChildren = [
     { id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' },
     { id: '9', serverId: 9, first: 'Theo', last: '', birth: 0, color: '#fff' },
   ];
+  const feeding = (childId: string, start: number, feedType = 'breast', method = 'left') => ({
+    id: `f-${childId}-${start}`,
+    serverId: start,
+    type: 'feeding',
+    childId,
+    start,
+    end: start + 1000,
+    feedType,
+    method,
+    amount: null,
+    tags: [],
+  });
 
   const resetLists = () => {
     listFeedings.mockReset().mockResolvedValue([]);
     listSleep.mockReset().mockResolvedValue([]);
     listChanges.mockReset().mockResolvedValue([]);
+    listPumping.mockReset().mockResolvedValue([]);
+    listTummy.mockReset().mockResolvedValue([]);
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listTemperature.mockReset().mockResolvedValue([]);
     listMedication.mockReset().mockResolvedValue([]);
+    listChildTreatments.mockReset().mockResolvedValue([]);
+    listMeasurements.mockReset().mockResolvedValue([]);
     listTimers.mockReset().mockResolvedValue([]);
   };
 
-  it('fetches the preferred child rather than the first one', async () => {
+  it("fetches the SIBLING's records too, not just the selected child's", async () => {
+    // The regression this whole change exists for. Fetching only the selection
+    // left a sibling's History empty until a refresh landed on them, made every
+    // child switch a network round trip, and (through `applyServerLoad`, which
+    // replaces `entries` wholesale) deleted the previous child's month chunks
+    // from disk on the way past.
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+
+    await loadFromServer(conn, 9);
+
+    for (const id of ['7', '9']) {
+      expect(listFeedings).toHaveBeenCalledWith(id);
+      expect(listSleep).toHaveBeenCalledWith(id);
+      expect(listChanges).toHaveBeenCalledWith(id);
+      expect(listPumping).toHaveBeenCalledWith(id);
+      expect(listTummy).toHaveBeenCalledWith(id);
+      expect(listChildNotes).toHaveBeenCalledWith(id);
+      expect(listTemperature).toHaveBeenCalledWith(id);
+      expect(listMedication).toHaveBeenCalledWith(id);
+      expect(listChildTreatments).toHaveBeenCalledWith(id);
+      for (const kind of ['weight', 'height', 'head', 'bmi']) expect(listMeasurements).toHaveBeenCalledWith(kind, id);
+    }
+  });
+
+  it('returns both children’s entries in one flat array', async () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+    listFeedings.mockImplementation(async (id: string) => [feeding(id, id === '7' ? 1000 : 2000)] as any);
+
+    const result = await loadFromServer(conn, 9);
+
+    expect(result.entries.map((e) => e.childId).sort()).toEqual(['7', '9']);
+  });
+
+  it('nominates the preferred child as the selection without that steering the fetch', async () => {
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
 
     const result = await loadFromServer(conn, 9);
 
+    // `preferredChildServerId` is now only the seed for `selectedChildId`: the
+    // records of BOTH children come back either way (asserted above).
     expect(result.selectedChildId).toBe('9');
-    expect(listFeedings).toHaveBeenCalledWith('9');
-    expect(listSleep).toHaveBeenCalledWith('9');
-    expect(listChanges).toHaveBeenCalledWith('9');
   });
 
   it('falls back to the first child when no preferred id is given', async () => {
@@ -144,7 +196,6 @@ describe('loadFromServer child selection', () => {
     const result = await loadFromServer(conn);
 
     expect(result.selectedChildId).toBe('7');
-    expect(listFeedings).toHaveBeenCalledWith('7');
   });
 
   it('falls back to the first child when the preferred id is not on the server', async () => {
@@ -155,32 +206,95 @@ describe('loadFromServer child selection', () => {
     const result = await loadFromServer(conn, 42);
 
     expect(result.selectedChildId).toBe('7');
-    expect(listFeedings).toHaveBeenCalledWith('7');
   });
 
-  it('fans out to listMedication and merges its rows into entries', async () => {
+  it('carries a feeding prefill for EACH child that has been fed', async () => {
+    // A single-child load could only ever answer for the child it fetched, which
+    // is why `mergeLastFeed` merges rather than replaces. Now it answers for
+    // every child at once, and each one has to land under its own key.
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
-    listMedication.mockResolvedValueOnce([
-      { id: 'medication-3', serverId: 3, childId: '9', type: 'medication', time: 1000, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', tags: [] },
-    ] as any);
+    listFeedings.mockImplementation(async (id: string) =>
+      id === '7'
+        ? ([feeding('7', 1000, 'solid', 'self'), feeding('7', 500)] as any)
+        : ([feeding('9', 2000, 'formula', 'bottle')] as any),
+    );
 
     const result = await loadFromServer(conn, 9);
 
-    expect(listMedication).toHaveBeenCalledWith('9');
-    expect(result.entries).toContainEqual(expect.objectContaining({ type: 'medication', name: 'Paracetamol' }));
+    // The LATEST feed per child, not the first row the server happened to send.
+    expect(result.lastFeed).toEqual({
+      '7': { feedType: 'solid', method: 'self' },
+      '9': { feedType: 'formula', method: 'bottle' },
+    });
   });
 
-  it('fetches measurements for the preferred child too', async () => {
+  it('leaves a child with no feeds out of lastFeed rather than defaulting them', async () => {
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
-    listMeasurements.mockClear();
+    listFeedings.mockImplementation(async (id: string) => (id === '7' ? ([feeding('7', 1000)] as any) : []));
 
-    await loadFromServer(conn, 9);
+    const result = await loadFromServer(conn, 9);
 
-    for (const kind of ['weight', 'height', 'head', 'bmi']) {
-      expect(listMeasurements).toHaveBeenCalledWith(kind, '9');
+    // No opinion, so whatever the device already knew about Theo stands.
+    expect(result.lastFeed).toEqual({ '7': { feedType: 'breast', method: 'left' } });
+  });
+
+  it("files a failure against the child whose request failed, not the selection", async () => {
+    // With siblings' requests interleaved, a shared `degraded` list would blame
+    // whichever child was selected and freeze the WRONG child's rows through
+    // `carryOverIncomplete`, while silently deleting the failing child's.
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    resetLists();
+    listChildNotes.mockImplementation((async (id: string) =>
+      id === '7' ? Promise.reject(new Error('timeout')) : { baths: [], milestones: [], notes: [] }) as any);
+
+    const result = await loadFromServer(conn, 9);
+
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+  });
+
+  it('holds concurrency at 8 across the whole load, not 8 per child', async () => {
+    // 3 children is 39 per-child requests. The cap is what keeps a multi-child
+    // load off a self-hosted gunicorn's worker pool (see `FETCH_CONCURRENCY`);
+    // an uncapped `Promise.all(children.map(...))` peaks at 13N instead.
+    listChildren.mockReset().mockResolvedValueOnce([
+      ...serverChildren,
+      { id: '11', serverId: 11, first: 'Ivo', last: '', birth: 0, color: '#fff' },
+    ]);
+    resetLists();
+    let inFlight = 0;
+    let peak = 0;
+    const gate = async () => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 0));
+      inFlight--;
+      return [];
+    };
+    for (const m of [listFeedings, listSleep, listChanges, listPumping, listTummy, listTemperature, listMedication, listChildTreatments, listMeasurements]) {
+      m.mockImplementation(gate as any);
     }
+    listChildNotes.mockImplementation((async () => {
+      await gate();
+      return { baths: [], milestones: [], notes: [] };
+    }) as any);
+
+    await loadFromServer(conn);
+
+    expect(peak).toBe(8);
+    // And it really did run all of them: 13 requests per child, 3 children.
+    expect(
+      [listFeedings, listSleep, listChanges, listPumping, listTummy, listChildNotes, listTemperature, listMedication, listChildTreatments].reduce(
+        (n, m) => n + m.mock.calls.length,
+        0,
+      ) + listMeasurements.mock.calls.length,
+    ).toBe(39);
+
+    // Put the shared mocks back to plain answers: the describes below reuse them
+    // without resetting every one, and a lingering timer-backed implementation
+    // would leak into them.
+    resetLists();
   });
 });
 

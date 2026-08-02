@@ -14,15 +14,19 @@ let started = false;
 
 type State = ReturnType<typeof useAppStore.getState>;
 
-// In SERVER mode, `s.entries` only ever holds the one child the last fetch
-// asked for (see the invariant around `useAppStore.ts:1566`; `repository.ts`
-// fetches sleep for `selectedChildId` only). So `lastPumpAt` and
-// `lastSleepEndByChild`/`asleepChildIds` below can only ever reflect ONE
-// child at a time in server mode, and `selectChild`'s `refresh()` replaces
-// `entries` wholesale, which drops the previous child's key entirely — the
-// next diff then reads that as "no longer desired" and cancels that child's
-// already-pending nap reminder. Inherited from `lastPumpAt`'s existing shape;
-// fixing it (fetching sleep for every child) is out of scope here.
+// `lastSleepEndByChild` and `asleepChildIds` below are genuinely per child, and
+// since 0.15.0 they are genuinely POPULATED per child in server mode too: a load
+// fetches every child's records (see `loadFromServer`), so this walk sees all of
+// them and `selectChild` no longer replaces `entries` on a switch.
+//
+// That closed a real bug rather than only widening coverage. A switch used to
+// drop the previous child's key here entirely, and the next diff read the
+// missing key as "no longer desired" and cancelled that child's already-pending
+// nap reminder.
+//
+// `lastPumpAt` stays a single account-wide scalar, deliberately: pumping is the
+// parent's activity, not a child's, and the reminder is about the parent's
+// interval.
 function toInput(s: State, now: number): ScheduleInput {
   let lastPumpAt: number | null = null;
   const lastSleepEndByChild: Record<string, number> = {};
@@ -70,10 +74,15 @@ function toInput(s: State, now: number): ScheduleInput {
     asleepChildIds,
     selectedChildId: s.selectedChildId,
     treatments: s.treatments,
-    // Scoped to the selected child on both sides, for the reason in the comment
-    // above this function: in server mode `s.entries` only ever holds one child,
-    // so counting doses for anyone else would silently read another child's
-    // history as empty.
+    // Still scoped to the selected child, but no longer because the data forces
+    // it. Until 0.15.0 `s.entries` held one child in server mode, so counting
+    // doses for anyone else read their history as empty; now every child's
+    // records are resident and this scoping is a PRODUCT choice that has not
+    // been made yet. Widening it means deciding what a sibling's alert says (a
+    // bare "Paracetamol due" is ambiguous once two children are in treatment),
+    // what its notification id is, and how the catch-up nudge picks between
+    // children. Narrow is the conservative direction: it under-notifies rather
+    // than firing an unattributable alert. See the 0.15.0 plan, item A4.
     treatmentDoses: treatmentDoseScalars(
       s.treatments.filter((c) => c.childId === s.selectedChildId),
       entriesForChild(s.entries, s.selectedChildId),
