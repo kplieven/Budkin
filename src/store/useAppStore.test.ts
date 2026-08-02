@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  carryOverIncomplete,
   mergeHeldBackEntries,
   mergeQueuedEntries,
   mergeUnsynced,
@@ -44,6 +45,7 @@ import { addPendingOp, clearPendingOps } from '@/data/pendingOps';
 import type { PendingOp } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import type { Child, Treatment, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
+import type { LoadSlice } from '@/data/repository';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
 const h = vi.hoisted(() => ({
@@ -2754,10 +2756,10 @@ describe('cache-first hydrate (server mode)', () => {
     // Let the hanging load settle (refreshInFlight is module state: a test
     // that leaves it pending would wedge every later refresh in this file)
     // and check the refresh pipeline merged the server answer over the cache.
-    // Every per-type request answered (`completeChildIds` names the child), so
-    // this is a WHOLE answer and the cached note it does not contain was
-    // genuinely deleted server-side: it must not survive. The degraded twin of
-    // this case is the test below, where the same shrunken list must NOT be
+    // Every per-type request answered (`incompleteSlices` names no slice at
+    // all), so this is a WHOLE answer and the cached note it does not contain
+    // was genuinely deleted server-side: it must not survive. The degraded twin
+    // of this case is the test below, where the same shrunken list must NOT be
     // believed.
     resolveLoad({
       treatments: [],
@@ -2767,7 +2769,7 @@ describe('cache-first hydrate (server mode)', () => {
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: ['501'],
+      incompleteSlices: {},
     });
     await flush();
     expect(s().entries.map((e) => e.id)).toEqual(['srv-1']);
@@ -2781,10 +2783,8 @@ describe('cache-first hydrate (server mode)', () => {
     // out, and its answer arrives without the note. Believing it drops the note
     // from state, and the persistence subscription then removes the month chunk
     // that held it, so the next cold start has nothing to open on either. The
-    // diaper that DID come back is dropped with the rest of the partial answer
-    // rather than unioned in: carrying the slice over verbatim is one refresh
-    // late, while a union would keep an entry deleted server-side alive for as
-    // long as this child keeps coming back incomplete.
+    // diaper is in a slice that DID answer, so it lands as usual: only the
+    // emptied slices are held back from the answer.
     useAppStore.setState({ hydrating: true, connection: null, connected: false, children: [], entries: [], selectedChildId: '' });
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
@@ -2802,14 +2802,14 @@ describe('cache-first hydrate (server mode)', () => {
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: [],
+      incompleteSlices: { '501': ['note', 'bath', 'milestone'] },
     });
     vi.mocked(saveEntries).mockClear();
 
     await s().hydrate();
     await flush();
 
-    expect(s().entries.map((e) => e.id)).toEqual(['stored-1']);
+    expect(s().entries.map((e) => e.id)).toEqual(['srv-1', 'stored-1']);
     for (const [written] of vi.mocked(saveEntries).mock.calls) expect(written).toContainEqual(storedEntry);
   });
 
@@ -5020,13 +5020,14 @@ describe('refresh / reconnect', () => {
 // /api/notes/ arrived here as a positive "this child has no notes" answer:
 // `applyServerLoad` replaced `entries` wholesale, the persistence subscription
 // wrote the shrunken list, and `saveEntries` multiRemoved the month chunks it
-// had just emptied. The load now names the children it answered for IN FULL
-// (`LoadResult.completeChildIds`) and this pipeline carries the previous slice
-// over for a child it did not, exactly as a null `timers` keeps the on-device
-// timers.
+// had just emptied. The load now names the record slices it emptied per child
+// (`LoadResult.incompleteSlices`) and this pipeline keeps the rows it already
+// holds for those, exactly as a null `timers` keeps the on-device timers.
 describe('a partial server load never deletes history', () => {
   const marchNote: Entry = { id: 'note-march', serverId: 9, childId: 'c1', type: 'note', time: NOW - 40 * 86400000, text: 'bath, all fine', tags: [] };
   const serverMira = { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 };
+  /** The three slices one failed /api/notes/ empties in a single request. */
+  const NOTES_SLICES = ['note', 'bath', 'milestone'] as const;
 
   /** A device that has already loaded this child's history once. */
   const seedLoaded = () =>
@@ -5037,14 +5038,14 @@ describe('a partial server load never deletes history', () => {
     vi.mocked(saveEntries).mockClear();
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [serverMira],
-      // What the notes timeout produces: the whole type missing, with the
-      // empty `completeChildIds` as the only thing saying the answer is a floor.
+      // What the notes timeout produces: the whole type missing, with
+      // `incompleteSlices` as the only thing saying the answer is a floor.
       entries: [],
       timers: [],
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: [],
+      incompleteSlices: { '501': [...NOTES_SLICES] },
     });
 
     await s().refresh();
@@ -5067,12 +5068,88 @@ describe('a partial server load never deletes history', () => {
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: ['501'],
+      incompleteSlices: {},
     });
 
     await s().refresh();
 
     expect(s().entries).toEqual([]);
+  });
+
+  it('clears the slices that DID answer, even while another slice is frozen', async () => {
+    // Per slice, not per child: the notes request failed, so its rows are kept,
+    // but the feeding that answered and came back absent was really deleted and
+    // must go. A per-child guard freezes the whole history and misses this.
+    const feed: Entry = { id: 'feed-old', serverId: 12, childId: 'c1', type: 'feeding', start: NOW - 40 * 86400000, end: NOW - 40 * 86400000 + 20 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
+    seedLoaded();
+    useAppStore.setState({ entries: [marchNote, feed] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [serverMira],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: { '501': [...NOTES_SLICES] },
+    });
+
+    await s().refresh();
+
+    expect(s().entries.map((e) => e.id)).toEqual(['note-march']);
+  });
+
+  it('takes a degraded slice AS-IS when the device holds no rows for it', async () => {
+    // Nothing on disk for that slice means nothing an empty answer can delete,
+    // so there is nothing to protect and the answer is taken. This is what stops
+    // a permanently failing endpoint from freezing a slice that was never
+    // populated, and it is what keeps a first connect from opening blank.
+    const feed: Entry = { id: 'feed-new', serverId: 13, childId: '501', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
+    useAppStore.setState({ children: [SYNCED_C1], selectedChildId: 'c1', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [serverMira],
+      entries: [feed],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: { '501': [...NOTES_SLICES] },
+    });
+
+    await s().refresh();
+
+    expect(s().entries.map((e) => e.id)).toEqual(['feed-new']);
+  });
+
+  it('a permanently failing endpoint does not freeze the slices that keep answering', async () => {
+    // The blocker case: /api/medication/ 500s on this instance every single
+    // time. Its rows are kept across refresh after refresh, but everything else
+    // stays live, so a note written on another device still lands and a note
+    // deleted there still goes. A per-child guard would freeze this child's
+    // whole history for as long as that one endpoint stays broken.
+    const dose: Entry = { id: 'med-1', serverId: 21, childId: 'c1', type: 'medication', time: NOW - 40 * 86400000, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', tags: [] };
+    useAppStore.setState({ children: [SYNCED_C1], selectedChildId: 'c1', entries: [dose, marchNote] });
+    const degradedMedication = {
+      treatments: [],
+      children: [serverMira],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: { '501': ['medication'] as LoadSlice[] },
+    };
+    vi.mocked(loadFromServer)
+      .mockResolvedValueOnce({ ...degradedMedication, entries: [{ ...marchNote, childId: '501' }] })
+      .mockResolvedValueOnce({
+        ...degradedMedication,
+        // Written on another device between the two refreshes.
+        entries: [{ id: 'note-elsewhere', serverId: 30, childId: '501', type: 'note', time: NOW - M, text: 'from the tablet', tags: [] }],
+      });
+
+    await s().refresh();
+    await s().refresh();
+
+    // The new note arrived and the one deleted elsewhere went: not frozen.
+    expect(s().entries.map((e) => e.id).sort()).toEqual(['med-1', 'note-elsewhere']);
   });
 
   it('treats a load that says nothing at all as complete (absent means all complete)', async () => {
@@ -5093,10 +5170,12 @@ describe('a partial server load never deletes history', () => {
     expect(s().entries).toEqual([]);
   });
 
-  it('keeps an entry logged WHILE the degraded fetch was in flight', async () => {
-    // The carried-over slice is the state read before the fetch, so the queue
-    // (read after it) is still the only home of an entry logged in between.
-    const midFlight: Entry = { id: 'mid-1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+  it('keeps an entry in a degraded slice logged WHILE that fetch was in flight', async () => {
+    // The rows carried over come from the state read before the fetch, so the
+    // queue (read after it) is still the only home of an entry logged in
+    // between. A note, so it lands in the same slice the failure emptied and
+    // cannot survive merely by being in an untouched one.
+    const midFlight: Entry = { id: 'mid-1', childId: 'c1', type: 'note', time: NOW, text: 'logged mid-request', tags: [] };
     seedLoaded();
     h.q = [midFlight];
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
@@ -5106,7 +5185,7 @@ describe('a partial server load never deletes history', () => {
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: [],
+      incompleteSlices: { '501': [...NOTES_SLICES] },
     });
 
     await s().refresh();
@@ -5116,11 +5195,13 @@ describe('a partial server load never deletes history', () => {
 
   it('carries the child\'s measurements and treatments over too', async () => {
     // Same degrade, same floor: the measurement fan-out and the treatment
-    // request sit behind the same `.catch(() => [])`.
+    // request sit behind the same catch. Measurements name the failing KIND,
+    // so the height that answered still clears while the weight is kept.
     const weight: Measurement = { id: 'm-1', serverId: 4, childId: 'c1', kind: 'weight', value: 5.2, date: NOW - 40 * 86400000 };
+    const height: Measurement = { id: 'm-2', serverId: 5, childId: 'c1', kind: 'height', value: 58, date: NOW - 40 * 86400000 };
     const vitamin: Treatment = { id: 'tr-1', serverId: 6, childId: 'c1', name: 'Vitamin D', scheduleMode: 'timesOfDay', timesOfDay: ['morning'], fromDate: NOW - 40 * 86400000, active: true };
     seedLoaded();
-    useAppStore.setState({ measurements: [weight], treatments: [vitamin] });
+    useAppStore.setState({ measurements: [weight, height], treatments: [vitamin] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [serverMira],
       entries: [],
@@ -5128,13 +5209,79 @@ describe('a partial server load never deletes history', () => {
       selectedChildId: '501',
       lastFeed: {},
       measurements: [],
-      completeChildIds: [],
+      incompleteSlices: { '501': ['weight', 'treatment', ...NOTES_SLICES] },
     });
 
     await s().refresh();
 
     expect(s().measurements).toEqual([weight]);
     expect(s().treatments).toEqual([vitamin]);
+  });
+
+  // The two arms of `carryOverIncomplete`'s contract that today's producer
+  // cannot reach: it empties a slice completely whenever that slice degrades,
+  // so no answer it builds ever carries a row in a degraded slice. A load that
+  // fails one PAGE of a slice, or covers more than one child, would, and the
+  // guard has to be right before that lands rather than after.
+  describe('carryOverIncomplete (the guard itself)', () => {
+    const row = (id: string, childId: string, type: string) => ({ id, childId, type });
+    const degraded = (childId: string, ...slices: string[]) =>
+      new Map([[childId, new Set(slices)]]) as ReadonlyMap<string, ReadonlySet<LoadSlice>>;
+
+    it('keeps the rows held for a degraded slice INSTEAD of the ones the answer still offered', () => {
+      // Not a union: a row the device does not have was either created
+      // elsewhere (it lands on the next whole answer, one refresh late) or is
+      // the partial half of a broken read. Unioning would also mean a row
+      // deleted in Baby Buddy's own UI never leaves, for as long as that slice
+      // stays broken.
+      const held = [row('n-1', 'c1', 'note'), row('n-2', 'c1', 'note')];
+      const answer = [row('n-3', 'c1', 'note'), row('f-1', 'c1', 'feeding')];
+
+      const out = carryOverIncomplete(answer, held, degraded('c1', 'note'), (r) => r.type as LoadSlice);
+
+      expect(out.map((r) => r.id)).toEqual(['f-1', 'n-1', 'n-2']);
+    });
+
+    it('takes the answer as-is for a degraded slice it holds nothing for', () => {
+      // Nothing on disk to lose, so the rows the server did return are strictly
+      // better than none: this is what stops a permanently broken endpoint from
+      // blanking a slice that was never populated.
+      const answer = [row('n-3', 'c1', 'note')];
+
+      const out = carryOverIncomplete(answer, [], degraded('c1', 'note'), (r) => r.type as LoadSlice);
+
+      expect(out).toBe(answer); // and the same reference: no needless write
+    });
+
+    it('leaves a child with no degraded slice alone, rows and reference alike', () => {
+      const answer = [row('n-3', 'c1', 'note')];
+
+      const out = carryOverIncomplete(answer, [row('n-1', 'c1', 'note')], degraded('c2', 'note'), (r) => r.type as LoadSlice);
+
+      expect(out).toBe(answer);
+    });
+  });
+
+  it('a FIRST connect to a server with one broken endpoint still opens on the rows it did return', async () => {
+    // The worst way to get this wrong: a device with nothing stored yet, and a
+    // server whose /api/medication/ 500s on every load. Guarding a slice the
+    // device holds no rows for would show a blank history and blank
+    // measurements, and would keep showing them on every later refresh.
+    useAppStore.setState({ connection: null, connected: false, children: [], entries: [], measurements: [], selectedChildId: '' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [serverMira],
+      entries: [{ id: 'feed-1', serverId: 14, childId: '501', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] }],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [{ id: 'm-9', serverId: 8, childId: '501', kind: 'weight', value: 5.4, date: NOW - 86400000 }],
+      incompleteSlices: { '501': ['medication'] },
+    });
+
+    await s().connect('http://x', 't');
+
+    expect(s().entries.map((e) => e.id)).toEqual(['feed-1']);
+    expect(s().measurements.map((m) => m.id)).toEqual(['m-9']);
   });
 });
 
@@ -7395,7 +7542,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
       entries: [], measurements: [], selectedChildId: '501',
       lastFeed: {},
       timers: [],
-      completeChildIds: [],
+      incompleteSlices: { '501': ['note', 'bath', 'milestone'] },
     });
 
     const result = await s().adopt('https://new.lan', 'tok');

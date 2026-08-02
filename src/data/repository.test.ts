@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '@/api/client';
 import { entryTimestamp } from '@/types/models';
 
 import {
@@ -34,7 +35,11 @@ const listTimers = vi.fn(async () => [] as any[]);
 const createTimer = vi.fn(async () => 11);
 const updateTimer = vi.fn(async () => undefined);
 const deleteTimer = vi.fn(async () => undefined);
-vi.mock('@/api/client', () => ({
+// Only the client class is stubbed; `ApiError` stays the real one, because
+// `loadFromServer` now reads its `status` to tell a 404 (an ANSWER: this server
+// has no such endpoint) from any other failure (an absent answer).
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
   BabybuddyClient: vi.fn().mockImplementation(() => ({
     listSleep,
     listFeedings,
@@ -180,7 +185,7 @@ describe('loadFromServer child selection', () => {
   });
 });
 
-describe('loadFromServer completeChildIds (partial-load signal)', () => {
+describe('loadFromServer incompleteSlices (partial-load signal)', () => {
   const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
   const serverChildren = [{ id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' }];
 
@@ -201,18 +206,19 @@ describe('loadFromServer completeChildIds (partial-load signal)', () => {
     listTimers.mockReset().mockResolvedValue([]);
   };
 
-  it('names the fetched child when every per-type request answered', async () => {
+  it('names nothing when every per-type request answered', async () => {
     answerEverything();
 
     const result = await loadFromServer(conn);
 
-    expect(result.completeChildIds).toEqual(['7']);
+    expect(result.incompleteSlices).toEqual({});
   });
 
-  it('leaves the fetched child out when a per-type request fails, while the rest still loads', async () => {
+  it('names the slices one failed request emptied, while the rest still loads', async () => {
     answerEverything();
     // The live repro: one timed-out /api/notes/ takes every note, bath and
-    // milestone out of `entries` with nothing in the answer saying so.
+    // milestone out of `entries` with nothing in the answer saying so. ONE
+    // request, so all three of its slices are floors.
     listChildNotes.mockRejectedValueOnce(new Error('timeout'));
     listFeedings.mockResolvedValueOnce([
       { id: 'f-1', type: 'feeding', childId: '7', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
@@ -220,26 +226,49 @@ describe('loadFromServer completeChildIds (partial-load signal)', () => {
 
     const result = await loadFromServer(conn);
 
-    expect(result.completeChildIds).toEqual([]);
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
     expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
   });
 
-  it('leaves the fetched child out when a measurement request fails too', async () => {
+  it('names only the failing measurement kind, not the three that answered', async () => {
     answerEverything();
+    // weight is fetched first (see `kinds` in loadFromServer).
     listMeasurements.mockReset().mockRejectedValueOnce(new Error('500')).mockResolvedValue([]);
 
     const result = await loadFromServer(conn);
 
-    expect(result.completeChildIds).toEqual([]);
+    expect(result.incompleteSlices).toEqual({ '7': ['weight'] });
   });
 
-  it('names no child when the account has none to fetch', async () => {
+  it('does NOT count a 404: an endpoint this server does not have is an ANSWER', async () => {
+    // /api/medication/ postdates several Baby Buddy releases, so an older
+    // instance 404s on it forever. Counting that as a degrade would freeze the
+    // slice on every load for good, which is the one outcome carry-over exists
+    // to avoid.
+    answerEverything();
+    listMedication.mockRejectedValueOnce(new ApiError(404, 'Not found'));
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({});
+  });
+
+  it('does count a 500 from the same endpoint (a failure, not a missing feature)', async () => {
+    answerEverything();
+    listMedication.mockRejectedValueOnce(new ApiError(500, 'Server Error'));
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({ '7': ['medication'] });
+  });
+
+  it('names nothing when the account has no children to fetch', async () => {
     answerEverything();
     listChildren.mockReset().mockResolvedValueOnce([]);
 
     const result = await loadFromServer(conn);
 
-    expect(result.completeChildIds).toEqual([]);
+    expect(result.incompleteSlices).toEqual({});
   });
 });
 
