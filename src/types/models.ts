@@ -43,6 +43,13 @@ export interface Child {
   picture?: string | null;
 }
 
+/** A child as the SERVER describes it. Identical to `Child` minus `color`,
+ *  because Baby Buddy has no color field: the tint is assigned and persisted
+ *  on device (see `nextChildColor` and the store's `reconcileChildren`), and
+ *  leaving it off this type is what stops a fabricated one from travelling in
+ *  and overwriting the real one on every refresh. */
+export type ServerChild = Omit<Child, 'color'>;
+
 /** A photo the user picked in the child sheet, normalized off the image-picker
  *  asset so the store / API layer never import expo-image-picker types.
  *  `file` is only populated on web (the raw File the picker exposes) and lets

@@ -19,6 +19,7 @@ import {
   type MeasurementKind,
   type PhotoChange,
   type Profile,
+  type ServerChild,
   type Tag,
   type Timer,
 } from '@/types/models';
@@ -28,7 +29,9 @@ export type Connection =
   | { mode: 'server'; serverUrl: string; token: string };
 
 export interface LoadResult {
-  children: Child[];
+  /** No `color`: the avatar tint is local-only, and the store fills it in when
+   *  it reconciles this list (see `reconcileChildren`). */
+  children: ServerChild[];
   entries: Entry[];
   /** Running timers mirrored on the server, or null when the /api/timers/
    *  fetch itself failed. The distinction is load-bearing: an empty list is

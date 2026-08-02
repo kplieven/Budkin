@@ -40,7 +40,8 @@ import {
 } from '@/data/repository';
 import { reconcileTimers } from '@/data/serverTimers';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
-import { ApiError, childColor, isHiddenTag, normalizeServerUrl } from '@/api/client';
+import { ApiError, isHiddenTag, normalizeServerUrl } from '@/api/client';
+import { nextChildColor } from '@/lib/color';
 import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
@@ -115,6 +116,7 @@ import type {
   MilestoneEntry,
   PhotoChange,
   Profile,
+  ServerChild,
   Tag,
   Timer,
 } from '@/types/models';
@@ -667,27 +669,51 @@ function backfillHeldBack(entries: Entry[], children: Child[]): Entry[] {
 
 /** Reconcile a server child list onto the local one WITHOUT changing any local
  *  `id`. A child that exists on both sides is matched by `serverId` and the
- *  server's field values win, but the local `id` is preserved, because entries
- *  and measurements reference it and rewriting it would orphan them. That
- *  orphaning is the bug this whole design exists to prevent.
+ *  server's field values win, with two exceptions. The local `id` is preserved,
+ *  because entries and measurements reference it and rewriting it would orphan
+ *  them; that orphaning is the bug this whole design exists to prevent. And the
+ *  local `color` is preserved, because Baby Buddy has no color field at all
+ *  (`ServerChild` omits it): the tint is assigned here, once, and persisted, so
+ *  the server is definitionally not authoritative for it.
  *
  *  Local children with no `serverId` were never pushed (an offline creation, or
  *  a child deliberately held back) and are kept, prepended, which is where
  *  `mergeUnsynced` put them. Server children the app has not seen are added
  *  with their server-derived id: they never had a local phase, so that id is
- *  already stable. A local child whose `serverId` is absent from the server list
- *  was deleted server-side and is dropped, matching today's behaviour. A
- *  never-pushed local whose `id` collides with a reconciled child's id is
- *  dropped too, so the result can never contain duplicate ids, matching what
- *  `mergeUnsynced` guaranteed. */
-export function reconcileChildren(serverChildren: Child[], localChildren: Child[]): Child[] {
+ *  already stable. They are also the only children given a fresh tint, picked
+ *  against every child that will be in the result rather than against the ones
+ *  seen so far, so the tints do not depend on the order the server happened to
+ *  list its children in (see `nextChildColor`). A local child whose `serverId`
+ *  is absent from the server list was deleted server-side and is dropped,
+ *  matching today's behaviour. A never-pushed local whose `id` collides with a
+ *  reconciled child's id is dropped too, so the result can never contain
+ *  duplicate ids, matching what `mergeUnsynced` guaranteed. */
+export function reconcileChildren(serverChildren: ServerChild[], localChildren: Child[]): Child[] {
   const localByServerId = new Map<number, Child>();
   for (const c of localChildren) {
     if (c.serverId != null) localByServerId.set(c.serverId, c);
   }
+  const serverIds = new Set<number>();
+  for (const c of serverChildren) {
+    if (c.serverId != null) serverIds.add(c.serverId);
+  }
+  // Every child whose tint is already settled, gathered UP FRONT: the
+  // never-pushed locals (always kept) and the locals a server child matches
+  // (their color is preserved below). Seeding this from the local list instead
+  // of filling it as the map runs is what makes the answer independent of the
+  // server's ordering: a matched sibling listed after a new arrival is still
+  // visible to it. Locals absent from the server list are deleted server-side,
+  // so they are left out and their tint is free again.
+  const assigned: Child[] = localChildren.filter((c) => c.serverId == null || serverIds.has(c.serverId));
   const reconciled = serverChildren.map((sc) => {
     const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
-    return local ? { ...sc, id: local.id } : sc;
+    if (local) return { ...sc, id: local.id, color: local.color };
+    // Only a genuinely new child needs a tint, and only it joins `assigned`:
+    // the matched ones are already in there, and counting them twice would
+    // skew `nextChildColor`'s least-used fallback.
+    const child: Child = { ...sc, color: nextChildColor(assigned) };
+    assigned.push(child);
+    return child;
   });
   const reconciledIds = new Set(reconciled.map((c) => c.id));
   const neverPushed = localChildren.filter((c) => c.serverId == null && !reconciledIds.has(c.id));
@@ -2476,8 +2502,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return;
     }
-    // Creating: assign a local id + the next tint from the shared palette,
-    // optimistically add it, and auto-select it (mirrors saveMeasurement's
+    // Creating: assign a local id + a tint no sibling is wearing (by the palette,
+    // not by list position, which a deletion would make collide), optimistically
+    // add it, and auto-select it (mirrors saveMeasurement's
     // optimistic-local-then-push pattern).
     const localId = 'child' + Date.now();
     const child: Child = {
@@ -2487,7 +2514,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       birth: fields.birth,
       expected: fields.expected,
       gender: fields.gender,
-      color: childColor(s.children.length),
+      color: nextChildColor(s.children),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
     set({
