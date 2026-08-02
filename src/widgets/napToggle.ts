@@ -18,7 +18,7 @@ import { loadPrefs } from '@/data/prefs';
 import { enqueueEntry } from '@/data/queue';
 import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import { loadTimers, saveTimers } from '@/data/timers';
-import { buildTimerNotification } from '@/notifications/content';
+import { buildNamedTimerNotification } from '@/notifications/content';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
 import { NAP_WINDOW_END_DEFAULT, NAP_WINDOW_START_DEFAULT, runningTimer, type NapWindow } from '@/store/selectors';
 import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
@@ -144,5 +144,8 @@ export async function toggleNapFromWidget(
   const next: WidgetSnapshot = { ...snap, sleepStart: now };
   await writeWidgetSnapshot(next);
   render(next); // repaint now — state is durable; post the notification after.
-  await postTimerNotification(buildTimerNotification(timer, snap.childName));
+  // The name-shaped builder, because there is no roster out here to resolve the
+  // timer's child from. Correct by construction anyway: the timer was just
+  // stamped with `snap.selectedChildId`, and `snap.childName` is that child.
+  await postTimerNotification(buildNamedTimerNotification(timer, snap.childName));
 }

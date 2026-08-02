@@ -7,7 +7,7 @@
  */
 
 import { ACTIVITY_LABEL } from '@/lib/activities';
-import type { Timer } from '@/types/models';
+import type { Child, Timer } from '@/types/models';
 
 /** Android channel id, shared by the channel *creation* (register.android) and the
  *  channel-aware *trigger* (postNotification.android) so a typo can't silently
@@ -35,7 +35,12 @@ export function formatClock(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export function buildTimerNotification(timer: Timer, childName: string): TimerNotification {
+/** Shapes a notification from a name the caller has ALREADY resolved. Only the
+ *  headless widget task uses this: it runs with a snapshot holding one child's
+ *  name and no roster to look the timer's own child up in. Everything with a
+ *  roster goes through `buildTimerNotification`, which resolves the name itself
+ *  and so cannot title a timer with the wrong child. */
+export function buildNamedTimerNotification(timer: Timer, childName: string): TimerNotification {
   const label = ACTIVITY_LABEL[timer.saveAs];
   return {
     identifier: timer.id,
@@ -45,8 +50,17 @@ export function buildTimerNotification(timer: Timer, childName: string): TimerNo
   };
 }
 
-export function desiredTimerNotifications(timers: Timer[], childName: string): TimerNotification[] {
-  return timers.map((t) => buildTimerNotification(t, childName));
+/** Titles a timer with ITS OWN child, matched strictly on `timer.childId`. That
+ *  is the rule `staleReminders` uses, and for the same reason: the selected child
+ *  is deliberately NOT a fallback, so a running timer keeps its name when the
+ *  user switches child. A timer no child matches gets the bare label. */
+export function buildTimerNotification(timer: Timer, children: Child[]): TimerNotification {
+  const child = children.find((c) => c.id === timer.childId);
+  return buildNamedTimerNotification(timer, child?.first ?? '');
+}
+
+export function desiredTimerNotifications(timers: Timer[], children: Child[]): TimerNotification[] {
+  return timers.map((t) => buildTimerNotification(t, children));
 }
 
 export function diffTimerNotifications(
