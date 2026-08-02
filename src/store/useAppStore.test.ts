@@ -3650,7 +3650,7 @@ describe('deleteChild', () => {
     amount: null,
     tags: [],
   });
-  const timer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+  const timer = (id: string, childId: string): Timer => ({ id, childId, activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' });
 
   it('local-only child: deletes in memory only, no server call', async () => {
     // the seeded child 'c1' has no serverId => local-only
@@ -3686,7 +3686,7 @@ describe('deleteChild', () => {
       selectedChildId: '5',
       entries: [feeding('feeding-1', '5')],
       measurements: [{ id: 'weight-1', serverId: 2, childId: '5', kind: 'weight', value: 5, date: NOW }],
-      timers: [timer],
+      timers: [timer('t1', '5')],
       insightsLoaded: true,
       insightsEntries: [{ id: 'x' } as any],
       insightsError: true,
@@ -3724,15 +3724,65 @@ describe('deleteChild', () => {
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',
       entries: [feeding('feeding-1', '5')],
-      timers: [timer],
+      timers: [timer('t1', '5')],
     });
     void s().deleteChild('6');
     expect(s().children.map((c) => c.id)).toEqual(['5']);
     expect(s().selectedChildId).toBe('5'); // unchanged
     expect(s().entries).toHaveLength(1); // selected child's data untouched
-    expect(s().timers).toHaveLength(1); // timers not cleared
+    expect(s().timers).toHaveLength(1); // and their running timer keeps running
     await flush();
     expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 6 })]);
+  });
+
+  it("deleting the selected child leaves a sibling's timer running", async () => {
+    // The wipe used to be unconditional inside the re-point branch, so deleting
+    // one child stopped every child's timers. A timer belongs to whoever started
+    // it, and the sibling is still here.
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [timer('t1', '5'), timer('t2', '6')],
+    });
+    serverViewOf(serverChild('6', 'Nova'));
+
+    void s().deleteChild('5');
+
+    expect(s().timers.map((t) => t.id)).toEqual(['t2']);
+    await flush();
+  });
+
+  it("deleting a NON-selected child stops that child's orphaned timers", async () => {
+    // The second bug this filter fixes: the purge used to run only when the
+    // deleted child was the selected one, so a non-selected child's timers ran
+    // on forever with no owner and no surface to stop them from.
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [timer('t1', '5'), timer('t2', '6')],
+    });
+
+    void s().deleteChild('6');
+
+    expect(s().timers.map((t) => t.id)).toEqual(['t1']);
+    await flush();
+  });
+
+  it('keeps a still-unstamped timer, which belongs to no deleted child', () => {
+    // `t.childId !== id` is true for `undefined`, deliberately: a timer hydrate
+    // could not attribute is not evidence that it was the deleted child's, and
+    // `stopTimer` can still resolve it.
+    const legacy: Timer = { id: 't-legacy', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [legacy, timer('t1', '5')],
+    });
+
+    void s().deleteChild('5');
+
+    expect(s().timers).toEqual([legacy]);
   });
 
   it('local mode: deletes in memory only, no server call', async () => {
@@ -3888,7 +3938,7 @@ describe('deleteChild', () => {
   // started offline (serverId == null) exists nowhere else and is gone for good.
   it('a failed server delete restores the running timers it cleared', async () => {
     h.childDeleteFails = true;
-    const localTimer: Timer = { id: 't-local', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    const localTimer = timer('t-local', '5');
     useAppStore.setState({
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',

@@ -2666,13 +2666,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const nextChildren = s.children.filter((c) => c.id !== id);
     // Kept for the restore below, captured before the purge. `purgedTimers` are
-    // the running timers the re-point clears: a server-backed one would come
-    // back on the next refresh, but one started offline (serverId == null) lives
-    // nowhere else and would be lost for good.
+    // the deleted child's running timers: a server-backed one would come back on
+    // the next refresh, but one started offline (serverId == null) lives nowhere
+    // else and would be lost for good.
     const priorIndex = s.children.findIndex((c) => c.id === id);
     const purgedEntries = s.entries.filter((e) => e.childId === id);
     const purgedMeasurements = s.measurements.filter((m) => m.childId === id);
-    const purgedTimers = s.timers;
+    const purgedTimers = s.timers.filter((t) => t.childId === id);
     // Purge the deleted child's entries/measurements. In local mode every
     // child's data lives in state, so this drops the orphans — and, via the
     // persistence subscription, from the durable entity store (saveEntries /
@@ -2683,17 +2683,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: nextChildren,
       entries: s.entries.filter((e) => e.childId !== id),
       measurements: s.measurements.filter((m) => m.childId !== id),
+      // The deleted child's running timers, and only those. Ungated on the
+      // selection on purpose, and it fixes a bug in both directions: this used
+      // to wipe EVERY timer when the deleted child happened to be selected
+      // (stopping a sibling's nap for no reason), and to wipe NONE when they
+      // were not (leaving that child's timers running forever, owned by nobody,
+      // with no surface left to stop them from). `!==` keeps a still-unstamped
+      // timer, deliberately: `undefined` is not evidence it was this child's.
+      timers: s.timers.filter((t) => t.childId !== id),
       childSheet: false,
       editingChildId: null,
       showChildSwitcher: false,
     };
     if (s.selectedChildId === id) {
       // Deleting the selected child: re-point selection (mirrors refresh's
-      // fallback), clear the running timers (they implicitly belong to the
-      // selected child, so a later stop must not log against a different one),
-      // and reset insights (as selectChild does).
+      // fallback) and reset insights (as selectChild does). The timer purge
+      // above is NOT part of this branch; ownership decides it, not selection.
       patch.selectedChildId = nextChildren[0]?.id ?? '';
-      patch.timers = [];
       patch.insightsLoaded = false;
       patch.insightsEntries = [];
       patch.insightsError = false;
