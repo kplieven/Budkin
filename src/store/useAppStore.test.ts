@@ -2309,6 +2309,32 @@ describe('mergeUnsynced', () => {
     expect(merged.map((c) => c.id)).toEqual(['dup']);
   });
 
+  it('keeps a record created mid-fetch even once its push has stamped a serverId', () => {
+    // The drop: the answer went out before this record existed, and its own
+    // push stamped a serverId before the apply ran, so `serverId == null` no
+    // longer recognises it as unsynced. Absent from the pre-fetch snapshot is
+    // what proves it is newer than the answer.
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('mid', 9), mkChild('s1', 1)], [mkChild('s1', 1)]);
+    expect(merged.map((c) => c.id)).toEqual(['mid', 's1']);
+  });
+
+  it('still drops a record deleted server-side, which the snapshot DID contain', () => {
+    // The other half of the same question, and why "keep every local the answer
+    // omits" would be wrong: this record existed before the fetch and the
+    // answer no longer lists it, so it was genuinely deleted elsewhere and must
+    // not be resurrected on every refresh forever.
+    const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('gone', 7), mkChild('s1', 1)], [mkChild('gone', 7), mkChild('s1', 1)]);
+    expect(merged.map((c) => c.id)).toEqual(['s1']);
+  });
+
+  it('behaves exactly as before when no snapshot is passed', () => {
+    // `connect` and `adopt` have no pre-fetch snapshot. An absent one must mean
+    // "cannot tell", not "every local record is new", or those callers would
+    // start resurrecting server-side deletions.
+    const local = [mkChild('synced', 7), mkChild('offline')];
+    expect(mergeUnsynced([mkChild('s1', 1)], local).map((c) => c.id)).toEqual(['offline', 's1']);
+  });
+
   it('returns just the server list when nothing is unsynced', () => {
     expect(mergeUnsynced([mkChild('s1', 1)], [])).toEqual([mkChild('s1', 1)]);
   });
@@ -6035,6 +6061,75 @@ describe("editing a sibling's row from the History household view", () => {
     s().deleteEntry('tn1');
     expect(s().entries.find((e) => e.id === 'tn1')).toBeUndefined();
     expect(s().selectedChildId).toBe('localMira');
+  });
+});
+
+describe('a measurement saved DURING a refresh survives it', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const serverChildren = [{ id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' }];
+
+  it('keeps it even though its push stamped a serverId before the apply', async () => {
+    // The race, in order: the fetch goes out; the user saves a weight; its push
+    // resolves and stamps a serverId on the in-memory row; the answer lands.
+    // The answer predates the measurement so does not list it, and the stamp
+    // means `serverId == null` no longer recognises it as unsynced, so it used
+    // to be dropped from state and then from the entity store.
+    let resolveLoad!: (data: unknown) => void;
+    useAppStore.setState({ children: [mira], selectedChildId: 'localMira', measurements: [] });
+    vi.mocked(loadFromServer).mockImplementationOnce(() => new Promise((res) => (resolveLoad = res)) as never);
+
+    const refreshing = s().refresh();
+    // `refresh` reads on-device timers before it fetches, so let that await
+    // settle: until it does, `loadFromServer` has not been called and there is
+    // no `resolveLoad` yet. (Leaving the promise pending would also wedge
+    // `refreshInFlight` for every later test in this file.)
+    await flush();
+    // Saved while the request is in flight, then stamped, exactly as the real
+    // push does on resolve.
+    useAppStore.setState({
+      measurements: [{ id: 'm-mid', serverId: 77, childId: 'localMira', kind: 'weight', value: 5.2, date: NOW }],
+    });
+
+    resolveLoad({
+      treatments: [],
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: {},
+    });
+    await refreshing;
+    await flush();
+
+    expect(s().measurements.map((m) => m.id)).toEqual(['m-mid']);
+  });
+
+  it('still lets a measurement deleted server-side go', async () => {
+    // The guard must not become "keep everything the answer omits": a
+    // measurement that existed BEFORE the fetch and is absent from the answer
+    // was deleted elsewhere, and resurrecting it would make deletion
+    // impossible.
+    useAppStore.setState({
+      children: [mira],
+      selectedChildId: 'localMira',
+      measurements: [{ id: 'm-old', serverId: 42, childId: 'localMira', kind: 'weight', value: 4.1, date: NOW - 86400000 }],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      treatments: [],
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: {},
+    });
+
+    await s().refresh();
+
+    expect(s().measurements).toEqual([]);
   });
 });
 
