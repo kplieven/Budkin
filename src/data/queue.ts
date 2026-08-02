@@ -23,10 +23,21 @@
  *   that path is not hypothetical: it is what EVERY multi-child save takes while
  *   a self-hosted server is unhappy but the phone still has internet.
  *
- * KNOWN LIMIT: `src/widgets/napToggle.ts` enqueues from a headless task in
- * another process, which an in-process chain cannot order against this one. That
- * is pre-existing, and it writes one entry at a time, so it can only lose to (or
- * be lost to) a simultaneous foreground write, not to itself.
+ * THE WIDGET IS COVERED TOO, contrary to what this comment used to claim.
+ * `src/widgets/napToggle.ts` enqueues from the headless widget task, and that
+ * task is not a separate process: `react-native-android-widget`'s
+ * `HeadlessJsTaskWorker` takes its host from
+ * `((ReactApplication) getApplicationContext()).getReactHost()`, the app's OWN
+ * `ReactHost`, and `RNWidgetBackgroundTaskWorker` passes the config's
+ * `isAllowedInForeground` as true. So whenever a React context already exists
+ * the task runs on the app's JS context, `tail` below is the same `tail`, and a
+ * widget write is ordered against app writes like any other caller's.
+ *
+ * The one genuinely unordered case is a COLD headless boot, where the worker
+ * starts the host itself and that fresh JS context begins with a fresh `tail`.
+ * Nothing races there: the app's own writers are not running at all. The
+ * ordering is real in every case where it could matter, so do not add
+ * cross-process machinery to buy a guarantee that already holds.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
