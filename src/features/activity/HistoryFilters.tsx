@@ -51,6 +51,7 @@ export function HistoryFilterChips({
   household,
   householdLabel,
   onToggleHousehold,
+  showFilters,
 }: {
   filter: TimelineFilter;
   now: number;
@@ -62,6 +63,15 @@ export function HistoryFilterChips({
   /** What the toggle currently shows: the selected child's name when off. */
   householdLabel: string;
   onToggleHousehold: () => void;
+  /** Whether there is anything to filter. False when the timeline is empty, and
+   *  then the day and activity chips are hidden: both would open a sheet with no
+   *  options in it, and "Clear filters" would offer to clear nothing.
+   *
+   *  The household toggle deliberately still shows in that case. An empty
+   *  timeline is exactly when someone wants to look at the rest of the
+   *  household, and a toggle that appears only once THIS child has activity is
+   *  unreachable in the one state that most needs it. */
+  showFilters: boolean;
 }) {
   const t = useTheme();
 
@@ -86,19 +96,23 @@ export function HistoryFilterChips({
           onPress={onToggleHousehold}
         />
       )}
-      <DropdownChip
-        label={dayLabel}
-        accessibilityLabel={`Filter by day, showing ${dayLabel}`}
-        active={filter.day != null}
-        onPress={() => onOpen('day')}
-      />
-      <DropdownChip
-        label={activityLabel}
-        accessibilityLabel={`Filter by activity, showing ${activityLabel}`}
-        active={filter.types.length > 0}
-        onPress={() => onOpen('activity')}
-      />
-      {filtered && (
+      {showFilters && (
+        <DropdownChip
+          label={dayLabel}
+          accessibilityLabel={`Filter by day, showing ${dayLabel}`}
+          active={filter.day != null}
+          onPress={() => onOpen('day')}
+        />
+      )}
+      {showFilters && (
+        <DropdownChip
+          label={activityLabel}
+          accessibilityLabel={`Filter by activity, showing ${activityLabel}`}
+          active={filter.types.length > 0}
+          onPress={() => onOpen('activity')}
+        />
+      )}
+      {showFilters && filtered && (
         <Pressable
           // Deliberately does NOT clear the household toggle: see this
           // component's own doc. `TimelineFilter` is the whole of what "filters"
