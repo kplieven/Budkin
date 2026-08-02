@@ -26,11 +26,29 @@ export async function saveQueue(q: Entry[]): Promise<void> {
   }
 }
 
-export async function enqueueEntry(e: Entry): Promise<Entry[]> {
+/**
+ * Append a whole BATCH in one load/save cycle, returning the resulting queue.
+ *
+ * This is not an optimisation, it is the only safe way to queue more than one
+ * entry at once. Every mutation here is an unguarded load-modify-save with no
+ * locking, so N un-awaited `enqueueEntry` calls all read the same pre-push queue
+ * and the last save clobbers the rest. Offline, a "log for both" save made that
+ * one twin's entry silently vanish.
+ *
+ * An empty batch writes nothing and just reports the queue, so a caller that
+ * partitions its writes (see `commitWrites` in the store, where some entries
+ * push and some queue) can hand over whatever is left without a length check.
+ */
+export async function enqueueEntries(entries: Entry[]): Promise<Entry[]> {
   const q = await loadQueue();
-  q.push(e);
+  if (entries.length === 0) return q;
+  q.push(...entries);
   await saveQueue(q);
   return q;
+}
+
+export async function enqueueEntry(e: Entry): Promise<Entry[]> {
+  return enqueueEntries([e]);
 }
 
 /**

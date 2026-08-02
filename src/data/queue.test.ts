@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { enqueueEntry, loadQueue, updateQueuedEntry } from '@/data/queue';
+import { enqueueEntries, enqueueEntry, loadQueue, updateQueuedEntry } from '@/data/queue';
 import type { Entry } from '@/types/models';
 
 // In-memory stand-in for the native AsyncStorage module.
@@ -31,6 +31,39 @@ const note = (id: string, text: string): Entry => ({
 beforeEach(() => {
   mem.store.clear();
   vi.mocked(AsyncStorage.setItem).mockClear();
+});
+
+describe('enqueueEntries', () => {
+  it('appends the whole batch in ONE load/save cycle', async () => {
+    await enqueueEntry(note('a', 'first'));
+    vi.mocked(AsyncStorage.setItem).mockClear();
+
+    const queue = await enqueueEntries([note('b', 'twin one'), note('c', 'twin two')]);
+
+    expect(queue.map((e) => e.id)).toEqual(['a', 'b', 'c']);
+    // One write for the batch, which is the whole point: `enqueueEntry` is an
+    // unguarded load-modify-save, so N un-awaited calls read the same pre-push
+    // queue and the last save clobbers the rest.
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+    expect(await loadQueue()).toEqual(queue);
+  });
+
+  it('keeps every entry of a batch written in one pass', async () => {
+    // The offline twin save: one entry per child, all handed over together.
+    // Written one at a time without awaiting, one of them silently vanishes.
+    await enqueueEntries([note('a', 'twin one'), note('b', 'twin two')]);
+    expect((await loadQueue()).map((e) => e.id)).toEqual(['a', 'b']);
+  });
+
+  it('writes nothing for an empty batch, and still reports the queue', async () => {
+    await enqueueEntry(note('a', 'first'));
+    vi.mocked(AsyncStorage.setItem).mockClear();
+
+    const queue = await enqueueEntries([]);
+
+    expect(queue.map((e) => e.id)).toEqual(['a']);
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  });
 });
 
 describe('updateQueuedEntry', () => {
