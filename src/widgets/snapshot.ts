@@ -38,6 +38,15 @@ export interface WidgetSnapshot {
   selectedChildId: string;
   /** true when a real (non-demo) connection exists, so a widget-saved nap can be queued */
   canQueueNap: boolean;
+  /**
+   * How many children the device holds, so a widget can tell whether naming the
+   * child says anything (see `napLabels`). Optional, and read with a `?? 1`
+   * default: unlike the v1 change below this one reinterprets nothing, so a
+   * stale v2 payload written before the field existed stays readable and
+   * degrades to "one child, do not name anyone", which is the safe direction.
+   * That is why the key stays v2.
+   */
+  childCount?: number;
 }
 
 /**
@@ -111,5 +120,6 @@ export function buildWidgetSnapshot(s: {
     rhythmOriginHour: s.rhythmOriginHour,
     selectedChildId: s.selectedChildId,
     canQueueNap: s.connection?.mode === 'server',
+    childCount: s.children.length,
   };
 }
