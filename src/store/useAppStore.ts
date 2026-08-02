@@ -2486,14 +2486,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // against a snapshot drops it (`treatments`, `timers` and `lastFeed` below
     // have always been read here for the same reason).
     //
-    // No pre-fetch snapshot is passed to `reconcileChildren` below, so unlike
-    // `refresh` this does NOT protect a write made DURING this GET to a child
-    // the answer already knows about: an edit to a synced child, or a create
-    // whose serverId was stamped mid-GET, still reconciles to the server's
-    // values. Only a never-pushed create survives, through the ordinary
-    // `serverId == null` rule. That gap is pre-existing and accepted rather
-    // than plumbed: this runs behind the modal adopt sheet, with no child
-    // editor open behind it and no path in this flow that saves one.
+    // No pre-fetch snapshot is passed to `reconcileChildren` below, nor to
+    // `mergeUnsynced` for measurements, so unlike `refresh` this does NOT
+    // protect a write made DURING this GET to a record the answer already knows
+    // about: an edit to a synced child, or a create whose serverId was stamped
+    // mid-GET, still reconciles to the server's values. Only a never-pushed
+    // create survives, through the ordinary `serverId == null` rule.
+    //
+    // This gap USED to be written off as unreachable, on the grounds that adopt
+    // runs behind a modal sheet with every control disabled while it works.
+    // That is wrong, and the reasoning is recorded here so it is not made
+    // again: `BottomSheet`'s scrim is a plain `Pressable onPress={onClose}`
+    // with no `busy` gate, so a tap outside the sheet dismisses it mid-flight
+    // (`AdoptSheet` passes `closeAdopt` straight through). This function keeps
+    // awaiting its GET regardless, and the user is back on a fully interactive
+    // app with the child editor one tap away. So the window is real, just
+    // narrow and deliberately entered.
+    //
+    // Still not plumbed, as a scoping decision rather than an impossibility
+    // one. Reaching it takes dismissing an in-progress adopt and then editing a
+    // child before its GET returns, and the blast radius is one reverted edit
+    // on a flow run once per device. `refresh`, which fires constantly and hit
+    // this for real, is where the snapshots went (see `childrenBefore` and
+    // `measurementsBefore`). If adopt ever needs them, they thread in the same
+    // way: snapshot before `loadFromServer` above, pass to `reconcileChildren`
+    // and `mergeUnsynced` below.
     const localChildren = get().children;
     const localEntries = get().entries;
     const localMeasurements = get().measurements;
