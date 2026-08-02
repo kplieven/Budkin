@@ -51,8 +51,18 @@ describe('buildTimerNotification', () => {
       identifier: 't1',
       title: 'Ellie · Feeding',
       body: 'Started 14:45',
-      data: { url: '/timers', timerId: 't1' },
+      data: { url: '/timers?child=c1', timerId: 't1' },
     });
+  });
+  it("points the tap at the timer's own child, so it lands on the right Timers screen", () => {
+    const out = buildTimerNotification(timer({ childId: 'c2' }), [child(), child({ id: 'c2', first: 'Wren' })]);
+    expect(out.data.url).toBe('/timers?child=c2');
+  });
+  it('names no child for a timer nobody owns', () => {
+    // Persisted before ownership was stamped: `childId` absent means "not
+    // attributable", so the tap keeps the current selection rather than
+    // adopting one.
+    expect(buildTimerNotification(timer({ childId: undefined }), [child()]).data.url).toBe('/timers');
   });
   it('uses saveAs (not activity) for the label', () => {
     expect(buildTimerNotification(timer({ saveAs: 'pumping' }), [child()]).title).toBe('Ellie · Pumping');
