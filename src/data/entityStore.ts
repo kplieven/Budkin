@@ -172,9 +172,11 @@ function parseEntryArray(raw: string | null): Entry[] {
  * shape. Anything that is neither is dropped rather than seeding a child with
  * junk.
  *
- * The key is deliberately NOT bumped. Nothing is migrated: the legacy value is
- * consulted on read as one child's fallback (`lastFeedForChild`) and disappears
- * by itself the first time `saveLastFeed` writes a map over the key.
+ * The key is deliberately NOT bumped, so the map and the value it replaces
+ * SHARE one slot and a write can destroy the fallback. Nothing is migrated: the
+ * legacy value is consulted on read as one child's fallback
+ * (`lastFeedForChild`) and is overwritten only when a real per-child map is
+ * saved over it, which `saveLastFeed`'s empty guard is what makes true.
  */
 function parseLastFeed(raw: string | null): { map: Record<string, LastFeed>; legacy: LastFeed | null } {
   const parsed = parseOr<unknown>(raw, null);
@@ -492,7 +494,24 @@ export async function saveSelectedChildId(v: string): Promise<void> {
   }
 }
 
+/**
+ * An EMPTY map is never written. The map shares its key with the pre-map scalar
+ * (see `parseLastFeed`), and a launch that falls back to that scalar holds an
+ * empty map all session, handed to the store as a FRESH `{}` reference; the
+ * persistence subscription's reference check fires on it, so without this the
+ * legacy value was destroyed by the first hydrate rather than by the first real
+ * save, and the prefill reverted after a single restart.
+ *
+ * Nothing is lost by skipping it: within a session the map only ever GAINS keys
+ * (`save()` and `mergeLastFeed` both spread the previous one), so an empty map
+ * is always a just-loaded one, never a deletion. The one visible consequence is
+ * that connecting to a DIFFERENT server leaves the previous account's map on
+ * disk until the next feed is saved; those keys name children this install no
+ * longer has, so nothing reads them, and `clearEntities` removes the key
+ * outright on disconnect.
+ */
 export async function saveLastFeed(v: Record<string, LastFeed>): Promise<void> {
+  if (Object.keys(v).length === 0) return;
   if (blockedByFailedRead(KEY_LAST_FEED, 'saveLastFeed')) return;
   try {
     await AsyncStorage.setItem(KEY_LAST_FEED, JSON.stringify(v));

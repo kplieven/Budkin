@@ -249,9 +249,15 @@ export const LAST_FEED_DEFAULT: LastFeed = { feedType: 'breast', method: 'left' 
  *
  * `fallback` is where the pre-map migration lives. A build before this map kept
  * ONE account-wide value, and it is consulted here rather than seeded into the
- * map by a hydration pass: no write, no ordering dependency, idempotent (see
- * `legacyBathRhythm`). It reads as "every child inherits the old value" on the
- * first launch and degrades to per-child as each child gets a real save.
+ * map by a hydration pass, so this read itself performs no write and depends on
+ * no ordering (see `legacyBathRhythm`). It reads as "every child inherits the
+ * old value" until a child gets a real save, then degrades to per-child.
+ *
+ * This function's own idempotence is not the whole story, unlike the bath case
+ * it is modelled on. `legacyBathRhythm` derives from a DIFFERENT storage key
+ * than the map it backs, so a map write cannot reach it; here the two share one
+ * key, and keeping the fallback alive until a real save also depends on
+ * `saveLastFeed` refusing to persist an empty map. See its doc comment.
  *
  * No child to scope to yields the fallback, not somebody else's draft: this is
  * a seed the sheet SAVES, so a permissive read files one child's habits as

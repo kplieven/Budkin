@@ -16,9 +16,15 @@ export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
 /**
  * What a child's last feed was like, which is what the next feeding draft opens
- * on. Held per child (`Record<childId, LastFeed>`): with twins, one shared value
- * meant the sheet offered whichever of them was fed last, whoever it was opened
- * for. Local only, and never an entry: it is a seed, not a record.
+ * on. Local only, and never an entry: it is a seed, not a record.
+ *
+ * THE reason it is held per child (`Record<childId, LastFeed>`), stated once
+ * here because several places lean on it: one shared value was written by
+ * whichever child was fed last, so with twins the feeding sheet opened on the
+ * OTHER twin's habits and disagreed with the Home tile that sent you there
+ * (that tile computes its own hint from child-scoped entries). It is a seed the
+ * sheet SAVES, not just one it displays, so an unscoped read files one child's
+ * habits as another's.
  */
 export interface LastFeed {
   feedType: FeedType;
