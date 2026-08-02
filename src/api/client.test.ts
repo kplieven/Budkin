@@ -126,10 +126,17 @@ describe('child photo upload serializes under expo/fetch', () => {
     return calls;
   }
 
-  /** The multipart body expo/fetch would actually put on the wire. */
-  async function encode(init: RequestInit): Promise<string> {
-    const { body } = await convertFormDataAsync(init.body as FormData);
-    return new TextDecoder().decode(body);
+  /** The bytes actually handed to `fetch`. Native encodes the multipart ITSELF
+   *  (see `pictureInit`), so the body is already a Uint8Array rather than a
+   *  FormData for `fetch` to encode. */
+  function wireOf(init: RequestInit): string {
+    return new TextDecoder().decode(init.body as unknown as Uint8Array);
+  }
+
+  /** The boundary the request declares in its own Content-Type header. */
+  function declaredBoundary(init: RequestInit): string | undefined {
+    const ct = (init.headers as Record<string, string> | undefined)?.['Content-Type'];
+    return /boundary=(.+)$/.exec(ct ?? '')?.[1];
   }
 
   it('a photo PATCH encodes the picture part as bytes, alongside the name fields', async () => {
@@ -137,12 +144,21 @@ describe('child photo upload serializes under expo/fetch', () => {
     const calls = captureInit({ picture: 'https://x/media/mira.jpg', slug: 'mira-doe' });
     await new BabybuddyClient('https://x', 't').updateChild(child, { kind: 'set', photo: photo() });
 
-    const wire = await encode(calls[0]);
+    const wire = wireOf(calls[0]);
     expect(wire).toContain('name="picture"');
     expect(wire).toContain('JPEG-BYTES');
     // A rename made in the same save rides this body too, so it is lost with it.
     expect(wire).toContain('name="first_name"');
     expect(wire).toContain('Mira');
+
+    // THE REGRESSION. Handing `fetch` the FormData instead reached Baby Buddy,
+    // returned 200 and applied nothing, silently losing the photo and the name.
+    // Confirmed on device. So the body must be BYTES and the request must carry
+    // its own boundary: without both, the upload is a no-op.
+    expect(calls[0].body).toBeInstanceOf(Uint8Array);
+    const boundary = declaredBoundary(calls[0]);
+    expect(boundary).toBeTruthy();
+    expect(wire).toContain(`--${boundary}`);
   });
 
   it('names the native part after the file, not after the picked name (web sends the latter)', async () => {
@@ -152,14 +168,18 @@ describe('child photo upload serializes under expo/fetch', () => {
     const calls = captureInit({ id: 9 });
     await new BabybuddyClient('https://x', 't').createChild(CHILD, photo());
 
-    expect(await encode(calls[0])).toContain('filename="cropped-42.jpg"');
+    expect(wireOf(calls[0])).toContain('filename="cropped-42.jpg"');
   });
 
   it('a create-with-photo POST encodes the picture part as bytes', async () => {
     const calls = captureInit({ id: 9, slug: 'mira-doe', picture: 'https://x/media/mira.jpg' });
     await new BabybuddyClient('https://x', 't').createChild(CHILD, photo());
 
-    expect(await encode(calls[0])).toContain('JPEG-BYTES');
+    const wire = wireOf(calls[0]);
+    expect(wire).toContain('JPEG-BYTES');
+    // The create path carries the same defect and the same fix.
+    expect(calls[0].body).toBeInstanceOf(Uint8Array);
+    expect(wire).toContain(`--${declaredBoundary(calls[0])}`);
   });
 
   it('a photo with no file behind it fails as a photo problem, not as an unreachable server', async () => {

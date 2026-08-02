@@ -663,6 +663,41 @@ async function buildChildForm(child: Child, photo: PickedPhoto): Promise<FormDat
   return form;
 }
 
+/** The RequestInit for a child write that carries a picture.
+ *
+ *  NATIVE ENCODES THE MULTIPART ITSELF rather than handing `fetch` the
+ *  `FormData`. Handing it over looks correct and is not: the request reaches
+ *  Baby Buddy, returns 200, and applies NOTHING, so the photo and any name or
+ *  birthday riding the same request are silently lost, and the next refresh
+ *  reverts them from the server's unchanged copy. Confirmed on device: encoding
+ *  here and sending the bytes with our own boundary makes the identical upload
+ *  land, and the same photo uploaded by `curl` always worked, so the payload and
+ *  the server were never at fault.
+ *
+ *  The mechanism inside expo/fetch is NOT established. Reading its source, the
+ *  `FormData` branch looks like it should work: it recognises the body, encodes
+ *  it with `convertFormDataAsync` (the same encoder used here), and overrides
+ *  Content-Type with the boundary. So do not "simplify" this back to passing the
+ *  `FormData`, however wrong that looks: the difference is observed, repeatedly,
+ *  and the simplification is exactly the bug.
+ *
+ *  Web keeps the `FormData` path, where the browser owns the encoding and this
+ *  has always worked. */
+async function pictureInit(method: 'POST' | 'PATCH', child: Child, photo: PickedPhoto): Promise<RequestInit> {
+  const form = await buildChildForm(child, photo);
+  if (typeof document !== 'undefined') return { method, body: form };
+  const { convertFormDataAsync } = await import('expo/src/winter/fetch/convertFormData');
+  const { body, boundary } = await convertFormDataAsync(form);
+  return {
+    method,
+    body: body as unknown as BodyInit,
+    // Ours, so it cannot go missing. `request()` only defaults Content-Type to
+    // JSON when the body is not a FormData, and an explicit header here wins
+    // over that default.
+    headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+  };
+}
+
 export class BabybuddyClient {
   private readonly apiBase: string;
   private readonly token: string;
@@ -825,7 +860,7 @@ export class BabybuddyClient {
     photo?: PickedPhoto,
   ): Promise<{ id?: number; slug?: string; picture?: string | null }> {
     const init: RequestInit = photo
-      ? { method: 'POST', body: await buildChildForm(child, photo) }
+      ? await pictureInit('POST', child, photo)
       : { method: 'POST', body: JSON.stringify(childBody(child)) };
     const res = await this.request<{ id?: number; slug?: string; picture?: string | null }>('/children/', init);
     return { id: res?.id, slug: res?.slug, picture: res?.picture ?? null };
@@ -844,7 +879,7 @@ export class BabybuddyClient {
     if (key == null) return undefined;
     const init: RequestInit =
       change.kind === 'set'
-        ? { method: 'PATCH', body: await buildChildForm(child, change.photo) }
+        ? await pictureInit('PATCH', child, change.photo)
         : { method: 'PATCH', body: JSON.stringify(childBody(child, change.kind === 'remove')) };
     const res = await this.request<{ picture?: string | null; slug?: string }>(`/children/${key}/`, init);
     return { picture: res?.picture ?? null, slug: res?.slug };
