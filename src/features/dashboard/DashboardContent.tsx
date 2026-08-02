@@ -12,6 +12,7 @@ import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
+import { timerChildSuffix } from '@/features/timers/timerAttribution';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, washDueState, rhythmForChild, runningTimer, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
@@ -70,6 +71,10 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
   // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
+  // The roster the timer cards attribute against. Raw select (stable
+  // reference); the naming is derived per card in the render body below, never
+  // in the selector, per the same zustand v5 rule as `treatments` above.
+  const children = useAppStore((s) => s.children);
   // Returns a store element, not a derived object, so the reference is stable.
   const selectedChild = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
 
@@ -236,64 +241,75 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         ))}
       </View>
 
-      {/* live-timer cards + start-timer card — one full-width card each, same
+      {/* live-timer cards + start-timer card: one full-width card each, same
           card style. Every running timer shows (global list, so a born
           sibling's timer stays visible even while another child is selected),
-          then the Start-timer card sits below as the "start another" action. */}
+          and each card names the child it belongs to once there are two, so two
+          same-activity timers are told apart here rather than only on the
+          Timers screen. The Start-timer card sits below as the "start another"
+          action. */}
       <View style={{ gap: 9, marginTop: 4 }}>
-        {timers.map((tm) => (
-          <Pressable
-            key={tm.id}
-            onPress={() => router.push('/timers')}
-            accessibilityRole="button"
-            accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running${isServer ? (tm.serverId != null ? ', synced' : ', pending sync') : ''}, view timers`}
-            style={(s) => [
-              {
-                backgroundColor: t.surface,
-                borderWidth: 1.5,
-                borderColor: t.line,
-                borderRadius: 20,
-                paddingVertical: 15,
-                paddingHorizontal: 17,
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 11,
-                cursor: 'pointer',
-              },
-              isHovered(s) && { borderColor: t.line2 },
-            ]}
-          >
-            <PulsingDot color={t.activity[tm.saveAs]} />
-            <View style={{ flex: 1 }}>
-              {/* Eyebrow row: the "{ACTIVITY} RUNNING" label with the per-timer
-                  sync badge beside it. The badge's tallest part (12px icon,
-                  11.5px text) is no taller than the 12px label's own line box,
-                  so this row is 14px with or without it and the card height does
-                  not move. The label shrinks and truncates ahead of the badge
-                  because the badge is the part that can widen: "Pending sync" is
-                  materially wider than "Synced". In local mode the badge is
-                  gated off and the row is just the label. */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
-                <Txt unselectable numberOfLines={1} weight={600} size={12} color={t.dim} style={{ flexShrink: 1, textTransform: 'uppercase' }}>
-                  {ACTIVITY_LABEL[tm.saveAs]} running
+        {timers.map((tm) => {
+          // The timer's OWN child, never the selected one: this list is global,
+          // so a sibling's timer is on screen while another child is selected,
+          // which is exactly the case the name is here to disambiguate.
+          const who = timerChildSuffix(tm.childId, children);
+          return (
+            <Pressable
+              key={tm.id}
+              onPress={() => router.push('/timers')}
+              accessibilityRole="button"
+              accessibilityLabel={`${ACTIVITY_LABEL[tm.saveAs]} timer running${who.spoken}${isServer ? (tm.serverId != null ? ', synced' : ', pending sync') : ''}, view timers`}
+              style={(s) => [
+                {
+                  backgroundColor: t.surface,
+                  borderWidth: 1.5,
+                  borderColor: t.line,
+                  borderRadius: 20,
+                  paddingVertical: 15,
+                  paddingHorizontal: 17,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 11,
+                  cursor: 'pointer',
+                },
+                isHovered(s) && { borderColor: t.line2 },
+              ]}
+            >
+              <PulsingDot color={t.activity[tm.saveAs]} />
+              <View style={{ flex: 1 }}>
+                {/* Eyebrow row: the "{ACTIVITY} RUNNING · NAME" label with the
+                    per-timer sync badge beside it. The badge's tallest part
+                    (12px icon, 11.5px text) is no taller than the 12px label's
+                    own line box, so this row is 14px with or without it and the
+                    card height does not move. The child rides INSIDE the label
+                    for that reason: an element of its own could move the row.
+                    The label shrinks and truncates ahead of the badge because
+                    the badge is the part that can widen: "Pending sync" is
+                    materially wider than "Synced". In local mode the badge is
+                    gated off and the row is just the label. */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                  <Txt unselectable numberOfLines={1} weight={600} size={12} color={t.dim} style={{ flexShrink: 1, textTransform: 'uppercase' }}>
+                    {ACTIVITY_LABEL[tm.saveAs]} running{who.drawn}
+                  </Txt>
+                  {isServer && <SyncBadge synced={tm.serverId != null} inline />}
+                </View>
+                <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
+                  {fmtDur((now - tm.start) / 60000)}
                 </Txt>
-                {isServer && <SyncBadge synced={tm.serverId != null} inline />}
               </View>
-              <Txt unselectable weight={800} size={26} tracking={-0.5} color={t.activity[tm.saveAs]} style={{ fontVariant: ['tabular-nums'], marginTop: 1 }}>
-                {fmtDur((now - tm.start) / 60000)}
-              </Txt>
-            </View>
-            {/* Right column: the "View" affordance and its chevron on one centred
-                row. The sync badge sits on the eyebrow row above instead of
-                stacked under here, so this column stays a single line. */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-              <Txt unselectable weight={600} size={13.5} color={t.dim}>
-                View
-              </Txt>
-              <Icon name="chevron-right" color={t.dim} size={16} />
-            </View>
-          </Pressable>
-        ))}
+              {/* Right column: the "View" affordance and its chevron on one centred
+                  row. The sync badge sits on the eyebrow row above instead of
+                  stacked under here, so this column stays a single line. */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                <Txt unselectable weight={600} size={13.5} color={t.dim}>
+                  View
+                </Txt>
+                <Icon name="chevron-right" color={t.dim} size={16} />
+              </View>
+            </Pressable>
+          );
+        })}
 
         {/* Start-timer card */}
         <Pressable

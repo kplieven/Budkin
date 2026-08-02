@@ -88,8 +88,13 @@ export function queueTypeCounts(queue: Entry[]): QueueTypeCount[] {
  * Null for a single-child household (the answer is never in doubt) and null for
  * a child that is no longer on the device, where a blank or an id would be
  * worse than silence.
+ *
+ * `childId` is optional, which an `Entry`'s never is, because the running-timer
+ * cards share this rule through `src/features/timers/timerAttribution.ts` and
+ * `Timer.childId` IS optional. An unowned timer falls in with the unknown child
+ * above and says nothing, rather than being named after whoever is selected.
  */
-export function attributionFor(childId: string, children: { id: string; first: string }[]): string | null {
+export function attributionFor(childId: string | undefined, children: { id: string; first: string }[]): string | null {
   if (children.length < 2) return null;
   return children.find((c) => c.id === childId)?.first ?? null;
 }
