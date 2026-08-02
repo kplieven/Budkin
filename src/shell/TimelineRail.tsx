@@ -13,7 +13,7 @@ import { useTheme } from '@/theme/useTheme';
 
 /**
  * Desktop dashboard's right-hand timeline rail (fixed 372px): day-grouped recent
- * activity, sharing ActivityRow + groupByDay with the History screen. Rendered
+ * activity, sharing TimelineEntry + groupByDay with the History screen. Rendered
  * only above the rail breakpoint (see showRail / the dashboard's desktop branch).
  */
 export function TimelineRail() {
