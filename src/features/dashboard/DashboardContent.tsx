@@ -12,7 +12,7 @@ import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
 import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import { MilestoneNudge } from '@/features/milestones/MilestoneNudge';
-import { timerChildSuffix } from '@/features/timers/timerAttribution';
+import { childAttribution } from '@/features/activity/childAttribution';
 import { fmtAgoShort, fmtDur } from '@/lib/format';
 import { bathGivenToday, treatmentDueHint, treatmentDueList, treatmentsAllGiven, entriesForChild, fmtDayStartHour, lastDiaper, lastFeedStartMinAgo, nextStartSide, washDueState, rhythmForChild, runningTimer, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
@@ -253,7 +253,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           // The timer's OWN child, never the selected one: this list is global,
           // so a sibling's timer is on screen while another child is selected,
           // which is exactly the case the name is here to disambiguate.
-          const who = timerChildSuffix(tm.childId, children);
+          const who = childAttribution(tm.childId, children);
           return (
             <Pressable
               key={tm.id}
