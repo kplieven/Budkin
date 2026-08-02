@@ -144,7 +144,7 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
     childName: s?.childName,
     childCount: s?.childCount,
     age,
-    side: s?.nextSide === 'right' ? 'right' : 'left',
+    side: s ? (s.nextSide === 'right' ? 'right' : 'left') : null,
     expected: !!s?.expected,
     fedMin,
     diaperMin,
