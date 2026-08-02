@@ -70,6 +70,14 @@ export interface TimeEntryState {
   milestone?: string;
   /** bath (point): which wash was given */
   wash?: WashKind;
+  /**
+   * The user picked the wash THEMSELVES, as opposed to it being the suggestion
+   * the sheet seeded from the child's own rhythm on open. Re-aiming the sheet at
+   * a sibling re-seeds that suggestion, since whose rhythm applies has changed,
+   * and this is what keeps it from overruling a decision already made. Mirrors
+   * `startEdited`.
+   */
+  washEdited?: boolean;
   /** temperature (point): the numeric reading being entered (°C) */
   temperature?: number;
   /** medication (point): the medication name being entered (required to save) */

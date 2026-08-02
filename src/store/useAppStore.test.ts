@@ -3018,6 +3018,65 @@ describe('the log sheet owns the child it is logging for', () => {
   });
 });
 
+describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
+  // `wash` is the one child-scoped SEED the sheet computes at open (from that
+  // child's own rhythm and bath history), so re-aiming has to move it: leaving
+  // it behind offers Mira's suggestion as Ivo's, and the sheet saves it.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+  // Bathed fully an hour ago, so the full-bath clock is reset and only a quick
+  // wash is on the cards. Ivo has never been bathed, so a full bath is due.
+  const miraBath: Entry = { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3600000, wash: 'full', tags: [] };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1', entries: [miraBath] });
+  });
+
+  it('follows a single-target re-aim', () => {
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('full');
+  });
+
+  it('follows a collapse back to one child', () => {
+    s().openSheet('bath');
+    s().toggleSheetChild('c2');
+    // Two targets have no single rhythm to read, so the shared value stands.
+    expect(s().te.wash).toBe('quick');
+    s().toggleSheetChild('c1');
+    expect(s().te.wash).toBe('full');
+  });
+
+  it('never overwrites a wash the parent already chose', () => {
+    // A suggestion must not overrule a decision. Both children suggest `full`
+    // here, so only the guard can keep the chosen `quick`.
+    useAppStore.setState({ entries: [] });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('full');
+    s().setWash('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('quick');
+  });
+
+  it('never re-seeds an EDIT, whose wash is the record\'s own', () => {
+    // Re-aiming an edit moves the record; it must not also rewrite what the
+    // record says happened.
+    useAppStore.setState({ entries: [{ ...miraBath, wash: 'quick' }] });
+    s().openEdit('b1');
+    expect(s().te.wash).toBe('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('quick');
+  });
+
+  it('leaves other activities\' drafts alone', () => {
+    s().openSheet('diaper');
+    const before = s().te;
+    s().setSheetChildren(['c2']);
+    expect(s().te).toBe(before);
+  });
+});
+
 describe('logging for more than one child at once', () => {
   // "Log for both": one INDEPENDENT entry per target child, each separately
   // editable and deletable afterwards. No link field, no group id.
@@ -3045,6 +3104,21 @@ describe('logging for more than one child at once', () => {
   it('toggleSheetChild refuses to untoggle the last target', () => {
     s().openSheet('diaper');
     s().toggleSheetChild('c1');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses a child the picker could never have offered', () => {
+    // An expecting child added as a target would fan out invisibly: no chip
+    // would show it, so nothing could take it back off again.
+    useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses an id that names nobody', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('ghost');
     expect(s().sheetChildIds).toEqual(['c1']);
   });
 
@@ -3144,12 +3218,15 @@ describe('logging for more than one child at once', () => {
     expect(s().entries[0].childId).toBe('c1');
   });
 
-  it('holds back an expecting sibling\'s entry while the born one pushes', async () => {
-    // `commitWrite` routes per child, so a batch genuinely takes several paths.
-    // Nothing in the UI offers an expecting child, so this is the store keeping
-    // its own rule rather than trusting the picker's.
+  it('routes a mixed batch per child: a withheld sibling stays local', async () => {
+    // `commitWrites` routes each entry on its OWN child, so a batch genuinely
+    // takes several paths at once. The target is set directly rather than
+    // through the picker, which refuses an expecting child: the subject here is
+    // what the write path does with such a batch, however one arose.
     useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
-    bothDiapers();
+    s().openSheet('diaper');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
     await flush();
     expect(s().entries).toHaveLength(2);
     expect(s().entries.find((e) => e.childId === 'c2')?.heldBack).toBe(true);

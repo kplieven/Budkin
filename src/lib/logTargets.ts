@@ -54,6 +54,18 @@ export function eligibleTargetChildren(children: Child[]): Child[] {
 }
 
 /**
+ * The single-id form of `eligibleTargetChildren`, for guarding a WRITE rather
+ * than building a list. One rule about who may be a target, so the picker's
+ * chips and the store's toggle cannot drift: a target the picker would never
+ * render is a target nothing can take back off again, because there is no chip
+ * for it, and it would fan out invisibly on save.
+ */
+export function isEligibleTarget(children: Child[], id: string): boolean {
+  const child = children.find((c) => c.id === id);
+  return !!child && !child.expected;
+}
+
+/**
  * The names behind the sheet header's "for ..." line: "Mira", "Mira and Ivo",
  * "Mira, Ivo and Ada". Ordered by the TARGET list rather than the roster, so the
  * line reads back the taps that built it.

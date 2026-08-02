@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { anchorChildId, eligibleTargetChildren, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
+import { anchorChildId, eligibleTargetChildren, isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import type { Child } from '@/types/models';
 
 const child = (id: string, first: string, extra: Partial<Child> = {}): Child => ({
@@ -53,6 +53,30 @@ describe('eligibleTargetChildren', () => {
 
   it('keeps the roster order', () => {
     expect(eligibleTargetChildren([ivo, mira]).map((c) => c.id)).toEqual(['c2', 'c1']);
+  });
+});
+
+describe('isEligibleTarget', () => {
+  // The single-id form of `eligibleTargetChildren`, for the picker's toggle:
+  // one rule about who may be a target, not two that can drift.
+  const bump = child('c4', 'Bump', { expected: true });
+
+  it('accepts a born child on the roster', () => {
+    expect(isEligibleTarget([mira, ivo], 'c2')).toBe(true);
+  });
+
+  it('refuses an expecting child', () => {
+    expect(isEligibleTarget([mira, bump], 'c4')).toBe(false);
+  });
+
+  it('refuses an id that names nobody', () => {
+    expect(isEligibleTarget([mira], 'gone')).toBe(false);
+  });
+
+  it('agrees with eligibleTargetChildren on every roster member', () => {
+    const roster = [mira, bump, ivo];
+    const listed = eligibleTargetChildren(roster).map((c) => c.id);
+    expect(roster.filter((c) => isEligibleTarget(roster, c.id)).map((c) => c.id)).toEqual(listed);
   });
 });
 

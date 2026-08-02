@@ -78,7 +78,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
-import { sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
+import { isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
@@ -1149,6 +1149,43 @@ function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
 function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSystem): TimeEntryState {
   if (te.amount == null || !draftAmountIsVolume(type, te)) return te;
   return { ...te, amount: snapVolume(te.amount, system) };
+}
+
+/**
+ * The draft the sheet should hold once it has been re-aimed at `ids`, or null
+ * when nothing needs to move.
+ *
+ * Exactly one seed on the draft is CHILD-scoped: a bath's suggested wash, taken
+ * in `openSheet` from that child's own rhythm and bath history. Re-aiming the
+ * sheet changes whose rhythm applies, so the suggestion has to follow, the same
+ * way the time-entry anchor chips do. Leaving it behind would offer Mira's
+ * suggestion as Ivo's, and the sheet SAVES it. (A sleep draft's nap flag looks
+ * similar and is not: the nap window is global.)
+ *
+ * "Recompute the derived surfaces, leave the user's own choices alone" cuts both
+ * ways, hence three guards. `washEdited` means the parent has already picked
+ * quick or full, and a suggestion must never overrule a decision. An EDIT holds
+ * the RECORD's wash, not a suggestion, so re-aiming an edit moves the record
+ * without rewriting what it says happened. And a multi-target draft has no
+ * single rhythm to read, so the shared value stands.
+ */
+/** Point the open sheet at `ids`, carrying any child-scoped seed along with it.
+ *  The one write path for the target, so `setSheetChildren` and
+ *  `toggleSheetChild` cannot re-aim on different terms. */
+function aimSheetAt(get: Get, set: Set, ids: string[]): void {
+  const te = reseedTargetScopedDraft(get(), ids);
+  set(te ? { sheetChildIds: ids, te } : { sheetChildIds: ids });
+}
+
+function reseedTargetScopedDraft(s: AppStore, ids: string[]): TimeEntryState | null {
+  if (s.sheet?.type !== 'bath' || s.editingId || s.te.washEdited || ids.length !== 1) return null;
+  const childId = ids[0];
+  const wash = washDueState(
+    entriesForChild(s.entries, childId),
+    rhythmForChild(s.bathRhythms, childId, s.legacyRhythm),
+    s.now,
+  ).nextKind;
+  return wash === s.te.wash ? null : { ...s.te, wash };
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3168,19 +3205,25 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // means "never seeded, use the old binding", so accepting one here would
     // quietly hand the draft back to the global selection.
     if (ids.length === 0) return;
-    set({ sheetChildIds: ids });
+    aimSheetAt(get, set, ids);
   },
   toggleSheetChild: (id) => {
-    const ids = get().sheetChildIds;
+    const s = get();
+    const ids = s.sheetChildIds;
     if (!ids.includes(id)) {
-      set({ sheetChildIds: [...ids, id] });
+      // Only a child the PICKER could have offered. A target with no chip is one
+      // nothing can take back off again, and it would fan out on save with
+      // nothing on screen to say so. Unreachable through the UI, which builds
+      // its chips from the same rule; this is the state keeping it anyway.
+      if (!isEligibleTarget(s.children, id)) return;
+      aimSheetAt(get, set, [...ids, id]);
       return;
     }
     // Untoggling the last target would leave the draft ownerless. The picker
     // shows the remaining chip as selected, so this reads as "you cannot
     // deselect everyone" rather than as a dead tap.
     if (ids.length === 1) return;
-    set({ sheetChildIds: ids.filter((x) => x !== id) });
+    aimSheetAt(get, set, ids.filter((x) => x !== id));
   },
   closeSheet: () => set({ sheet: null, sheetChildIds: [], editingId: null, fromTimerId: null }),
   deleteEntry: (id) => {
@@ -3502,10 +3545,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({ te: { ...s.te, amount: stepVolume(s.te.amount ?? 0, dir, s.unitSystem) } })),
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
-  setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),
+  // `washEdited` unlike `setNap` below, because this seed is CHILD-scoped and so
+  // gets recomputed when the sheet is re-aimed (see `reseedTargetScopedDraft`).
+  // The flag is what keeps that recompute from overruling this choice.
+  setWash: (wash) => set((s) => ({ te: { ...s.te, wash, washEdited: true } })),
   // Manual Nap/Night override for the sleep sheet. No companion "user touched
-  // this" flag is needed: the sheet seeds `te.nap` from the window on open and
-  // saves whatever `te.nap` holds, so a flip here simply wins.
+  // this" flag is needed: the nap window is GLOBAL, so no re-aim can change what
+  // it suggests; the sheet seeds `te.nap` from it on open and saves whatever
+  // `te.nap` holds, so a flip here simply wins.
   setNap: (nap) => set((s) => ({ te: { ...s.te, nap } })),
   toggleTag: (tag) =>
     set((s) => {
