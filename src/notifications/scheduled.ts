@@ -367,8 +367,10 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
       // every occurrence after the first.
       body: 'Tap to log a session.',
       fireAt,
-      // The one kind that names no child: pumping is parent-side, scheduled once
-      // for the device rather than per child, so there is nobody to select.
+      // The only kind that is childless BY DESIGN: pumping is parent-side,
+      // scheduled once for the device rather than per child, so there is nobody
+      // to name. A stale-timer alert can be childless too, but only when the
+      // timer it is about has no owner to resolve.
       data: { url: '/timers' },
     });
   }
