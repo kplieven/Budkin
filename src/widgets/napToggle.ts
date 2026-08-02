@@ -18,7 +18,7 @@ import { loadPrefs } from '@/data/prefs';
 import { enqueueEntry } from '@/data/queue';
 import { buildSleepEntry, startSleepTimer } from '@/data/sleepTimer';
 import { loadTimers, saveTimers } from '@/data/timers';
-import { buildTimerNotification } from '@/notifications/content';
+import { buildNamedTimerNotification } from '@/notifications/content';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
 import { NAP_WINDOW_END_DEFAULT, NAP_WINDOW_START_DEFAULT, runningTimer, type NapWindow } from '@/store/selectors';
 import { readWidgetSnapshot, writeWidgetSnapshot, type WidgetSnapshot } from '@/widgets/snapshot';
@@ -112,7 +112,12 @@ export async function toggleNapFromWidget(
   // widget shows one child, and the unscoped version was a misattribution bug,
   // filing the stopped nap against `snap.selectedChildId` whoever it belonged to.
   // (The Timers tab stays the multi-child surface where any timer is stoppable.)
-  const running = runningTimer(timers, 'sleep', snap.selectedChildId, snap.selectedChildId);
+  // A timer carrying NO owner matches nobody here. Migrating those is the store's
+  // job, in `hydrate`, and this task runs with no store, so a legacy unowned
+  // timer is invisible to the widget until the app next cold-starts WITH a
+  // connection and a born child selected (see `stampTimerOwners` for why merely
+  // opening the app is not always enough).
+  const running = runningTimer(timers, 'sleep', snap.selectedChildId);
 
   if (running) {
     // Stop: queue the finished nap (unless demo/unconfigured) and drop the timer.
@@ -144,5 +149,8 @@ export async function toggleNapFromWidget(
   const next: WidgetSnapshot = { ...snap, sleepStart: now };
   await writeWidgetSnapshot(next);
   render(next); // repaint now — state is durable; post the notification after.
-  await postTimerNotification(buildTimerNotification(timer, snap.childName));
+  // The name-shaped builder, because there is no roster out here to resolve the
+  // timer's child from. Correct by construction anyway: the timer was just
+  // stamped with `snap.selectedChildId`, and `snap.childName` is that child.
+  await postTimerNotification(buildNamedTimerNotification(timer, snap.childName));
 }

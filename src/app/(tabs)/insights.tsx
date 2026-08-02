@@ -81,15 +81,13 @@ export default function Insights() {
   // live breathing bar on the heatmap's Today row. Scoped to the selected child,
   // which `insightsEntries` already is by construction, and keyed on `saveAs`
   // rather than `activity` so a quick timer repointed to sleep draws in the sleep
-  // colour: the same rule Home and the reminder scheduler use. The child id is
-  // passed twice because this screen only ever asks about the selected child; the
-  // two arguments differ only for the scheduler, which walks every child.
-  const runningSince = runningTimer(timers, 'sleep', selectedChildId, selectedChildId)?.start ?? null;
+  // colour: the same rule Home and the reminder scheduler use.
+  const runningSince = runningTimer(timers, 'sleep', selectedChildId)?.start ?? null;
   // Start of a currently-running feeding timer, for the live feeding bar (drawn
   // on top of a live sleep bar so feeding takes precedence). Keying on `saveAs`
   // makes the two mutually exclusive per timer, so that precedence is only
   // reachable with a sleep and a feeding timer running at the same time.
-  const runningFeedSince = runningTimer(timers, 'feeding', selectedChildId, selectedChildId)?.start ?? null;
+  const runningFeedSince = runningTimer(timers, 'feeding', selectedChildId)?.start ?? null;
   // The day boundary (set on the Settings page). Drives the heatmap and every
   // per-window trend below, so the graph and the numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);

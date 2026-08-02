@@ -15,6 +15,23 @@ export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self
 export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
 /**
+ * What a child's last feed was like, which is what the next feeding draft opens
+ * on. Local only, and never an entry: it is a seed, not a record.
+ *
+ * THE reason it is held per child (`Record<childId, LastFeed>`), stated once
+ * here because several places lean on it: one shared value was written by
+ * whichever child was fed last, so with twins the feeding sheet opened on the
+ * OTHER twin's habits and disagreed with the Home tile that sent you there
+ * (that tile computes its own hint from child-scoped entries). It is a seed the
+ * sheet SAVES, not just one it displays, so an unscoped read files one child's
+ * habits as another's.
+ */
+export interface LastFeed {
+  feedType: FeedType;
+  method: FeedMethod;
+}
+
+/**
  * A child's gender. Optional everywhere: absent means "not recorded", which is
  * why there is no "unspecified" member — nothing has to be chosen.
  */
@@ -42,6 +59,13 @@ export interface Child {
   /** remote photo URL, when present */
   picture?: string | null;
 }
+
+/** A child as the SERVER describes it. Identical to `Child` minus `color`,
+ *  because Baby Buddy has no color field: the tint is assigned and persisted
+ *  on device (see `nextChildColor` and the store's `reconcileChildren`), and
+ *  leaving it off this type is what stops a fabricated one from travelling in
+ *  and overwriting the real one on every refresh. */
+export type ServerChild = Omit<Child, 'color'>;
 
 /** A photo the user picked in the child sheet, normalized off the image-picker
  *  asset so the store / API layer never import expo-image-picker types.
@@ -246,7 +270,13 @@ export interface Timer {
   id: string;
   /** server numeric id; present once the timer is mirrored to a server */
   serverId?: number;
-  /** local child id this timer belongs to (defaults to the selected child) */
+  /** local child id this timer belongs to: whoever started it, and nobody else.
+   *  Every creation path stamps one and `hydrate` stamps the ones persisted
+   *  before that existed (`stampTimerOwners`), so an absent value means "not
+   *  attributable", never "the selected child": the read sites stopped adopting
+   *  (see `timerBelongsTo`). Stays OPTIONAL because `budkin.pendingOps.v1` and
+   *  `budkin.timers.v1` hold whole `Timer` payloads that are cast, never
+   *  validated, so requiring it would only be a lie about what is on disk. */
   childId?: string;
   /** the activity this timer was started as */
   activity: ActivityType;

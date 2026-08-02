@@ -150,6 +150,12 @@ describe('attributionFor', () => {
   it('stays silent rather than showing an id for a child that is gone', () => {
     expect(attributionFor('gone', kids)).toBeNull();
   });
+
+  it('stays silent for a record with no owner at all', () => {
+    // Only reachable through the timer cards: `Timer.childId` is optional where
+    // an `Entry`'s is not. Silence, never the selected child.
+    expect(attributionFor(undefined, kids)).toBeNull();
+  });
 });
 
 describe('syncBlockedBy', () => {

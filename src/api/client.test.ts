@@ -120,6 +120,31 @@ describe('listChildren', () => {
     expect(children[0].birth).toBe(new Date(2025, 2, 4).getTime());
   });
 
+  // The avatar tint is purely local: Baby Buddy has no color field on a child,
+  // so anything set here would be fabricated from the server's list position
+  // and would move under the child whenever that ordering changed. The store
+  // owns it instead (nextChildColor / reconcileChildren).
+  it('does not invent an avatar color from the list position', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 7, first_name: 'A', birth_date: '2024-01-01' },
+          { id: 8, first_name: 'B', birth_date: '2024-01-01' },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new BabybuddyClient('https://example.com', 'tok');
+
+    const children = await client.listChildren();
+
+    expect(children[0]).not.toHaveProperty('color');
+    expect(children[1]).not.toHaveProperty('color');
+  });
+
   // The serialize half of the pair childBody uses: a parsed birth date must
   // come back out as the same calendar day, or every edit round-trip
   // (rename, gender, photo) would walk birth_date backwards on the server.

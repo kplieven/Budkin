@@ -13,12 +13,12 @@ import {
   type ChildGender,
   type Treatment,
   type Entry,
-  type FeedMethod,
-  type FeedType,
+  type LastFeed,
   type Measurement,
   type MeasurementKind,
   type PhotoChange,
   type Profile,
+  type ServerChild,
   type Tag,
   type Timer,
 } from '@/types/models';
@@ -28,7 +28,9 @@ export type Connection =
   | { mode: 'server'; serverUrl: string; token: string };
 
 export interface LoadResult {
-  children: Child[];
+  /** No `color`: the avatar tint is local-only, and the store fills it in when
+   *  it reconciles this list (see `reconcileChildren`). */
+  children: ServerChild[];
   entries: Entry[];
   /** Running timers mirrored on the server, or null when the /api/timers/
    *  fetch itself failed. The distinction is load-bearing: an empty list is
@@ -40,7 +42,12 @@ export interface LoadResult {
    *  very device that started it. */
   timers: Timer[] | null;
   selectedChildId: string;
-  lastFeed: { feedType: FeedType; method: FeedMethod };
+  /** The feeding prefill implied by the server's history, keyed by child. Never
+   *  more than one entry: a load only ever fetches ONE child's records, so this
+   *  is what THAT child was last fed, and it says nothing about a sibling. The
+   *  key is a SERVER child id, like every other `childId` here, and the caller
+   *  translates it (see `mergeLastFeed`). */
+  lastFeed: Record<string, LastFeed>;
   measurements: Measurement[];
   /** The selected child's treatment regimens, read from their `treatment`-tagged
    *  notes. Empty in local mode and whenever the fetch fails. */
@@ -70,7 +77,7 @@ export async function loadFromServer(
       entries: [],
       timers: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
       treatments: [],
     };
@@ -120,9 +127,12 @@ export async function loadFromServer(
   const lastFeeding = entries
     .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding')
     .sort((a, b) => b.start - a.start)[0];
-  const lastFeed = lastFeeding
-    ? { feedType: lastFeeding.feedType, method: lastFeeding.method }
-    : { feedType: 'breast' as FeedType, method: 'left' as FeedMethod };
+  // Keyed by the child this load fetched, so the caller can file it against
+  // that child alone. No feeds means no opinion, NOT a default: an empty map
+  // leaves whatever the device already knew about this child standing.
+  const lastFeed: Record<string, LastFeed> = lastFeeding
+    ? { [lastFeeding.childId]: { feedType: lastFeeding.feedType, method: lastFeeding.method } }
+    : {};
 
   let measurements: Measurement[] = [];
   if (selectedChildId) {

@@ -6,7 +6,7 @@
 import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
 import { normalizeWash, type WashKind } from '@/lib/wash';
-import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
+import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, LastFeed, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -67,37 +67,34 @@ export function entriesForChild(entries: Entry[], childId: string | undefined): 
 }
 
 /**
- * THE timer adoption rule, in one place: whether `t` belongs to `childId`, given
- * which child is currently selected. A timer carrying no `childId` of its own
- * counts as the SELECTED child's, and therefore as nobody else's.
+ * THE timer ownership rule, in one place: a timer belongs to whoever started it,
+ * and to nobody else. Both `timersForChild` and `runningTimer` are built on this,
+ * so the repo has one rule instead of two subtly different ones.
  *
- * `??` rather than a `== null` test so a persisted `null` and an absent field
- * (`childId` is optional on `Timer`) resolve identically.
+ * This USED to adopt: a timer carrying no `childId` of its own counted as the
+ * SELECTED child's. Every creation path now stamps an owner, and `hydrate`
+ * stamps the ones persisted before that existed, so the fallback bought nothing
+ * but a way to file a sibling's nap against the wrong child. A timer that is
+ * still unowned by the time it reaches here is one nothing could attribute, and
+ * showing it under whoever happens to be selected is exactly the misattribution
+ * the stamping removed.
  *
- * Both `timersForChild` and `runningTimer` are built on this, so the repo has one
- * adoption rule instead of two subtly different ones.
+ * `===` against an optional field, so a persisted `null` (AsyncStorage JSON is
+ * cast, never parsed) and an absent field both simply match no child.
  */
-function timerBelongsTo(t: Timer, childId: string, selectedChildId: string | undefined): boolean {
-  return (t.childId ?? selectedChildId) === childId;
+function timerBelongsTo(t: Timer, childId: string): boolean {
+  return t.childId === childId;
 }
 
 /**
- * The running timers belonging on one child's history. Scoped like
- * `entriesForChild`, with one deliberate difference: a timer with NO `childId`
- * counts as the selected child's. `childId` is optional on `Timer` and the rest
- * of the app already reads an unowned timer as the current child's (the
- * dashboard's running-timer card does no scoping at all), so dropping it here
- * would hide a genuinely running timer.
+ * The running timers belonging on one child's history. Scoped exactly like
+ * `entriesForChild`: only what the child owns, and nothing at all without a
+ * child to scope to, because a permissive fallback resurrects the bug the
+ * scoping exists to prevent.
  *
  * This is NOT the rule the Timers tab uses: that one deliberately lists every
  * child's timers, so a sibling's timer stays stoppable. History is per-child, so
  * a sibling's timer belongs in the sibling's history, not this one's.
- *
- * Every caller here asks about the SELECTED child, which is why `childId` serves
- * as both arguments to `timerBelongsTo`: this function is the special case of the
- * adoption rule where the child being asked about is the selected one. To ask
- * about a sibling, or for one timer of one kind, use `runningTimer` below, which
- * takes the two ids apart.
  *
  * Pure, so it must be called in the render body over a raw-selected array, not
  * inside a `useAppStore` selector: returning a fresh array from a selector makes
@@ -105,7 +102,7 @@ function timerBelongsTo(t: Timer, childId: string, selectedChildId: string | und
  */
 export function timersForChild(timers: Timer[], childId: string | undefined): Timer[] {
   if (!childId) return [];
-  return timers.filter((t) => timerBelongsTo(t, childId, childId));
+  return timers.filter((t) => timerBelongsTo(t, childId));
 }
 
 /**
@@ -124,13 +121,11 @@ export function timersForChild(timers: Timer[], childId: string | undefined): Ti
  * `saveAs` is what the timer will be written as, which is the one thing every
  * surface already agrees on.
  *
- * BOTH child ids, because they answer different questions. `childId` is whose
- * timer is being asked about; `selectedChildId` exists only to resolve a timer
- * that carries no owner. Passing the selected child as both is the "the current
- * child" case and behaves exactly like `timersForChild`. Passing a different
- * `childId` asks about a sibling, and an unowned timer must NOT be adopted by
- * them: `napReminders` walks every child, so a single ownerless sleep timer would
- * otherwise silence every child's nap nudge at once.
+ * ONE child id, because there is one question: whose timer is this. It took a
+ * second `selectedChildId` argument for as long as `timerBelongsTo` adopted an
+ * unowned timer, so that a caller asking about a sibling could not accidentally
+ * hand them one; the rule no longer consults the selection at all, so that
+ * argument had nothing left to decide.
  *
  * No child to scope to yields `undefined` rather than the first matching timer,
  * for the reason `entriesForChild` yields `[]`: a permissive fallback resurrects
@@ -143,14 +138,9 @@ export function timersForChild(timers: Timer[], childId: string | undefined): Ti
  * that "derive in render, never in a selector" stays a rule with no exceptions to
  * reason about and nothing allocates on every selector call.
  */
-export function runningTimer(
-  timers: Timer[],
-  saveAs: ActivityType,
-  childId: string | undefined,
-  selectedChildId: string | undefined,
-): Timer | undefined {
+export function runningTimer(timers: Timer[], saveAs: ActivityType, childId: string | undefined): Timer | undefined {
   if (!childId) return undefined;
-  return timers.find((t) => t.saveAs === saveAs && timerBelongsTo(t, childId, selectedChildId));
+  return timers.find((t) => t.saveAs === saveAs && timerBelongsTo(t, childId));
 }
 
 /** Measurements owned by one child. Same scoping rules as `entriesForChild`. */
@@ -244,6 +234,41 @@ export function nextStartSide(entries: Entry[]): 'left' | 'right' {
             ? 'right'
             : null;
   return side === 'left' ? 'right' : side === 'right' ? 'left' : 'left';
+}
+
+/**
+ * The feeding prefill for a child with nothing logged yet, and the value the
+ * store boots on. Breast on the left is the neutral opening pair; `openSheet`
+ * alternates the side from it, so a fresh sheet suggests the right.
+ */
+export const LAST_FEED_DEFAULT: LastFeed = { feedType: 'breast', method: 'left' };
+
+/**
+ * One child's last feed: their own stored draft if they have one, else
+ * `fallback`. Exactly `rhythmForChild`'s shape and for the same reason.
+ *
+ * `fallback` is where the pre-map migration lives. A build before this map kept
+ * ONE account-wide value, and it is consulted here rather than seeded into the
+ * map by a hydration pass, so this read itself performs no write and depends on
+ * no ordering (see `legacyBathRhythm`). It reads as "every child inherits the
+ * old value" until a child gets a real save, then degrades to per-child.
+ *
+ * This function's own idempotence is not the whole story, unlike the bath case
+ * it is modelled on. `legacyBathRhythm` derives from a DIFFERENT storage key
+ * than the map it backs, so a map write cannot reach it; here the two share one
+ * key, and keeping the fallback alive until a real save also depends on
+ * `saveLastFeed` refusing to persist an empty map. See its doc comment.
+ *
+ * No child to scope to yields the fallback, not somebody else's draft: this is
+ * a seed the sheet SAVES, so a permissive read files one child's habits as
+ * another's.
+ */
+export function lastFeedForChild(
+  map: Record<string, LastFeed>,
+  childId: string | undefined,
+  fallback: LastFeed,
+): LastFeed {
+  return (childId ? map[childId] : undefined) ?? fallback;
 }
 
 /** Minutes since the most recent completed feeding ended, or null. */

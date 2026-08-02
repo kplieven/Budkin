@@ -58,6 +58,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 const KEY_ENTRIES_V1 = 'budkin.entries.v1';
 const KEY_MIGRATED = 'budkin.entriesMigrated.v2';
 const CHUNK_PREFIX = 'budkin.entries.v2.';
+const KEY_LAST_FEED = 'budkin.lastFeed.v1';
 
 const chunkKey = (y: number, m: number) => `${CHUNK_PREFIX}${y}-${String(m).padStart(2, '0')}`;
 
@@ -143,10 +144,52 @@ describe('entityStore persistence', () => {
     expect(loaded?.selectedChildId).toEqual('c1');
   });
 
-  it('round-trips the last-feed defaults', async () => {
-    await saveLastFeed({ feedType: 'formula', method: 'bottle' });
+  it('round-trips the last-feed defaults, per child', async () => {
+    await saveLastFeed({ c1: { feedType: 'formula', method: 'bottle' } });
     const loaded = await loadEntities();
-    expect(loaded?.lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(loaded?.lastFeed).toEqual({ c1: { feedType: 'formula', method: 'bottle' } });
+    expect(loaded?.legacyLastFeed).toBeNull();
+  });
+
+  it('reads a pre-map last-feed value as the legacy fallback, not as a map', async () => {
+    // What a build before the per-child map left on the key. Both shapes are
+    // plain objects, so a naive object guard would take this as a map of two
+    // children called `feedType` and `method`.
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
+    const loaded = await loadEntities();
+    expect(loaded?.lastFeed).toEqual({});
+    expect(loaded?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+  });
+
+  it('drops map entries that are not drafts rather than seeding a child with junk', async () => {
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ c1: { feedType: 'solid', method: 'self' }, c2: 'nonsense' }));
+    const loaded = await loadEntities();
+    expect(loaded?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
+  });
+
+  it('keeps the pre-map value across repeated launches that never save a feed', async () => {
+    // The map SHARES its key with the pre-map scalar, so the empty map a
+    // fallback launch loads must not be written back over it. The store's
+    // persistence subscription fires on the fresh `{}` reference the read
+    // hands it, which is what made this a single-restart data loss rather
+    // than a theoretical one.
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
+
+    // Launch 1: falls back, then persists whatever it is holding.
+    const first = await loadEntities();
+    expect(first?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    await saveLastFeed(first!.lastFeed);
+
+    // Launch 2: the same answer, not the built-in default.
+    const second = await loadEntities();
+    expect(second?.lastFeed).toEqual({});
+    expect(second?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+
+    // And it still degrades per child on a REAL save, which is the design.
+    await saveLastFeed({ c1: { feedType: 'solid', method: 'self' } });
+    const third = await loadEntities();
+    expect(third?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
+    expect(third?.legacyLastFeed).toBeNull();
   });
 
   it('round-trips entries spanning several months as one union', async () => {
@@ -182,7 +225,8 @@ describe('entityStore persistence', () => {
       entries: [],
       measurements: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
   });
 
@@ -205,7 +249,8 @@ describe('entityStore persistence', () => {
       entries: [],
       measurements: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
   });
 
@@ -214,7 +259,7 @@ describe('entityStore persistence', () => {
     await saveEntries([entry('a'), entryAt('b', 2026, 6)]);
     await saveMeasurements([measurement('a')]);
     await saveSelectedChildId('c1');
-    await saveLastFeed({ feedType: 'solid', method: 'self' });
+    await saveLastFeed({ c1: { feedType: 'solid', method: 'self' } });
 
     await clearEntities();
 

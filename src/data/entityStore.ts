@@ -25,7 +25,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { normalizeWash } from '@/lib/wash';
-import type { Child, Entry, FeedMethod, FeedType, Measurement } from '@/types/models';
+import type { Child, Entry, LastFeed, Measurement } from '@/types/models';
 import { entryTimestamp } from '@/types/models';
 
 const KEY_CHILDREN = 'budkin.children.v1';
@@ -73,17 +73,19 @@ const KEY_LAST_FEED = 'budkin.lastFeed.v1';
  */
 const KEY_ENTITY_ORIGIN = 'budkin.entityOrigin.v1';
 
-const DEFAULT_LAST_FEED: { feedType: FeedType; method: FeedMethod } = {
-  feedType: 'breast',
-  method: 'left',
-};
-
 export interface StoredEntities {
   children: Child[];
   entries: Entry[];
   measurements: Measurement[];
   selectedChildId: string;
-  lastFeed: { feedType: FeedType; method: FeedMethod };
+  /** Per-child feeding prefill, keyed by child id. Absent for a child who has
+   *  never been fed through this app; the reader falls back (see
+   *  `lastFeedForChild`), which is also how `legacyLastFeed` gets used. */
+  lastFeed: Record<string, LastFeed>;
+  /** The single account-wide value a pre-map build left on the same key, or
+   *  null. Read-only: nothing ever writes this shape again, and it disappears
+   *  the first time `saveLastFeed` overwrites the key with a map. */
+  legacyLastFeed: LastFeed | null;
 }
 
 /**
@@ -156,6 +158,33 @@ function parseEntryArray(raw: string | null): Entry[] {
   return parsed.map((e) =>
     e?.type === 'bath' ? { ...e, wash: normalizeWash((e as { wash?: unknown }).wash) } : e,
   );
+}
+
+/**
+ * Splits the persisted `budkin.lastFeed.v1` value into the per-child map and
+ * the pre-map scalar the key may still be holding.
+ *
+ * Both shapes are plain objects, so "is it an object" decides nothing: the v1
+ * value `{feedType, method}` would pass straight through as a map of two
+ * children called `feedType` and `method`, and `parseOr` casts without looking.
+ * The discriminator is the VALUE type. A map's values are always drafts
+ * (objects); v1's are strings, so a string `feedType` can only be the old
+ * shape. Anything that is neither is dropped rather than seeding a child with
+ * junk.
+ *
+ * The key is deliberately NOT bumped, so the map and the value it replaces
+ * SHARE one slot and a write can destroy the fallback. Nothing is migrated: the
+ * legacy value is consulted on read as one child's fallback
+ * (`lastFeedForChild`) and is overwritten only when a real per-child map is
+ * saved over it, which `saveLastFeed`'s empty guard is what makes true.
+ */
+function parseLastFeed(raw: string | null): { map: Record<string, LastFeed>; legacy: LastFeed | null } {
+  const parsed = parseOr<unknown>(raw, null);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { map: {}, legacy: null };
+  const v = parsed as Record<string, unknown>;
+  if (typeof v.feedType === 'string') return { map: {}, legacy: v as unknown as LastFeed };
+  const drafts = Object.entries(v).filter(([, d]) => !!d && typeof d === 'object' && !Array.isArray(d));
+  return { map: Object.fromEntries(drafts) as Record<string, LastFeed>, legacy: null };
 }
 
 /**
@@ -373,12 +402,14 @@ export async function loadEntities(): Promise<StoredEntities | null> {
     return null;
   }
 
+  const lastFeed = parseLastFeed(lastFeedRaw);
   return {
     children: parseOr<Child[]>(childrenRaw, []),
     entries: chunks.entries,
     measurements: parseOr<Measurement[]>(measurementsRaw, []),
     selectedChildId: parseOr<string>(selectedChildIdRaw, ''),
-    lastFeed: parseOr<{ feedType: FeedType; method: FeedMethod }>(lastFeedRaw, DEFAULT_LAST_FEED),
+    lastFeed: lastFeed.map,
+    legacyLastFeed: lastFeed.legacy,
   };
 }
 
@@ -463,7 +494,24 @@ export async function saveSelectedChildId(v: string): Promise<void> {
   }
 }
 
-export async function saveLastFeed(v: { feedType: FeedType; method: FeedMethod }): Promise<void> {
+/**
+ * An EMPTY map is never written. The map shares its key with the pre-map scalar
+ * (see `parseLastFeed`), and a launch that falls back to that scalar holds an
+ * empty map all session, handed to the store as a FRESH `{}` reference; the
+ * persistence subscription's reference check fires on it, so without this the
+ * legacy value was destroyed by the first hydrate rather than by the first real
+ * save, and the prefill reverted after a single restart.
+ *
+ * Nothing is lost by skipping it: within a session the map only ever GAINS keys
+ * (`save()` and `mergeLastFeed` both spread the previous one), so an empty map
+ * is always a just-loaded one, never a deletion. The one visible consequence is
+ * that connecting to a DIFFERENT server leaves the previous account's map on
+ * disk until the next feed is saved; those keys name children this install no
+ * longer has, so nothing reads them, and `clearEntities` removes the key
+ * outright on disconnect.
+ */
+export async function saveLastFeed(v: Record<string, LastFeed>): Promise<void> {
+  if (Object.keys(v).length === 0) return;
   if (blockedByFailedRead(KEY_LAST_FEED, 'saveLastFeed')) return;
   try {
     await AsyncStorage.setItem(KEY_LAST_FEED, JSON.stringify(v));
