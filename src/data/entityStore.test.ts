@@ -167,6 +167,31 @@ describe('entityStore persistence', () => {
     expect(loaded?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
   });
 
+  it('keeps the pre-map value across repeated launches that never save a feed', async () => {
+    // The map SHARES its key with the pre-map scalar, so the empty map a
+    // fallback launch loads must not be written back over it. The store's
+    // persistence subscription fires on the fresh `{}` reference the read
+    // hands it, which is what made this a single-restart data loss rather
+    // than a theoretical one.
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
+
+    // Launch 1: falls back, then persists whatever it is holding.
+    const first = await loadEntities();
+    expect(first?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    await saveLastFeed(first!.lastFeed);
+
+    // Launch 2: the same answer, not the built-in default.
+    const second = await loadEntities();
+    expect(second?.lastFeed).toEqual({});
+    expect(second?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+
+    // And it still degrades per child on a REAL save, which is the design.
+    await saveLastFeed({ c1: { feedType: 'solid', method: 'self' } });
+    const third = await loadEntities();
+    expect(third?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
+    expect(third?.legacyLastFeed).toBeNull();
+  });
+
   it('round-trips entries spanning several months as one union', async () => {
     const entries = [entryAt('jun1', 2026, 6, 5), entryAt('jul1', 2026, 7, 5), entryAt('jun2', 2026, 6, 20)];
     await saveEntries(entries);

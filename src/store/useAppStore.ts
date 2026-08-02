@@ -282,11 +282,9 @@ interface AppState {
   treatments: Treatment[];
   /**
    * What each child was last fed, keyed by child id: the seed the feeding sheet
-   * opens on. Per child because one shared value meant a twin's sheet offered
-   * whichever of them was fed last, disagreeing with the Home tile that sent
-   * you there. Written by `save()`'s feeding branch, persisted to
-   * `budkin.lastFeed.v1`, and topped up by the server load for the one child a
-   * refresh fetched (see `mergeLastFeed`).
+   * opens on. See `LastFeed` for why it is per child. Written by `save()`'s
+   * feeding branch, persisted to `budkin.lastFeed.v1`, and topped up by the
+   * server load for the one child a refresh fetched (see `mergeLastFeed`).
    */
   lastFeed: Record<string, LastFeed>;
   /**
@@ -1230,19 +1228,24 @@ function feedingSeeds(
  * child's own rhythm and bath history, and a feeding's type, method and start
  * side, from what that child was last fed. Re-aiming the sheet changes whose
  * history applies, so the suggestions have to follow, the same way the
- * time-entry anchor chips do. Leaving them behind would offer Mira's suggestion
- * as Ivo's, and the sheet SAVES it: a breastfed twin and a bottle-fed one have
- * genuinely different right answers. (A sleep draft's nap flag looks similar and
- * is not: the nap window is global.)
+ * time-entry anchor chips do. Leaving them behind offers Mira's suggestion as
+ * Ivo's and the sheet SAVES it, which is the hazard `LastFeed` describes; a
+ * breastfed twin and a bottle-fed one have genuinely different right answers.
+ * (A sleep draft's nap flag looks similar and is not: the nap window is
+ * global.)
  *
  * "Recompute the derived surfaces, leave the user's own choices alone" cuts both
- * ways, hence three guards. The `*Edited` flags mean the parent has already
+ * ways, hence four guards. The `*Edited` flags mean the parent has already
  * picked, and a suggestion must never overrule a decision; they are per field,
  * so choosing a feed type does not freeze the method and the side on the
  * previous child. An EDIT holds the RECORD's own values, not suggestions, so
- * re-aiming an edit moves the record without rewriting what it says happened.
- * And a multi-target draft has no single history to read, so the shared values
- * stand.
+ * re-aiming an edit moves the record without rewriting what it says happened. A
+ * TIMER-EDIT holds the timer's, which are choices made when the timer was
+ * started and carry no edited flag of their own; the picker hides itself there
+ * (`canRetarget` in LogSheet), and this is the same rule held in the store. And
+ * a multi-target draft has no single history to read, so whatever the draft
+ * already holds stands: nothing is recomputed, rather than recomputed to a
+ * default.
  */
 /** Point the open sheet at `ids`, carrying any child-scoped seed along with it.
  *  The one write path for the target, so `setSheetChildren` and
@@ -1253,7 +1256,7 @@ function aimSheetAt(get: Get, set: Set, ids: string[]): void {
 }
 
 function reseedTargetScopedDraft(s: AppStore, ids: string[]): TimeEntryState | null {
-  if (s.editingId || ids.length !== 1) return null;
+  if (s.editingId || s.fromTimerId || ids.length !== 1) return null;
   const childId = ids[0];
   if (s.sheet?.type === 'bath') {
     if (s.te.washEdited) return null;
@@ -3115,11 +3118,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.agoMin = 0;
     }
     if (type === 'feeding') {
-      // All three seeds are about THIS child. Unscoped, a twin's sheet opened on
-      // whichever of them was fed last and disagreed with the Home tile that
-      // sent you there, which computes its hint from child-scoped entries. They
-      // follow a re-aim from here too (see `reseedTargetScopedDraft`), which is
-      // why the computation is shared rather than written out twice.
+      // All three seeds are about THIS child (see `LastFeed` for why that
+      // matters). They follow a re-aim from here too, which is why the
+      // computation is shared rather than written out twice.
       const seeds = feedingSeeds(s, seedChildId);
       te.feedType = seeds.feedType;
       te.method = seeds.method;
