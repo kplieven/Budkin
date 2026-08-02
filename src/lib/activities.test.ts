@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { DIAPER_LEVELS, INTAKE_LEVELS, feedAmountIsVolume, intakeLevelLabel, type LevelSet } from '@/lib/activities';
+import { ALL_ACTIVITIES, DIAPER_LEVELS, INTAKE_LEVELS, allowsMultipleChildren, feedAmountIsVolume, intakeLevelLabel, type LevelSet } from '@/lib/activities';
+import type { ActivityType } from '@/types/models';
 
 describe('feedAmountIsVolume partitions the dual-purpose amount', () => {
   it('is a volume for anything but a feed taken at the breast', () => {
@@ -12,6 +13,33 @@ describe('feedAmountIsVolume partitions the dual-purpose amount', () => {
 
   it('is a level at the breast', () => {
     for (const m of ['left', 'right', 'both'] as const) expect(feedAmountIsVolume('breast', m)).toBe(false);
+  });
+});
+
+describe('allowsMultipleChildren gates the "log for both" affordance', () => {
+  it('allows the routines siblings genuinely share', () => {
+    for (const type of ['feeding', 'sleep', 'diaper', 'bath', 'tummy'] as const) {
+      expect(allowsMultipleChildren(type)).toBe(true);
+    }
+  });
+
+  it('refuses pumping, so duplicating a session cannot double-count the milk', () => {
+    // Pumping is parent-side: one session produces one volume, and copying it
+    // onto each child inflates every aggregate built on it.
+    expect(allowsMultipleChildren('pumping')).toBe(false);
+  });
+
+  it('refuses measurements and one-off records', () => {
+    // One thermometer reading cannot belong to two children, and a dose, a note
+    // or a milestone is about one of them by construction.
+    for (const type of ['temperature', 'medication', 'note', 'milestone'] as const) {
+      expect(allowsMultipleChildren(type)).toBe(false);
+    }
+  });
+
+  it('is an allow-list, so a newly added activity is never silently included', () => {
+    const known: ActivityType[] = [...ALL_ACTIVITIES, 'note', 'milestone'];
+    expect(known.filter(allowsMultipleChildren)).toEqual(['feeding', 'sleep', 'diaper', 'tummy', 'bath']);
   });
 });
 
