@@ -8,6 +8,7 @@
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 
 import { fmtDur } from '@/lib/format';
+import { napLabels } from '@/widgets/napLabels';
 import type { WidgetSnapshot } from '@/widgets/snapshot';
 import { activitySvg } from '@/widgets/widgetIcons';
 
@@ -21,11 +22,12 @@ export function NapWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; 
   const sleepStart = snapshot?.sleepStart ?? null;
   const napping = sleepStart != null;
   const elapsed = napping ? fmtDur((now - sleepStart) / 60000) : '';
+  const labels = napLabels({ childName: snapshot?.childName, childCount: snapshot?.childCount, napping });
 
   return (
     <FlexWidget
       clickAction="NAP_TOGGLE"
-      accessibilityLabel={napping ? 'Stop nap' : 'Start nap'}
+      accessibilityLabel={labels.accessibilityLabel}
       style={{
         height: 'match_parent',
         width: 'match_parent',
@@ -39,14 +41,14 @@ export function NapWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; 
     >
       {napping ? (
         <FlexWidget style={{ flexDirection: 'column', alignItems: 'center' }}>
-          <TextWidget text="● Napping" style={{ fontSize: 14, fontWeight: 'bold', color: BG }} />
+          <TextWidget text={labels.text} style={{ fontSize: 14, fontWeight: 'bold', color: BG }} />
           <TextWidget text={elapsed} style={{ fontSize: 26, fontWeight: 'bold', color: BG, marginTop: 2 }} />
           <TextWidget text="tap to stop" style={{ fontSize: 12, color: BG, marginTop: 2 }} />
         </FlexWidget>
       ) : (
         <FlexWidget style={{ flexDirection: 'column', alignItems: 'center' }}>
           <SvgWidget svg={activitySvg('sleep', SLEEP)} style={{ height: 34, width: 34 }} />
-          <TextWidget text="Start nap" style={{ fontSize: 16, fontWeight: 'bold', color: TEXT, marginTop: 6 }} />
+          <TextWidget text={labels.text} style={{ fontSize: 16, fontWeight: 'bold', color: TEXT, marginTop: 6 }} />
         </FlexWidget>
       )}
     </FlexWidget>

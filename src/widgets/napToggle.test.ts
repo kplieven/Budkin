@@ -81,7 +81,7 @@ describe('toggleNapFromWidget', () => {
 
   it('stop: queues the nap, clears the timer, clears sleepStart', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render, last } = capture();
     await toggleNapFromWidget(5000, render);
     expect(last()?.sleepStart).toBeNull();
@@ -98,7 +98,7 @@ describe('toggleNapFromWidget', () => {
     const start = new Date(2026, 0, 15, 9, 0, 0).getTime();
     const end = new Date(2026, 0, 15, 11, 0, 0).getTime();
     await writeWidgetSnapshot(snap({ sleepStart: start }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
     const { render } = capture();
     await toggleNapFromWidget(end, render);
     expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: false });
@@ -108,7 +108,7 @@ describe('toggleNapFromWidget', () => {
     const start = new Date(2026, 0, 15, 9, 0, 0).getTime();
     const end = new Date(2026, 0, 15, 11, 0, 0).getTime();
     await writeWidgetSnapshot(snap({ sleepStart: start }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
     const { render } = capture();
     await toggleNapFromWidget(end, render);
     expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: true });
@@ -121,7 +121,7 @@ describe('toggleNapFromWidget', () => {
     const start = new Date(2026, 0, 15, 2, 0, 0).getTime();
     const end = new Date(2026, 0, 15, 4, 0, 0).getTime();
     await writeWidgetSnapshot(snap({ sleepStart: start }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
     const { render } = capture();
     await toggleNapFromWidget(end, render);
     expect((await loadQueue())[0]).toMatchObject({ type: 'sleep', nap: true });
@@ -129,7 +129,7 @@ describe('toggleNapFromWidget', () => {
 
   it('stop in demo mode: clears the timer but queues nothing', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000, canQueueNap: false }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render, last } = capture();
     await toggleNapFromWidget(5000, render);
     expect(last()?.sleepStart).toBeNull();
@@ -144,13 +144,15 @@ describe('toggleNapFromWidget', () => {
     expect(postTimerNotification).toHaveBeenCalledTimes(1);
     expect(vi.mocked(postTimerNotification).mock.calls[0][0]).toMatchObject({
       title: 'Ada · Sleep',
-      data: { url: '/timers', timerId: 't1000' },
+      // Named from the timer's own child, so a tap lands on whoever the widget
+      // started the nap for even if the app is sitting on a sibling.
+      data: { url: '/timers?child=c1', timerId: 't1000' },
     });
   });
 
   it('stop: dismisses the nap notification by timer id', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render } = capture();
     await toggleNapFromWidget(5000, render);
     expect(dismissTimerNotification).toHaveBeenCalledWith('t1');
@@ -173,7 +175,7 @@ describe('toggleNapFromWidget', () => {
 
   it('stop: renders before dismissing the notification', async () => {
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const order: string[] = [];
     vi.mocked(dismissTimerNotification).mockImplementation(async () => {
       order.push('dismiss');
@@ -216,7 +218,7 @@ describe('toggleNapFromWidget', () => {
     const start = at(2026, 6, 5, 13);
     const end = at(2026, 6, 5, 14);
     await writeWidgetSnapshot(snap({ sleepStart: start }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
     const { render, last } = capture();
     await toggleNapFromWidget(end, render);
     const next = last() as WidgetSnapshot;
@@ -232,7 +234,7 @@ describe('toggleNapFromWidget', () => {
     const keep: Entry = { id: 'd1', childId: 'c1', type: 'diaper', time: at(2026, 6, 5, 12, 30), wet: true, solid: false, color: null, tags: [] };
     const stale: Entry = { id: 'd0', childId: 'c1', type: 'diaper', time: at(2026, 6, 2, 12), wet: true, solid: false, color: null, tags: [] };
     await writeWidgetSnapshot(snap({ sleepStart: start, entries: [stale, keep] }));
-    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start, saveAs: 'sleep' }]);
     const { render, last } = capture();
     await toggleNapFromWidget(end, render);
     const next = last() as WidgetSnapshot;
@@ -244,7 +246,7 @@ describe('toggleNapFromWidget', () => {
     // an activity-keyed lookup here would leave the widget saying "napping" while
     // this tap started a SECOND timer.
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
-    await saveTimers([{ id: 't1', activity: 'feeding', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    await saveTimers([{ id: 't1', childId: 'c1', activity: 'feeding', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render, last } = capture();
     await toggleNapFromWidget(5000, render);
     expect(last()?.sleepStart).toBeNull();
@@ -266,6 +268,25 @@ describe('toggleNapFromWidget', () => {
     expect(timers[0]).toMatchObject({ id: 't1', childId: 'c2' }); // untouched
     expect(timers[1]).toMatchObject({ childId: 'c1', start: 5000 });
     expect(await loadQueue()).toHaveLength(0); // nothing filed against the wrong child
+  });
+
+  it('does not stop a legacy ownerless timer; migrating those is the store\'s job', async () => {
+    // Known consequence of retiring the adoption rule. `hydrate` stamps an owner
+    // onto timers persisted before stamping existed, and this task runs with no
+    // store, so between an app update and the next app launch a leftover
+    // ownerless timer is invisible here. Filing it against whoever the widget
+    // happens to show is the misattribution the stamping removed, so refusing is
+    // the point; the orphan is stamped and stoppable the moment the app opens.
+    await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
+    await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
+    const { render } = capture();
+    await toggleNapFromWidget(5000, render);
+    const timers = await loadTimers();
+    expect(timers).toHaveLength(2);
+    expect(timers[0]).toMatchObject({ id: 't1', start: 1000 }); // untouched, not stopped
+    expect(timers[0]).not.toHaveProperty('childId'); // and not stamped out here either
+    expect(timers[1]).toMatchObject({ childId: 'c1', start: 5000 });
+    expect(await loadQueue()).toHaveLength(0); // nothing filed against a guess
   });
 
   it('with no child selected: does nothing, and never accumulates phantom timers', async () => {

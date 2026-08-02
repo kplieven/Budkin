@@ -10,6 +10,7 @@ import { create, type StoreApi } from 'zustand';
 import {
   ACTIVITY_SHAPE,
   ACTIVITY_LABEL,
+  allowsMultipleChildren,
   DEFAULT_DURATION_MIN,
   feedAmountIsVolume,
 } from '@/lib/activities';
@@ -40,7 +41,8 @@ import {
 } from '@/data/repository';
 import { reconcileTimers } from '@/data/serverTimers';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
-import { ApiError, childColor, isHiddenTag, normalizeServerUrl } from '@/api/client';
+import { ApiError, isHiddenTag, normalizeServerUrl } from '@/api/client';
+import { nextChildColor } from '@/lib/color';
 import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
@@ -64,7 +66,7 @@ import {
   savePendingOps,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
+import { clearQueue, enqueueEntries, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -76,6 +78,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
+import { anchorChildId, isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
@@ -87,6 +90,8 @@ import {
   clampMinuteOfDay,
   entriesForChild,
   isNapStart,
+  LAST_FEED_DEFAULT,
+  lastFeedForChild,
   legacyBathRhythm,
   NAP_WINDOW_END_DEFAULT,
   NAP_WINDOW_START_DEFAULT,
@@ -110,11 +115,13 @@ import type {
   Entry,
   FeedMethod,
   FeedType,
+  LastFeed,
   Measurement,
   MeasurementKind,
   MilestoneEntry,
   PhotoChange,
   Profile,
+  ServerChild,
   Tag,
   Timer,
 } from '@/types/models';
@@ -222,6 +229,22 @@ interface AppState {
   /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
   adoptSheet: boolean;
   sheet: { type: ActivityType; confirm?: boolean } | null;
+  /**
+   * Which children the OPEN log sheet will file against, seeded when it opens
+   * and cleared with it. More than one means "log for both": `save()` writes one
+   * INDEPENDENT entry per id, separately editable and deletable afterwards.
+   *
+   * Deliberately NOT a field on `sheet`. `sheet` is replaced wholesale and never
+   * spread (`openSheet`, `openEdit`, `openTimerEdit`, `logMedicationFromTreatment`
+   * and, worst, `expandMedicationLog`), so a target living there would silently
+   * reset the moment the user tapped Edit in medication confirm mode. Not on `te`
+   * either: `setTE` coerces the feed amount and would have to learn to ignore it.
+   *
+   * EMPTY means "never seeded", not "nobody": `save()` then falls back to the
+   * binding it always had (the edited entry's child, else the source timer's,
+   * else the selection). See `sheetTargetIds`.
+   */
+  sheetChildIds: string[];
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
   /** id of the running timer being stopped+edited via the log sheet, or null */
@@ -257,7 +280,20 @@ interface AppState {
    *  store and the offline cache when connected; survives disconnect (user
    *  data, not the synced entity store). */
   treatments: Treatment[];
-  lastFeed: { feedType: FeedType; method: FeedMethod };
+  /**
+   * What each child was last fed, keyed by child id: the seed the feeding sheet
+   * opens on. See `LastFeed` for why it is per child. Written by `save()`'s
+   * feeding branch, persisted to `budkin.lastFeed.v1`, and topped up by the
+   * server load for the one child a refresh fetched (see `mergeLastFeed`).
+   */
+  lastFeed: Record<string, LastFeed>;
+  /**
+   * The prefill for a child with no entry of their own, taken once at hydration
+   * from the single account-wide value a pre-map build left on the same storage
+   * key, or the built-in default when there was none. See `lastFeedForChild`;
+   * exactly the `legacyRhythm` arrangement, and for the same reasons.
+   */
+  legacyLastFeed: LastFeed;
   insightsEntries: Entry[];
   insightsLoaded: boolean;
   insightsLoading: boolean;
@@ -345,6 +381,11 @@ interface AppActions {
    *  the queue.ts path (flushQueue); mixing the two would double-push. */
   flushUnsynced: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
+  /** `commitWrite` for a whole save at once. Each entry still routes on its own
+   *  child (a withheld `expected` one stays local, a child with no serverId
+   *  goes to the queue), but everything bound for the queue is handed over in
+   *  ONE batched call. See `enqueueEntries` for why that matters. */
+  commitWrites: (entries: Entry[]) => void;
 
   selectChild: (id: string) => void;
   openSwitcher: () => void;
@@ -387,6 +428,14 @@ interface AppActions {
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
   openTimerEdit: (timerId: string) => void;
+  /** Re-aim the open sheet at these children. Does NOT touch the global
+   *  selection: after saving for a sibling the user stays on whoever they were
+   *  on. An empty list is ignored, so a draft can never lose its owner. */
+  setSheetChildren: (ids: string[]) => void;
+  /** Add or remove one child from the sheet's target set ("log for both").
+   *  Removing the last one is a no-op, for the reason `setSheetChildren`
+   *  ignores an empty list. */
+  toggleSheetChild: (id: string) => void;
   closeSheet: () => void;
   deleteEntry: (id: string) => void;
   /** Restore the entry removed by the most recent deleteEntry (undo). */
@@ -667,27 +716,51 @@ function backfillHeldBack(entries: Entry[], children: Child[]): Entry[] {
 
 /** Reconcile a server child list onto the local one WITHOUT changing any local
  *  `id`. A child that exists on both sides is matched by `serverId` and the
- *  server's field values win, but the local `id` is preserved, because entries
- *  and measurements reference it and rewriting it would orphan them. That
- *  orphaning is the bug this whole design exists to prevent.
+ *  server's field values win, with two exceptions. The local `id` is preserved,
+ *  because entries and measurements reference it and rewriting it would orphan
+ *  them; that orphaning is the bug this whole design exists to prevent. And the
+ *  local `color` is preserved, because Baby Buddy has no color field at all
+ *  (`ServerChild` omits it): the tint is assigned here, once, and persisted, so
+ *  the server is definitionally not authoritative for it.
  *
  *  Local children with no `serverId` were never pushed (an offline creation, or
  *  a child deliberately held back) and are kept, prepended, which is where
  *  `mergeUnsynced` put them. Server children the app has not seen are added
  *  with their server-derived id: they never had a local phase, so that id is
- *  already stable. A local child whose `serverId` is absent from the server list
- *  was deleted server-side and is dropped, matching today's behaviour. A
- *  never-pushed local whose `id` collides with a reconciled child's id is
- *  dropped too, so the result can never contain duplicate ids, matching what
- *  `mergeUnsynced` guaranteed. */
-export function reconcileChildren(serverChildren: Child[], localChildren: Child[]): Child[] {
+ *  already stable. They are also the only children given a fresh tint, picked
+ *  against every child that will be in the result rather than against the ones
+ *  seen so far, so the tints do not depend on the order the server happened to
+ *  list its children in (see `nextChildColor`). A local child whose `serverId`
+ *  is absent from the server list was deleted server-side and is dropped,
+ *  matching today's behaviour. A never-pushed local whose `id` collides with a
+ *  reconciled child's id is dropped too, so the result can never contain
+ *  duplicate ids, matching what `mergeUnsynced` guaranteed. */
+export function reconcileChildren(serverChildren: ServerChild[], localChildren: Child[]): Child[] {
   const localByServerId = new Map<number, Child>();
   for (const c of localChildren) {
     if (c.serverId != null) localByServerId.set(c.serverId, c);
   }
+  const serverIds = new Set<number>();
+  for (const c of serverChildren) {
+    if (c.serverId != null) serverIds.add(c.serverId);
+  }
+  // Every child whose tint is already settled, gathered UP FRONT: the
+  // never-pushed locals (always kept) and the locals a server child matches
+  // (their color is preserved below). Seeding this from the local list instead
+  // of filling it as the map runs is what makes the answer independent of the
+  // server's ordering: a matched sibling listed after a new arrival is still
+  // visible to it. Locals absent from the server list are deleted server-side,
+  // so they are left out and their tint is free again.
+  const assigned: Child[] = localChildren.filter((c) => c.serverId == null || serverIds.has(c.serverId));
   const reconciled = serverChildren.map((sc) => {
     const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
-    return local ? { ...sc, id: local.id } : sc;
+    if (local) return { ...sc, id: local.id, color: local.color };
+    // Only a genuinely new child needs a tint, and only it joins `assigned`:
+    // the matched ones are already in there, and counting them twice would
+    // skew `nextChildColor`'s least-used fallback.
+    const child: Child = { ...sc, color: nextChildColor(assigned) };
+    assigned.push(child);
+    return child;
   });
   const reconciledIds = new Set(reconciled.map((c) => c.id));
   const neverPushed = localChildren.filter((c) => c.serverId == null && !reconciledIds.has(c.id));
@@ -703,8 +776,8 @@ export function reconcileChildren(serverChildren: Child[], localChildren: Child[
  *  be resolved (e.g. deleted server-side mid-request) keeps its existing
  *  `childId` rather than being dropped or reassigned to the wrong owner.
  *  `childId` is typed optional here (not just `string`) so this same helper
- *  covers `Timer`, whose `childId` can be genuinely absent (defaults to the
- *  selected child); entries and measurements always carry one. */
+ *  covers `Timer`, whose `childId` can be genuinely absent (see
+ *  `stampTimerOwners`); entries and measurements always carry one. */
 export function remapChildIds<T extends { childId?: string }>(records: T[], children: Child[]): T[] {
   const localIdByServerId = new Map<string, string>();
   for (const c of children) {
@@ -715,6 +788,79 @@ export function remapChildIds<T extends { childId?: string }>(records: T[], chil
     const localId = localIdByServerId.get(r.childId);
     return localId ? { ...r, childId: localId } : r;
   });
+}
+
+/**
+ * Give an owner to timers persisted before every creation path stamped one.
+ *
+ * `Timer.childId` stays OPTIONAL: `budkin.pendingOps.v1` persists whole `Timer`
+ * payloads and AsyncStorage JSON is cast, never validated, so a required type
+ * would only be a lie about what is already on disk. The read sites stopped
+ * adopting an unowned timer (see `timerBelongsTo`), which is why the stamping
+ * has to happen here, once, on load: an unowned timer is otherwise invisible on
+ * every per-child surface.
+ *
+ * Runs in `hydrate`, not in `loadTimers`, because `loadTimers` is a read with no
+ * access to the child list or the selection. The persistence subscription writes
+ * the stamped list back, so a migrated launch leaves nothing for the next one.
+ *
+ * `hydrate` is the ONLY stamping site, deliberately, and that makes the window
+ * wider than "one launch". Two other paths put disk timers into state with a
+ * roster already in hand and do not stamp: `connect()` (whose `applyServerLoad`
+ * keeps `serverId == null` timers verbatim through `reconcileTimers`) and
+ * `enterLocal()` (which never touches `timers` at all). `hydrate`'s own
+ * no-connection branch reads no entity store, so it has nobody to stamp with
+ * either. So after a session expiry, a cold start leaves a legacy timer
+ * unstamped and reconnecting does not fix it: the real window is until the next
+ * cold start that has a connection AND a born child selected. Nothing is lost
+ * meanwhile, since an unstamped timer stays visible and stoppable on the Timers
+ * tab (which filters by nothing) and `stopTimer` resolves its owner itself.
+ *
+ * The owner is the SELECTED child and only when that child is born, mirroring
+ * `stopTimer`'s refusal to log against an `expected` child (whose `birth` is a
+ * due date, not a real one). Anything else is left unstamped rather than guessed
+ * at, and NOTHING is ever dropped: that keeps the migration lossless and
+ * idempotent, and `stopTimer`'s own fallback chain still resolves a leftover.
+ *
+ * Returns the input array untouched when there is nothing to stamp, so a launch
+ * with no legacy timers does not churn the reference.
+ *
+ * Deliberately does NOT touch queued `{op:'update', entity:'timer'}` payloads in
+ * `budkin.pendingOps.v1`: `removePendingOp` matches ops by `JSON.stringify`, and
+ * `updateTimerOnServer` sends only `serverId`, the encoded name and `start`, so
+ * a stamp there would risk breaking removal to change nothing on the wire.
+ */
+function stampTimerOwners(timers: Timer[], children: Child[], selectedChildId: string): Timer[] {
+  if (!timers.some((t) => t.childId == null)) return timers;
+  const selected = children.find((c) => c.id === selectedChildId);
+  if (!selected || selected.expected) return timers;
+  return timers.map((t) => (t.childId == null ? { ...t, childId: selected.id } : t));
+}
+
+/** Lay a server-loaded feeding prefill over the local one, translating its keys
+ *  out of the SERVER's child id space the way `remapChildIds` translates a
+ *  record's `childId`, and for the same reason: the load has no local state to
+ *  consult. Must run AFTER `reconcileChildren`, on its output.
+ *
+ *  Merged, never replaced. A load only ever covers the ONE child it fetched, and
+ *  `refresh()` fires on every child switch, so replacing would wipe the
+ *  sibling's prefill on each A-to-B-to-A round trip. An empty answer therefore
+ *  changes nothing and returns the same reference, so the persistence
+ *  subscription doesn't rewrite the key on every refresh. */
+function mergeLastFeed(
+  local: Record<string, LastFeed>,
+  incoming: Record<string, LastFeed>,
+  children: Child[],
+): Record<string, LastFeed> {
+  const entries = Object.entries(incoming);
+  if (entries.length === 0) return local;
+  const localIdByServerId = new Map<string, string>();
+  for (const c of children) {
+    if (c.serverId != null) localIdByServerId.set(String(c.serverId), c.id);
+  }
+  const merged = { ...local };
+  for (const [childId, draft] of entries) merged[localIdByServerId.get(childId) ?? childId] = draft;
+  return merged;
 }
 
 /** The server id of the child a record belongs to, or null when that child has
@@ -807,6 +953,7 @@ function applyServerLoad(
     treatments: Treatment[];
     selectedChildId: string;
     timers: Timer[];
+    lastFeed: Record<string, LastFeed>;
     q: Entry[];
   },
   extra: Partial<AppState> = {},
@@ -856,6 +1003,12 @@ function applyServerLoad(
       data.timers == null
         ? local.timers
         : reconcileTimers(local.timers, remapChildIds(data.timers, reconciledChildren)),
+    // Another key that must stay AFTER the `...data` spread, for a different
+    // reason than `timers`: the answer is right but PARTIAL. It covers only the
+    // child this load fetched, so spreading it wholesale would drop every
+    // sibling's prefill on a refresh, which fires on each child switch. See
+    // `mergeLastFeed`, which also puts the incoming key into local id space.
+    lastFeed: mergeLastFeed(local.lastFeed, data.lastFeed, reconciledChildren),
   });
 }
 
@@ -873,7 +1026,11 @@ function mirrorTimerCreate(get: Get, set: Set, timerId: string): void {
   // A genuine new create: give the retry chain a fresh budget, so a timer
   // started an hour after some earlier failure isn't stuck with a spent one.
   timerRetryAttempt = 0;
-  const child = s.children.find((c) => c.id === (timer.childId ?? s.selectedChildId));
+  // The timer's own owner, with no fallback to the selection: every creation
+  // path stamps one, and pushing an unowned timer under whoever is selected
+  // would put the misattribution on the SERVER, where undoing it costs another
+  // round trip.
+  const child = s.children.find((c) => c.id === timer.childId);
   // Child not on the server yet. `flushUnsynced` pushes the child first and the
   // timer straight after (it re-reads state between the two for exactly this
   // reason), so schedule it instead of leaving the timer for whenever a refresh
@@ -1041,6 +1198,95 @@ function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
 function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSystem): TimeEntryState {
   if (te.amount == null || !draftAmountIsVolume(type, te)) return te;
   return { ...te, amount: snapVolume(te.amount, system) };
+}
+
+/**
+ * The three CHILD-scoped seeds a feeding draft opens on: what this child was
+ * last fed, and which breast comes next.
+ *
+ * One function so `openSheet`, `openTimerEdit` and a re-aim cannot arrive at
+ * different answers for the same child. `method` is the alternated side, which
+ * is why the last feed's own method is not simply echoed back.
+ */
+function feedingSeeds(
+  s: Pick<AppState, 'entries' | 'lastFeed' | 'legacyLastFeed'>,
+  childId: string | undefined,
+): { feedType: FeedType; method: FeedMethod; startSide: 'left' | 'right' } {
+  const last = lastFeedForChild(s.lastFeed, childId, s.legacyLastFeed);
+  return {
+    feedType: last.feedType || 'breast',
+    method: last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left',
+    startSide: nextStartSide(entriesForChild(s.entries, childId)),
+  };
+}
+
+/**
+ * The draft the sheet should hold once it has been re-aimed at `ids`, or null
+ * when nothing needs to move.
+ *
+ * Two activities carry CHILD-scoped seeds: a bath's suggested wash, from that
+ * child's own rhythm and bath history, and a feeding's type, method and start
+ * side, from what that child was last fed. Re-aiming the sheet changes whose
+ * history applies, so the suggestions have to follow, the same way the
+ * time-entry anchor chips do. Leaving them behind offers Mira's suggestion as
+ * Ivo's and the sheet SAVES it, which is the hazard `LastFeed` describes; a
+ * breastfed twin and a bottle-fed one have genuinely different right answers.
+ * (A sleep draft's nap flag looks similar and is not: the nap window is
+ * global.)
+ *
+ * "Recompute the derived surfaces, leave the user's own choices alone" cuts both
+ * ways, hence four guards. The `*Edited` flags mean the parent has already
+ * picked, and a suggestion must never overrule a decision; they are per field,
+ * so choosing a feed type does not freeze the method and the side on the
+ * previous child. An EDIT holds the RECORD's own values, not suggestions, so
+ * re-aiming an edit moves the record without rewriting what it says happened. A
+ * TIMER-EDIT holds the timer's, which are choices made when the timer was
+ * started and carry no edited flag of their own; the picker hides itself there
+ * (`canRetarget` in LogSheet), and this is the same rule held in the store. And
+ * a multi-target draft has no single history to read, so whatever the draft
+ * already holds stands: nothing is recomputed, rather than recomputed to a
+ * default.
+ */
+/** Point the open sheet at `ids`, carrying any child-scoped seed along with it.
+ *  The one write path for the target, so `setSheetChildren` and
+ *  `toggleSheetChild` cannot re-aim on different terms. */
+function aimSheetAt(get: Get, set: Set, ids: string[]): void {
+  const te = reseedTargetScopedDraft(get(), ids);
+  set(te ? { sheetChildIds: ids, te } : { sheetChildIds: ids });
+}
+
+function reseedTargetScopedDraft(s: AppStore, ids: string[]): TimeEntryState | null {
+  if (s.editingId || s.fromTimerId || ids.length !== 1) return null;
+  const childId = ids[0];
+  if (s.sheet?.type === 'bath') {
+    if (s.te.washEdited) return null;
+    const wash = washDueState(
+      entriesForChild(s.entries, childId),
+      rhythmForChild(s.bathRhythms, childId, s.legacyRhythm),
+      s.now,
+    ).nextKind;
+    return wash === s.te.wash ? null : { ...s.te, wash };
+  }
+  if (s.sheet?.type === 'feeding') {
+    const seeds = feedingSeeds(s, childId);
+    const next: TimeEntryState = { ...s.te };
+    if (!s.te.feedTypeEdited) next.feedType = seeds.feedType;
+    if (!s.te.methodEdited) next.method = seeds.method;
+    if (!s.te.startSideEdited) next.startSide = seeds.startSide;
+    if (next.feedType === s.te.feedType && next.method === s.te.method && next.startSide === s.te.startSide) {
+      return null;
+    }
+    // The same stale-amount hazard `setTE` guards, reached by another door: the
+    // field means millilitres on one side of `feedAmountIsVolume` and an intake
+    // level on the other, and this re-seed can move the draft across that line.
+    // An intake of 3 is not 3 ml, so drop it rather than let it be saved,
+    // converted or snapped to the volume grid as the wrong kind of number.
+    if (feedAmountIsVolume(s.te.feedType, s.te.method) !== feedAmountIsVolume(next.feedType, next.method)) {
+      next.amount = undefined;
+    }
+    return next;
+  }
+  return null;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1315,6 +1561,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   confirmBirthFor: null,
   adoptSheet: false,
   sheet: null,
+  sheetChildIds: [],
   editingId: null,
   fromTimerId: null,
   measurementSheet: null,
@@ -1330,7 +1577,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   timers: [],
   measurements: [],
   treatments: [],
-  lastFeed: { feedType: 'breast', method: 'left' },
+  lastFeed: {},
+  legacyLastFeed: LAST_FEED_DEFAULT,
   insightsEntries: [],
   insightsLoaded: false,
   insightsLoading: false,
@@ -1531,7 +1779,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ treatments: await loadTreatments() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
-    // state is loaded below.
+    // state is loaded below. `stampTimerOwners` then gives an owner to any that
+    // predate `childId` stamping, per branch rather than here: the child list
+    // and the selection it needs only exist once the entity store has been read,
+    // which each branch below does for itself.
     const savedTimers = await loadTimers();
     let savedServers = await loadServers();
     // Migration: ensure the active real server is in the retry list for users
@@ -1546,6 +1797,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ savedServers }); // merges; later set() calls in this fn keep it
     if (!conn) {
+      // No entity store is read on this branch, so there is no roster and no
+      // selection: an ownerless timer stays ownerless until a later hydrate has
+      // something to attribute it to.
       set({ hydrating: false, ...queueMirror(q), timers: savedTimers });
       return;
     }
@@ -1559,8 +1813,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
         measurements: e?.measurements ?? [],
         selectedChildId: e?.selectedChildId ?? '',
-        lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
-        timers: savedTimers,
+        lastFeed: e?.lastFeed ?? {},
+        legacyLastFeed: e?.legacyLastFeed ?? LAST_FEED_DEFAULT,
+        timers: stampTimerOwners(savedTimers, e?.children ?? [], e?.selectedChildId ?? ''),
         ...queueMirror(q),
       });
       return;
@@ -1602,8 +1857,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // a write against it then carries `childId: ''` (flushQueue can never
       // resolve that). Mirrors the local-mode branch above.
       selectedChildId: saved?.selectedChildId ?? '',
-      lastFeed: saved?.lastFeed ?? { feedType: 'breast', method: 'left' },
-      timers: savedTimers,
+      lastFeed: saved?.lastFeed ?? {},
+      legacyLastFeed: saved?.legacyLastFeed ?? LAST_FEED_DEFAULT,
+      timers: stampTimerOwners(savedTimers, saved?.children ?? [], saved?.selectedChildId ?? ''),
       ...queueMirror(q),
     });
     // refresh() IS the fetch-reconcile-merge-flush pipeline, so reuse it
@@ -1663,6 +1919,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           treatments: s.treatments,
           selectedChildId: s.selectedChildId,
           timers: localTimers,
+          lastFeed: s.lastFeed,
           q,
         },
         { connected: true, offline: false, networkOnline: true },
@@ -1739,19 +1996,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const sameOrigin = (await loadEntityOrigin()) === normalizeServerUrl(serverUrl);
       const saved = sameOrigin && s.children.length === 0 ? await loadEntities() : null;
       const local = !sameOrigin
-        ? { children: [], entries: [], measurements: [], selectedChildId: '' }
+        ? { children: [], entries: [], measurements: [], selectedChildId: '', lastFeed: {} }
         : s.children.length > 0
           ? {
               children: s.children,
               entries: s.entries,
               measurements: s.measurements,
               selectedChildId: s.selectedChildId,
+              lastFeed: s.lastFeed,
             }
           : {
               children: saved?.children ?? [],
               entries: backfillHeldBack(saved?.entries ?? [], saved?.children ?? []),
               measurements: saved?.measurements ?? [],
               selectedChildId: saved?.selectedChildId ?? '',
+              lastFeed: saved?.lastFeed ?? {},
             };
       // Read AFTER the fetch, mirroring `refresh`: an entry queued while the
       // request was in flight is included. The queue is deliberately NOT
@@ -1786,6 +2045,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connected: true,
           connecting: false,
           savedServers,
+          // The pre-map feeding fallback travels with the entities it belongs
+          // to. This is the only place it can reach state on a cold start
+          // parked at the reconnect screen: `hydrate`'s no-connection branch
+          // reads no entity store. Skipped when the read found none, so a
+          // fallback `hydrate` did manage to set is never reset to the default.
+          ...(saved?.legacyLastFeed ? { legacyLastFeed: saved.legacyLastFeed } : {}),
           // a newly-connected server's profile + tags haven't been fetched yet
           profile: null,
           profileLoaded: false,
@@ -1963,6 +2228,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // `...data` spread above: keep the in-memory timers as they are. A
       // non-null answer is remapped and taken wholesale, as before.
       timers: data.timers == null ? get().timers : remapChildIds(data.timers, reconciledChildren),
+      // Explicit and AFTER the spread for the same reason as in
+      // `applyServerLoad`: the server's answer covers one child, so taking it
+      // wholesale would drop every sibling's feeding prefill.
+      lastFeed: mergeLastFeed(get().lastFeed, data.lastFeed, reconciledChildren),
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
@@ -1985,7 +2254,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
       measurements: e?.measurements ?? [],
       selectedChildId: e?.selectedChildId ?? '',
-      lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
+      lastFeed: e?.lastFeed ?? {},
+      legacyLastFeed: e?.legacyLastFeed ?? LAST_FEED_DEFAULT,
       profile: null,
       profileLoaded: false,
       profileError: false,
@@ -2293,7 +2563,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const st2 = get();
       for (const timer of st2.timers) {
         if (timer.serverId != null) continue;
-        const child = st2.children.find((c) => c.id === (timer.childId ?? st2.selectedChildId));
+        // Owner only, like `mirrorTimerCreate`: a timer `hydrate` could not
+        // attribute is skipped rather than created under the selected child.
+        const child = st2.children.find((c) => c.id === timer.childId);
         if (!child || child.serverId == null) continue;
         const serverId = await pushTimerToServer(conn, timer, child.serverId).catch(() => undefined);
         if (serverId != null) {
@@ -2304,43 +2576,51 @@ export const useAppStore = create<AppStore>((set, get) => ({
       flushUnsyncedInFlight = false;
     }
   },
-  commitWrite: (entry) => {
+  commitWrite: (entry) => get().commitWrites([entry]),
+  commitWrites: (entries) => {
     const s = get();
-    const child = s.children.find((c) => c.id === entry.childId);
-    // WITHHELD: the owning child is a due-date placeholder with no
-    // `serverId` (see `childServerIdFor`) and, being `expected`, will not
-    // get one until `confirmBirth` (see `saveChild`). Stamp that as a
-    // durable fact on the entry now, ONCE (this is the only place
-    // `heldBack` is ever set, see its doc comment on `EntryBase`), rather
-    // than something re-derived later from `expected` or a timestamp, which
-    // is exactly what kept expiring at the next transition across earlier
-    // attempts at this. Runs even in local mode / with no connection at all:
-    // `adopt()`'s later merge (`mergeHeldBackEntries`) needs the same marker
-    // on an entry written before the app ever had a server connection.
-    if (child?.expected && !entry.heldBack) {
-      set((st) => ({
-        entries: st.entries.map((e) => (e.id === entry.id ? { ...e, heldBack: true } : e)),
-      }));
-    }
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server') return; // local: nothing to push
-    // Leave a withheld entry purely local (in `entries` / the entity store,
-    // like local mode) rather than queueing it. Queueing it would let it
-    // flush silently through `flushQueue`, which never stamps a local
-    // `serverId` on an entry: the only path that does is `flushUnsynced`'s
-    // held-back push once `confirmBirth` gives the child one (see
-    // `isHeldBackEntry`), and mixing the two would risk pushing the same
-    // entry to the server twice.
-    if (child?.expected) return;
-    if (s.offline) {
-      void enqueueEntry(entry).then((q) => set(queueMirror(q)));
-    } else {
+    // Entries bound for the offline queue are collected and written ONCE at the
+    // end, rather than one un-awaited `enqueueEntry` each. See `enqueueEntries`
+    // for the load-modify-save race that makes the difference between the two a
+    // lost entry rather than an extra write.
+    const queued: Entry[] = [];
+    for (const entry of entries) {
+      const child = s.children.find((c) => c.id === entry.childId);
+      // WITHHELD: the owning child is a due-date placeholder with no
+      // `serverId` (see `childServerIdFor`) and, being `expected`, will not
+      // get one until `confirmBirth` (see `saveChild`). Stamp that as a
+      // durable fact on the entry now, ONCE (this is the only place
+      // `heldBack` is ever set, see its doc comment on `EntryBase`), rather
+      // than something re-derived later from `expected` or a timestamp, which
+      // is exactly what kept expiring at the next transition across earlier
+      // attempts at this. Runs even in local mode / with no connection at all:
+      // `adopt()`'s later merge (`mergeHeldBackEntries`) needs the same marker
+      // on an entry written before the app ever had a server connection.
+      if (child?.expected && !entry.heldBack) {
+        set((st) => ({
+          entries: st.entries.map((e) => (e.id === entry.id ? { ...e, heldBack: true } : e)),
+        }));
+      }
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server') continue; // local: nothing to push
+      // Leave a withheld entry purely local (in `entries` / the entity store,
+      // like local mode) rather than queueing it. Queueing it would let it
+      // flush silently through `flushQueue`, which never stamps a local
+      // `serverId` on an entry: the only path that does is `flushUnsynced`'s
+      // held-back push once `confirmBirth` gives the child one (see
+      // `isHeldBackEntry`), and mixing the two would risk pushing the same
+      // entry to the server twice.
+      if (child?.expected) continue;
+      if (s.offline) {
+        queued.push(entry);
+        continue;
+      }
       const childServerId = childServerIdFor(s.children, entry.childId);
       if (childServerId == null) {
         // The child is not on the server yet, so this entry cannot be either.
         // Queue it: the reconnect flush pushes it once the child exists.
         console.warn('[entries] no server id for child, queued:', entry.type, entry.childId);
-        void enqueueEntry(entry).then((q) => set(queueMirror(q)));
+        queued.push(entry);
       } else {
         // A genuine new write: give the retry chain a fresh budget, so a save
         // made an hour after some earlier failure isn't stuck with a spent one.
@@ -2378,6 +2658,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           });
       }
     }
+    // One load/save cycle and one `queueMirror` update for the whole batch. The
+    // length guard is about the READ: `enqueueEntries` would write nothing for
+    // an empty list but still load the queue and re-mirror it, on every ordinary
+    // online push.
+    if (queued.length > 0) void enqueueEntries(queued).then((q) => set(queueMirror(q)));
   },
 
   // ---- child switcher ----
@@ -2476,8 +2761,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
       return;
     }
-    // Creating: assign a local id + the next tint from the shared palette,
-    // optimistically add it, and auto-select it (mirrors saveMeasurement's
+    // Creating: assign a local id + a tint no sibling is wearing (by the palette,
+    // not by list position, which a deletion would make collide), optimistically
+    // add it, and auto-select it (mirrors saveMeasurement's
     // optimistic-local-then-push pattern).
     const localId = 'child' + Date.now();
     const child: Child = {
@@ -2487,7 +2773,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       birth: fields.birth,
       expected: fields.expected,
       gender: fields.gender,
-      color: childColor(s.children.length),
+      color: nextChildColor(s.children),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
     set({
@@ -2592,13 +2878,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
     const nextChildren = s.children.filter((c) => c.id !== id);
     // Kept for the restore below, captured before the purge. `purgedTimers` are
-    // the running timers the re-point clears: a server-backed one would come
-    // back on the next refresh, but one started offline (serverId == null) lives
-    // nowhere else and would be lost for good.
+    // the deleted child's running timers: a server-backed one would come back on
+    // the next refresh, but one started offline (serverId == null) lives nowhere
+    // else and would be lost for good.
     const priorIndex = s.children.findIndex((c) => c.id === id);
     const purgedEntries = s.entries.filter((e) => e.childId === id);
     const purgedMeasurements = s.measurements.filter((m) => m.childId === id);
-    const purgedTimers = s.timers;
+    const purgedTimers = s.timers.filter((t) => t.childId === id);
     // Purge the deleted child's entries/measurements. In local mode every
     // child's data lives in state, so this drops the orphans — and, via the
     // persistence subscription, from the durable entity store (saveEntries /
@@ -2609,17 +2895,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
       children: nextChildren,
       entries: s.entries.filter((e) => e.childId !== id),
       measurements: s.measurements.filter((m) => m.childId !== id),
+      // The deleted child's running timers, and only those. Ungated on the
+      // selection on purpose, and it fixes a bug in both directions: this used
+      // to wipe EVERY timer when the deleted child happened to be selected
+      // (stopping a sibling's nap for no reason), and to wipe NONE when they
+      // were not (leaving that child's timers running forever, owned by nobody,
+      // with no surface left to stop them from). `!==` keeps a still-unstamped
+      // timer, deliberately: `undefined` is not evidence it was this child's.
+      timers: s.timers.filter((t) => t.childId !== id),
       childSheet: false,
       editingChildId: null,
       showChildSwitcher: false,
     };
     if (s.selectedChildId === id) {
       // Deleting the selected child: re-point selection (mirrors refresh's
-      // fallback), clear the running timers (they implicitly belong to the
-      // selected child, so a later stop must not log against a different one),
-      // and reset insights (as selectChild does).
+      // fallback) and reset insights (as selectChild does). The timer purge
+      // above is NOT part of this branch; ownership decides it, not selection.
       patch.selectedChildId = nextChildren[0]?.id ?? '';
-      patch.timers = [];
       patch.insightsLoaded = false;
       patch.insightsEntries = [];
       patch.insightsError = false;
@@ -2804,7 +3096,17 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   // ---- log sheet ----
   openSheet: (type) => {
-    const last = get().lastFeed;
+    const s = get();
+    // The children this sheet is being aimed at, decided once here and used
+    // both for the child-scoped seeds below and for `sheetChildIds` at the
+    // bottom, so a seed and the target it was computed for cannot drift.
+    const aimedAt = [s.selectedChildId];
+    // Whose own history those seeds read: the single target, or nobody when
+    // there is no one right answer. The same rule the time-entry anchor chips
+    // follow, deliberately shared rather than restated (see `anchorChildId`).
+    // A sheet opens on exactly one child today; it can be re-aimed at several
+    // afterwards, and the seeds must not pretend otherwise.
+    const seedChildId = anchorChildId(aimedAt, s.selectedChildId);
     const shape = ACTIVITY_SHAPE[type];
     const te: TimeEntryState = { shape, tags: [] };
     if (shape === 'interval') {
@@ -2816,10 +3118,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.agoMin = 0;
     }
     if (type === 'feeding') {
-      te.feedType = last.feedType || 'breast';
-      te.method = last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left';
-      // suggested starting breast, alternating from the last feed
-      te.startSide = nextStartSide(get().entries);
+      // All three seeds are about THIS child (see `LastFeed` for why that
+      // matters). They follow a re-aim from here too, which is why the
+      // computation is shared rather than written out twice.
+      const seeds = feedingSeeds(s, seedChildId);
+      te.feedType = seeds.feedType;
+      te.method = seeds.method;
+      te.startSide = seeds.startSide;
     }
     if (type === 'pumping') {
       te.amount = 90;
@@ -2838,24 +3143,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // and whatever `te.nap` holds at save time is what gets saved.
       // `s.now` rather than `Date.now()` so the seed is computed against the
       // very clock `save()` will resolve the draft with.
-      const now = get().now;
+      const now = s.now;
       te.nap = isNapStart(teStart(te, now) ?? now, {
-        startMin: get().napWindowStartMin,
-        endMin: get().napWindowEndMin,
+        startMin: s.napWindowStartMin,
+        endMin: s.napWindowEndMin,
       });
     }
     if (type === 'bath') {
       // Pre-select the wash that's due from this child's rhythm. Scoped to the
-      // selected child: `entries` holds every child's records, so an unscoped
+      // sheet's own child: `entries` holds every child's records, so an unscoped
       // read would let a sibling's baths decide this child's next wash.
-      // `get().now` rather than `Date.now()`, same reasoning as the sleep
-      // branch above: the store clock is the one `save()` will resolve the
-      // draft with.
-      const childId = get().selectedChildId;
+      // `s.now` rather than `Date.now()`, same reasoning as the sleep branch
+      // above: the store clock is the one `save()` will resolve the draft with.
       te.wash = washDueState(
-        entriesForChild(get().entries, childId),
-        rhythmForChild(get().bathRhythms, childId, get().legacyRhythm),
-        get().now,
+        entriesForChild(s.entries, seedChildId),
+        rhythmForChild(s.bathRhythms, seedChildId ?? null, s.legacyRhythm),
+        s.now,
       ).nextKind;
     }
     if (type === 'temperature') {
@@ -2873,7 +3176,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({
       sheet: { type },
-      te: snapDraftAmount(type, te, get().unitSystem),
+      // The draft is aimed HERE, at open, not read off the selection at save
+      // time: a warm notification tap for a sibling moves the selection with no
+      // action on the switcher, and this sheet is a root overlay that survives
+      // the navigation. Deep links select first and open second (see
+      // app/log/[type].tsx), so the link's child is the one pinned.
+      sheetChildIds: aimedAt,
+      te: snapDraftAmount(type, te, s.unitSystem),
       editingId: null,
       fromTimerId: null,
     });
@@ -2962,6 +3271,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({
       sheet: { type: entry.type },
+      // An edit opens on whoever the record was about, never on the selection:
+      // the edit path PATCHes `child:` along with everything else, so a wrong
+      // seed here would move the server row too.
+      sheetChildIds: [entry.childId],
       te: snapDraftAmount(entry.type, te, s.unitSystem),
       editingId: entryId,
       fromTimerId: null,
@@ -2972,7 +3285,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const tm = s.timers.find((t) => t.id === timerId);
     if (!tm) return;
     const type = tm.saveAs;
-    const last = s.lastFeed;
     // The timer IS running, so show TimeEntry's ongoing editing view (start
     // editable, live "now" end) rather than dead end/lasted pills. save()
     // short-circuits to saveTimerDetails on fromTimerId BEFORE its
@@ -2985,11 +3297,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       order: ['end', 'start', 'lasted'],
     };
     if (type === 'feeding') {
-      te.feedType = tm.feedType ?? (last.feedType || 'breast');
-      te.method =
-        tm.method ??
-        (last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left');
-      te.startSide = tm.startSide ?? nextStartSide(s.entries);
+      // The TIMER's child, not the selection: this sheet is aimed at whoever
+      // started it (see `sheetChildIds` below), and the Timers tab lists every
+      // child's, so the two routinely disagree. A timer nothing could attribute
+      // has no scoped history at all, and borrows nobody's rather than falling
+      // back to whoever happens to be selected.
+      const seeds = feedingSeeds(s, tm.childId);
+      te.feedType = tm.feedType ?? seeds.feedType;
+      te.method = tm.method ?? seeds.method;
+      te.startSide = tm.startSide ?? seeds.startSide;
       if (tm.amount != null) te.amount = tm.amount;
     }
     if (type === 'pumping') {
@@ -3006,12 +3322,42 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (tm.notes != null) te.notes = tm.notes;
     set({
       sheet: { type },
+      // A timer belongs to whoever started it, the rule `stopTimer` follows for
+      // the button next to it. An unattributable timer (no owner even after
+      // `stampTimerOwners`) seeds nothing, so `save()` keeps its own fallback
+      // rather than this sheet inventing an owner for it.
+      sheetChildIds: tm.childId ? [tm.childId] : [],
       te: snapDraftAmount(type, te, s.unitSystem),
       editingId: null,
       fromTimerId: timerId,
     });
   },
-  closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
+  setSheetChildren: (ids) => {
+    // An empty list is refused rather than stored: `sheetChildIds: []` already
+    // means "never seeded, use the old binding", so accepting one here would
+    // quietly hand the draft back to the global selection.
+    if (ids.length === 0) return;
+    aimSheetAt(get, set, ids);
+  },
+  toggleSheetChild: (id) => {
+    const s = get();
+    const ids = s.sheetChildIds;
+    if (!ids.includes(id)) {
+      // Only a child the PICKER could have offered. A target with no chip is one
+      // nothing can take back off again, and it would fan out on save with
+      // nothing on screen to say so. Unreachable through the UI, which builds
+      // its chips from the same rule; this is the state keeping it anyway.
+      if (!isEligibleTarget(s.children, id)) return;
+      aimSheetAt(get, set, [...ids, id]);
+      return;
+    }
+    // Untoggling the last target would leave the draft ownerless. The picker
+    // shows the remaining chip as selected, so this reads as "you cannot
+    // deselect everyone" rather than as a dead tap.
+    if (ids.length === 1) return;
+    aimSheetAt(get, set, ids.filter((x) => x !== id));
+  },
+  closeSheet: () => set({ sheet: null, sheetChildIds: [], editingId: null, fromTimerId: null }),
   deleteEntry: (id) => {
     const s = get();
     const index = s.entries.findIndex((e) => e.id === id);
@@ -3020,6 +3366,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
+      sheetChildIds: s.editingId === id ? [] : s.sheetChildIds,
       editingId: s.editingId === id ? null : s.editingId,
     });
     detachEntry(get, set, entry, index);
@@ -3140,7 +3487,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const m: Measurement = {
       id: existing ? existing.id : 'm' + Date.now(),
       serverId: existing?.serverId,
-      childId: s.selectedChildId,
+      // Same rule `save()` follows: an edit keeps the record with whoever it
+      // was about, and re-stamping the selected child would move it on the
+      // server too.
+      childId: existing?.childId ?? s.selectedChildId,
       kind,
       value,
       date,
@@ -3315,6 +3665,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ) {
         next.amount = undefined;
       }
+      // The feeding chips are the setter for the three CHILD-scoped feeding
+      // seeds, so this is where "the parent chose it" gets recorded. Same job
+      // `setWash` does for the bath suggestion, and the flags keep a re-aim from
+      // overruling the choice (see `reseedTargetScopedDraft`). Every production
+      // caller is a chip tap; a compound patch (tests) marks each key it names.
+      if ('feedType' in patch) next.feedTypeEdited = true;
+      if ('method' in patch) next.methodEdited = true;
+      if ('startSide' in patch) next.startSideEdited = true;
       if ('agoMin' in patch) next.absTime = undefined; // point: a relative pick drops the edit anchor
       // A manual time pick (precise editor, "Now") deselects the "When" anchor,
       // unless the patch itself is that anchor selection.
@@ -3327,10 +3685,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set((s) => ({ te: { ...s.te, amount: stepVolume(s.te.amount ?? 0, dir, s.unitSystem) } })),
   toggleWet: () => set((s) => ({ te: { ...s.te, wet: !s.te.wet } })),
   toggleSolid: () => set((s) => ({ te: { ...s.te, solid: !s.te.solid } })),
-  setWash: (wash) => set((s) => ({ te: { ...s.te, wash } })),
+  // `washEdited` unlike `setNap` below, because this seed is CHILD-scoped and so
+  // gets recomputed when the sheet is re-aimed (see `reseedTargetScopedDraft`).
+  // The flag is what keeps that recompute from overruling this choice.
+  setWash: (wash) => set((s) => ({ te: { ...s.te, wash, washEdited: true } })),
   // Manual Nap/Night override for the sleep sheet. No companion "user touched
-  // this" flag is needed: the sheet seeds `te.nap` from the window on open and
-  // saves whatever `te.nap` holds, so a flip here simply wins.
+  // this" flag is needed: the nap window is GLOBAL, so no re-aim can change what
+  // it suggests; the sheet seeds `te.nap` from it on open and saves whatever
+  // `te.nap` holds, so a flip here simply wins.
   setNap: (nap) => set((s) => ({ te: { ...s.te, nap } })),
   toggleTag: (tag) =>
     set((s) => {
@@ -3457,9 +3819,51 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (type === 'medication' && !s.te.medName?.trim()) return;
     const te = s.te;
     const now = s.now;
-    const childId = s.selectedChildId;
     const existing = s.editingId ? s.entries.find((e) => e.id === s.editingId) : null;
-    const id = existing ? existing.id : 'e' + Date.now();
+    // Three cases, in this order.
+    //
+    // An EDIT keeps the record with whoever it was about. Re-stamping the
+    // selected child here would also move it server-side, since the update
+    // PATCHes `child:` along with everything else.
+    //
+    // A timer STOP (the "lasted X" path, `fromTimerId` set) belongs to whoever
+    // STARTED the timer, the same rule `stopTimer` follows for the button next
+    // to it. This one cannot read `existing`: the entry is brand new, so it is
+    // null, and the owner has to come off the timer. The Timers tab deliberately
+    // lists every child's timers with no per-child filter, so the timer being
+    // stopped need not belong to the selection, and stamping the selection here
+    // filed a sibling's nap against the wrong child, server row and all.
+    //
+    // NOT full parity with `stopTimer`, which additionally walks a born-child
+    // chain rather than ever resolving to an `expected` one. Here an unstamped
+    // timer still falls through to `s.selectedChildId`, so stopping one via
+    // "lasted X" with an expecting child selected still files against them.
+    // That is strictly narrower than before (it used to apply to EVERY timer,
+    // not just unstamped ones) and is left alone on purpose; closing it means
+    // sharing one owner-resolution helper with `stopTimer`.
+    //
+    // A fresh draft is the selected child's, which is the only case left.
+    //
+    // All three are now only the FALLBACK: the sheet carries its own target
+    // (seeded from exactly these three when it opened, so the rule below is
+    // unchanged for every sheet the user never re-aimed), and an explicit pick
+    // in the header picker wins over all of it. That is what lets a save file
+    // against the child the sheet was opened for even when the global selection
+    // moved underneath it, and what makes re-aiming an edit move the record.
+    const sourceTimer = s.fromTimerId ? s.timers.find((t) => t.id === s.fromTimerId) : undefined;
+    const fallbackChildId = existing?.childId ?? sourceTimer?.childId ?? s.selectedChildId;
+    const aimedAt = sheetTargetIds(s.sheetChildIds, fallbackChildId);
+    // "Log for both" is CREATE-ONLY and only for the shared-routine activities.
+    // An edit moves ONE record and must never mint a sibling copy of it, a timer
+    // stop belongs to whoever started that one timer, and the allow-list keeps a
+    // duplicated pumping session from double-counting the milk (see
+    // `allowsMultipleChildren`). The UI already gates all three; this is the
+    // store keeping the rule rather than trusting the picker's.
+    const targets = !existing && !sourceTimer && allowsMultipleChildren(type) ? aimedAt : [aimedAt[0]];
+    const childId = targets[0];
+    // One stamp for the whole save, suffixed per target below.
+    const stamp = Date.now();
+    const id = existing ? existing.id : `e${stamp}-0`;
     // for breastfeeding "both", record the starting side as a left/right tag
     const tags =
       type === 'feeding' &&
@@ -3607,45 +4011,78 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Undo is transactional (see `undoDelete`): it restores the entry and
     // discards the timer together, so the user can never hold both.
     if (te.ongoing && te.shape === 'interval') {
-      // A timer belongs to whoever the record was about, not to whoever happens
-      // to be selected. Same rule `stopTimer` follows in reverse.
-      const timerChildId = existing?.childId ?? childId;
-      const timer = buildTimerFromDraft(
-        't' + Date.now(),
-        type,
-        te,
-        ongoingStartMs(te, s.entries, s.editingId, now),
-        timerChildId,
-      );
+      // Spelled out rather than just reusing `targets`: on an edit the two are
+      // now equal (see where `targets` is bound), but a timer belongs to whoever
+      // the RECORD was about, and a conversion is single-target by construction.
+      // Same rule `stopTimer` follows in reverse.
+      //
+      // One timer PER TARGET on a fresh draft, for the reason a finished save
+      // writes one entry each: "still feeding" for both twins is two things
+      // happening, and starting a single timer would silently drop one of them
+      // after the parent asked for both. Ids carry the same `-<index>` suffix as
+      // the entries, and for the same collision reason.
+      const timerChildIds = existing ? [existing.childId] : targets;
+      const start = ongoingStartMs(te, s.entries, s.editingId, now);
+      const timers = timerChildIds.map((cid, i) => buildTimerFromDraft(`t${stamp}-${i}`, type, te, start, cid));
       const index = existing ? s.entries.findIndex((e) => e.id === existing.id) : -1;
       set({
         entries: existing ? s.entries.filter((e) => e.id !== existing.id) : s.entries,
-        timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
+        timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), ...timers],
         sheet: null,
+        sheetChildIds: [],
         editingId: null,
         fromTimerId: null,
       });
       if (existing) {
-        detachEntry(get, set, existing, index, timer.id);
+        detachEntry(get, set, existing, index, timers[0].id);
         get().showToast('Replaced with a live timer', { label: 'Undo', run: () => get().undoDelete() });
       } else {
-        get().showToast('Live timer started');
+        get().showToast(timers.length > 1 ? 'Live timers started' : 'Live timer started');
       }
-      mirrorTimerCreate(get, set, timer.id);
+      for (const tm of timers) mirrorTimerCreate(get, set, tm.id);
       return;
     }
 
+    // One INDEPENDENT record per target child. The siblings are CLONES of the
+    // draft carrying their own id and their own owner: every other field is
+    // about the activity rather than the child, and the two child-scoped seeds
+    // (a bath's `wash`, a feed's start side) are user-editable draft values by
+    // the time save runs, so they are shared deliberately rather than recomputed
+    // behind the parent's back. No group id and no link field: each entry is
+    // separately editable and deletable afterwards.
+    //
+    // The `-<index>` id suffix is load-bearing. `Date.now()` is millisecond
+    // resolution and this pass is synchronous, so N entries written in one save
+    // would otherwise carry IDENTICAL ids, and every id-keyed operation would
+    // then hit all of them: `removeQueuedEntry` / `updateQueuedEntry`,
+    // `deleteEntry`'s findIndex, the post-POST `serverId` stamp (which would put
+    // one child's server row onto the sibling's entry), `mergeUnsynced`'s id set
+    // and React's list keys. Nothing parses a LOCAL entry id (server ids live in
+    // `Entry.serverId`), so the format is free.
+    const built: Entry[] = [
+      entry,
+      ...targets.slice(1).map((cid, i): Entry => ({ ...entry, id: `e${stamp}-${i + 1}`, childId: cid })),
+    ];
+
     const patch: Partial<AppState> = existing
-      ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, editingId: null }
+      ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, sheetChildIds: [], editingId: null }
       : {
-          entries: [entry, ...s.entries],
+          entries: [...built, ...s.entries],
           sheet: null,
+          sheetChildIds: [],
           fromTimerId: null,
           // stopping a running timer via "lasted X" drops the source timer
           ...(s.fromTimerId ? { timers: s.timers.filter((tm) => tm.id !== s.fromTimerId) } : {}),
         };
     if (type === 'feeding') {
-      patch.lastFeed = { feedType: te.feedType ?? 'breast', method: te.method ?? 'left' };
+      // ONE draft, written once, and filed against every child it was logged
+      // for: "what was this child's last feed like" is now true of each target,
+      // and leaving a target's entry behind is exactly the staleness the
+      // per-child map exists to close. Merged over the rest of the map, so a
+      // child nobody just fed keeps whatever their own last feed was.
+      const draft: LastFeed = { feedType: te.feedType ?? 'breast', method: te.method ?? 'left' };
+      patch.lastFeed = { ...s.lastFeed };
+      for (const cid of targets) patch.lastFeed[cid] = draft;
     }
     set(patch);
     if (existing) {
@@ -3679,9 +4116,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const src = s.timers.find((tm) => tm.id === s.fromTimerId);
         if (src) mirrorTimerDelete(get, src);
       }
-      get().commitWrite(entry);
+      // One call for the whole save: everything bound for the offline queue is
+      // written in ONE load/save cycle there, because N un-awaited single
+      // enqueues interleave and drop entries (see `commitWrites`).
+      get().commitWrites(built);
       const queued = s.offline && !!s.connection && s.connection.mode === 'server';
-      get().showToast(queued ? 'Saved · queued offline' : 'Saved');
+      // Naming the children back is the confirmation that the fan-out happened:
+      // the entries land under whoever was targeted, so History (which filters
+      // by the SELECTED child) shows only one of them.
+      const what = built.length > 1 ? `Saved for ${targetChildrenLabel(s.children, targets)}` : 'Saved';
+      get().showToast(queued ? `${what} · queued offline` : what);
     }
   },
 
@@ -3725,6 +4169,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       timers: s.timers.map((t) => (t.id === timerId ? { ...t, ...patch } : t)),
       sheet: null,
+      sheetChildIds: [],
       fromTimerId: null,
     });
     get().showToast('Details saved');
@@ -3758,10 +4203,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // selected when Stop is tapped: the Timers tab deliberately shows every
     // child's timers at once, including a running nap for a born sibling while
     // an expecting child is selected. `tm.childId` is the source of truth once
-    // a timer carries one (every creation path stamps it). The `?? ...`
-    // fallback only matters for a timer that somehow reached here without
-    // one; an expecting child can never be logged against (its `birth` is a
-    // due date, not a real one), so that fallback must never resolve to one.
+    // a timer carries one (every creation path stamps it, and `stampTimerOwners`
+    // stamps the ones persisted before that existed). The `?? ...` fallback is
+    // the last line of defence for a timer even that migration could not
+    // attribute; an expecting child can never be logged against (its `birth` is
+    // a due date, not a real one), so it must never resolve to one.
     // Prefer the selected child if it's born, else the first born child on
     // file, else fall through to the selection anyway rather than leaving the
     // timer unstoppable.

@@ -11,8 +11,9 @@ import {
   useAppStore,
   visibleTags,
 } from '@/store/useAppStore';
-import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, LAST_FEED_DEFAULT, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { toDisplay } from '@/lib/units';
+import { CHILD_COLORS } from '@/lib/color';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -35,7 +36,9 @@ import {
   loadEntities,
   saveChildren,
   saveEntries,
+  saveLastFeed,
 } from '@/data/entityStore';
+import { enqueueEntries, enqueueEntry } from '@/data/queue';
 import { addPendingOp, clearPendingOps } from '@/data/pendingOps';
 import type { PendingOp } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
@@ -47,6 +50,10 @@ const h = vi.hoisted(() => ({
   timers: [] as unknown[],
   servers: [] as unknown[],
   pushed: [] as unknown[],
+  /** The `childServerId` argument each `pushEntryToServer` call went out with.
+   *  Separate from `pushed` (which several tests match wholesale) and the thing
+   *  that actually decides which child the server row lands under. */
+  pushedChildServerIds: [] as unknown[],
   updated: [] as unknown[],
   deleted: [] as unknown[],
   measPushed: [] as unknown[],
@@ -129,6 +136,10 @@ vi.mock('@/data/queue', () => ({
   }),
   enqueueEntry: vi.fn(async (e: unknown) => {
     h.q = [...h.q, e];
+    return h.q;
+  }),
+  enqueueEntries: vi.fn(async (es: unknown[]) => {
+    if (es.length > 0) h.q = [...h.q, ...es];
     return h.q;
   }),
   removeQueuedEntry: vi.fn(async (id: string) => {
@@ -221,17 +232,18 @@ vi.mock('@/data/repository', () => ({
     entries: [],
     timers: [],
     selectedChildId: '',
-    lastFeed: { feedType: 'breast', method: 'left' },
+    lastFeed: {},
     measurements: [],
     treatments: [],
   })),
-  pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown) => {
+  pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown, childServerId: unknown) => {
     if (h.pushFails) throw new Error('net');
     if (h.entryPushFails > 0) {
       h.entryPushFails -= 1;
       throw new Error('net');
     }
     h.pushed.push(e);
+    h.pushedChildServerIds.push(childServerId);
     return 999;
   }),
   updateEntryOnServer: vi.fn(async (_c: unknown, e: unknown) => {
@@ -398,6 +410,7 @@ beforeEach(() => {
   h.timers = [];
   h.servers = [];
   h.pushed = [];
+  h.pushedChildServerIds = [];
   h.updated = [];
   h.deleted = [];
   h.measPushed = [];
@@ -437,12 +450,15 @@ beforeEach(() => {
   h.treatments = [];
   h.bathRhythms = {};
   h.entityOrigin = null;
+  vi.mocked(enqueueEntry).mockClear();
+  vi.mocked(enqueueEntries).mockClear();
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
   vi.mocked(loadEntities).mockClear();
   vi.mocked(loadEntities).mockResolvedValue(null);
   vi.mocked(saveChildren).mockClear();
+  vi.mocked(saveLastFeed).mockClear();
   vi.mocked(clearEntities).mockClear();
   vi.mocked(clearPendingOps).mockClear();
   vi.mocked(loadAdoptTarget).mockClear();
@@ -461,8 +477,10 @@ beforeEach(() => {
     timers: [],
     measurements: [],
     treatments: [],
-    lastFeed: { feedType: 'breast', method: 'left' },
+    lastFeed: {},
+    legacyLastFeed: LAST_FEED_DEFAULT,
     sheet: null,
+    sheetChildIds: [],
     editingId: null,
     fromTimerId: null,
     measurementSheet: null,
@@ -533,6 +551,96 @@ describe('openSheet defaults', () => {
     expect(s().te.amount).toBe(90);
     expect(s().te.method).toBe('both');
     expect(s().te.durationMin).toBe(15);
+  });
+});
+
+// The feeding draft's three seeds are about ONE child: what their last feed was
+// like, and which breast comes next. Both used to be read unscoped, so with
+// twins the sheet opened on the other one's history and disagreed with the Home
+// tile that sent you there (the tile computes its hint from child-scoped entries).
+describe('the feeding prefill is scoped to the sheet\'s child', () => {
+  const mira: Child = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+  const feedOnTheLeft = (id: string, childId: string): Entry => ({
+    id, childId, type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [],
+  });
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1' });
+  });
+
+  it('suggests the start side from THIS child\'s feeds, not a sibling\'s', () => {
+    // Only Ivo has fed, on the left, so HIS next side is the right. Mira has
+    // never fed: hers is the opening default, and his feed must not move it.
+    useAppStore.setState({ entries: [feedOnTheLeft('f2', 'c2')] });
+    s().openSheet('feeding');
+    expect(s().te.startSide).toBe('left');
+  });
+
+  it('takes the type and method from THIS child\'s last feed, not a sibling\'s', () => {
+    useAppStore.setState({ lastFeed: { c2: { feedType: 'solid', method: 'self' } } });
+    s().openSheet('feeding');
+    expect(s().te.feedType).toBe('breast');
+    expect(s().te.method).toBe('right'); // the default 'left', alternated
+  });
+
+  it('inherits the pre-map value for a child with nothing of their own', () => {
+    // Derive-on-read migration: until a child gets a real save, the single
+    // account-wide value a pre-map build left behind is still their prefill.
+    useAppStore.setState({ lastFeed: {}, legacyLastFeed: { feedType: 'formula', method: 'bottle' } });
+    s().openSheet('feeding');
+    expect(s().te.feedType).toBe('formula');
+    expect(s().te.method).toBe('bottle');
+  });
+
+  it('a fallback hydrate hands the persist path an EMPTY map, which is what makes the guard load-bearing', async () => {
+    // Half of the two-restart story, and the half that lives here. `lastFeed`
+    // is a fresh `{}` on a launch that fell back, so the persistence
+    // subscription's reference check fires and this key does get written. The
+    // other half, that writing it cannot destroy the value the read just fell
+    // back to, is `saveLastFeed`'s empty guard (entityStore.test.ts, 'keeps the
+    // pre-map value across repeated launches'). Pinned here so a change to
+    // either side cannot quietly stop the two composing.
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [mira],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    vi.mocked(saveLastFeed).mockClear(); // only what the hydrate itself writes
+
+    await s().hydrate();
+    await flush();
+
+    expect(s().legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(vi.mocked(saveLastFeed).mock.calls.map(([v]) => v)).toEqual([{}]);
+  });
+
+  it('openTimerEdit seeds from the TIMER\'s child, not the selection', () => {
+    // Mira is selected and has fed on the left, so HER next side is the right.
+    // The running feeding timer is Ivo's and he has never fed.
+    useAppStore.setState({
+      entries: [feedOnTheLeft('f1', 'c1')],
+      lastFeed: { c1: { feedType: 'solid', method: 'self' } },
+      timers: [{ id: 't9', childId: 'c2', activity: 'feeding', name: 'Feed', start: NOW - 5 * M, saveAs: 'feeding' }],
+    });
+    s().openTimerEdit('t9');
+    expect(s().te.startSide).toBe('left');
+    expect(s().te.feedType).toBe('breast');
+  });
+
+  it('openTimerEdit borrows nobody\'s history for a timer with no owner', () => {
+    // Ownerless timers are no longer adopted by the selection, so there is no
+    // scoped history to read and the suggestion falls back to the default.
+    useAppStore.setState({
+      entries: [feedOnTheLeft('f1', 'c1')],
+      timers: [{ id: 't9', activity: 'feeding', name: 'Feed', start: NOW - 5 * M, saveAs: 'feeding' }],
+    });
+    s().openTimerEdit('t9');
+    expect(s().te.startSide).toBe('left');
   });
 });
 
@@ -1207,7 +1315,7 @@ describe('save', () => {
     expect(e.feedType).toBe('breast');
     expect(e.method).toBe('right');
     expect(e.amount).toBeNull(); // breast + not bottle => null
-    expect(s().lastFeed).toEqual({ feedType: 'breast', method: 'right' });
+    expect(s().lastFeed).toEqual({ c1: { feedType: 'breast', method: 'right' } });
     expect(s().sheet).toBeNull();
     await flush();
     expect(h.pushed).toHaveLength(1);
@@ -1718,6 +1826,9 @@ describe('timer childId attribution', () => {
   });
 
   it('a timer with no childId (e.g. a pre-fix widget-started nap) is never attributed to an expecting child when stopped', () => {
+    // Exactly the case `stampTimerOwners` declines to migrate, so this fallback
+    // chain is what is left to resolve it: still stoppable, still never logged
+    // against a child who has not been born.
     useAppStore.setState({
       connection: { mode: 'local' },
       children: [
@@ -1859,7 +1970,7 @@ describe('timer server sync', () => {
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: [{ id: 'tsrv6', serverId: 6, childId: 'c1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
     });
     await s().refresh();
@@ -1879,7 +1990,7 @@ describe('timer server sync', () => {
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: null,
     });
     await s().refresh();
@@ -1896,7 +2007,7 @@ describe('timer server sync', () => {
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: [],
     });
     await s().refresh();
@@ -1908,7 +2019,7 @@ describe('timer server sync', () => {
     useAppStore.setState({ connection: null, connected: false, timers: [localRunning] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: null,
     });
     await s().connect('http://x', 't');
@@ -1924,7 +2035,7 @@ describe('timer server sync', () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       // `loadFromServer` has no local state to translate with, so the timer's
       // child FK arrives as the SERVER id (mirrors repository.ts's
       // `childByServerId` construction), not the local id 'c1'.
@@ -1941,7 +2052,7 @@ describe('timer server sync', () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: [{ id: 'tsrv10', serverId: 10, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 10 * M }],
     });
     await s().refresh();
@@ -1964,6 +2075,20 @@ describe('timer server sync', () => {
     await s().flushPendingOps();
     expect(h.timerUpdated).toHaveLength(1);
     expect(h.timerDeleted).toContain(9);
+  });
+
+  it('flushUnsynced leaves an ownerless timer unpushed rather than filing it under the selection', async () => {
+    // The last read site that used to adopt. A timer hydrate could not
+    // attribute (nothing selected at the time, or an expecting child selected)
+    // must not be created server-side under whoever is selected now: the server
+    // row would be the misattribution, and deleting it needs another round trip.
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', measurements: [],
+      timers: [{ id: 't-legacy', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
+    });
+    await s().flushUnsynced();
+    expect(h.timerPushed).toHaveLength(0);
+    expect(s().timers[0].serverId).toBeUndefined();
   });
 
   it('flushUnsynced POSTs an offline-created timer once its child is synced', async () => {
@@ -2005,7 +2130,7 @@ describe('timer persistence across restarts', () => {
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [], entries: [], measurements: [], selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: null,
     });
     await s().hydrate();
@@ -2039,6 +2164,97 @@ describe('timer persistence across restarts', () => {
     s().disconnect();
     expect(saveTimers).toHaveBeenLastCalledWith([]);
     expect(h.timers).toEqual([]);
+  });
+});
+
+// The retired adoption rule used to let every read site treat a timer with no
+// `childId` as the selected child's. Every timer source stamps one now, so the
+// only ownerless timers left are ones persisted by an older build; hydrate gives
+// them an owner once, on load, and the persistence subscription writes the
+// stamped list back.
+describe('hydrate migrates ownerless timers', () => {
+  const ownerless = (id = 't1'): Timer => ({ id, activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' });
+  const born = (id: string): Child => ({ id, first: id, last: '', birth: NOW - 90 * 86400000, color: '#fff' });
+  const entityStore = (children: Child[], selectedChildId: string) =>
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children,
+      entries: [],
+      measurements: [],
+      selectedChildId,
+      lastFeed: {},
+      legacyLastFeed: null,
+    });
+
+  it('stamps the selected child onto a timer persisted before stamping existed', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), born('c2')], 'c2');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([{ ...ownerless(), childId: 'c2' }]);
+    // Durable, so the next launch has nothing left to migrate.
+    expect(h.timers).toEqual([{ ...ownerless(), childId: 'c2' }]);
+  });
+
+  it('stamps on a server-mode cold start too, from the entity store selection', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    entityStore([born('c1')], 'c1');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([{ ...ownerless(), childId: 'c1' }]);
+  });
+
+  it('leaves an owned timer exactly as it was, including a non-selected child\'s', () => {
+    // Idempotent, and never a re-point: a sibling's running nap belongs to the
+    // sibling however long the app sat closed.
+    const mine: Timer = { ...ownerless('t1'), childId: 'c1' };
+    const sibling: Timer = { ...ownerless('t2'), childId: 'c2' };
+    h.timers = [mine, sibling];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), born('c2')], 'c1');
+
+    return s().hydrate().then(() => {
+      expect(s().timers).toEqual([mine, sibling]);
+    });
+  });
+
+  it('refuses to hand a timer to an expecting child, and never drops it', async () => {
+    // Same refusal `stopTimer` makes: an expecting child's `birth` is a due
+    // date, so nothing can be logged against them. Leaving the timer unstamped
+    // keeps the migration lossless; `stopTimer`'s own fallback chain still
+    // resolves it if the user stops it before the selection moves.
+    const expecting: Child = { id: 'due', first: 'Bean', last: '', birth: NOW + 30 * 86400000, color: '#fff', expected: true };
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), expecting], 'due');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
+  });
+
+  it('leaves a timer unstamped when nothing is selected to stamp it with', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1')], '');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
+  });
+
+  it('has no roster to stamp against with no connection, and leaves timers alone', async () => {
+    // The no-connection branch reads no entity store at all, so there is no
+    // child list and no selection to attribute a timer to.
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
   });
 });
 
@@ -2163,7 +2379,7 @@ describe('queued entries survive killing the app', () => {
       ],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2205,7 +2421,8 @@ describe('queued entries survive killing the app', () => {
       entries: [storedOnly],
       measurements: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
@@ -2241,7 +2458,8 @@ describe('queued entries survive killing the app', () => {
       entries: [note],
       measurements: [meas],
       selectedChildId: 'localDue',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
@@ -2274,7 +2492,8 @@ describe('queued entries survive killing the app', () => {
       entries: [note],
       measurements: [],
       selectedChildId: 'localDue',
-      lastFeed: { feedType: 'formula', method: 'bottle' },
+      lastFeed: { localDue: { feedType: 'formula', method: 'bottle' } },
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
@@ -2289,7 +2508,7 @@ describe('queued entries survive killing the app', () => {
     const selectedChild = s().children.find((c) => c.id === s().selectedChildId);
     expect(selectedChild).toBeDefined();
     expect(selectedChild?.expected).toBe(true);
-    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(s().lastFeed).toEqual({ localDue: { feedType: 'formula', method: 'bottle' } });
   });
 
   it('does not duplicate the entry after it flushes and a later refresh returns the server copy', async () => {
@@ -2300,7 +2519,7 @@ describe('queued entries survive killing the app', () => {
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2320,7 +2539,7 @@ describe('queued entries survive killing the app', () => {
       entries: [{ id: 'diaper-9', serverId: 9, childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -2346,7 +2565,7 @@ describe('queued entries survive killing the app', () => {
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2359,7 +2578,7 @@ describe('queued entries survive killing the app', () => {
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -2382,14 +2601,15 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       entries: [],
       measurements: [],
       selectedChildId: 'localY',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [mira],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2408,14 +2628,15 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       entries: [],
       measurements: [],
       selectedChildId: 'localY',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [mira],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2433,14 +2654,15 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       entries: [],
       measurements: [localMeasurement],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [mira],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2468,14 +2690,15 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       entries: [persistedEntry],
       measurements: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [mira],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().hydrate();
@@ -2504,7 +2727,8 @@ describe('cache-first hydrate (server mode)', () => {
       entries: [storedEntry],
       measurements: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'formula', method: 'bottle' },
+      lastFeed: { c1: { feedType: 'formula', method: 'bottle' } },
+      legacyLastFeed: null,
     });
     // A black-holed server: the load neither resolves nor rejects until told to.
     vi.mocked(loadFromServer).mockImplementationOnce(() => new Promise((res) => (resolveLoad = res)) as never);
@@ -2518,7 +2742,7 @@ describe('cache-first hydrate (server mode)', () => {
     expect(s().children.map((c) => c.id)).toEqual(['c1']);
     expect(s().entries.map((e) => e.id)).toEqual(['stored-1']);
     expect(s().selectedChildId).toBe('c1');
-    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(s().lastFeed).toEqual({ c1: { feedType: 'formula', method: 'bottle' } });
 
     // The background refresh was fired and asked the server for the persisted
     // selection: children were populated from the entity store BEFORE the
@@ -2535,7 +2759,7 @@ describe('cache-first hydrate (server mode)', () => {
       entries: [{ id: 'srv-1', serverId: 5, childId: '501', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await flush();
@@ -2552,7 +2776,8 @@ describe('cache-first hydrate (server mode)', () => {
       entries: [],
       measurements: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token for this server.'));
 
@@ -2745,6 +2970,478 @@ describe('edit / delete entry', () => {
     // The queued delete op must be removed, or a later flushPendingOps would
     // delete the just-restored entry from the server anyway.
     expect(h.pendingOps).toHaveLength(0);
+  });
+});
+
+describe('editing a record keeps it with the child it belongs to', () => {
+  // A record belongs to whoever it was about, not to whoever happens to be
+  // selected while it is edited. Editing stamped the SELECTED child onto it,
+  // and since the edit path also PATCHes `child:`, that moved the server row
+  // to the sibling too.
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const miraFeed: Entry = { id: 'f1', serverId: 11, childId: 'localMira', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo' });
+  });
+
+  it("an entry edit made while a sibling is selected stays with the entry's own child", async () => {
+    useAppStore.setState({ entries: [miraFeed] });
+    s().openEdit('f1');
+    s().setTE({ method: 'right' });
+    s().save();
+
+    expect(s().entries[0].childId).toBe('localMira');
+    await flush();
+    expect((h.updated[0] as Entry).childId).toBe('localMira');
+    // ...and the PATCH is addressed to Mira's server row, not Theo's.
+    expect(vi.mocked(updateEntryOnServer).mock.calls.at(-1)?.[2]).toBe(1);
+  });
+
+  it("a measurement edit made while a sibling is selected stays with the measurement's own child", async () => {
+    useAppStore.setState({
+      measurements: [{ id: 'weight-1', serverId: 7, childId: 'localMira', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().openEditMeasurement('weight-1');
+    s().saveMeasurement(6.0, NOW);
+
+    expect(s().measurements[0].childId).toBe('localMira');
+    await flush();
+    expect((h.measUpdated[0] as Measurement).childId).toBe('localMira');
+  });
+
+  it('converting an entry back into a live timer keeps it with the entry\'s own child', async () => {
+    useAppStore.setState({ entries: [miraFeed] });
+    s().openEdit('f1');
+    s().setOngoing(); // "Still ongoing": the entry is replaced by a timer
+    s().save();
+
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0].childId).toBe('localMira');
+    await flush();
+    // The server mirror is created under Mira, not under the selected child.
+    expect(h.timerPushed[0]).toMatchObject({ childServerId: 1 });
+  });
+});
+
+describe('the log sheet owns the child it is logging for', () => {
+  // The draft used to read the GLOBAL selection at save time, so anything that
+  // moved the selection under an open sheet re-aimed the draft. Once the sheet
+  // carries its own target, the selection moving underneath is irrelevant.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1' });
+  });
+
+  it('openSheet pins the selection as the sheet target', () => {
+    s().openSheet('diaper');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('a fresh draft files against the sheet target, not a selection that moved under it', () => {
+    // A warm notification tap for a sibling moves the selection with no action
+    // on the switcher, and the sheet is a root overlay that survives the
+    // navigation, so the draft really does stay open over the new selection.
+    s().openSheet('diaper');
+    useAppStore.setState({ selectedChildId: 'c2' });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('setSheetChildren re-aims the draft without moving the global selection', () => {
+    s().openSheet('diaper');
+    s().setSheetChildren(['c2']);
+    s().save();
+    expect(s().entries[0].childId).toBe('c2');
+    expect(s().selectedChildId).toBe('c1');
+  });
+
+  it('setSheetChildren ignores an empty list, so a draft can never lose its owner', () => {
+    s().openSheet('diaper');
+    s().setSheetChildren([]);
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('openEdit pins the entry\'s own child, not the selection', () => {
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c2', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('re-aiming an edit moves the record, server row and all', async () => {
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c1', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    s().setSheetChildren(['c2']);
+    s().save();
+
+    expect(s().entries[0].childId).toBe('c2');
+    await flush();
+    // The PATCH is addressed to Ivo's server row: the entry really moves.
+    expect(vi.mocked(updateEntryOnServer).mock.calls.at(-1)?.[2]).toBe(502);
+  });
+
+  it('openTimerEdit pins the timer\'s owner', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', childId: 'c2', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('closeSheet clears the target alongside the sheet itself', () => {
+    s().openSheet('diaper');
+    s().closeSheet();
+    expect(s().sheetChildIds).toEqual([]);
+  });
+
+  it('expandMedicationLog keeps the target, since it replaces `sheet` wholesale', () => {
+    // `sheet` is never spread, so a target living on it would silently reset
+    // here. This is why the target is its own top-level field.
+    s().openSheet('medication');
+    s().setSheetChildren(['c2']);
+    s().expandMedicationLog();
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('a sheet opened without a seeded target still falls back to the selection', () => {
+    // Nothing in the app opens a sheet this way, but `sheetChildIds` is state
+    // and an empty list has to keep meaning "whoever the old rule picked".
+    useAppStore.setState({ sheet: { type: 'diaper' }, sheetChildIds: [], te: { shape: 'point', tags: [], agoMin: 0 } });
+    s().save();
+    expect(s().entries[0].childId).toBe('c1');
+  });
+});
+
+describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
+  // `wash` is the one child-scoped SEED the sheet computes at open (from that
+  // child's own rhythm and bath history), so re-aiming has to move it: leaving
+  // it behind offers Mira's suggestion as Ivo's, and the sheet saves it.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+  // Bathed fully an hour ago, so the full-bath clock is reset and only a quick
+  // wash is on the cards. Ivo has never been bathed, so a full bath is due.
+  const miraBath: Entry = { id: 'b1', childId: 'c1', type: 'bath', time: NOW - 3600000, wash: 'full', tags: [] };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1', entries: [miraBath] });
+  });
+
+  it('follows a single-target re-aim', () => {
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('full');
+  });
+
+  it('follows a collapse back to one child', () => {
+    s().openSheet('bath');
+    s().toggleSheetChild('c2');
+    // Two targets have no single rhythm to read, so the shared value stands.
+    expect(s().te.wash).toBe('quick');
+    s().toggleSheetChild('c1');
+    expect(s().te.wash).toBe('full');
+  });
+
+  it('never overwrites a wash the parent already chose', () => {
+    // A suggestion must not overrule a decision. Both children suggest `full`
+    // here, so only the guard can keep the chosen `quick`.
+    useAppStore.setState({ entries: [] });
+    s().openSheet('bath');
+    expect(s().te.wash).toBe('full');
+    s().setWash('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('quick');
+  });
+
+  it('never re-seeds an EDIT, whose wash is the record\'s own', () => {
+    // Re-aiming an edit moves the record; it must not also rewrite what the
+    // record says happened.
+    useAppStore.setState({ entries: [{ ...miraBath, wash: 'quick' }] });
+    s().openEdit('b1');
+    expect(s().te.wash).toBe('quick');
+    s().setSheetChildren(['c2']);
+    expect(s().te.wash).toBe('quick');
+  });
+
+  it('leaves other activities\' drafts alone', () => {
+    s().openSheet('diaper');
+    const before = s().te;
+    s().setSheetChildren(['c2']);
+    expect(s().te).toBe(before);
+  });
+});
+
+describe('re-aiming a feeding sheet re-seeds what that child was last fed', () => {
+  const mira: Child = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+  // Two genuinely different feeders, so all three seeds disagree and no
+  // coincidence can pass this: Mira takes the breast (last on the left, so her
+  // next is the right, and her method alternates to 'right'), Ivo takes a
+  // bottle (no side at all, so his start side is the opening default).
+  const miraFeed: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
+  const ivoFeed: Entry = { id: 'f2', childId: 'c2', type: 'feeding', start: NOW - 90 * M, end: NOW - 70 * M, feedType: 'formula', method: 'bottle', amount: 120, tags: [] };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      children: [mira, ivo],
+      selectedChildId: 'c1',
+      entries: [miraFeed, ivoFeed],
+      lastFeed: { c1: { feedType: 'breast', method: 'left' }, c2: { feedType: 'formula', method: 'bottle' } },
+    });
+  });
+
+  const seeds = () => {
+    const { feedType, method, startSide } = s().te;
+    return { feedType, method, startSide };
+  };
+
+  it('follows a single-target re-aim', () => {
+    s().openSheet('feeding');
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'right', startSide: 'right' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'formula', method: 'bottle', startSide: 'left' });
+  });
+
+  it('follows a collapse back to one child', () => {
+    s().openSheet('feeding');
+    s().toggleSheetChild('c2');
+    // Two targets have no single history to read, so the shared draft stands.
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'right', startSide: 'right' });
+    s().toggleSheetChild('c1');
+    expect(seeds()).toEqual({ feedType: 'formula', method: 'bottle', startSide: 'left' });
+  });
+
+  it('never overwrites seeds the parent already chose', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'solid' });
+    s().setTE({ method: 'self' });
+    s().setTE({ startSide: 'left' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'self', startSide: 'left' });
+  });
+
+  it('still follows for the seeds the parent has NOT touched', () => {
+    // Per field, not all-or-nothing: one deliberate choice must not freeze the
+    // other two on the previous child's history.
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'solid' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'bottle', startSide: 'left' });
+  });
+
+  it('never re-seeds an EDIT, whose values are the record\'s own', () => {
+    s().openEdit('f1');
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'left', startSide: undefined });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'left', startSide: undefined });
+  });
+
+  it('never re-seeds a timer-edit sheet, whose values are the timer\'s own', () => {
+    // `tm.feedType`/`tm.method` are choices the parent made when they started
+    // the timer, and nothing flags them as edited, so a re-seed would silently
+    // overwrite them. The picker hides itself on a timer-edit sheet
+    // (`canRetarget` in LogSheet), which makes this unreachable through the UI;
+    // this is the store holding the same rule.
+    useAppStore.setState({
+      timers: [{ id: 't9', childId: 'c1', activity: 'feeding', name: 'Feed', start: NOW - 5 * M, saveAs: 'feeding', feedType: 'solid', method: 'self' }],
+    });
+    s().openTimerEdit('t9');
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'self', startSide: 'right' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'self', startSide: 'right' });
+  });
+
+  it('drops a stale amount when the re-seed crosses the volume/level line', () => {
+    // Mira's seeds put the draft on the intake scale, Ivo's on millilitres. An
+    // intake of 3 is not 3 ml, so the number left behind is meaningless there.
+    s().openSheet('feeding');
+    s().setTE({ amount: 3 });
+    s().setSheetChildren(['c2']);
+    expect(s().te.amount).toBeUndefined();
+  });
+});
+
+describe('logging for more than one child at once', () => {
+  // "Log for both": one INDEPENDENT entry per target child, each separately
+  // editable and deletable afterwards. No link field, no group id.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1' });
+  });
+
+  const bothDiapers = () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    s().save();
+  };
+
+  it('toggleSheetChild adds a second target and takes it away again', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1', 'c2']);
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses to untoggle the last target', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c1');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses a child the picker could never have offered', () => {
+    // An expecting child added as a target would fan out invisibly: no chip
+    // would show it, so nothing could take it back off again.
+    useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses an id that names nobody', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('ghost');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('writes one entry per target child', () => {
+    bothDiapers();
+    expect(s().entries).toHaveLength(2);
+    expect(s().entries.map((e) => e.childId).sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('gives each entry its OWN id', () => {
+    // Both entries used to land with the SAME id, and everything id-keyed then
+    // hit both. See where `built` is assembled in `save()`.
+    bothDiapers();
+    const ids = s().entries.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('leaves the entries independent: deleting one keeps the other', () => {
+    bothDiapers();
+    s().deleteEntry(s().entries[0].id);
+    expect(s().entries).toHaveLength(1);
+  });
+
+  it('pushes each entry to its own child\'s server row', async () => {
+    bothDiapers();
+    await flush();
+    expect(h.pushed).toHaveLength(2);
+    expect([...(h.pushedChildServerIds as number[])].sort()).toEqual([501, 502]);
+  });
+
+  it('queues the whole batch in ONE write while offline', async () => {
+    useAppStore.setState({ offline: true });
+    bothDiapers();
+    await flush();
+    // One batched call, not one per child. See `enqueueEntries` for the
+    // load-modify-save race that turns the difference into a lost entry.
+    expect(vi.mocked(enqueueEntries)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(enqueueEntry)).not.toHaveBeenCalled();
+    expect(h.q).toHaveLength(2);
+    expect(s().queueCount).toBe(2);
+    expect(s().queuedIds).toHaveLength(2);
+  });
+
+  it('writes ONE lastFeed draft, filed under every child it was logged for', () => {
+    // One draft, one write. It lands under both targets because "what was this
+    // child's last feed like" is now true of each of them, and leaving the
+    // sibling's entry stale is the leak the map exists to close.
+    s().openSheet('feeding');
+    s().toggleSheetChild('c2');
+    s().setTE({ feedType: 'formula', method: 'bottle' });
+    s().save();
+    expect(s().entries).toHaveLength(2);
+    expect(s().lastFeed).toEqual({
+      c1: { feedType: 'formula', method: 'bottle' },
+      c2: { feedType: 'formula', method: 'bottle' },
+    });
+  });
+
+  it('leaves an untargeted sibling\'s prefill alone', () => {
+    useAppStore.setState({ lastFeed: { c2: { feedType: 'solid', method: 'self' } } });
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'formula', method: 'bottle' });
+    s().save();
+    expect(s().lastFeed).toEqual({
+      c1: { feedType: 'formula', method: 'bottle' },
+      c2: { feedType: 'solid', method: 'self' },
+    });
+  });
+
+  it('starts one live timer per target child', () => {
+    s().openSheet('sleep');
+    s().toggleSheetChild('c2');
+    s().setOngoing();
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(2);
+    expect(s().timers.map((tm) => tm.childId).sort()).toEqual(['c1', 'c2']);
+    expect(new Set(s().timers.map((tm) => tm.id)).size).toBe(2);
+  });
+
+  it('never fans out an EDIT, even with several targets sitting in state', () => {
+    // Multi-select is create-only: an edit moves ONE record, and letting it add
+    // a child would silently mint a sibling copy of an existing entry.
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c1', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('never fans out a timer stop', () => {
+    // A timer stop belongs to whoever started the timer, and there is one of it.
+    useAppStore.setState({
+      timers: [{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().setTimerLasted(40);
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('refuses to fan out an activity off the allow-list', () => {
+    // Belt and braces behind the UI gate: duplicating a pumping session would
+    // double-count the milk in every aggregate built on it.
+    s().openSheet('pumping');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('routes a mixed batch per child: a withheld sibling stays local', async () => {
+    // `commitWrites` routes each entry on its OWN child, so a batch genuinely
+    // takes several paths at once. The target is set directly rather than
+    // through the picker, which refuses an expecting child: the subject here is
+    // what the write path does with such a batch, however one arose.
+    useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
+    s().openSheet('diaper');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
+    await flush();
+    expect(s().entries).toHaveLength(2);
+    expect(s().entries.find((e) => e.childId === 'c2')?.heldBack).toBe(true);
+    expect(h.pushed).toHaveLength(1);
+    expect(h.pushedChildServerIds).toEqual([501]);
   });
 });
 
@@ -3230,6 +3927,22 @@ describe('children', () => {
     expect(s().children[0].slug).toBe('mirabel-slug');
   });
 
+  it('saveChild picks a tint no sibling wears, not one keyed to the list length', async () => {
+    // The shape deleting the middle of three children leaves behind. Picking by
+    // `children.length` here would hand out CHILD_COLORS[2] a second time.
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[0] },
+        { id: 'c3', first: 'Theo', last: 'O', birth: NOW, color: CHILD_COLORS[2] },
+      ],
+    });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+    await flush();
+
+    expect(s().children.at(-1)?.color).toBe(CHILD_COLORS[1]);
+  });
+
   it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {
     useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any], insightsError: true });
     s().openAddChild();
@@ -3473,7 +4186,7 @@ describe('deleteChild', () => {
     amount: null,
     tags: [],
   });
-  const timer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+  const timer = (id: string, childId: string): Timer => ({ id, childId, activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' });
 
   it('local-only child: deletes in memory only, no server call', async () => {
     // the seeded child 'c1' has no serverId => local-only
@@ -3499,7 +4212,7 @@ describe('deleteChild', () => {
       entries: [],
       timers: [],
       selectedChildId: String(survivors[0]?.serverId ?? ''),
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     } as any);
 
@@ -3509,7 +4222,7 @@ describe('deleteChild', () => {
       selectedChildId: '5',
       entries: [feeding('feeding-1', '5')],
       measurements: [{ id: 'weight-1', serverId: 2, childId: '5', kind: 'weight', value: 5, date: NOW }],
-      timers: [timer],
+      timers: [timer('t1', '5')],
       insightsLoaded: true,
       insightsEntries: [{ id: 'x' } as any],
       insightsError: true,
@@ -3547,15 +4260,65 @@ describe('deleteChild', () => {
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',
       entries: [feeding('feeding-1', '5')],
-      timers: [timer],
+      timers: [timer('t1', '5')],
     });
     void s().deleteChild('6');
     expect(s().children.map((c) => c.id)).toEqual(['5']);
     expect(s().selectedChildId).toBe('5'); // unchanged
     expect(s().entries).toHaveLength(1); // selected child's data untouched
-    expect(s().timers).toHaveLength(1); // timers not cleared
+    expect(s().timers).toHaveLength(1); // and their running timer keeps running
     await flush();
     expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 6 })]);
+  });
+
+  it("deleting the selected child leaves a sibling's timer running", async () => {
+    // The wipe used to be unconditional inside the re-point branch, so deleting
+    // one child stopped every child's timers. A timer belongs to whoever started
+    // it, and the sibling is still here.
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [timer('t1', '5'), timer('t2', '6')],
+    });
+    serverViewOf(serverChild('6', 'Nova'));
+
+    void s().deleteChild('5');
+
+    expect(s().timers.map((t) => t.id)).toEqual(['t2']);
+    await flush();
+  });
+
+  it("deleting a NON-selected child stops that child's orphaned timers", async () => {
+    // The second bug this filter fixes: the purge used to run only when the
+    // deleted child was the selected one, so a non-selected child's timers ran
+    // on forever with no owner and no surface to stop them from.
+    useAppStore.setState({
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [timer('t1', '5'), timer('t2', '6')],
+    });
+
+    void s().deleteChild('6');
+
+    expect(s().timers.map((t) => t.id)).toEqual(['t1']);
+    await flush();
+  });
+
+  it('keeps a still-unstamped timer, which belongs to no deleted child', () => {
+    // `t.childId !== id` is true for `undefined`, deliberately: a timer hydrate
+    // could not attribute is not evidence that it was the deleted child's, and
+    // `stopTimer` can still resolve it.
+    const legacy: Timer = { id: 't-legacy', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    useAppStore.setState({
+      connection: { mode: 'local' },
+      children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
+      selectedChildId: '5',
+      timers: [legacy, timer('t1', '5')],
+    });
+
+    void s().deleteChild('5');
+
+    expect(s().timers).toEqual([legacy]);
   });
 
   it('local mode: deletes in memory only, no server call', async () => {
@@ -3711,7 +4474,7 @@ describe('deleteChild', () => {
   // started offline (serverId == null) exists nowhere else and is gone for good.
   it('a failed server delete restores the running timers it cleared', async () => {
     h.childDeleteFails = true;
-    const localTimer: Timer = { id: 't-local', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
+    const localTimer = timer('t-local', '5');
     useAppStore.setState({
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',
@@ -3773,12 +4536,13 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
       entries: [],
       measurements: [],
       selectedChildId: 'p1',
-      lastFeed: { feedType: 'formula', method: 'bottle' },
+      lastFeed: { p1: { feedType: 'formula', method: 'bottle' } },
+      legacyLastFeed: null,
     });
     await s().enterLocal();
     expect(s().children).toEqual([savedChild]); // restored, not the demo seed
     expect(s().selectedChildId).toBe('p1');
-    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(s().lastFeed).toEqual({ p1: { feedType: 'formula', method: 'bottle' } });
   });
 
   it('local hydrate loads persisted entities instead of seeding fake ones', async () => {
@@ -3789,7 +4553,8 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
       entries: [],
       measurements: [],
       selectedChildId: 'h1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     await s().hydrate();
     expect(s().connected).toBe(true);
@@ -3867,16 +4632,40 @@ describe('refresh / reconnect', () => {
     expect(s().timers).toEqual([timer]);
   });
 
+  it('keeps an existing child avatar tint across a refresh, end to end', async () => {
+    // The unit case lives with `reconcileChildren`; this is the whole path,
+    // store to store. A deliberately non-first tint, so a re-derived one would
+    // come back as CHILD_COLORS[0] and fail rather than coincide.
+    useAppStore.setState({
+      children: [{ id: 'localA', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[3] }],
+      selectedChildId: 'localA',
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(s().children).toHaveLength(1);
+    expect(s().children[0].id).toBe('localA');
+    expect(s().children[0].color).toBe(CHILD_COLORS[3]);
+  });
+
   it('keeps the selected child when it still exists after refresh', async () => {
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [
-        { id: 'c0', first: 'A', last: '', birth: NOW, color: '#fff' },
-        { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: 'c0', first: 'A', last: '', birth: NOW },
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW },
       ],
       entries: [],
       timers: [],
       selectedChildId: 'c0',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     useAppStore.setState({ selectedChildId: 'c1' });
@@ -3895,7 +4684,7 @@ describe('refresh / reconnect', () => {
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -3957,11 +4746,11 @@ describe('refresh / reconnect', () => {
     const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -3973,11 +4762,11 @@ describe('refresh / reconnect', () => {
     const localChild: Child = { id: 'localX', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -3988,11 +4777,11 @@ describe('refresh / reconnect', () => {
     const localMeasurement: Measurement = { id: 'localM', childId: 'c1', kind: 'weight', value: 4.2, date: NOW };
     useAppStore.setState({ measurements: [localMeasurement] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -4027,11 +4816,11 @@ describe('refresh / reconnect', () => {
     // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
     // `selectedChildId` below.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [],
       selectedChildId: '777',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -4068,11 +4857,11 @@ describe('refresh / reconnect', () => {
     // child id verbatim (see `listMeasurements` in src/api/client.ts), same
     // as the entries/timers case above.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '777',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [{ id: 'm1', childId: '777', kind: 'weight', value: 6.1, date: NOW }],
     });
     await s().refresh();
@@ -4109,11 +4898,11 @@ describe('refresh / reconnect', () => {
     await flush();
 
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '777',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -4158,14 +4947,15 @@ describe('connect() reconciles the server load with local data (session-expiry r
       entries: [],
       measurements: [{ id: 'mLocal', childId: 'child1712-abc', kind: 'weight', value: 5.1, date: NOW }],
       selectedChildId: 'child1712-abc',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4188,6 +4978,48 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(s().measurements.map((m) => m.id)).toContain('mLocal');
   });
 
+  it('a post-expiry reconnect carries the pre-map feeding fallback out of the entity store', async () => {
+    // hydrate's no-connection branch reads no entity store, so on a cold start
+    // parked at the reconnect screen this is the only place the legacy value
+    // can reach state. Without it the derive-on-read migration has a hole:
+    // the sheet would open on the built-in default rather than the value the
+    // pre-map build left behind.
+    h.entityOrigin = 'http://x';
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      lastFeed: {},
+      legacyLastFeed: LAST_FEED_DEFAULT,
+    });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    expect(s().legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    s().openSheet('feeding');
+    expect(s().te.feedType).toBe('formula');
+  });
+
   it('a running local-only timer (serverId == null) survives connect even when the server answers an empty timers list', async () => {
     h.entityOrigin = 'http://x'; // same-server reconnect: the merge is licensed
     const running: Timer = { id: 't-local', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 5 * M, childId: 'c1' };
@@ -4195,14 +5027,14 @@ describe('connect() reconciles the server load with local data (session-expiry r
     // timer copy, via the persistence subscribe) still holds the timer.
     useAppStore.setState({ connection: null, connected: false, timers: [running] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
       entries: [],
       // A real empty answer, NOT null: F7's null-guard never fires here, and
       // the old wholesale spread dropped the running timer on exactly this
       // shape.
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4227,11 +5059,11 @@ describe('connect() reconciles the server load with local data (session-expiry r
     });
     // The entity store is empty too (the loadEntities mock default is null).
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000, color: '#fff' }],
+      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000 }],
       entries: [{ id: 'se1', serverId: 21, childId: '7', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [{ id: 'tsrv3', serverId: 3, childId: '7', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - M }],
       selectedChildId: '7',
-      lastFeed: { feedType: 'formula', method: 'bottle' },
+      lastFeed: { '7': { feedType: 'formula', method: 'bottle' } },
       measurements: [{ id: 'sm1', serverId: 11, childId: '7', kind: 'weight', value: 4.4, date: NOW }],
     });
 
@@ -4243,7 +5075,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(s().entries.map((e) => e.id)).toEqual(['se1']);
     expect(s().measurements.map((m) => m.id)).toEqual(['sm1']);
     expect(s().timers.map((t) => t.id)).toEqual(['tsrv3']);
-    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(s().lastFeed).toEqual({ '7': { feedType: 'formula', method: 'bottle' } });
     expectSelectionNamesARealChild();
     // connect stamps the origin, so the entity store's new contents are
     // labeled with the server they came from (and a pre-origin install
@@ -4277,14 +5109,15 @@ describe('connect() reconciles the server load with local data (session-expiry r
       entries: [],
       measurements: [],
       selectedChildId: 'child1712-abc',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4318,11 +5151,11 @@ describe('connect() reconciles the server load with local data (session-expiry r
       selectedChildId: 'cA',
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4353,11 +5186,11 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState({ children: [childAAA, childBBB], selectedChildId: 'childBBB' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }], // childBBB gone
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW }], // childBBB gone
       entries: [],
       timers: [],
       selectedChildId: '1', // repository.ts: children[0]?.id, a SERVER id, not a local one
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4377,14 +5210,15 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       entries: [],
       measurements: [],
       selectedChildId: 'childBBB',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4412,11 +5246,11 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       measurements: state.measurements,
     }));
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4448,7 +5282,7 @@ describe('history is scoped to the selected child', () => {
       entries: [],
       timers: [],
       selectedChildId: '2',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4467,14 +5301,15 @@ describe('history is scoped to the selected child', () => {
       entries: [],
       measurements: [],
       selectedChildId: 'localTheo',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: serverChildren,
       entries: [],
       timers: [],
       selectedChildId: '2',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4493,14 +5328,15 @@ describe('history is scoped to the selected child', () => {
       entries: [],
       measurements: [],
       selectedChildId: 'localBean',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: serverChildren,
       entries: [],
       timers: [],
       selectedChildId: '1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4522,7 +5358,7 @@ describe('history is scoped to the selected child', () => {
       entries: [miraFeed],
       timers: [],
       selectedChildId: '1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4546,7 +5382,7 @@ describe('history is scoped to the selected child', () => {
       entries: [miraFeed],
       timers: [],
       selectedChildId: '2',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4578,7 +5414,7 @@ describe('switching child refetches that child\'s records (server mode)', () => 
       entries: [theoFeed],
       timers: [],
       selectedChildId: '2',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -4589,6 +5425,35 @@ describe('switching child refetches that child\'s records (server mode)', () => 
     expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
     // And his records are now what the History surfaces will render.
     expect(entriesForChild(s().entries, 'localTheo').map((e) => e.id)).toEqual(['tf1']);
+  });
+
+  it("keeps the other child's feeding prefill through the refetch", async () => {
+    // A load only ever covers the child it fetched, and this refetch fires on
+    // EVERY child switch, so taking the server's answer wholesale would wipe
+    // the sibling's prefill on each Mira-to-Theo-to-Mira round trip. The
+    // incoming key is a SERVER id and has to land under the local one.
+    useAppStore.setState({
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+      lastFeed: { localMira: { feedType: 'solid', method: 'self' } },
+    });
+    vi.mocked(loadFromServer).mockClear();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: serverChildren,
+      entries: [theoFeed],
+      timers: [],
+      selectedChildId: '2',
+      lastFeed: { '2': { feedType: 'breast', method: 'left' } },
+      measurements: [],
+    });
+
+    s().selectChild('localTheo');
+    await flush();
+
+    expect(s().lastFeed).toEqual({
+      localMira: { feedType: 'solid', method: 'self' },
+      localTheo: { feedType: 'breast', method: 'left' },
+    });
   });
 
   it('does not hit the server in local mode', async () => {
@@ -4631,7 +5496,7 @@ describe('switching child refetches that child\'s records (server mode)', () => 
       entries: [],
       timers: [],
       selectedChildId: '1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -5211,6 +6076,37 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(s().sheet).toBeNull();
   });
 
+  it('stopping via "lasted X" files the entry against the timer\'s child, not the selection', async () => {
+    // The Timers tab deliberately lists every child's timers with no per-child
+    // filter, so tapping a sibling's running timer while another child is
+    // selected is the obvious thing to do. `stopTimer` gets this right; save()'s
+    // timer-stop path did not, because `existing` is null for a brand-new entry
+    // and the owner had nowhere to come from but the selection.
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+      children: [
+        { id: 'localMira', serverId: 11, first: 'Mira', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
+        { id: 'localTheo', serverId: 22, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
+      ],
+      selectedChildId: 'localTheo',
+      timers: [{ id: 'tm', childId: 'localMira', activity: 'sleep', name: 'Sleep', start: NOW - 20 * M, saveAs: 'sleep' }],
+      entries: [],
+    });
+
+    s().openTimerEdit('tm');
+    s().setTimerLasted(20);
+    s().save();
+
+    expect(s().timers).toHaveLength(0); // the timer was stopped
+    expect(s().entries[0].childId).toBe('localMira');
+    await flush();
+    // And the server row lands under Mira: `commitWrite` resolves the child
+    // server id from the ENTRY, so a wrong owner here creates the record under
+    // the wrong child, which no local fix can take back.
+    expect(h.pushedChildServerIds).toEqual([11]);
+  });
+
   it('"Still running" after a length keeps the timer live on save', () => {
     useAppStore.setState({ timers: [feedingTimer('t9c')] }); // start NOW - 12m
     s().openTimerEdit('t9c');
@@ -5388,13 +6284,13 @@ describe('insights slice', () => {
     // and drops them, which is not the situation under test here.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [
-        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
-        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW },
+        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW },
       ],
       entries: [],
       timers: [],
       selectedChildId: '502',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     useAppStore.getState().selectChild('c2'); // switch lands mid-flight
@@ -6186,9 +7082,9 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // matching the describe block's default `uploadUnsynced` stamp), returned
     // under its own server-derived id/fields.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW, color: '#eee' }],
+      children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW }],
       entries: [], timers: [], selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+      lastFeed: {}, measurements: [],
     });
 
     const result = await s().adopt('https://new.lan', 'tok');
@@ -6203,15 +7099,52 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
   });
 
+  it('keeps every child\'s feeding prefill through the post-adopt reload', async () => {
+    // adopt has its own open-coded copy of `applyServerLoad`'s set(), so the
+    // "explicit key AFTER the ...data spread" rule has to be pinned at both
+    // sites. Taking the reload wholesale would replace the whole map with the
+    // server-keyed single entry: the sibling's prefill gone, and the survivor
+    // filed under a server id nothing reads.
+    const mira: Child = { id: 'localM', first: 'Mira', last: '', birth: NOW, color: '#fff' };
+    const ivo: Child = { id: 'localI', first: 'Ivo', last: '', birth: NOW, color: '#eee' };
+    useAppStore.setState({
+      children: [mira, ivo],
+      selectedChildId: 'localM',
+      lastFeed: { localI: { feedType: 'solid', method: 'self' } },
+    });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c, i) => (c.serverId == null ? { ...c, serverId: 501 + i } : c)),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [
+        { id: '501', serverId: 501, first: 'Mira', last: '', birth: NOW },
+        { id: '502', serverId: 502, first: 'Ivo', last: '', birth: NOW },
+      ],
+      entries: [], timers: [], selectedChildId: '501',
+      lastFeed: { '501': { feedType: 'breast', method: 'left' } },
+      measurements: [],
+    });
+
+    const result = await s().adopt('https://new.lan', 'tok');
+
+    expect(result).toEqual({ status: 'done' });
+    expect(s().lastFeed).toEqual({
+      localI: { feedType: 'solid', method: 'self' },
+      localM: { feedType: 'breast', method: 'left' },
+    });
+  });
+
   it('keeps running timers when the post-adopt reload\'s timers fetch failed (timers: null)', async () => {
     const localChild: Child = { id: 'localT', first: 'Tia', last: '', birth: NOW, color: '#fff' };
     const running: Timer = { id: 't-run', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - 5 * M, childId: 'localT' };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localT', timers: [running] });
     // The post-success reload answers everything except /api/timers/.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Tia', last: '', birth: NOW, color: '#eee' }],
+      children: [{ id: '501', serverId: 501, first: 'Tia', last: '', birth: NOW }],
       entries: [], measurements: [], selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       timers: null,
     });
 
@@ -6266,11 +7199,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     vi.mocked(loadFromServer)
       .mockResolvedValueOnce({ treatments: [], // the dedup fetch
         children: [serverChild], entries: [], timers: [], selectedChildId: '900',
-        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+        lastFeed: {}, measurements: [],
       })
       .mockResolvedValueOnce({ treatments: [], // the post-success reload
         children: [serverChild], entries: [], timers: [], selectedChildId: '900',
-        lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
+        lastFeed: {}, measurements: [],
       });
     vi.mocked(matchServerChild).mockReturnValueOnce(900);
 
@@ -6376,11 +7309,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // child. The expecting child was never uploaded, so it's absent here too,
     // exactly the case that must not wipe it from `children`.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -6424,11 +7357,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // Post-success reload: the server only knows about the born child and has
     // no entries at all (the note was never uploaded).
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -6984,7 +7917,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -7007,14 +7940,15 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
       entries: [note],
       measurements: [],
       selectedChildId: 'localDue',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [bornOnServer],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -7057,11 +7991,11 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
     // The server now knows the child (by the serverId confirmBirth just
     // stamped) but not yet the note: nothing has pushed it there.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth, color: '#eee' }],
+      children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth }],
       entries: [],
       timers: [],
       selectedChildId: '777',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -7115,7 +8049,7 @@ describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
       entries: [],
       timers: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await useAppStore.getState().refresh();
@@ -7162,11 +8096,11 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     // Baby Buddy has no record of the note (it was never pushed): a refresh
     // must not let the server's blank slate silently drop it.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth, color: useAppStore.getState().children[0].color }],
+      children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth }],
       entries: [],
       timers: [],
       selectedChildId: '777',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await useAppStore.getState().refresh();
@@ -7201,7 +8135,7 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
       entries: [],
       timers: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await useAppStore.getState().refresh();
@@ -7277,14 +8211,15 @@ describe('heldBack migration (entries written before the field existed)', () => 
       entries: [legacyNote],
       measurements: [],
       selectedChildId: 'localDue',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [],
       entries: [],
       timers: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
 
@@ -7300,7 +8235,7 @@ describe('heldBack migration (entries written before the field existed)', () => 
       entries: [],
       timers: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
       measurements: [],
     });
     await s().refresh();
@@ -7316,7 +8251,8 @@ describe('heldBack migration (entries written before the field existed)', () => 
       entries: [ordinary],
       measurements: [],
       selectedChildId: 'c1',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
@@ -7346,12 +8282,64 @@ describe('reconcileChildren', () => {
     expect(out[0].serverId).toBe(501);
   });
 
-  it('takes the server copy of every other field on a match', () => {
-    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg' })];
-    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg' })];
+  it('takes the server copy of every other field on a match, except the color', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg', color: '#000000' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg', color: '#ABCDEF' })];
     const out = reconcileChildren(server, local);
     expect(out[0].first).toBe('Adaline');
     expect(out[0].picture).toBe('https://s/a.jpg');
+    // Baby Buddy has no color field, so a server-side one is fabricated and
+    // must never clobber the persisted local tint on hydrate/refresh/adopt.
+    expect(out[0].color).toBe('#ABCDEF');
+  });
+
+  it('assigns a fresh palette tint to a server child it has never seen', () => {
+    const out = reconcileChildren([kid({ id: '502', serverId: 502, color: '#000000' })], []);
+    expect(out[0].color).toBe(CHILD_COLORS[0]);
+  });
+
+  it('gives two never-seen server children different tints', () => {
+    const server = [kid({ id: '501', serverId: 501 }), kid({ id: '502', serverId: 502 })];
+    const out = reconcileChildren(server, []);
+    expect(out[0].color).not.toBe(out[1].color);
+  });
+
+  it('does not hand a new server child a tint a local child already wears', () => {
+    const local = [kid({ id: 'local1', color: CHILD_COLORS[0] })];
+    const out = reconcileChildren([kid({ id: '501', serverId: 501 })], local);
+    expect(out.find((c) => c.id === '501')?.color).toBe(CHILD_COLORS[1]);
+  });
+
+  it('does not reissue a matched sibling tint to a new child the server listed FIRST', () => {
+    // Baby Buddy orders /api/children/ by name, not by creation, so a second
+    // child added through its web UI whose name sorts first arrives AHEAD of
+    // the child this device already knows, which almost always wears
+    // CHILD_COLORS[0]. Seeding the tint search only with never-pushed locals
+    // made the answer depend on that ordering.
+    const local = [kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] })];
+    const server = [kid({ id: '502', serverId: 502 }), kid({ id: '501', serverId: 501 })];
+    const out = reconcileChildren(server, local);
+    expect(out.map((c) => [c.id, c.color])).toEqual([
+      ['502', CHILD_COLORS[1]],
+      ['cA', CHILD_COLORS[0]],
+    ]);
+  });
+
+  it('gives every child a distinct tint whatever order the server lists them in', () => {
+    // The property, stated directly: one matched local, one never-pushed local
+    // and two new arrivals interleaved so the matched one comes after a new one.
+    const local = [
+      kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] }),
+      kid({ id: 'cB', color: CHILD_COLORS[1] }),
+    ];
+    const server = [
+      kid({ id: '503', serverId: 503 }),
+      kid({ id: '501', serverId: 501 }),
+      kid({ id: '502', serverId: 502 }),
+    ];
+    const colors = reconcileChildren(server, local).map((c) => c.color);
+    expect(colors).toHaveLength(4);
+    expect(new Set(colors).size).toBe(colors.length);
   });
 
   it('adds a server child the app has never seen, keeping its server-derived id', () => {

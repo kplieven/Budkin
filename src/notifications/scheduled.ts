@@ -13,6 +13,7 @@
 import { treatmentDosageLabel, TIME_OF_DAY_ORDER } from '@/features/treatments/treatmentLabels';
 import { wakeWindowBand } from '@/features/insights/norms';
 import { ACTIVITY_LABEL } from '@/lib/activities';
+import { withChildParam } from '@/lib/deepLink';
 import { fmtDur } from '@/lib/format';
 import { catchUpDueAt, type MilestoneDef, MILESTONES } from '@/lib/milestones';
 import { isTreatmentActiveToday, runningTimer, startOfDay, timeOfDaySlotMs } from '@/store/selectors';
@@ -81,12 +82,9 @@ export interface ScheduleInput {
    *  end. `napReminders` treats membership here exactly like a running sleep
    *  timer. */
   asleepChildIds: Record<string, true>;
-  /** Resolves a running timer that carries no `childId`. Every current timer
-   *  source stamps one (in-app start, the headless widget's `startSleepTimer`,
-   *  a server-loaded timer, a manual log), so this fallback is defensive for a
-   *  timer persisted by a build that predates that stamping, not a live gap.
-   *  Mirrors the `timer.childId ?? selectedChildId` fallback `mirrorTimerCreate`
-   *  uses in `useAppStore.ts`. */
+  /** The child the app currently has loaded. Scopes the treatment and pumping
+   *  reminders below (see `treatments`); the nap rules deliberately do NOT
+   *  consult it, since a timer belongs to whoever started it. */
   selectedChildId: string;
   /** Every treatment the store holds. `treatmentReminders` scopes to `selectedChildId`
    *  itself, the same way `napReminders` does and for the same reason: in server
@@ -147,7 +145,9 @@ function dueReminders(child: Child, now: number): ScheduledNotification[] {
       title: `${child.first} is due next week`,
       body: 'Budkin is ready when they are.',
       fireAt: lead,
-      data: { url: '/' },
+      // Every reminder names the child it is about, so the tap selects them
+      // before it lands. See `childToSelectOnOpen`.
+      data: { url: withChildParam('/', child.id) },
     });
   }
   if (day > now) {
@@ -157,7 +157,7 @@ function dueReminders(child: Child, now: number): ScheduledNotification[] {
       title: `Today is ${child.first}'s due date`,
       body: 'Tap when your baby arrives.',
       fireAt: day,
-      data: { url: '/' },
+      data: { url: withChildParam('/', child.id) },
     });
   }
   return out;
@@ -210,7 +210,10 @@ function staleReminders(timer: Timer, children: Child[], now: number): Scheduled
       title: child?.first ? `${child.first} · ${label}` : label,
       body: `Running for ${spanLabel(threshold)}. Still going?`,
       fireAt,
-      data: { url: '/timers' },
+      // `child` is the timer's OWN child and may be missing: an unattributable
+      // timer names nobody rather than adopting the selection, exactly as the
+      // title above does.
+      data: { url: withChildParam('/timers', child?.id) },
     },
   ];
 }
@@ -268,7 +271,7 @@ function ageReminders(child: Child, now: number): ScheduledNotification[] {
       title,
       body: 'Tap to look back.',
       fireAt,
-      data: { url: '/history' },
+      data: { url: withChildParam('/history', child.id) },
     });
   };
 
@@ -364,6 +367,10 @@ function pumpReminders(input: ScheduleInput, now: number): ScheduledNotification
       // every occurrence after the first.
       body: 'Tap to log a session.',
       fireAt,
+      // The only kind that is childless BY DESIGN: pumping is parent-side,
+      // scheduled once for the device rather than per child, so there is nobody
+      // to name. A stale-timer alert can be childless too, but only when the
+      // timer it is about has no owner to resolve.
       data: { url: '/timers' },
     });
   }
@@ -412,14 +419,11 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   // TIMER, and separately an ongoing sleep ENTRY that carries no timer at all
   // (`asleepChildIds`; see its doc comment on ScheduleInput) — a running timer
   // does not exist for every ongoing sleep, e.g. one edited to "still
-  // ongoing". `runningTimer` is the shared rule; note it is asked about THIS
-  // child, not the selected one, so an ownerless timer resolves to the selected
-  // child alone and cannot silence every child's nudge at once. That ownerless
-  // case is defensive, not the normal widget path: every current timer source,
-  // including the headless widget, stamps a childId, so it only resolves a timer
-  // persisted before that stamping existed.
+  // ongoing". `runningTimer` is the shared rule, asked about THIS child: a
+  // timer belongs to whoever started it, so one child falling asleep can never
+  // silence another's nudge, and a timer with no owner at all silences nobody's.
   const asleep =
-    runningTimer(input.timers, 'sleep', child.id, input.selectedChildId) != null ||
+    runningTimer(input.timers, 'sleep', child.id) != null ||
     input.asleepChildIds[child.id] === true;
   if (asleep) return [];
 
@@ -453,7 +457,7 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
       // "1.25 hours". fmtDur gives "1h 15m".
       body: `Awake ${fmtDur(awakeMin)}.`,
       fireAt,
-      data: { url: '/timers' },
+      data: { url: withChildParam('/timers', child.id) },
     },
   ];
 }
@@ -502,7 +506,10 @@ function treatmentNote(treatment: Treatment, fireAt: number): ScheduledNotificat
     // Lands on the existing medication deep link with the treatment named, which
     // seeds the confirm sheet from it. See src/lib/logDeepLink.ts. The tap
     // opens, it never writes, so "tap to log the dose" stays literally true.
-    data: { url: `/log/medication?treatment=${encodeURIComponent(treatment.id)}` },
+    // The child rides along too: this one opens a WRITE surface, so the route
+    // refuses an unknown child rather than seeding the sheet against whoever
+    // happens to be selected when the alert is tapped.
+    data: { url: withChildParam(`/log/medication?treatment=${encodeURIComponent(treatment.id)}`, treatment.childId) },
   };
 }
 
@@ -696,7 +703,7 @@ function milestoneReminders(
         ? `${defs[0].title}. Most babies do this by ${defs[0].maxMonths} months.`
         : `${defs.map((d) => d.title).join(', ')}.`,
       fireAt,
-      data: { url: '/milestones' },
+      data: { url: withChildParam('/milestones', child.id) },
     });
   }
   return out;
@@ -848,7 +855,7 @@ function isStaleDelivered(parsed: ParsedReminderId, input: ScheduleInput, now: n
       // exactly the condition `napReminders` uses to refuse to schedule at all,
       // including the ongoing-sleep-entry case that carries no timer.
       return (
-        runningTimer(input.timers, 'sleep', parsed.head, input.selectedChildId) != null ||
+        runningTimer(input.timers, 'sleep', parsed.head) != null ||
         input.asleepChildIds[parsed.head] === true
       );
     case 'stale':

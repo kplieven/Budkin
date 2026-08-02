@@ -173,14 +173,18 @@ export function initScheduledReminderSync(): void {
     // launch-time run plus state-change runs is sufficient and a tick-driven
     // rebuild would be pure churn.
     //
-    // `selectedChildId` is a genuine input, not just a `timers`-adjacent
-    // disambiguator: `napReminders` resolves an ownerless running sleep
-    // timer's owner as `timer.childId ?? input.selectedChildId`. Every current
-    // timer source, including the headless widget, stamps a childId, so
-    // "ownerless" only happens for a timer persisted before that stamping
-    // existed — but while it can happen, which child is selected can flip
-    // which child's nap nudge is suppressed even though `timers` itself did
-    // not change.
+    // `selectedChildId` is a first-class input to the desired set, NOT a
+    // `timers`-adjacent disambiguator, and this entry must not be dropped. The
+    // justification used to be that `napReminders` resolved an ownerless sleep
+    // timer's owner as `timer.childId ?? selectedChildId`; that rule is retired
+    // (a timer belongs to whoever started it, see `timerBelongsTo`), so do not
+    // go looking for it. Two rules still read the selection directly, and
+    // neither is reachable from any other slice compared here:
+    // `treatmentReminders` scopes every treatment to the selected child and
+    // returns nothing at all while that child is `expected`, and the
+    // milestone-catch-up branch runs for the selected child alone. Switching
+    // children therefore changes the desired set with every other slice in this
+    // list untouched.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&

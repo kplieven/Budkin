@@ -38,6 +38,15 @@ export interface WidgetSnapshot {
   selectedChildId: string;
   /** true when a real (non-demo) connection exists, so a widget-saved nap can be queued */
   canQueueNap: boolean;
+  /**
+   * How many children the device holds, so a widget can tell whether naming the
+   * child says anything (see `napLabels`). Optional, and read with a `?? 1`
+   * default: unlike the v1 change below this one reinterprets nothing, so a
+   * stale v2 payload written before the field existed stays readable and
+   * degrades to "one child, do not name anyone", which is the safe direction.
+   * That is why the key stays v2.
+   */
+  childCount?: number;
 }
 
 /**
@@ -92,11 +101,10 @@ export function buildWidgetSnapshot(s: {
   const diaper = lastDiaper(entries);
   // The shared timer rule, keyed on `saveAs` (what the timer will be written as,
   // so a quick timer repointed to sleep counts) and scoped to the selected child
-  // (so a sibling's nap does not show up as this child's). The selected child is
-  // passed as both ids: an ownerless timer is the selected child's, and nobody
-  // else's. `napToggle` MUST look the running nap up the same way, or a tap on a
-  // widget showing "napping" would start a second timer.
-  const runningSleep = runningTimer(s.timers, 'sleep', s.selectedChildId, s.selectedChildId);
+  // (so a sibling's nap does not show up as this child's). `napToggle` MUST look
+  // the running nap up the same way, or a tap on a widget showing "napping"
+  // would start a second timer.
+  const runningSleep = runningTimer(s.timers, 'sleep', s.selectedChildId);
 
   return {
     childName: child ? child.first : '',
@@ -111,5 +119,6 @@ export function buildWidgetSnapshot(s: {
     rhythmOriginHour: s.rhythmOriginHour,
     selectedChildId: s.selectedChildId,
     canQueueNap: s.connection?.mode === 'server',
+    childCount: s.children.length,
   };
 }

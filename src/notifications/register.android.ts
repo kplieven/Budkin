@@ -1,7 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 
+import { childToSelectOnOpen } from '@/lib/deepLink';
 import { REMINDER_CHANNEL_ID, TIMER_CHANNEL_ID } from '@/notifications/content';
+import { useAppStore } from '@/store/useAppStore';
 
 // Without a handler, notifications posted while the app is in the FOREGROUND are
 // suppressed (not shown in the tray). This makes them appear; sound is left to the
@@ -32,10 +34,57 @@ void Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
 
 // Every notification we post carries its own destination in `data.url`, always
 // app-generated: '/timers' for timers and stale-timer alerts, '/' for due
-// dates, '/history' for age milestones.
+// dates, '/history' for age milestones. Most also name the child they are about
+// (`?child=<localId>`), because the screens they land on all read the global
+// selection and an alert sits in the tray long enough to outlive a child switch.
+//
+// NOTE this is the ONLY entry point that acts on `?child=` for a navigation-only
+// destination, which is sound today because notifications are the only thing that
+// produces one. A second producer (a widget button pointing at '/history', a
+// pasted web url) would have its parameter silently ignored, since the tabs those
+// urls land on read no params of their own. Give any such url a route that
+// resolves the parameter, or lift this into the linking layer.
 function openFromResponse(response: Notifications.NotificationResponse | null): void {
   const url = response?.notification.request.content.data?.url;
-  if (typeof url === 'string' && url.startsWith('/')) router.navigate(url as never);
+  if (typeof url !== 'string' || !url.startsWith('/')) return;
+  // Only the navigation-only destinations are selected for here: '/log/<type>'
+  // and '/timer' have a route of their own that resolves the parameter, since
+  // they open a write surface and must refuse a child we no longer have. See
+  // `childToSelectOnOpen`.
+  whenHydrated(() => {
+    const state = useAppStore.getState();
+    const select = childToSelectOnOpen(url, state.children, state.selectedChildId);
+    if (select) state.selectChild(select);
+  });
+  router.navigate(url as never);
+}
+
+/** Runs `apply` once the store holds the persisted roster and selection.
+ *
+ *  A cold-start tap arrives while `hydrate` is still reading AsyncStorage, so
+ *  the roster is empty and the child the url names would read as one we no
+ *  longer have. Hydration also RESTORES the persisted selection, which would
+ *  overwrite anything set before it lands, so waiting is the only correct order.
+ *  A warm tap runs straight through.
+ *
+ *  Two orderings here are load-bearing. `unsubscribe` before `apply`, because
+ *  `apply` calls `selectChild`, which re-enters `set()` synchronously and would
+ *  otherwise re-invoke this listener. Today's `apply` recomputes to a no-op on
+ *  that second pass, the child it names being the selected one by then, so this
+ *  order is what stops a later, less idempotent one from recursing. And
+ *  `refreshInFlight` being set before `refresh`'s first await: `apply` runs from
+ *  inside hydrate's own `set()`, so in server mode `selectChild`'s `refresh()`
+ *  starts first and hydrate's own `void get().refresh()` then no-ops. That is
+ *  the better of the two outcomes, the fetch targeting the deep-linked child
+ *  rather than the persisted one, but it only holds while that flag is set
+ *  synchronously. */
+function whenHydrated(apply: () => void): void {
+  if (!useAppStore.getState().hydrating) return apply();
+  const unsubscribe = useAppStore.subscribe((state) => {
+    if (state.hydrating) return;
+    unsubscribe();
+    apply();
+  });
 }
 
 // Warm taps (app running or backgrounded).

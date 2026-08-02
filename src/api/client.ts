@@ -33,6 +33,7 @@ import type {
   NoteEntry,
   Profile,
   PumpingEntry,
+  ServerChild,
   SleepEntry,
   Tag,
   TemperatureEntry,
@@ -124,15 +125,6 @@ const FEED_METHOD_FROM_API: Record<string, FeedMethod> = {
   'parent fed': 'parent',
   'self fed': 'self',
 };
-
-/** Fallback avatar tints for children fetched from a server (API has no color). */
-const CHILD_COLORS = ['#EBA06A', '#9F94D4', '#6FC0A6', '#E6BE5E', '#EA958A'];
-
-/** Cycle through the child avatar tint palette — the single source of truth
- *  for child colors, shared by `listChildren` and the store's local-create path. */
-export function childColor(index: number): string {
-  return CHILD_COLORS[index % CHILD_COLORS.length];
-}
 
 /** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times).
  *  Baths have no Baby Buddy resource — they ride on generic Notes. */
@@ -743,9 +735,13 @@ export class BabybuddyClient {
     }));
   }
 
-  async listChildren(): Promise<Child[]> {
+  /** No `color`: the avatar tint is a local concept Baby Buddy knows nothing
+   *  about, so inventing one here would key it to the server's list position
+   *  and move it under the child on the next fetch. `reconcileChildren` keeps
+   *  the persisted tint and assigns one to a genuinely new child. */
+  async listChildren(): Promise<ServerChild[]> {
     const data = await this.request<Paginated<any>>('/children/?limit=100');
-    return data.results.map((c, i) => ({
+    return data.results.map((c) => ({
       id: String(c.id),
       serverId: c.id,
       first: c.first_name ?? '',
@@ -754,7 +750,6 @@ export class BabybuddyClient {
       // never with fromISO, which would read it as UTC midnight and desync it
       // from clampBirth, matchServerChild and the childBody serialization.
       birth: c.birth_date ? fromDateStr(c.birth_date) : Date.now(),
-      color: childColor(i),
       slug: c.slug,
       picture: c.picture ?? null,
     }));
