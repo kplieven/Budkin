@@ -367,8 +367,8 @@ interface AppActions {
   commitWrite: (entry: Entry) => void;
   /** `commitWrite` for a whole save at once. Each entry still routes on its own
    *  child (a withheld `expected` one stays local, a child with no serverId
-   *  goes to the queue), but everything bound for the queue is written in ONE
-   *  batched call: N un-awaited single enqueues interleave and lose entries. */
+   *  goes to the queue), but everything bound for the queue is handed over in
+   *  ONE batched call. See `enqueueEntries` for why that matters. */
   commitWrites: (entries: Entry[]) => void;
 
   selectChild: (id: string) => void;
@@ -2425,10 +2425,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   commitWrites: (entries) => {
     const s = get();
     // Entries bound for the offline queue are collected and written ONCE at the
-    // end. Every mutation in queue.ts is an unguarded load-modify-save, so N
-    // un-awaited `enqueueEntry` calls read the same pre-push queue and the last
-    // save clobbers the rest: a "log for both" made offline lost a twin's entry.
-    // See `enqueueEntries`.
+    // end, rather than one un-awaited `enqueueEntry` each. See `enqueueEntries`
+    // for the load-modify-save race that makes the difference between the two a
+    // lost entry rather than an extra write.
     const queued: Entry[] = [];
     for (const entry of entries) {
       const child = s.children.find((c) => c.id === entry.childId);
