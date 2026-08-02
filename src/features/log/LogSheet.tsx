@@ -12,7 +12,7 @@ import { LevelScale } from '@/components/LevelScale';
 import { Stepper } from '@/components/Stepper';
 import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
-import { ACTIVITY_LABEL, DIAPER_LEVELS, DURATION_SHORTCUTS, INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
+import { ACTIVITY_LABEL, DIAPER_LEVELS, DURATION_SHORTCUTS, INTAKE_LEVELS, allowsMultipleChildren, feedAmountIsVolume } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
 import { eligibleTargetChildren, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
@@ -455,6 +455,7 @@ export function LogSheet() {
   const sheetChildIds = useAppStore((s) => s.sheetChildIds);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const setSheetChildren = useAppStore((s) => s.setSheetChildren);
+  const toggleSheetChild = useAppStore((s) => s.toggleSheetChild);
   const setTE = useAppStore((s) => s.setTE);
   const toggleWet = useAppStore((s) => s.toggleWet);
   const toggleSolid = useAppStore((s) => s.toggleSolid);
@@ -514,8 +515,16 @@ export function LogSheet() {
   // tap target for every solo-child user is worse than no affordance at all.
   const options = eligibleTargetChildren(children);
   const canRetarget = options.length > 1;
+  // "Log for both" is create-only, and only for the routines siblings share.
+  // Editing offers the picker as a plain single-select (re-aiming a record is
+  // still useful), and a timer stop belongs to the one timer being stopped.
+  const canLogForSeveral = canRetarget && !editingId && !fromTimerId && allowsMultipleChildren(type);
   // Marking a logged entry as still ongoing does not save changes to it, it
   // replaces it with a running timer, so the button must not promise an edit.
+  // With several children targeted the button stops naming the activity and
+  // says how many records the press writes, since that is the surprising part.
+  // The header line above it already names them.
+  const several = targetIds.length > 1;
   const saveLabel = editingId
     ? te.ongoing && te.shape === 'interval'
       ? 'Start live timer'
@@ -527,8 +536,14 @@ export function LogSheet() {
           ? `Stop & save · ended ${fmtClock(te.endAbs)}`
           : 'Stop & save'
       : te.ongoing && te.shape === 'interval'
-        ? 'Start live timer'
-        : `Save ${label.toLowerCase()}`;
+        ? several
+          ? 'Start live timers'
+          : 'Start live timer'
+        : several
+          ? targetIds.length === 2
+            ? 'Save for both'
+            : `Save for all ${targetIds.length}`
+          : `Save ${label.toLowerCase()}`;
 
   return (
     <BottomSheet onClose={closeSheet}>
@@ -572,7 +587,7 @@ export function LogSheet() {
             whoever they were on. */}
         {pickerOpen && canRetarget && (
           <>
-            <FieldLabel>Log for</FieldLabel>
+            <FieldLabel hint={canLogForSeveral ? 'one entry each' : undefined}>Log for</FieldLabel>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
               {options.map((c) => (
                 <Chip
@@ -582,6 +597,12 @@ export function LogSheet() {
                   swatch={c.color}
                   selected={targetIds.includes(c.id)}
                   onPress={() => {
+                    // Multi-select stays open (the point is picking a second
+                    // child); single-select collapses, since the choice is made.
+                    if (canLogForSeveral) {
+                      toggleSheetChild(c.id);
+                      return;
+                    }
                     setSheetChildren([c.id]);
                     setPickerOpen(false);
                   }}

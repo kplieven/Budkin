@@ -113,6 +113,25 @@ export const DEFAULT_DURATION_MIN: Record<ActivityType, number> = {
 
 export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath', 'temperature', 'medication'];
 
+/**
+ * Activities a twin household can log for several children in one save, each
+ * getting its own independent entry.
+ *
+ * An ALLOW-list, not a deny-list, so an activity added later has to be argued
+ * onto it rather than inheriting the affordance. What is missing is missing on
+ * purpose: `pumping` is parent-side, so copying one session onto each child
+ * double-counts the milk in every aggregate built on it; `temperature` and any
+ * measurement is a single reading that cannot belong to two children; a
+ * `medication` dose, a `note` and a `milestone` are about one child by
+ * construction.
+ */
+export const SHARED_ROUTINE_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'bath', 'tummy'];
+
+/** Whether the log sheet offers "log for both" for this activity. */
+export function allowsMultipleChildren(type: ActivityType): boolean {
+  return SHARED_ROUTINE_ACTIVITIES.includes(type);
+}
+
 /** Activities a timer can be saved as. */
 export const TIMER_SAVE_OPTIONS: ActivityType[] = ['feeding', 'sleep', 'pumping', 'tummy'];
 

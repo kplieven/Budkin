@@ -37,6 +37,7 @@ import {
   saveChildren,
   saveEntries,
 } from '@/data/entityStore';
+import { enqueueEntries, enqueueEntry } from '@/data/queue';
 import { addPendingOp, clearPendingOps } from '@/data/pendingOps';
 import type { PendingOp } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
@@ -134,6 +135,10 @@ vi.mock('@/data/queue', () => ({
   }),
   enqueueEntry: vi.fn(async (e: unknown) => {
     h.q = [...h.q, e];
+    return h.q;
+  }),
+  enqueueEntries: vi.fn(async (es: unknown[]) => {
+    if (es.length > 0) h.q = [...h.q, ...es];
     return h.q;
   }),
   removeQueuedEntry: vi.fn(async (id: string) => {
@@ -444,6 +449,8 @@ beforeEach(() => {
   h.treatments = [];
   h.bathRhythms = {};
   h.entityOrigin = null;
+  vi.mocked(enqueueEntry).mockClear();
+  vi.mocked(enqueueEntries).mockClear();
   vi.mocked(loadProfileFromServer).mockClear();
   vi.mocked(loadTagsFromServer).mockClear();
   vi.mocked(savePrefs).mockClear();
@@ -3008,6 +3015,150 @@ describe('the log sheet owns the child it is logging for', () => {
     useAppStore.setState({ sheet: { type: 'diaper' }, sheetChildIds: [], te: { shape: 'point', tags: [], agoMin: 0 } });
     s().save();
     expect(s().entries[0].childId).toBe('c1');
+  });
+});
+
+describe('logging for more than one child at once', () => {
+  // "Log for both": one INDEPENDENT entry per target child, each separately
+  // editable and deletable afterwards. No link field, no group id.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1' });
+  });
+
+  const bothDiapers = () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    s().save();
+  };
+
+  it('toggleSheetChild adds a second target and takes it away again', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1', 'c2']);
+    s().toggleSheetChild('c2');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('toggleSheetChild refuses to untoggle the last target', () => {
+    s().openSheet('diaper');
+    s().toggleSheetChild('c1');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('writes one entry per target child', () => {
+    bothDiapers();
+    expect(s().entries).toHaveLength(2);
+    expect(s().entries.map((e) => e.childId).sort()).toEqual(['c1', 'c2']);
+  });
+
+  it('gives each entry its OWN id', () => {
+    // `'e' + Date.now()` is millisecond resolution and this loop is
+    // synchronous, so both entries used to land with the same id. Everything
+    // id-keyed then hits both: the queue rewrite, the delete, the post-POST
+    // serverId stamp (which would put one child's server row on the sibling's
+    // entry) and React's list keys.
+    bothDiapers();
+    const ids = s().entries.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  it('leaves the entries independent: deleting one keeps the other', () => {
+    bothDiapers();
+    s().deleteEntry(s().entries[0].id);
+    expect(s().entries).toHaveLength(1);
+  });
+
+  it('pushes each entry to its own child\'s server row', async () => {
+    bothDiapers();
+    await flush();
+    expect(h.pushed).toHaveLength(2);
+    expect([...(h.pushedChildServerIds as number[])].sort()).toEqual([501, 502]);
+  });
+
+  it('queues the whole batch in ONE write while offline', async () => {
+    useAppStore.setState({ offline: true });
+    bothDiapers();
+    await flush();
+    // One batched call, not one unguarded load-modify-save per child: N
+    // un-awaited single enqueues read the same pre-push queue and the last save
+    // clobbers the rest, so a twin's entry silently vanished.
+    expect(vi.mocked(enqueueEntries)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(enqueueEntry)).not.toHaveBeenCalled();
+    expect(h.q).toHaveLength(2);
+    expect(s().queueCount).toBe(2);
+    expect(s().queuedIds).toHaveLength(2);
+  });
+
+  it('writes lastFeed once, not once per child', () => {
+    s().openSheet('feeding');
+    s().toggleSheetChild('c2');
+    s().setTE({ feedType: 'formula', method: 'bottle' });
+    s().save();
+    expect(s().entries).toHaveLength(2);
+    expect(s().lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+  });
+
+  it('starts one live timer per target child', () => {
+    s().openSheet('sleep');
+    s().toggleSheetChild('c2');
+    s().setOngoing();
+    s().save();
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(2);
+    expect(s().timers.map((tm) => tm.childId).sort()).toEqual(['c1', 'c2']);
+    expect(new Set(s().timers.map((tm) => tm.id)).size).toBe(2);
+  });
+
+  it('never fans out an EDIT, even with several targets sitting in state', () => {
+    // Multi-select is create-only: an edit moves ONE record, and letting it add
+    // a child would silently mint a sibling copy of an existing entry.
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c1', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('never fans out a timer stop', () => {
+    // A timer stop belongs to whoever started the timer, and there is one of it.
+    useAppStore.setState({
+      timers: [{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().setTimerLasted(40);
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('refuses to fan out an activity off the allow-list', () => {
+    // Belt and braces behind the UI gate: duplicating a pumping session would
+    // double-count the milk in every aggregate built on it.
+    s().openSheet('pumping');
+    useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('holds back an expecting sibling\'s entry while the born one pushes', async () => {
+    // `commitWrite` routes per child, so a batch genuinely takes several paths.
+    // Nothing in the UI offers an expecting child, so this is the store keeping
+    // its own rule rather than trusting the picker's.
+    useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
+    bothDiapers();
+    await flush();
+    expect(s().entries).toHaveLength(2);
+    expect(s().entries.find((e) => e.childId === 'c2')?.heldBack).toBe(true);
+    expect(h.pushed).toHaveLength(1);
+    expect(h.pushedChildServerIds).toEqual([501]);
   });
 });
 

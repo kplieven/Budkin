@@ -10,6 +10,7 @@ import { create, type StoreApi } from 'zustand';
 import {
   ACTIVITY_SHAPE,
   ACTIVITY_LABEL,
+  allowsMultipleChildren,
   DEFAULT_DURATION_MIN,
   feedAmountIsVolume,
 } from '@/lib/activities';
@@ -65,7 +66,7 @@ import {
   savePendingOps,
 } from '@/data/pendingOps';
 import { loadPrefs, savePrefs } from '@/data/prefs';
-import { clearQueue, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
+import { clearQueue, enqueueEntries, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import {
@@ -77,7 +78,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
-import { sheetTargetIds } from '@/lib/logTargets';
+import { sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
@@ -364,6 +365,11 @@ interface AppActions {
    *  the queue.ts path (flushQueue); mixing the two would double-push. */
   flushUnsynced: () => Promise<void>;
   commitWrite: (entry: Entry) => void;
+  /** `commitWrite` for a whole save at once. Each entry still routes on its own
+   *  child (a withheld `expected` one stays local, a child with no serverId
+   *  goes to the queue), but everything bound for the queue is written in ONE
+   *  batched call: N un-awaited single enqueues interleave and lose entries. */
+  commitWrites: (entries: Entry[]) => void;
 
   selectChild: (id: string) => void;
   openSwitcher: () => void;
@@ -2415,43 +2421,52 @@ export const useAppStore = create<AppStore>((set, get) => ({
       flushUnsyncedInFlight = false;
     }
   },
-  commitWrite: (entry) => {
+  commitWrite: (entry) => get().commitWrites([entry]),
+  commitWrites: (entries) => {
     const s = get();
-    const child = s.children.find((c) => c.id === entry.childId);
-    // WITHHELD: the owning child is a due-date placeholder with no
-    // `serverId` (see `childServerIdFor`) and, being `expected`, will not
-    // get one until `confirmBirth` (see `saveChild`). Stamp that as a
-    // durable fact on the entry now, ONCE (this is the only place
-    // `heldBack` is ever set, see its doc comment on `EntryBase`), rather
-    // than something re-derived later from `expected` or a timestamp, which
-    // is exactly what kept expiring at the next transition across earlier
-    // attempts at this. Runs even in local mode / with no connection at all:
-    // `adopt()`'s later merge (`mergeHeldBackEntries`) needs the same marker
-    // on an entry written before the app ever had a server connection.
-    if (child?.expected && !entry.heldBack) {
-      set((st) => ({
-        entries: st.entries.map((e) => (e.id === entry.id ? { ...e, heldBack: true } : e)),
-      }));
-    }
-    const conn = s.connection;
-    if (!conn || conn.mode !== 'server') return; // local: nothing to push
-    // Leave a withheld entry purely local (in `entries` / the entity store,
-    // like local mode) rather than queueing it. Queueing it would let it
-    // flush silently through `flushQueue`, which never stamps a local
-    // `serverId` on an entry: the only path that does is `flushUnsynced`'s
-    // held-back push once `confirmBirth` gives the child one (see
-    // `isHeldBackEntry`), and mixing the two would risk pushing the same
-    // entry to the server twice.
-    if (child?.expected) return;
-    if (s.offline) {
-      void enqueueEntry(entry).then((q) => set(queueMirror(q)));
-    } else {
+    // Entries bound for the offline queue are collected and written ONCE at the
+    // end. Every mutation in queue.ts is an unguarded load-modify-save, so N
+    // un-awaited `enqueueEntry` calls read the same pre-push queue and the last
+    // save clobbers the rest: a "log for both" made offline lost a twin's entry.
+    // See `enqueueEntries`.
+    const queued: Entry[] = [];
+    for (const entry of entries) {
+      const child = s.children.find((c) => c.id === entry.childId);
+      // WITHHELD: the owning child is a due-date placeholder with no
+      // `serverId` (see `childServerIdFor`) and, being `expected`, will not
+      // get one until `confirmBirth` (see `saveChild`). Stamp that as a
+      // durable fact on the entry now, ONCE (this is the only place
+      // `heldBack` is ever set, see its doc comment on `EntryBase`), rather
+      // than something re-derived later from `expected` or a timestamp, which
+      // is exactly what kept expiring at the next transition across earlier
+      // attempts at this. Runs even in local mode / with no connection at all:
+      // `adopt()`'s later merge (`mergeHeldBackEntries`) needs the same marker
+      // on an entry written before the app ever had a server connection.
+      if (child?.expected && !entry.heldBack) {
+        set((st) => ({
+          entries: st.entries.map((e) => (e.id === entry.id ? { ...e, heldBack: true } : e)),
+        }));
+      }
+      const conn = s.connection;
+      if (!conn || conn.mode !== 'server') continue; // local: nothing to push
+      // Leave a withheld entry purely local (in `entries` / the entity store,
+      // like local mode) rather than queueing it. Queueing it would let it
+      // flush silently through `flushQueue`, which never stamps a local
+      // `serverId` on an entry: the only path that does is `flushUnsynced`'s
+      // held-back push once `confirmBirth` gives the child one (see
+      // `isHeldBackEntry`), and mixing the two would risk pushing the same
+      // entry to the server twice.
+      if (child?.expected) continue;
+      if (s.offline) {
+        queued.push(entry);
+        continue;
+      }
       const childServerId = childServerIdFor(s.children, entry.childId);
       if (childServerId == null) {
         // The child is not on the server yet, so this entry cannot be either.
         // Queue it: the reconnect flush pushes it once the child exists.
         console.warn('[entries] no server id for child, queued:', entry.type, entry.childId);
-        void enqueueEntry(entry).then((q) => set(queueMirror(q)));
+        queued.push(entry);
       } else {
         // A genuine new write: give the retry chain a fresh budget, so a save
         // made an hour after some earlier failure isn't stuck with a spent one.
@@ -2489,6 +2504,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
           });
       }
     }
+    // One load/save cycle and one `queueMirror` update for the whole batch.
+    // An empty list writes nothing, so this needs no length guard.
+    if (queued.length > 0) void enqueueEntries(queued).then((q) => set(queueMirror(q)));
   },
 
   // ---- child switcher ----
@@ -3646,8 +3664,18 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // moved underneath it, and what makes re-aiming an edit move the record.
     const sourceTimer = s.fromTimerId ? s.timers.find((t) => t.id === s.fromTimerId) : undefined;
     const fallbackChildId = existing?.childId ?? sourceTimer?.childId ?? s.selectedChildId;
-    const childId = sheetTargetIds(s.sheetChildIds, fallbackChildId)[0];
-    const id = existing ? existing.id : 'e' + Date.now();
+    const aimedAt = sheetTargetIds(s.sheetChildIds, fallbackChildId);
+    // "Log for both" is CREATE-ONLY and only for the shared-routine activities.
+    // An edit moves ONE record and must never mint a sibling copy of it, a timer
+    // stop belongs to whoever started that one timer, and the allow-list keeps a
+    // duplicated pumping session from double-counting the milk (see
+    // `allowsMultipleChildren`). The UI already gates all three; this is the
+    // store keeping the rule rather than trusting the picker's.
+    const targets = !existing && !sourceTimer && allowsMultipleChildren(type) ? aimedAt : [aimedAt[0]];
+    const childId = targets[0];
+    // One stamp for the whole save, suffixed per target below.
+    const stamp = Date.now();
+    const id = existing ? existing.id : `e${stamp}-0`;
     // for breastfeeding "both", record the starting side as a left/right tag
     const tags =
       type === 'feeding' &&
@@ -3795,41 +3823,63 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Undo is transactional (see `undoDelete`): it restores the entry and
     // discards the timer together, so the user can never hold both.
     if (te.ongoing && te.shape === 'interval') {
-      // Spelled out rather than just reusing `childId`: on an edit the two are
-      // now equal (see where `childId` is bound), but on a fresh draft
-      // `childId` IS the selection, and a timer belongs to whoever the record
-      // was about. Same rule `stopTimer` follows in reverse.
-      const timerChildId = existing?.childId ?? childId;
-      const timer = buildTimerFromDraft(
-        't' + Date.now(),
-        type,
-        te,
-        ongoingStartMs(te, s.entries, s.editingId, now),
-        timerChildId,
-      );
+      // Spelled out rather than just reusing `targets`: on an edit the two are
+      // now equal (see where `targets` is bound), but a timer belongs to whoever
+      // the RECORD was about, and a conversion is single-target by construction.
+      // Same rule `stopTimer` follows in reverse.
+      //
+      // One timer PER TARGET on a fresh draft, for the reason a finished save
+      // writes one entry each: "still feeding" for both twins is two things
+      // happening, and starting a single timer would silently drop one of them
+      // after the parent asked for both. Ids carry the same `-<index>` suffix as
+      // the entries, and for the same collision reason.
+      const timerChildIds = existing ? [existing.childId] : targets;
+      const start = ongoingStartMs(te, s.entries, s.editingId, now);
+      const timers = timerChildIds.map((cid, i) => buildTimerFromDraft(`t${stamp}-${i}`, type, te, start, cid));
       const index = existing ? s.entries.findIndex((e) => e.id === existing.id) : -1;
       set({
         entries: existing ? s.entries.filter((e) => e.id !== existing.id) : s.entries,
-        timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
+        timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), ...timers],
         sheet: null,
         sheetChildIds: [],
         editingId: null,
         fromTimerId: null,
       });
       if (existing) {
-        detachEntry(get, set, existing, index, timer.id);
+        detachEntry(get, set, existing, index, timers[0].id);
         get().showToast('Replaced with a live timer', { label: 'Undo', run: () => get().undoDelete() });
       } else {
-        get().showToast('Live timer started');
+        get().showToast(timers.length > 1 ? 'Live timers started' : 'Live timer started');
       }
-      mirrorTimerCreate(get, set, timer.id);
+      for (const tm of timers) mirrorTimerCreate(get, set, tm.id);
       return;
     }
+
+    // One INDEPENDENT record per target child. The siblings are CLONES of the
+    // draft carrying their own id and their own owner: every other field is
+    // about the activity rather than the child, and the two child-scoped seeds
+    // (a bath's `wash`, a feed's start side) are user-editable draft values by
+    // the time save runs, so they are shared deliberately rather than recomputed
+    // behind the parent's back. No group id and no link field: each entry is
+    // separately editable and deletable afterwards.
+    //
+    // The `-<index>` id suffix is load-bearing. `Date.now()` is millisecond
+    // resolution and this pass is synchronous, so N entries written in one save
+    // would otherwise carry IDENTICAL ids, and every id-keyed operation would
+    // then hit all of them: `removeQueuedEntry` / `updateQueuedEntry`,
+    // `deleteEntry`'s findIndex, the post-POST `serverId` stamp (which would put
+    // one child's server row onto the sibling's entry), `mergeUnsynced`'s id set
+    // and React's list keys. Nothing parses a LOCAL entry id (server ids live in
+    // `Entry.serverId`), so the format is free.
+    const built: Entry[] = [
+      entry,
+      ...targets.slice(1).map((cid, i): Entry => ({ ...entry, id: `e${stamp}-${i + 1}`, childId: cid })),
+    ];
 
     const patch: Partial<AppState> = existing
       ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, sheetChildIds: [], editingId: null }
       : {
-          entries: [entry, ...s.entries],
+          entries: [...built, ...s.entries],
           sheet: null,
           sheetChildIds: [],
           fromTimerId: null,
@@ -3837,6 +3887,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
           ...(s.fromTimerId ? { timers: s.timers.filter((tm) => tm.id !== s.fromTimerId) } : {}),
         };
     if (type === 'feeding') {
+      // ONCE per save, not once per child: it is one draft, and "what was the
+      // last feed like" has a single answer whoever it was logged for.
       patch.lastFeed = { feedType: te.feedType ?? 'breast', method: te.method ?? 'left' };
     }
     set(patch);
@@ -3871,9 +3923,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
         const src = s.timers.find((tm) => tm.id === s.fromTimerId);
         if (src) mirrorTimerDelete(get, src);
       }
-      get().commitWrite(entry);
+      // One call for the whole save: everything bound for the offline queue is
+      // written in ONE load/save cycle there, because N un-awaited single
+      // enqueues interleave and drop entries (see `commitWrites`).
+      get().commitWrites(built);
       const queued = s.offline && !!s.connection && s.connection.mode === 'server';
-      get().showToast(queued ? 'Saved · queued offline' : 'Saved');
+      // Naming the children back is the confirmation that the fan-out happened:
+      // the entries land under whoever was targeted, so History (which filters
+      // by the SELECTED child) shows only one of them.
+      const what = built.length > 1 ? `Saved for ${targetChildrenLabel(s.children, targets)}` : 'Saved';
+      get().showToast(queued ? `${what} · queued offline` : what);
     }
   },
 
