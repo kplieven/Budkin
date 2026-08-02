@@ -15,6 +15,17 @@ export type FeedMethod = 'left' | 'right' | 'both' | 'bottle' | 'parent' | 'self
 export type DiaperColor = 'black' | 'brown' | 'green' | 'yellow';
 
 /**
+ * What a child's last feed was like, which is what the next feeding draft opens
+ * on. Held per child (`Record<childId, LastFeed>`): with twins, one shared value
+ * meant the sheet offered whichever of them was fed last, whoever it was opened
+ * for. Local only, and never an entry: it is a seed, not a record.
+ */
+export interface LastFeed {
+  feedType: FeedType;
+  method: FeedMethod;
+}
+
+/**
  * A child's gender. Optional everywhere: absent means "not recorded", which is
  * why there is no "unspecified" member — nothing has to be chosen.
  */
