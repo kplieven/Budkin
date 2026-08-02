@@ -38,14 +38,20 @@ import type {
   Tag,
   TemperatureEntry,
   TummyEntry,
+  UploadableFile,
 } from '@/types/models';
 
 export class ApiError extends Error {
+  /** `cause` carries whatever actually failed. The transport errors below are
+   *  written for the user and say nothing about what went wrong underneath; a
+   *  client-side failure (a body that could not be serialized, say) used to be
+   *  reported as an unreachable server and left no trace of itself anywhere. */
   constructor(
     public status: number,
     message: string,
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    super(message, options);
     this.name = 'ApiError';
   }
 }
@@ -602,9 +608,19 @@ export function childBody(child: Child, clearPicture = false): Record<string, un
   return body;
 }
 
-/** The React Native FormData file descriptor for an uploaded picture. */
-export function nativePicturePart(photo: PickedPhoto): { uri: string; name: string; type: string } {
-  return { uri: photo.uri, name: photo.name, type: photo.type };
+/** Native only: the file object the multipart part is built from. Native bundles
+ *  run expo/fetch rather than React Native's fetch, and its multipart encoder
+ *  reads a part's `bytes()`; it cannot read RN's `{ uri, name, type }`
+ *  descriptor, which used to throw inside `fetch` before a byte left the device.
+ *  The picker layer attaches this (see `src/lib/photo.ts`), because building it
+ *  needs `expo-file-system` and this file stays import-free of native modules.
+ *
+ *  Missing means the photo came from somewhere that could not open the file, so
+ *  it fails loudly and distinctly: raised before `request()`, it never reaches
+ *  the transport catch that would have blamed the connection. */
+function nativePicturePart(photo: PickedPhoto): UploadableFile {
+  if (!photo.nativeFile) throw new ApiError(0, "Couldn't read the selected photo.");
+  return photo.nativeFile;
 }
 
 /** Web only: cover-crop the picked image onto a 512px square canvas and return a
@@ -625,10 +641,15 @@ async function squarePictureBlob(photo: PickedPhoto): Promise<Blob> {
   );
 }
 
-/** Multipart child body including a picture upload. Native appends the picker's
- *  file descriptor; web appends the square-cropped JPEG blob. Web is detected by
+/** Multipart child body including a picture upload. Native appends the picked
+ *  file itself; web appends the square-cropped JPEG blob. Web is detected by
  *  the presence of `document` (no `react-native` import — keeps this file
- *  loadable under the node test runner). */
+ *  loadable under the node test runner).
+ *
+ *  The native part deliberately passes no filename: expo's FormData patch keeps
+ *  the third argument only for a real `Blob`, so the part is named after the
+ *  file itself (the picker's cache filename, extension included) rather than
+ *  after `photo.name` as on web. */
 async function buildChildForm(child: Child, photo: PickedPhoto): Promise<FormData> {
   const form = new FormData();
   form.append('first_name', child.first);
@@ -690,14 +711,19 @@ export class BabybuddyClient {
           ...(init?.headers ?? {}),
         },
       });
-    } catch {
+    } catch (err) {
       // Timed out vs unreachable: distinct copy, so a hung server reads
       // differently from a wrong address, but the same status 0, so every
       // existing catch that switches on it keeps working.
+      //
+      // The underlying error rides along as `cause`. Not every rejection here is
+      // the network: `fetch` also throws when it cannot serialize the body, and
+      // discarding that is how an upload that never left the device spent months
+      // reading as a connection problem.
       if (controller.signal.aborted) {
-        throw new ApiError(0, 'Server took too long to respond.');
+        throw new ApiError(0, 'Server took too long to respond.', { cause: err });
       }
-      throw new ApiError(0, "Couldn't reach server. Check the URL and your connection.");
+      throw new ApiError(0, "Couldn't reach server. Check the URL and your connection.", { cause: err });
     } finally {
       clearTimeout(abortTimer);
     }
