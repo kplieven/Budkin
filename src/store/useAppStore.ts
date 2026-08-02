@@ -2504,8 +2504,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
           });
       }
     }
-    // One load/save cycle and one `queueMirror` update for the whole batch.
-    // An empty list writes nothing, so this needs no length guard.
+    // One load/save cycle and one `queueMirror` update for the whole batch. The
+    // length guard is about the READ: `enqueueEntries` would write nothing for
+    // an empty list but still load the queue and re-mirror it, on every ordinary
+    // online push.
     if (queued.length > 0) void enqueueEntries(queued).then((q) => set(queueMirror(q)));
   },
 
