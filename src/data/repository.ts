@@ -3,7 +3,7 @@
  * over a real Baby Buddy server vs the local demo. The store talks only to this.
  */
 
-import { BabybuddyClient } from '@/api/client';
+import { ApiError, BabybuddyClient } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { encodeTimerName, serverTimerToTimer } from '@/data/serverTimers';
 import {
@@ -26,6 +26,12 @@ import {
 export type Connection =
   | { mode: 'local' }
   | { mode: 'server'; serverUrl: string; token: string };
+
+/** One per-type fetch's worth of a child's records: an entry `type`, a
+ *  `MeasurementKind`, or `'treatment'` (its own request). The unit
+ *  `LoadResult.incompleteSlices` is expressed in, so a load can say WHICH of a
+ *  child's records are missing rather than only that some are. */
+export type LoadSlice = ActivityType | MeasurementKind | 'treatment';
 
 export interface LoadResult {
   /** No `color`: the avatar tint is local-only, and the store fills it in when
@@ -52,23 +58,40 @@ export interface LoadResult {
   /** The selected child's treatment regimens, read from their `treatment`-tagged
    *  notes. Empty in local mode and whenever the fetch fails. */
   treatments: Treatment[];
-  /** SERVER child ids this load FETCHED whose per-type requests all answered.
-   *  A fetched child absent from here had at least one request degrade to []
-   *  (see the `.catch`es below), so its `entries`/`measurements`/`treatments`
-   *  slice is a FLOOR, not an answer: consumers must carry the slice they
-   *  already hold over instead of accepting it, or one timed-out /api/notes/
-   *  deletes every note, bath and milestone this device had. Exactly the
-   *  `timers: null` distinction, per child.
+  /** SERVER child id -> the record slices whose fetch DEGRADED to [] for that
+   *  child (see the `.catch`es below). A listed slice is missing from
+   *  `entries`/`measurements`/`treatments` with nothing else in the shape
+   *  saying so, which makes it a FLOOR, not an answer: consumers must keep the
+   *  rows they already hold for it instead of reading the gap as a delete, or
+   *  one timed-out /api/notes/ takes every note, bath and milestone this device
+   *  had. Exactly the `timers: null` distinction, per child and per slice.
    *
-   *  Optional, and absent means every fetched child came back whole: the only
-   *  two construction sites are in this file, and a caller that cannot degrade
-   *  should not have to say so.
+   *  Optional, and absent (like an empty map) means every slice of every
+   *  fetched child came back whole: `loadFromServer` is the only construction
+   *  site, and a caller that cannot degrade should not have to say so.
    *
-   *  Says nothing about a child this load did NOT fetch. A load covers ONE
-   *  child (see `lastFeed`), and the siblings it skipped are not incomplete
-   *  answers, they were never asked about; what happens to their records is a
-   *  separate question from this one. */
-  completeChildIds?: string[];
+   *  Per SLICE rather than per child, deliberately. An endpoint can fail
+   *  STRUCTURALLY and keep failing, so a per-child signal would freeze a
+   *  child's whole history for as long as one endpoint stayed broken, which is
+   *  the "never" that carry-over exists to avoid. A 404 is not counted at all:
+   *  it is a positive answer ("this server has no such feature", e.g. an
+   *  instance older than Baby Buddy's medication release), not an absent one.
+   *
+   *  Names only children this load FETCHED and failed for. A sibling it never
+   *  fetched is not an incomplete answer, it is no answer at all, and what
+   *  happens to a sibling's records is a separate question from this one.
+   *
+   *  Accepted residual: a slice whose endpoint keeps failing with something
+   *  other than a 404 stays at the rows the device already holds, so a record
+   *  added or deleted elsewhere in THAT slice lands only once the endpoint
+   *  answers again. Bounded to the broken slice, and consumers take the answer
+   *  as-is for a slice they hold no rows for, so it cannot present as an empty
+   *  app.
+   *
+   *  `listGenders` is deliberately not counted: gender is account-wide rather
+   *  than part of any child's record slice, it is merged onto `children` rather
+   *  than into a slice, and it re-reads on the next good refresh. */
+  incompleteSlices?: Record<string, LoadSlice[]>;
 }
 
 /** Validate the connection and load children + recent entries from the server.
@@ -119,16 +142,24 @@ export async function loadFromServer(
       : undefined;
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
-  // Flipped by `orEmpty` below the moment any per-type request degrades, which
-  // is what `completeChildIds` reports to the caller. One degrade is enough:
-  // the concatenation loses a whole type with nothing in the shape saying so.
-  let complete = true;
-  /** The degrade-to-empty catch every per-type call shares, recording that it
-   *  fired rather than swallowing it silently. */
+  // Filled by `orEmpty` below, and reported as `incompleteSlices`: the slices
+  // whose rows are missing from the concatenation with nothing in the shape
+  // saying so.
+  const degraded: LoadSlice[] = [];
+  /** The degrade-to-empty catch every per-type call shares, recording WHICH
+   *  slices it emptied rather than swallowing the failure silently. Takes the
+   *  slices explicitly because one request can cover several (`listChildNotes`
+   *  answers for baths, milestones and notes at once).
+   *
+   *  A 404 is deliberately NOT recorded. It says this server has no such
+   *  endpoint (Baby Buddy instances older than the medication release 404 on
+   *  /api/medication/), which is an answer: "no rows, and there never will be".
+   *  Recording it would freeze those slices on every load for as long as the
+   *  server stayed on that version, rather than for one refresh. */
   const orEmpty =
-    <T>(empty: T) =>
-    (): T => {
-      complete = false;
+    <T>(empty: T, ...slices: LoadSlice[]) =>
+    (e: unknown): T => {
+      if (!(e instanceof ApiError && e.status === 404)) degraded.push(...slices);
       return empty;
     };
 
@@ -136,19 +167,20 @@ export async function loadFromServer(
   let treatments: Treatment[] = [];
   if (selectedChildId) {
     const [f, s, d, p, tt, notesData, temp, med, treatmentList] = await Promise.all([
-      client.listFeedings(selectedChildId).catch(orEmpty([])),
-      client.listSleep(selectedChildId).catch(orEmpty([])),
-      client.listChanges(selectedChildId).catch(orEmpty([])),
-      client.listPumping(selectedChildId).catch(orEmpty([])),
-      client.listTummy(selectedChildId).catch(orEmpty([])),
-      // ONE /api/notes/ request, partitioned into milestones + baths + general notes.
-      client.listChildNotes(selectedChildId).catch(orEmpty({ baths: [], milestones: [], notes: [] })),
-      client.listTemperature(selectedChildId).catch(orEmpty([])),
-      client.listMedication(selectedChildId).catch(orEmpty([])),
+      client.listFeedings(selectedChildId).catch(orEmpty([], 'feeding')),
+      client.listSleep(selectedChildId).catch(orEmpty([], 'sleep')),
+      client.listChanges(selectedChildId).catch(orEmpty([], 'diaper')),
+      client.listPumping(selectedChildId).catch(orEmpty([], 'pumping')),
+      client.listTummy(selectedChildId).catch(orEmpty([], 'tummy')),
+      // ONE /api/notes/ request, partitioned into milestones + baths + general notes,
+      // so one failure empties all three of those slices at once.
+      client.listChildNotes(selectedChildId).catch(orEmpty({ baths: [], milestones: [], notes: [] }, 'bath', 'milestone', 'note')),
+      client.listTemperature(selectedChildId).catch(orEmpty([], 'temperature')),
+      client.listMedication(selectedChildId).catch(orEmpty([], 'medication')),
       // Treatments come from a SECOND /api/notes/ request filtered by the `treatment` tag,
       // not out of `listChildNotes`: a treatment note is dated at the regimen's start,
       // so a long-running treatment would drop out of the recent-notes window.
-      client.listChildTreatments(selectedChildId).catch(orEmpty([] as Treatment[])),
+      client.listChildTreatments(selectedChildId).catch(orEmpty([] as Treatment[], 'treatment')),
     ]);
     entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp, ...med];
     treatments = treatmentList;
@@ -168,7 +200,9 @@ export async function loadFromServer(
   if (selectedChildId) {
     const kinds: MeasurementKind[] = ['weight', 'height', 'head', 'bmi'];
     const lists = await Promise.all(
-      kinds.map((k) => client.listMeasurements(k, selectedChildId).catch(orEmpty([] as Measurement[]))),
+      // Each kind is its own request, so each is its own slice: a 500 on weight
+      // says nothing about the height rows that came back.
+      kinds.map((k) => client.listMeasurements(k, selectedChildId).catch(orEmpty([] as Measurement[], k))),
     );
     measurements = lists.flat();
   }
@@ -201,10 +235,10 @@ export async function loadFromServer(
     lastFeed,
     measurements,
     treatments,
-    // The one child this load fetched, and only when nothing degraded (see
-    // `LoadResult.completeChildIds`). An account with no children fetched
-    // nothing, so it names nothing.
-    completeChildIds: selectedChildId && complete ? [selectedChildId] : [],
+    // Keyed by the one child this load fetched, and only when something
+    // actually degraded (see `LoadResult.incompleteSlices`). An account with no
+    // children fetched nothing, so it names nothing.
+    incompleteSlices: selectedChildId && degraded.length > 0 ? { [selectedChildId]: degraded } : {},
   };
 }
 
