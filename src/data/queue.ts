@@ -23,7 +23,7 @@
  *   that path is not hypothetical: it is what EVERY multi-child save takes while
  *   a self-hosted server is unhappy but the phone still has internet.
  *
- * THE WIDGET IS COVERED TOO, contrary to what this comment used to claim.
+ * THE WIDGET IS COVERED TOO, which is easy to assume otherwise.
  * `src/widgets/napToggle.ts` enqueues from the headless widget task, and that
  * task is not a separate process: `react-native-android-widget`'s
  * `HeadlessJsTaskWorker` takes its host from
