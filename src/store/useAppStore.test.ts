@@ -2748,6 +2748,59 @@ describe('edit / delete entry', () => {
   });
 });
 
+describe('editing a record keeps it with the child it belongs to', () => {
+  // A record belongs to whoever it was about, not to whoever happens to be
+  // selected while it is edited. Editing stamped the SELECTED child onto it,
+  // and since the edit path also PATCHes `child:`, that moved the server row
+  // to the sibling too.
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const miraFeed: Entry = { id: 'f1', serverId: 11, childId: 'localMira', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo' });
+  });
+
+  it("an entry edit made while a sibling is selected stays with the entry's own child", async () => {
+    useAppStore.setState({ entries: [miraFeed] });
+    s().openEdit('f1');
+    s().setTE({ method: 'right' });
+    s().save();
+
+    expect(s().entries[0].childId).toBe('localMira');
+    await flush();
+    expect((h.updated[0] as Entry).childId).toBe('localMira');
+    // ...and the PATCH is addressed to Mira's server row, not Theo's.
+    expect(vi.mocked(updateEntryOnServer).mock.calls.at(-1)?.[2]).toBe(1);
+  });
+
+  it("a measurement edit made while a sibling is selected stays with the measurement's own child", async () => {
+    useAppStore.setState({
+      measurements: [{ id: 'weight-1', serverId: 7, childId: 'localMira', kind: 'weight', value: 5.0, date: NOW }],
+    });
+    s().openEditMeasurement('weight-1');
+    s().saveMeasurement(6.0, NOW);
+
+    expect(s().measurements[0].childId).toBe('localMira');
+    await flush();
+    expect((h.measUpdated[0] as Measurement).childId).toBe('localMira');
+  });
+
+  it('converting an entry back into a live timer keeps it with the entry\'s own child', async () => {
+    useAppStore.setState({ entries: [miraFeed] });
+    s().openEdit('f1');
+    s().setOngoing(); // "Still ongoing": the entry is replaced by a timer
+    s().save();
+
+    expect(s().entries).toHaveLength(0);
+    expect(s().timers).toHaveLength(1);
+    expect(s().timers[0].childId).toBe('localMira');
+    await flush();
+    // The server mirror is created under Mira, not under the selected child.
+    expect(h.timerPushed[0]).toMatchObject({ childServerId: 1 });
+  });
+});
+
 describe('editing a still-queued entry rewrites its queued copy', () => {
   // The offline write queue file is what `flushQueue` pushes, and it never
   // consults `entries`. An edit that only updated the in-memory copy left the
