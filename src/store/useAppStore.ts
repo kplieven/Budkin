@@ -2478,6 +2478,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // connect() is allowed to reconcile them. See `loadEntityOrigin`.
     void saveEntityOrigin(normalizeServerUrl(serverUrl));
     void persistServers(savedServers);
+    // Snapshotted BEFORE the fetch, and the only reads here that are: they are
+    // what tells a record written during the GET apart from one the server
+    // changed. Everything else below is read after it, deliberately (see the
+    // next comment).
+    const childrenBefore = get().children;
+    const measurementsBefore = get().measurements;
     const data = await loadFromServer(conn);
     // The pre-existing local children/entries/measurements, which the set()
     // below replaces with the server's list. Read AFTER the fetch, like
@@ -2486,31 +2492,19 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // against a snapshot drops it (`treatments`, `timers` and `lastFeed` below
     // have always been read here for the same reason).
     //
-    // No pre-fetch snapshot is passed to `reconcileChildren` below, nor to
-    // `mergeUnsynced` for measurements, so unlike `refresh` this does NOT
-    // protect a write made DURING this GET to a record the answer already knows
-    // about: an edit to a synced child, or a create whose serverId was stamped
-    // mid-GET, still reconciles to the server's values. Only a never-pushed
-    // create survives, through the ordinary `serverId == null` rule.
+    // The pre-fetch snapshots above are passed to `reconcileChildren` and
+    // `mergeUnsynced` below, so this now protects a write made DURING the GET
+    // exactly as `refresh` does: an edit to a synced child keeps the edit, and
+    // a create whose serverId was stamped mid-GET is kept rather than dropped.
     //
-    // This gap USED to be written off as unreachable, on the grounds that adopt
-    // runs behind a modal sheet with every control disabled while it works.
-    // That is wrong, and the reasoning is recorded here so it is not made
-    // again: `BottomSheet`'s scrim is a plain `Pressable onPress={onClose}`
-    // with no `busy` gate, so a tap outside the sheet dismisses it mid-flight
-    // (`AdoptSheet` passes `closeAdopt` straight through). This function keeps
-    // awaiting its GET regardless, and the user is back on a fully interactive
-    // app with the child editor one tap away. So the window is real, just
-    // narrow and deliberately entered.
-    //
-    // Still not plumbed, as a scoping decision rather than an impossibility
-    // one. Reaching it takes dismissing an in-progress adopt and then editing a
-    // child before its GET returns, and the blast radius is one reverted edit
-    // on a flow run once per device. `refresh`, which fires constantly and hit
-    // this for real, is where the snapshots went (see `childrenBefore` and
-    // `measurementsBefore`). If adopt ever needs them, they thread in the same
-    // way: snapshot before `loadFromServer` above, pass to `reconcileChildren`
-    // and `mergeUnsynced` below.
+    // This window was once written off as unreachable, on the grounds that
+    // adopt runs behind a modal sheet with every control disabled while it
+    // works. That was wrong, and it is recorded here so the same conclusion is
+    // not drawn again: `BottomSheet`'s scrim is a plain
+    // `Pressable onPress={onClose}` with no `busy` gate, and `AdoptSheet` wires
+    // it straight to `closeAdopt`, so a tap outside dismisses the sheet
+    // mid-flight. This function keeps awaiting its GET regardless, and the user
+    // is back on a fully interactive app with the child editor one tap away.
     const localChildren = get().children;
     const localEntries = get().entries;
     const localMeasurements = get().measurements;
@@ -2523,7 +2517,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // (see `stillUnsynced` above), so it's absent from `data.children` too;
     // `reconcileChildren` keeps it under its local id the same way it keeps
     // any other never-pushed child.
-    const reconciledChildren = reconcileChildren(data.children, localChildren);
+    const reconciledChildren = reconcileChildren(data.children, localChildren, childrenBefore);
     // Incoming entries/measurements/timers carry the SERVER's child id;
     // rewrite it to the local id now that reconciliation has produced the
     // authoritative mapping. See `remapChildIds` (mirrors `hydrate`/`refresh`).
@@ -2533,7 +2527,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // record is: they never reach the server (uploadUnsynced skips them, no
     // server child to attach them to), so merge the local copy back in,
     // mirroring hydrate()/refresh()'s general mergeUnsynced treatment.
-    const mergedMeasurements = mergeUnsynced(remappedMeasurements, localMeasurements);
+    const mergedMeasurements = mergeUnsynced(remappedMeasurements, localMeasurements, measurementsBefore);
     // Its entries are held back too. Use the same expecting-child merge that
     // refresh()/hydrate() use (mergeHeldBackEntries) rather than a blanket
     // serverId==null filter: an expecting child's entries can never reach the
