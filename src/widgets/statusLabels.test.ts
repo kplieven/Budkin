@@ -16,12 +16,13 @@ const full = {
   today: 'since midnight · 4 feeds · 5 changes',
 };
 
-/** The tile with no snapshot behind it: every row draws the placeholder. */
+/** The tile with no snapshot behind it: every row draws the placeholder, and the
+ *  side is unknown rather than left. */
 const empty = {
   childName: undefined,
   childCount: undefined,
   age: '',
-  side: 'left' as const,
+  side: null,
   expected: false,
   fedMin: null,
   sleepMin: null,
@@ -84,7 +85,20 @@ describe('statusLabels root label', () => {
   });
 
   it('omits the age clause when the tile draws none', () => {
-    expect(statusLabels(empty).root).toBe('Budkin, next feed on the left. Since midnight, 0 feeds, 0 changes. Open Budkin.');
+    expect(statusLabels(empty).root).toBe('Budkin. Since midnight, 0 feeds, 0 changes. Open Budkin.');
+  });
+
+  // `nextStartSide` defaults to left with nothing to go on, so the tile draws
+  // `start Left` on an empty tile. Speaking it would present that default as a
+  // fact, on the one tile where every other row is honestly a placeholder.
+  it('does not speak a side it does not know, though the tile still draws one', () => {
+    const labels = statusLabels(empty);
+    expect(labels.root).not.toContain('next feed');
+    expect(labels.sideText).toBe('start Left');
+  });
+
+  it('still speaks the side once a snapshot supplies one', () => {
+    expect(statusLabels({ ...empty, side: 'right' as const }).root).toContain('next feed on the right');
   });
 
   // A child who is not born has no next feed. The tile draws the line anyway,

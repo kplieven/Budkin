@@ -174,8 +174,11 @@ export function statusLabels(opts: {
   childCount: number | undefined;
   /** the header's age line, exactly as drawn, '' when the tile draws none */
   age: string;
-  /** which breast the next feed begins on; both the drawn and the spoken form come from this */
-  side: 'left' | 'right';
+  /** which breast the next feed begins on; both the drawn and the spoken form come from this.
+   *  null when there is no snapshot at all, i.e. nothing is known yet. The tile still DRAWS
+   *  `start Left`, because `nextStartSide` defaults there, but the label refuses to speak a
+   *  default as though it were a fact. */
+  side: 'left' | 'right' | null;
   /** selected child not born yet, which is what silences the side clause */
   expected: boolean;
   /** minutes since the last feed and the last change, null where the tile draws its placeholder */
@@ -195,10 +198,13 @@ export function statusLabels(opts: {
   // the feeding card; speech keeps none of those, and TalkBack flattens the
   // capital, leaving "start left" to parse as an imperative missing its object.
   //
-  // Dropped outright for a child who is not born, who has no next feed. The tile
-  // draws the line anyway, but a label that already drops placeholder rows is
-  // being consistent here, not making an exception.
-  const sideClause = opts.expected ? '' : `next feed on the ${opts.side}`;
+  // Dropped outright for a child who is not born, who has no next feed, and when
+  // there is no snapshot at all, where `left` is `nextStartSide`'s default rather
+  // than anything the app knows. The tile draws the line in both cases, but a
+  // label that already drops placeholder rows is being consistent here, not
+  // making an exception: the empty tile draws dashes for every other row, and
+  // this is the one place a default would read as data.
+  const sideClause = opts.expected || opts.side == null ? '' : `next feed on the ${opts.side}`;
   const header = [widgetTitle(opts.childName), opts.age, sideClause].filter(Boolean).join(', ');
   const rows = [
     opts.fedMin != null ? `${ROW_LABEL.fed} ${spokenAgo(opts.fedMin)}` : null,
