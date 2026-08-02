@@ -81,9 +81,7 @@ export default function Insights() {
   // live breathing bar on the heatmap's Today row. Scoped to the selected child,
   // which `insightsEntries` already is by construction, and keyed on `saveAs`
   // rather than `activity` so a quick timer repointed to sleep draws in the sleep
-  // colour: the same rule Home and the reminder scheduler use. The child id is
-  // passed twice because this screen only ever asks about the selected child; the
-  // two arguments differ only for the scheduler, which walks every child.
+  // colour: the same rule Home and the reminder scheduler use.
   const runningSince = runningTimer(timers, 'sleep', selectedChildId)?.start ?? null;
   // Start of a currently-running feeding timer, for the live feeding bar (drawn
   // on top of a live sleep bar so feeding takes precedence). Keying on `saveAs`

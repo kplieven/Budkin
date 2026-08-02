@@ -757,6 +757,18 @@ export function remapChildIds<T extends { childId?: string }>(records: T[], chil
  * access to the child list or the selection. The persistence subscription writes
  * the stamped list back, so a migrated launch leaves nothing for the next one.
  *
+ * `hydrate` is the ONLY stamping site, deliberately, and that makes the window
+ * wider than "one launch". Two other paths put disk timers into state with a
+ * roster already in hand and do not stamp: `connect()` (whose `applyServerLoad`
+ * keeps `serverId == null` timers verbatim through `reconcileTimers`) and
+ * `enterLocal()` (which never touches `timers` at all). `hydrate`'s own
+ * no-connection branch reads no entity store, so it has nobody to stamp with
+ * either. So after a session expiry, a cold start leaves a legacy timer
+ * unstamped and reconnecting does not fix it: the real window is until the next
+ * cold start that has a connection AND a born child selected. Nothing is lost
+ * meanwhile, since an unstamped timer stays visible and stoppable on the Timers
+ * tab (which filters by nothing) and `stopTimer` resolves its owner itself.
+ *
  * The owner is the SELECTED child and only when that child is born, mirroring
  * `stopTimer`'s refusal to log against an `expected` child (whose `birth` is a
  * due date, not a real one). Anything else is left unstamped rather than guessed
@@ -3548,12 +3560,20 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // PATCHes `child:` along with everything else.
     //
     // A timer STOP (the "lasted X" path, `fromTimerId` set) belongs to whoever
-    // STARTED the timer, exactly as `stopTimer` decides for the button next to
-    // it. This one cannot read `existing`: the entry is brand new, so it is
+    // STARTED the timer, the same rule `stopTimer` follows for the button next
+    // to it. This one cannot read `existing`: the entry is brand new, so it is
     // null, and the owner has to come off the timer. The Timers tab deliberately
     // lists every child's timers with no per-child filter, so the timer being
     // stopped need not belong to the selection, and stamping the selection here
     // filed a sibling's nap against the wrong child, server row and all.
+    //
+    // NOT full parity with `stopTimer`, which additionally walks a born-child
+    // chain rather than ever resolving to an `expected` one. Here an unstamped
+    // timer still falls through to `s.selectedChildId`, so stopping one via
+    // "lasted X" with an expecting child selected still files against them.
+    // That is strictly narrower than before (it used to apply to EVERY timer,
+    // not just unstamped ones) and is left alone on purpose; closing it means
+    // sharing one owner-resolution helper with `stopTimer`.
     //
     // A fresh draft is the selected child's, which is the only case left.
     const sourceTimer = s.fromTimerId ? s.timers.find((t) => t.id === s.fromTimerId) : undefined;
