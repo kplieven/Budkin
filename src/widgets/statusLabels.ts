@@ -20,14 +20,14 @@
  * Everything the root says is built from the same VALUES the tile draws from,
  * never from a second reading of the snapshot. Where the two forms differ, both
  * come out of this module from one input, which is the `napLabels` and
- * `timerChildSuffix` shape: `sideText` here is the drawn line and the root's
+ * `childAttribution` shape: `sideText` here is the drawn line and the root's
  * clause is the spoken one, from a single `side`.
  *
  * They differ wherever the bitmap's constraints are not speech's:
  *
  *  - the drawn " · " becomes ", ", because a screen reader announcing "middle
  *    dot" is noise and a comma is the pause the dot stands for
- *    (`timerChildSuffix`'s reasoning);
+ *    (`childAttribution`'s reasoning);
  *  - a row whose value is the tile's placeholder is dropped, not spoken, since
  *    a lone dash announces as "dash" or as nothing;
  *  - the compact durations are expanded, because "1h18m ago" is one unspaced
@@ -143,7 +143,7 @@ const BUTTON_ACTION: Record<StatusButton, string> = {
 /** The row labels, drawn by `StatusWidget` and spoken here from this one source. */
 export const ROW_LABEL = { fed: 'Fed', sleep: 'Sleep', diaper: 'Diaper' } as const;
 
-/** The drawn separator spoken as the pause it stands for, per `timerChildSuffix`. */
+/** The drawn separator spoken as the pause it stands for, per `childAttribution`. */
 function spoken(drawn: string): string {
   return drawn.split(' · ').join(', ');
 }

@@ -60,6 +60,15 @@ export function isItemQueued(item: TimelineItem, queued: ReadonlySet<string>): b
  * aloud. The queued clause goes LAST, after the elapsed time, so the sentence
  * stays "what this row is, then what is still true of it".
  *
+ * `child` is the SPOKEN attribution suffix (", Mara") from `childAttribution`,
+ * never a bare name assembled here, so the chip History draws and the words a
+ * screen reader hears cannot name different children or punctuate differently.
+ * It is empty or absent whenever the household view is off or the household has
+ * one child, and it sits with the activity rather than at the end because whose
+ * row this is is part of WHAT the row is, not something still true of it. This
+ * is the same contract the queued marker has: nothing is drawn on a row that is
+ * not also announced.
+ *
  * "Waiting to upload" is the offline queue screen's own wording (see
  * `queueView.ts`), so the two surfaces name the same state the same way.
  */
@@ -69,9 +78,11 @@ export function timelineRowLabel(opts: {
   timer: boolean;
   elapsed: string;
   queued: boolean;
+  child?: string;
 }): string {
+  const who = opts.child ?? '';
   const base = opts.ongoing
-    ? `Edit running ${opts.activity}${opts.timer ? ' timer' : ''}, ${opts.elapsed} so far`
-    : `Edit ${opts.activity}`;
+    ? `Edit running ${opts.activity}${opts.timer ? ' timer' : ''}${who}, ${opts.elapsed} so far`
+    : `Edit ${opts.activity}${who}`;
   return opts.queued ? `${base}, waiting to upload` : base;
 }

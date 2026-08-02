@@ -18,26 +18,50 @@ import { dayKeyLabel, type DayOption, type TimelineFilter } from './filter';
 export type OpenFilterSheet = 'day' | 'activity' | null;
 
 /**
- * The History timeline's filter row: a day chip and an activity chip, each
- * opening a sheet, plus a clear button once either is set.
+ * The History timeline's filter row: a household toggle, a day chip and an
+ * activity chip (the latter two opening sheets), plus a clear button once either
+ * of those two is set.
  *
- * Two chips rather than two rows of inline chips, because the alternative does
- * not fit. There are eight activities and as many days as the child has been
- * logged for, so anything inline is either horizontally scrollable (fiddly on a
- * phone, and it hides its own options) or takes more vertical space than the
- * timeline it is there to shorten. A chip that names its current value costs one
- * line and stays readable at any number of options.
+ * Chips rather than rows of inline options, because the alternative does not
+ * fit. There are eight activities and as many days as the child has been logged
+ * for, so anything inline is either horizontally scrollable (fiddly on a phone,
+ * and it hides its own options) or takes more vertical space than the timeline
+ * it is there to shorten. A chip that names its current value costs one line and
+ * stays readable at any number of options.
+ *
+ * The row WRAPS. Three chips plus the clear button overflow a 360dp phone once
+ * the activity chip is showing a long label, and this row is neither scrollable
+ * (see above) nor allowed to clip a control.
+ *
+ * The household toggle is NOT part of `TimelineFilter`, and the difference is
+ * load-bearing rather than tidiness. `filterItems` is a purely SUBTRACTIVE
+ * filter over a list it is handed; the household toggle is ADDITIVE and changes
+ * what that list is built FROM, upstream of the filter. Keeping it out is also
+ * what stops "Clear filters" from resetting it: both cleared-state literals
+ * (the one just below and its twin in `history.tsx`) spell out `TimelineFilter`
+ * in full, so a toggle living inside that type would be reset BY ACCIDENT, by
+ * two call sites that never mention it. Clearing a day and an activity should
+ * not throw the user back to one child.
  */
 export function HistoryFilterChips({
   filter,
   now,
   onOpen,
   onChange,
+  household,
+  householdLabel,
+  onToggleHousehold,
 }: {
   filter: TimelineFilter;
   now: number;
   onOpen: (sheet: OpenFilterSheet) => void;
   onChange: (next: TimelineFilter) => void;
+  /** Whether the whole household is showing, or null to offer no toggle at all
+   *  (fewer than two children who can own activity). */
+  household: boolean | null;
+  /** What the toggle currently shows: the selected child's name when off. */
+  householdLabel: string;
+  onToggleHousehold: () => void;
 }) {
   const t = useTheme();
 
@@ -51,7 +75,17 @@ export function HistoryFilterChips({
   const filtered = filter.day != null || filter.types.length > 0;
 
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginHorizontal: 20, marginBottom: 14 }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, rowGap: 8, marginHorizontal: 20, marginBottom: 14 }}>
+      {/* First, because it is the broadest question the row asks: whose activity,
+          then when, then what. */}
+      {household != null && (
+        <ToggleChip
+          label={householdLabel}
+          accessibilityLabel={`Show the whole household, currently showing ${householdLabel}`}
+          on={household}
+          onPress={onToggleHousehold}
+        />
+      )}
       <DropdownChip
         label={dayLabel}
         accessibilityLabel={`Filter by day, showing ${dayLabel}`}
@@ -66,6 +100,9 @@ export function HistoryFilterChips({
       />
       {filtered && (
         <Pressable
+          // Deliberately does NOT clear the household toggle: see this
+          // component's own doc. `TimelineFilter` is the whole of what "filters"
+          // means here, and the toggle is not in it.
           onPress={() => onChange({ day: null, types: [] })}
           accessibilityRole="button"
           accessibilityLabel="Clear filters"
@@ -237,6 +274,65 @@ function DropdownChip({
         {label}
       </Txt>
       <Icon name="chevron-down" color={active ? t.primary : t.faint} size={16} />
+    </Pressable>
+  );
+}
+
+/**
+ * A chip that flips a boolean, styled as the active/inactive twin of
+ * `DropdownChip` but with no chevron: there is no sheet behind it and nothing to
+ * choose from, so the affordance must not promise one. The absence of the
+ * chevron IS the distinction, which is why this carries no icon of its own to
+ * blur it; the primary tint says which state it is in, exactly as it does on the
+ * two chips beside it.
+ *
+ * `accessibilityRole="switch"` rather than "button", because that is what it is,
+ * and it is what makes a screen reader announce the state as on or off instead
+ * of leaving the user to infer it from a label that names only the current one.
+ */
+function ToggleChip({
+  label,
+  accessibilityLabel,
+  on,
+  onPress,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  on: boolean;
+  onPress: () => void;
+}) {
+  const t = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="switch"
+      accessibilityLabel={accessibilityLabel}
+      // BOTH forms, deliberately. `accessibilityState` is the native one, and
+      // react-native-web drops it on the floor: the two DropdownChips beside
+      // this one pass `accessibilityState={{ selected }}` and emit no
+      // `aria-selected` at all, which is survivable for a button but not for a
+      // switch, whose whole ARIA contract is the checked state. `aria-checked`
+      // is what actually reaches the DOM on web, and RN maps the `aria-*` props
+      // back onto `accessibilityState` on native, so neither platform is left
+      // announcing "switch" with no on or off.
+      accessibilityState={{ checked: on }}
+      aria-checked={on}
+      style={(s) => [
+        {
+          paddingHorizontal: 13,
+          paddingVertical: 8,
+          borderRadius: 12,
+          backgroundColor: on ? hexA(t.primary, t.dark ? 0.16 : 0.1) : t.chip,
+          borderWidth: 1.5,
+          borderColor: on ? hexA(t.primary, 0.55) : t.line,
+          cursor: 'pointer',
+        },
+        !on && isHovered(s) && { borderColor: t.line2 },
+      ]}
+    >
+      <Txt unselectable weight={700} size={13.5} color={on ? t.primary : t.text}>
+        {label}
+      </Txt>
     </Pressable>
   );
 }

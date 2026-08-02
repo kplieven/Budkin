@@ -11,7 +11,7 @@ import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
-import { timerChildSuffix } from '@/features/timers/timerAttribution';
+import { childAttribution } from '@/features/activity/childAttribution';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtElapsedClock } from '@/lib/format';
@@ -87,7 +87,7 @@ export default function Timers() {
           // The timer's OWN child, never the selected one. `who.spoken` goes on
           // the three action labels below, which are otherwise byte-identical
           // between two cards running the same activity.
-          const who = timerChildSuffix(tm.childId, children);
+          const who = childAttribution(tm.childId, children);
           return (
             <View
               key={tm.id}

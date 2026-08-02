@@ -5934,6 +5934,53 @@ describe('server mode holds every child, not just the selected one', () => {
   });
 });
 
+describe("editing a sibling's row from the History household view", () => {
+  // The household view puts a row on screen whose child is NOT the selected one,
+  // and tapping it opens the ordinary editor. The edit path PATCHes `child:`
+  // along with everything else, so seeding the sheet from the SELECTION rather
+  // than the record would move the server row to the wrong child. This is a
+  // pre-existing guarantee (`openEdit` seeds from the record, `save()` falls
+  // back to `existing?.childId`), pinned here because the household view is the
+  // first surface that routinely exercises it.
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const theoNap: Entry = { id: 'tn1', childId: 'localTheo', tags: [], type: 'sleep', start: NOW - 7200000, end: NOW - 5400000, nap: true };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [theoNap] });
+  });
+
+  it("opens the sheet on the ROW's child, not the selected one", () => {
+    s().openEdit('tn1');
+    expect(s().sheetChildIds).toEqual(['localTheo']);
+  });
+
+  it('saves the edit back against that same child', async () => {
+    s().openEdit('tn1');
+    s().setNap(false);
+    await s().save();
+
+    const saved = s().entries.find((e) => e.id === 'tn1');
+    expect(saved?.childId).toBe('localTheo');
+    expect(saved).toMatchObject({ type: 'sleep', nap: false });
+  });
+
+  it('leaves the global selection where it was', async () => {
+    // Editing a sibling's row is not a way to switch child: the user goes back
+    // to the list still on whoever they were on.
+    s().openEdit('tn1');
+    await s().save();
+
+    expect(s().selectedChildId).toBe('localMira');
+  });
+
+  it('deletes a sibling row without touching the selected child', () => {
+    s().deleteEntry('tn1');
+    expect(s().entries.find((e) => e.id === 'tn1')).toBeUndefined();
+    expect(s().selectedChildId).toBe('localMira');
+  });
+});
+
 describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
   const sleepTimer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
 
