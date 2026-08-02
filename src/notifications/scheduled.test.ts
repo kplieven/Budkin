@@ -638,12 +638,12 @@ describe('nap suggestions', () => {
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
-  it('resolves an ownerless sleep timer to the selected child', () => {
-    // Defensive case: a timer persisted before childId stamping existed.
-    // Every current timer source (including the headless widget) stamps one.
+  it('lets an ownerless sleep timer suppress nobody\'s nudge, selected child included', () => {
+    // A timer persisted before childId stamping existed says nothing about who
+    // is asleep, so it cannot answer for the selected child either. `hydrate`
+    // stamps those on load; the nudge rule refuses to guess in the meantime.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
-    expect(naps(napInput({ timers: [t], selectedChildId: 'c1' }))).toEqual([]);
-    // ...and must not suppress a DIFFERENT child's nudge.
+    expect(naps(napInput({ timers: [t], selectedChildId: 'c1' })).length).toBe(1);
     expect(naps(napInput({ timers: [t], selectedChildId: 'c2' })).length).toBe(1);
   });
 
@@ -1245,15 +1245,13 @@ describe('staleDelivered', () => {
       ]);
     });
 
-    it('resolves an ownerless sleep timer to the selected child, as napReminders does', () => {
+    it('dismisses nothing for an ownerless sleep timer, as napReminders suppresses nothing', () => {
       const i = input({
         children: [rowan, wren],
         selectedChildId: 'c1',
         timers: [timer({ id: 't1', childId: undefined, saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
       });
-      expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
-        napId('c1', fireAt),
-      ]);
+      expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([]);
     });
 
     it('does not dismiss for a running non-sleep timer', () => {

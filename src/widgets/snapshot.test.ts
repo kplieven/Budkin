@@ -155,13 +155,16 @@ describe('buildWidgetSnapshot running sleep timer', () => {
     expect(widgetToday(s, NOW).sleepMin).toBe(0);
   });
 
-  it('adopts an ownerless timer as the selected child\'s', () => {
+  it('ignores an ownerless timer rather than showing it as the selected child\'s', () => {
+    // A timer belongs to whoever started it. One with no owner at all predates
+    // `childId` stamping, and `hydrate` stamps those; until it has, the widget
+    // must not claim it for whoever happens to be selected.
     const s = buildWidgetSnapshot({ ...baseState, timers: [timer({ childId: undefined })], connection: null });
-    expect(s.sleepStart).toBe(at(2026, 6, 5, 14));
+    expect(s.sleepStart).toBeNull();
   });
 
   it('has no running nap when no child is selected', () => {
-    const s = buildWidgetSnapshot({ ...baseState, selectedChildId: '', timers: [timer({ childId: undefined })], connection: null });
+    const s = buildWidgetSnapshot({ ...baseState, selectedChildId: '', timers: [timer()], connection: null });
     expect(s.sleepStart).toBeNull();
   });
 });

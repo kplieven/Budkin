@@ -729,8 +729,8 @@ export function reconcileChildren(serverChildren: ServerChild[], localChildren: 
  *  be resolved (e.g. deleted server-side mid-request) keeps its existing
  *  `childId` rather than being dropped or reassigned to the wrong owner.
  *  `childId` is typed optional here (not just `string`) so this same helper
- *  covers `Timer`, whose `childId` can be genuinely absent (defaults to the
- *  selected child); entries and measurements always carry one. */
+ *  covers `Timer`, whose `childId` can be genuinely absent (see
+ *  `stampTimerOwners`); entries and measurements always carry one. */
 export function remapChildIds<T extends { childId?: string }>(records: T[], children: Child[]): T[] {
   const localIdByServerId = new Map<string, string>();
   for (const c of children) {
@@ -741,6 +741,41 @@ export function remapChildIds<T extends { childId?: string }>(records: T[], chil
     const localId = localIdByServerId.get(r.childId);
     return localId ? { ...r, childId: localId } : r;
   });
+}
+
+/**
+ * Give an owner to timers persisted before every creation path stamped one.
+ *
+ * `Timer.childId` stays OPTIONAL: `budkin.pendingOps.v1` persists whole `Timer`
+ * payloads and AsyncStorage JSON is cast, never validated, so a required type
+ * would only be a lie about what is already on disk. The read sites stopped
+ * adopting an unowned timer (see `timerBelongsTo`), which is why the stamping
+ * has to happen here, once, on load: an unowned timer is otherwise invisible on
+ * every per-child surface.
+ *
+ * Runs in `hydrate`, not in `loadTimers`, because `loadTimers` is a read with no
+ * access to the child list or the selection. The persistence subscription writes
+ * the stamped list back, so a migrated launch leaves nothing for the next one.
+ *
+ * The owner is the SELECTED child and only when that child is born, mirroring
+ * `stopTimer`'s refusal to log against an `expected` child (whose `birth` is a
+ * due date, not a real one). Anything else is left unstamped rather than guessed
+ * at, and NOTHING is ever dropped: that keeps the migration lossless and
+ * idempotent, and `stopTimer`'s own fallback chain still resolves a leftover.
+ *
+ * Returns the input array untouched when there is nothing to stamp, so a launch
+ * with no legacy timers does not churn the reference.
+ *
+ * Deliberately does NOT touch queued `{op:'update', entity:'timer'}` payloads in
+ * `budkin.pendingOps.v1`: `removePendingOp` matches ops by `JSON.stringify`, and
+ * `updateTimerOnServer` sends only `serverId`, the encoded name and `start`, so
+ * a stamp there would risk breaking removal to change nothing on the wire.
+ */
+function stampTimerOwners(timers: Timer[], children: Child[], selectedChildId: string): Timer[] {
+  if (!timers.some((t) => t.childId == null)) return timers;
+  const selected = children.find((c) => c.id === selectedChildId);
+  if (!selected || selected.expected) return timers;
+  return timers.map((t) => (t.childId == null ? { ...t, childId: selected.id } : t));
 }
 
 /** The server id of the child a record belongs to, or null when that child has
@@ -899,7 +934,11 @@ function mirrorTimerCreate(get: Get, set: Set, timerId: string): void {
   // A genuine new create: give the retry chain a fresh budget, so a timer
   // started an hour after some earlier failure isn't stuck with a spent one.
   timerRetryAttempt = 0;
-  const child = s.children.find((c) => c.id === (timer.childId ?? s.selectedChildId));
+  // The timer's own owner, with no fallback to the selection: every creation
+  // path stamps one, and pushing an unowned timer under whoever is selected
+  // would put the misattribution on the SERVER, where undoing it costs another
+  // round trip.
+  const child = s.children.find((c) => c.id === timer.childId);
   // Child not on the server yet. `flushUnsynced` pushes the child first and the
   // timer straight after (it re-reads state between the two for exactly this
   // reason), so schedule it instead of leaving the timer for whenever a refresh
@@ -1557,7 +1596,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ treatments: await loadTreatments() });
     // Running timers are local-only (the server has no matching record), so
     // restore them from on-device storage regardless of how the rest of the
-    // state is loaded below.
+    // state is loaded below. `stampTimerOwners` then gives an owner to any that
+    // predate `childId` stamping, per branch rather than here: the child list
+    // and the selection it needs only exist once the entity store has been read,
+    // which each branch below does for itself.
     const savedTimers = await loadTimers();
     let savedServers = await loadServers();
     // Migration: ensure the active real server is in the retry list for users
@@ -1572,6 +1614,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({ savedServers }); // merges; later set() calls in this fn keep it
     if (!conn) {
+      // No entity store is read on this branch, so there is no roster and no
+      // selection: an ownerless timer stays ownerless until a later hydrate has
+      // something to attribute it to.
       set({ hydrating: false, ...queueMirror(q), timers: savedTimers });
       return;
     }
@@ -1586,7 +1631,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         measurements: e?.measurements ?? [],
         selectedChildId: e?.selectedChildId ?? '',
         lastFeed: e?.lastFeed ?? { feedType: 'breast', method: 'left' },
-        timers: savedTimers,
+        timers: stampTimerOwners(savedTimers, e?.children ?? [], e?.selectedChildId ?? ''),
         ...queueMirror(q),
       });
       return;
@@ -1629,7 +1674,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // resolve that). Mirrors the local-mode branch above.
       selectedChildId: saved?.selectedChildId ?? '',
       lastFeed: saved?.lastFeed ?? { feedType: 'breast', method: 'left' },
-      timers: savedTimers,
+      timers: stampTimerOwners(savedTimers, saved?.children ?? [], saved?.selectedChildId ?? ''),
       ...queueMirror(q),
     });
     // refresh() IS the fetch-reconcile-merge-flush pipeline, so reuse it
@@ -2319,7 +2364,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const st2 = get();
       for (const timer of st2.timers) {
         if (timer.serverId != null) continue;
-        const child = st2.children.find((c) => c.id === (timer.childId ?? st2.selectedChildId));
+        // Owner only, like `mirrorTimerCreate`: a timer `hydrate` could not
+        // attribute is skipped rather than created under the selected child.
+        const child = st2.children.find((c) => c.id === timer.childId);
         if (!child || child.serverId == null) continue;
         const serverId = await pushTimerToServer(conn, timer, child.serverId).catch(() => undefined);
         if (serverId != null) {
@@ -3793,10 +3840,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // selected when Stop is tapped: the Timers tab deliberately shows every
     // child's timers at once, including a running nap for a born sibling while
     // an expecting child is selected. `tm.childId` is the source of truth once
-    // a timer carries one (every creation path stamps it). The `?? ...`
-    // fallback only matters for a timer that somehow reached here without
-    // one; an expecting child can never be logged against (its `birth` is a
-    // due date, not a real one), so that fallback must never resolve to one.
+    // a timer carries one (every creation path stamps it, and `stampTimerOwners`
+    // stamps the ones persisted before that existed). The `?? ...` fallback is
+    // the last line of defence for a timer even that migration could not
+    // attribute; an expecting child can never be logged against (its `birth` is
+    // a due date, not a real one), so it must never resolve to one.
     // Prefer the selected child if it's born, else the first born child on
     // file, else fall through to the selection anyway rather than leaving the
     // timer unstoppable.

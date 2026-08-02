@@ -1719,6 +1719,9 @@ describe('timer childId attribution', () => {
   });
 
   it('a timer with no childId (e.g. a pre-fix widget-started nap) is never attributed to an expecting child when stopped', () => {
+    // Exactly the case `stampTimerOwners` declines to migrate, so this fallback
+    // chain is what is left to resolve it: still stoppable, still never logged
+    // against a child who has not been born.
     useAppStore.setState({
       connection: { mode: 'local' },
       children: [
@@ -1967,6 +1970,20 @@ describe('timer server sync', () => {
     expect(h.timerDeleted).toContain(9);
   });
 
+  it('flushUnsynced leaves an ownerless timer unpushed rather than filing it under the selection', async () => {
+    // The last read site that used to adopt. A timer hydrate could not
+    // attribute (nothing selected at the time, or an expecting child selected)
+    // must not be created server-side under whoever is selected now: the server
+    // row would be the misattribution, and deleting it needs another round trip.
+    useAppStore.setState({
+      connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', measurements: [],
+      timers: [{ id: 't-legacy', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
+    });
+    await s().flushUnsynced();
+    expect(h.timerPushed).toHaveLength(0);
+    expect(s().timers[0].serverId).toBeUndefined();
+  });
+
   it('flushUnsynced POSTs an offline-created timer once its child is synced', async () => {
     useAppStore.setState({
       connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', measurements: [],
@@ -2040,6 +2057,96 @@ describe('timer persistence across restarts', () => {
     s().disconnect();
     expect(saveTimers).toHaveBeenLastCalledWith([]);
     expect(h.timers).toEqual([]);
+  });
+});
+
+// The retired adoption rule used to let every read site treat a timer with no
+// `childId` as the selected child's. Every timer source stamps one now, so the
+// only ownerless timers left are ones persisted by an older build; hydrate gives
+// them an owner once, on load, and the persistence subscription writes the
+// stamped list back.
+describe('hydrate migrates ownerless timers', () => {
+  const ownerless = (id = 't1'): Timer => ({ id, activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' });
+  const born = (id: string): Child => ({ id, first: id, last: '', birth: NOW - 90 * 86400000, color: '#fff' });
+  const entityStore = (children: Child[], selectedChildId: string) =>
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children,
+      entries: [],
+      measurements: [],
+      selectedChildId,
+      lastFeed: { feedType: 'breast', method: 'left' },
+    });
+
+  it('stamps the selected child onto a timer persisted before stamping existed', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), born('c2')], 'c2');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([{ ...ownerless(), childId: 'c2' }]);
+    // Durable, so the next launch has nothing left to migrate.
+    expect(h.timers).toEqual([{ ...ownerless(), childId: 'c2' }]);
+  });
+
+  it('stamps on a server-mode cold start too, from the entity store selection', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    entityStore([born('c1')], 'c1');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([{ ...ownerless(), childId: 'c1' }]);
+  });
+
+  it('leaves an owned timer exactly as it was, including a non-selected child\'s', () => {
+    // Idempotent, and never a re-point: a sibling's running nap belongs to the
+    // sibling however long the app sat closed.
+    const mine: Timer = { ...ownerless('t1'), childId: 'c1' };
+    const sibling: Timer = { ...ownerless('t2'), childId: 'c2' };
+    h.timers = [mine, sibling];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), born('c2')], 'c1');
+
+    return s().hydrate().then(() => {
+      expect(s().timers).toEqual([mine, sibling]);
+    });
+  });
+
+  it('refuses to hand a timer to an expecting child, and never drops it', async () => {
+    // Same refusal `stopTimer` makes: an expecting child's `birth` is a due
+    // date, so nothing can be logged against them. Leaving the timer unstamped
+    // keeps the migration lossless; `stopTimer`'s own fallback chain still
+    // resolves it if the user stops it before the selection moves.
+    const expecting: Child = { id: 'due', first: 'Bean', last: '', birth: NOW + 30 * 86400000, color: '#fff', expected: true };
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1'), expecting], 'due');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
+  });
+
+  it('leaves a timer unstamped when nothing is selected to stamp it with', async () => {
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    entityStore([born('c1')], '');
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
+  });
+
+  it('has no roster to stamp against with no connection, and leaves timers alone', async () => {
+    // The no-connection branch reads no entity store at all, so there is no
+    // child list and no selection to attribute a timer to.
+    h.timers = [ownerless()];
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+
+    await s().hydrate();
+
+    expect(s().timers).toEqual([ownerless()]);
   });
 });
 
