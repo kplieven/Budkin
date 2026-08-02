@@ -5,6 +5,13 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+# The version this image will be published under, read by app.config.js. Set
+# from compose, which defaults it to the mandatory TAG, so a web build can
+# never label itself "dev". Declared here rather than above `npm ci` because an
+# ENV invalidates every layer below it and the dependency layer must not
+# rebuild on every release.
+ARG BUDKIN_VERSION
+ENV BUDKIN_VERSION=$BUDKIN_VERSION
 RUN npx expo export --platform web
 
 FROM nginx:1.27-alpine AS runtime
