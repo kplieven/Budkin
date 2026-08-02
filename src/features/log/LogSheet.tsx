@@ -511,20 +511,25 @@ export function LogSheet() {
   // seeded, where the old rule (the global selection) still applies.
   const targetIds = sheetTargetIds(sheetChildIds, selectedChildId);
   const targetLabel = targetChildrenLabel(children, targetIds);
+  const options = eligibleTargetChildren(children);
   // A single-child household gets the plain static line it always had: a dead
   // tap target for every solo-child user is worse than no affordance at all.
-  const options = eligibleTargetChildren(children);
-  const canRetarget = options.length > 1;
+  //
+  // A timer-edit sheet gets it too. That sheet stops ONE running timer, which
+  // belongs to whoever started it (the rule `stopTimer` follows for the button
+  // next to it), and while the timer is still ongoing `saveTimerDetails` writes
+  // no owner at all, so a picker there would sometimes do nothing.
+  const canRetarget = options.length > 1 && !fromTimerId;
   // "Log for both" is create-only, and only for the routines siblings share.
-  // Editing offers the picker as a plain single-select (re-aiming a record is
-  // still useful), and a timer stop belongs to the one timer being stopped.
-  const canLogForSeveral = canRetarget && !editingId && !fromTimerId && allowsMultipleChildren(type);
+  // Editing still offers the picker as a plain single-select, since re-aiming a
+  // record that was filed against the wrong twin is worth having.
+  const canLogForSeveral = canRetarget && !editingId && allowsMultipleChildren(type);
+  const severalTargets = targetIds.length > 1;
   // Marking a logged entry as still ongoing does not save changes to it, it
   // replaces it with a running timer, so the button must not promise an edit.
-  // With several children targeted the button stops naming the activity and
-  // says how many records the press writes, since that is the surprising part.
-  // The header line above it already names them.
-  const several = targetIds.length > 1;
+  // With several children targeted it stops naming the activity and says how
+  // many records the press writes, which is the surprising part; the header
+  // line above already names them.
   const saveLabel = editingId
     ? te.ongoing && te.shape === 'interval'
       ? 'Start live timer'
@@ -536,10 +541,10 @@ export function LogSheet() {
           ? `Stop & save · ended ${fmtClock(te.endAbs)}`
           : 'Stop & save'
       : te.ongoing && te.shape === 'interval'
-        ? several
+        ? severalTargets
           ? 'Start live timers'
           : 'Start live timer'
-        : several
+        : severalTargets
           ? targetIds.length === 2
             ? 'Save for both'
             : `Save for all ${targetIds.length}`
