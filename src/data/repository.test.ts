@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '@/api/client';
-import { entryTimestamp } from '@/types/models';
+import { entryTimestamp, type ActivityType, type MeasurementKind, type Timer } from '@/types/models';
 
 import {
   deleteTimerFromServer,
@@ -12,7 +12,6 @@ import {
   serverHasData,
   updateTimerOnServer,
 } from './repository';
-import type { Timer } from '@/types/models';
 
 const DAY = 86400000;
 
@@ -260,6 +259,52 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     const result = await loadFromServer(conn);
 
     expect(result.incompleteSlices).toEqual({ '7': ['medication'] });
+  });
+
+  // Fail-closed coverage. `orEmpty` is the only thing that reports a failed
+  // fetch, and an unreported failure is read as a real answer, so its rows are
+  // DELETED rather than preserved (see `LoadResult.incompleteSlices`). Every
+  // slice in the vocabulary therefore has to be reachable from a fetch that
+  // routes through it. These two are `Record<Union, true>`, so adding an
+  // activity type or a measurement kind fails to TYPECHECK here until it is
+  // listed, and then fails the test below until some fetch reports it.
+  const ALL_ACTIVITIES: Record<ActivityType, true> = {
+    feeding: true,
+    sleep: true,
+    diaper: true,
+    pumping: true,
+    tummy: true,
+    bath: true,
+    milestone: true,
+    note: true,
+    temperature: true,
+    medication: true,
+  };
+  const ALL_MEASUREMENT_KINDS: Record<MeasurementKind, true> = { weight: true, height: true, head: true, bmi: true };
+
+  it('every activity type and measurement kind is covered by a fetch that reports its own failure', async () => {
+    answerEverything();
+    // Every per-type fetch fails at once. Named one by one on purpose: this
+    // list IS the set of fetches whose failures have to be reported, so a new
+    // fetch added without a line here surfaces as a slice nobody covers.
+    listFeedings.mockRejectedValueOnce(new Error('down'));
+    listSleep.mockRejectedValueOnce(new Error('down'));
+    listChanges.mockRejectedValueOnce(new Error('down'));
+    listPumping.mockRejectedValueOnce(new Error('down'));
+    listTummy.mockRejectedValueOnce(new Error('down'));
+    listChildNotes.mockRejectedValueOnce(new Error('down'));
+    listTemperature.mockRejectedValueOnce(new Error('down'));
+    listMedication.mockRejectedValueOnce(new Error('down'));
+    listChildTreatments.mockRejectedValueOnce(new Error('down'));
+    for (const kind of Object.keys(ALL_MEASUREMENT_KINDS)) listMeasurements.mockRejectedValueOnce(new Error(`down: ${kind}`));
+    // Account-wide, and deliberately uncounted: it belongs to no child's slice.
+    listGenders.mockRejectedValueOnce(new Error('down'));
+
+    const result = await loadFromServer(conn);
+
+    expect([...(result.incompleteSlices?.['7'] ?? [])].sort()).toEqual(
+      [...Object.keys(ALL_ACTIVITIES), ...Object.keys(ALL_MEASUREMENT_KINDS), 'treatment'].sort(),
+    );
   });
 
   it('names nothing when the account has no children to fetch', async () => {
