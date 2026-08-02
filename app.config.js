@@ -11,6 +11,40 @@
  */
 const IS_DEV = process.env.APP_VARIANT === 'development';
 
+/**
+ * The build's version, resolved once here and published as `extra.version` for
+ * `versionLabel` (src/lib/appVersion.ts) to draw.
+ *
+ * It cannot come from `package.json` or `app.json`: both stay at 1.0.0
+ * permanently, because Budkin's release version is a lightweight git tag on a
+ * merge commit on `main`.
+ *
+ * It cannot be read from git inside a build either. `.dockerignore` and
+ * `.easignore` both exclude `.git`, and when building from a git WORKTREE
+ * `.git` is not a directory at all but a small file pointing at the real
+ * repository elsewhere on disk, so shipping it would ship a dangling
+ * reference. Hence the environment variable, which the build sets: see
+ * `docker-compose.yml`, where it defaults to the TAG that a compose build
+ * already cannot omit.
+ *
+ * The `git describe` below is therefore ONLY for a dev server running on a
+ * host that has the repository. It fails harmlessly everywhere else: in the
+ * web image the git binary is not even installed (node:20-alpine).
+ */
+const gitDescribe = () => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node:child_process')
+      .execSync('git describe --tags --always --dirty', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return undefined;
+  }
+};
+
+const VERSION = process.env.BUDKIN_VERSION?.trim() || gitDescribe() || undefined;
+
 export default ({ config }) => ({
   ...config,
   // Distinguishable in the launcher and the app switcher, where both variants
@@ -25,5 +59,13 @@ export default ({ config }) => ({
   android: {
     ...config.android,
     package: IS_DEV ? 'dev.karellievens.budkin.dev' : config.android.package,
+  },
+  extra: {
+    // Spread first: expo-router and EAS both write their own keys here, and
+    // replacing the object wholesale would drop them.
+    ...config.extra,
+    // Read back at runtime with `Constants.expoConfig?.extra?.version`, the
+    // same channel StatusWidget.tsx uses to read `scheme`.
+    version: VERSION,
   },
 });
