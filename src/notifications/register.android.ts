@@ -37,6 +37,13 @@ void Notifications.setNotificationChannelAsync(REMINDER_CHANNEL_ID, {
 // dates, '/history' for age milestones. Most also name the child they are about
 // (`?child=<localId>`), because the screens they land on all read the global
 // selection and an alert sits in the tray long enough to outlive a child switch.
+//
+// NOTE this is the ONLY entry point that acts on `?child=` for a navigation-only
+// destination, which is sound today because notifications are the only thing that
+// produces one. A second producer (a widget button pointing at '/history', a
+// pasted web url) would have its parameter silently ignored, since the tabs those
+// urls land on read no params of their own. Give any such url a route that
+// resolves the parameter, or lift this into the linking layer.
 function openFromResponse(response: Notifications.NotificationResponse | null): void {
   const url = response?.notification.request.content.data?.url;
   if (typeof url !== 'string' || !url.startsWith('/')) return;
@@ -58,7 +65,19 @@ function openFromResponse(response: Notifications.NotificationResponse | null): 
  *  the roster is empty and the child the url names would read as one we no
  *  longer have. Hydration also RESTORES the persisted selection, which would
  *  overwrite anything set before it lands, so waiting is the only correct order.
- *  A warm tap runs straight through. */
+ *  A warm tap runs straight through.
+ *
+ *  Two orderings here are load-bearing. `unsubscribe` before `apply`, because
+ *  `apply` calls `selectChild`, which re-enters `set()` synchronously and would
+ *  otherwise re-invoke this listener. Today's `apply` recomputes to a no-op on
+ *  that second pass, the child it names being the selected one by then, so this
+ *  order is what stops a later, less idempotent one from recursing. And
+ *  `refreshInFlight` being set before `refresh`'s first await: `apply` runs from
+ *  inside hydrate's own `set()`, so in server mode `selectChild`'s `refresh()`
+ *  starts first and hydrate's own `void get().refresh()` then no-ops. That is
+ *  the better of the two outcomes, the fetch targeting the deep-linked child
+ *  rather than the persisted one, but it only holds while that flag is set
+ *  synchronously. */
 function whenHydrated(apply: () => void): void {
   if (!useAppStore.getState().hydrating) return apply();
   const unsubscribe = useAppStore.subscribe((state) => {
