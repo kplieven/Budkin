@@ -13,6 +13,7 @@ import {
 } from '@/store/useAppStore';
 import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { toDisplay } from '@/lib/units';
+import { CHILD_COLORS } from '@/lib/color';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -3283,6 +3284,22 @@ describe('children', () => {
     expect(s().children[0].slug).toBe('mirabel-slug');
   });
 
+  it('saveChild picks a tint no sibling wears, not one keyed to the list length', async () => {
+    // The shape deleting the middle of three children leaves behind. Picking by
+    // `children.length` here would hand out CHILD_COLORS[2] a second time.
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[0] },
+        { id: 'c3', first: 'Theo', last: 'O', birth: NOW, color: CHILD_COLORS[2] },
+      ],
+    });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+    await flush();
+
+    expect(s().children.at(-1)?.color).toBe(CHILD_COLORS[1]);
+  });
+
   it('saveChild creating a new child resets the insights cache (auto-select mirrors selectChild)', () => {
     useAppStore.setState({ insightsLoaded: true, insightsEntries: [{ id: 'x' } as any], insightsError: true });
     s().openAddChild();
@@ -3920,11 +3937,35 @@ describe('refresh / reconnect', () => {
     expect(s().timers).toEqual([timer]);
   });
 
+  it('keeps an existing child avatar tint across a refresh, end to end', async () => {
+    // The unit case lives with `reconcileChildren`; this is the whole path,
+    // store to store. A deliberately non-first tint, so a re-derived one would
+    // come back as CHILD_COLORS[0] and fail rather than coincide.
+    useAppStore.setState({
+      children: [{ id: 'localA', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[3] }],
+      selectedChildId: 'localA',
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: { feedType: 'breast', method: 'left' },
+      measurements: [],
+    });
+
+    await s().refresh();
+
+    expect(s().children).toHaveLength(1);
+    expect(s().children[0].id).toBe('localA');
+    expect(s().children[0].color).toBe(CHILD_COLORS[3]);
+  });
+
   it('keeps the selected child when it still exists after refresh', async () => {
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [
-        { id: 'c0', first: 'A', last: '', birth: NOW, color: '#fff' },
-        { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
+        { id: 'c0', first: 'A', last: '', birth: NOW },
+        { id: 'c1', first: 'Mira', last: 'O', birth: NOW },
       ],
       entries: [],
       timers: [],
@@ -4010,7 +4051,7 @@ describe('refresh / reconnect', () => {
     const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
@@ -4026,7 +4067,7 @@ describe('refresh / reconnect', () => {
     const localChild: Child = { id: 'localX', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
@@ -4041,7 +4082,7 @@ describe('refresh / reconnect', () => {
     const localMeasurement: Measurement = { id: 'localM', childId: 'c1', kind: 'weight', value: 4.2, date: NOW };
     useAppStore.setState({ measurements: [localMeasurement] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: '#fff' }],
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: 'c1',
@@ -4080,7 +4121,7 @@ describe('refresh / reconnect', () => {
     // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
     // `selectedChildId` below.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [],
       selectedChildId: '777',
@@ -4121,7 +4162,7 @@ describe('refresh / reconnect', () => {
     // child id verbatim (see `listMeasurements` in src/api/client.ts), same
     // as the entries/timers case above.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '777',
@@ -4162,7 +4203,7 @@ describe('refresh / reconnect', () => {
     await flush();
 
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '777',
@@ -4214,7 +4255,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
       lastFeed: { feedType: 'breast', method: 'left' },
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -4248,7 +4289,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
     // timer copy, via the persistence subscribe) still holds the timer.
     useAppStore.setState({ connection: null, connected: false, timers: [running] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
       entries: [],
       // A real empty answer, NOT null: F7's null-guard never fires here, and
       // the old wholesale spread dropped the running timer on exactly this
@@ -4280,7 +4321,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
     });
     // The entity store is empty too (the loadEntities mock default is null).
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000, color: '#fff' }],
+      children: [{ id: '7', serverId: 7, first: 'Nova', last: 'O', birth: NOW - 10 * 86400000 }],
       entries: [{ id: 'se1', serverId: 21, childId: '7', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
       timers: [{ id: 'tsrv3', serverId: 3, childId: '7', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW - M }],
       selectedChildId: '7',
@@ -4333,7 +4374,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
       lastFeed: { feedType: 'breast', method: 'left' },
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -4371,7 +4412,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
       selectedChildId: 'cA',
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000 }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -4406,7 +4447,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState({ children: [childAAA, childBBB], selectedChildId: 'childBBB' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }], // childBBB gone
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW }], // childBBB gone
       entries: [],
       timers: [],
       selectedChildId: '1', // repository.ts: children[0]?.id, a SERVER id, not a local one
@@ -4433,7 +4474,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       lastFeed: { feedType: 'breast', method: 'left' },
     });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '1', serverId: 1, first: 'A', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '1',
@@ -4465,7 +4506,7 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
       measurements: state.measurements,
     }));
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'M', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -5441,8 +5482,8 @@ describe('insights slice', () => {
     // and drops them, which is not the situation under test here.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [
-        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: '#fff' },
-        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW, color: '#eee' },
+        { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW },
+        { id: '502', serverId: 502, first: 'Rio', last: '', birth: NOW },
       ],
       entries: [],
       timers: [],
@@ -6239,7 +6280,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // matching the describe block's default `uploadUnsynced` stamp), returned
     // under its own server-derived id/fields.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW, color: '#eee' }],
+      children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW }],
       entries: [], timers: [], selectedChildId: '501',
       lastFeed: { feedType: 'breast', method: 'left' }, measurements: [],
     });
@@ -6262,7 +6303,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     useAppStore.setState({ children: [localChild], selectedChildId: 'localT', timers: [running] });
     // The post-success reload answers everything except /api/timers/.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Tia', last: '', birth: NOW, color: '#eee' }],
+      children: [{ id: '501', serverId: 501, first: 'Tia', last: '', birth: NOW }],
       entries: [], measurements: [], selectedChildId: '501',
       lastFeed: { feedType: 'breast', method: 'left' },
       timers: null,
@@ -6429,7 +6470,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // child. The expecting child was never uploaded, so it's absent here too,
     // exactly the case that must not wipe it from `children`.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -6477,7 +6518,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // Post-success reload: the server only knows about the born child and has
     // no entries at all (the note was never uploaded).
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW, color: '#fff' }],
+      children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
       timers: [],
       selectedChildId: '501',
@@ -7110,7 +7151,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
     // The server now knows the child (by the serverId confirmBirth just
     // stamped) but not yet the note: nothing has pushed it there.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth, color: '#eee' }],
+      children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth }],
       entries: [],
       timers: [],
       selectedChildId: '777',
@@ -7215,7 +7256,7 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     // Baby Buddy has no record of the note (it was never pushed): a refresh
     // must not let the server's blank slate silently drop it.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth, color: useAppStore.getState().children[0].color }],
+      children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth }],
       entries: [],
       timers: [],
       selectedChildId: '777',
@@ -7399,12 +7440,64 @@ describe('reconcileChildren', () => {
     expect(out[0].serverId).toBe(501);
   });
 
-  it('takes the server copy of every other field on a match', () => {
-    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg' })];
-    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg' })];
+  it('takes the server copy of every other field on a match, except the color', () => {
+    const server = [kid({ id: '501', serverId: 501, first: 'Adaline', picture: 'https://s/a.jpg', color: '#000000' })];
+    const local = [kid({ id: 'child1752', serverId: 501, first: 'Ada', picture: 'file:///tmp/a.jpg', color: '#ABCDEF' })];
     const out = reconcileChildren(server, local);
     expect(out[0].first).toBe('Adaline');
     expect(out[0].picture).toBe('https://s/a.jpg');
+    // Baby Buddy has no color field, so a server-side one is fabricated and
+    // must never clobber the persisted local tint on hydrate/refresh/adopt.
+    expect(out[0].color).toBe('#ABCDEF');
+  });
+
+  it('assigns a fresh palette tint to a server child it has never seen', () => {
+    const out = reconcileChildren([kid({ id: '502', serverId: 502, color: '#000000' })], []);
+    expect(out[0].color).toBe(CHILD_COLORS[0]);
+  });
+
+  it('gives two never-seen server children different tints', () => {
+    const server = [kid({ id: '501', serverId: 501 }), kid({ id: '502', serverId: 502 })];
+    const out = reconcileChildren(server, []);
+    expect(out[0].color).not.toBe(out[1].color);
+  });
+
+  it('does not hand a new server child a tint a local child already wears', () => {
+    const local = [kid({ id: 'local1', color: CHILD_COLORS[0] })];
+    const out = reconcileChildren([kid({ id: '501', serverId: 501 })], local);
+    expect(out.find((c) => c.id === '501')?.color).toBe(CHILD_COLORS[1]);
+  });
+
+  it('does not reissue a matched sibling tint to a new child the server listed FIRST', () => {
+    // Baby Buddy orders /api/children/ by name, not by creation, so a second
+    // child added through its web UI whose name sorts first arrives AHEAD of
+    // the child this device already knows, which almost always wears
+    // CHILD_COLORS[0]. Seeding the tint search only with never-pushed locals
+    // made the answer depend on that ordering.
+    const local = [kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] })];
+    const server = [kid({ id: '502', serverId: 502 }), kid({ id: '501', serverId: 501 })];
+    const out = reconcileChildren(server, local);
+    expect(out.map((c) => [c.id, c.color])).toEqual([
+      ['502', CHILD_COLORS[1]],
+      ['cA', CHILD_COLORS[0]],
+    ]);
+  });
+
+  it('gives every child a distinct tint whatever order the server lists them in', () => {
+    // The property, stated directly: one matched local, one never-pushed local
+    // and two new arrivals interleaved so the matched one comes after a new one.
+    const local = [
+      kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] }),
+      kid({ id: 'cB', color: CHILD_COLORS[1] }),
+    ];
+    const server = [
+      kid({ id: '503', serverId: 503 }),
+      kid({ id: '501', serverId: 501 }),
+      kid({ id: '502', serverId: 502 }),
+    ];
+    const colors = reconcileChildren(server, local).map((c) => c.color);
+    expect(colors).toHaveLength(4);
+    expect(new Set(colors).size).toBe(colors.length);
   });
 
   it('adds a server child the app has never seen, keeping its server-derived id', () => {

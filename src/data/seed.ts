@@ -3,6 +3,7 @@
  * (no server) so the app is fully explorable. Timestamps are relative to `now`.
  */
 
+import { CHILD_COLORS } from '@/lib/color';
 import type { Child, Entry, FeedMethod, FeedType, Measurement, Tag, Timer } from '@/types/models';
 
 const M = 60000;
@@ -32,8 +33,8 @@ export function makeSeed(now: number): SeedData {
     selectedChildId: c1,
     lastFeed: { feedType: 'breast', method: 'left' },
     children: [
-      { id: 'c1', first: 'Mira', last: 'Okafor', birth: now - 86 * DAY, color: '#EBA06A' },
-      { id: 'c2', first: 'Theo', last: 'Okafor', birth: now - 86 * DAY, color: '#9F94D4' },
+      { id: 'c1', first: 'Mira', last: 'Okafor', birth: now - 86 * DAY, color: CHILD_COLORS[0] },
+      { id: 'c2', first: 'Theo', last: 'Okafor', birth: now - 86 * DAY, color: CHILD_COLORS[1] },
     ],
     timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: now - 27 * M, saveAs: 'sleep' }],
     entries: [

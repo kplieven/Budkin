@@ -8,7 +8,7 @@
  * flows.
  */
 
-import type { Child, Treatment, Entry, Measurement } from '@/types/models';
+import type { Child, Treatment, Entry, Measurement, ServerChild } from '@/types/models';
 
 export interface UploadDeps {
   /** POST a child, return its new server id (or undefined on failure). */
@@ -147,7 +147,7 @@ export async function uploadUnsynced(
  *  trimmed) AND birth date (same calendar day). Returns the matched server child's
  *  serverId, or null when there's no match. Used by the "upload anyway" override so a
  *  local child is attached to an existing server child instead of duplicated. */
-export function matchServerChild(local: Child, serverChildren: Child[]): number | null {
+export function matchServerChild(local: Child, serverChildren: ServerChild[]): number | null {
   // An expected child must not adopt a server row: its `birth` is a due date,
   // so a name-and-birthday match would be a coincidence, not the same child.
   if (local.expected) return null;
