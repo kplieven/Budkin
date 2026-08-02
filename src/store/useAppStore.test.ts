@@ -9008,3 +9008,275 @@ describe('nap classification', () => {
     expect(e.nap).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// REPRODUCTION (do not fix here): "updating a child's photo on Android does
+// nothing". Returning from the OS image picker fires AppState 'active', which
+// `src/app/_layout.tsx` turns into a `refresh()`. That refresh resolves into
+// `applyServerLoad` -> `reconcileChildren`, which rebuilds every matched child
+// as `{ ...serverChild, id: local.id, color: local.color }`: every other field,
+// `picture` included, is taken from the server answer. A refresh that lands
+// AFTER the save therefore overwrites the just-saved photo (and name, and
+// birthday) with the values the server held when the GET went out.
+// ---------------------------------------------------------------------------
+describe('a refresh in flight during a child edit overwrites the edit (photo bug repro)', () => {
+  const BIRTH = NOW - 90 * 86400000;
+  const LOCAL: Child = {
+    id: 'c1',
+    serverId: 501,
+    first: 'Mira',
+    last: 'O',
+    birth: BIRTH,
+    color: '#fff',
+    slug: 'mira-o',
+    picture: null,
+  };
+  const PHOTO = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+
+  /** What the server answers a GET issued BEFORE the photo PATCH landed: the
+   *  child as it was, with no picture. */
+  const staleLoad = (over: Partial<Child> = {}) => ({
+    children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, slug: 'mira-o', picture: null, ...over }],
+    entries: [],
+    timers: [],
+    selectedChildId: '501',
+    lastFeed: {},
+    measurements: [],
+    treatments: [],
+  });
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  // Earlier tests in this file queue `...Once` mock answers that their own path
+  // never consumes, and a leftover REJECTED load would flip `offline` here and
+  // send the save down the offline branch instead. Reset the two mocks these
+  // tests steer and reinstall faithful implementations, so the interleaving
+  // under test is the only variable.
+  beforeEach(() => {
+    vi.mocked(loadFromServer).mockReset();
+    vi.mocked(loadFromServer).mockImplementation(async () => staleLoad() as any);
+    vi.mocked(updateChildOnServer).mockReset();
+    vi.mocked(updateChildOnServer).mockImplementation(async (_c: unknown, child: any, change: any) => {
+      h.childUpdated.push(child);
+      h.childUpdateChange.push(change);
+      return { picture: change?.kind === 'set' ? SERVER_PIC : null, slug: 'mira-o' };
+    });
+    vi.mocked(pushChildToServer).mockReset();
+    vi.mocked(pushChildToServer).mockImplementation(async (_c: unknown, child: any, change: any) => {
+      h.childPushed.push(child);
+      h.childPushChange.push(change);
+      return { id: 777, slug: SERVER_SLUG, picture: change?.kind === 'set' ? SERVER_PIC : null };
+    });
+    useAppStore.setState({ children: [LOCAL], selectedChildId: 'c1', offline: false, toast: null });
+  });
+
+  it('CONTROL: with no refresh in flight, the photo survives the save', async () => {
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: PHOTO } });
+    expect(s().children[0].picture).toBe(PHOTO.uri);
+    await flush();
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+  });
+
+  it('refresh lands AFTER the PATCH response: the photo is applied and then wiped', async () => {
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh(); // the AppState 'active' refresh, still fetching
+    await flush();
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: PHOTO } });
+    expect(s().children[0].picture).toBe(PHOTO.uri); // optimistic local URI
+
+    await flush(); // the PATCH answers with the durable URL
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+
+    load.resolve(staleLoad()); // the in-flight GET finally answers
+    await refreshP;
+    await flush();
+
+    expect(s().children[0].picture).toBeNull(); // <-- the photo is gone
+  });
+
+  it('refresh lands BEFORE the PATCH response: the photo is wiped and then comes back', async () => {
+    const load = deferred<any>();
+    const patch = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: PHOTO } });
+    expect(s().children[0].picture).toBe(PHOTO.uri);
+
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+    expect(s().children[0].picture).toBeNull(); // wiped mid-save
+
+    patch.resolve({ picture: SERVER_PIC, slug: 'mira-o' });
+    await flush();
+    expect(s().children[0].picture).toBe(SERVER_PIC); // the response puts it back
+  });
+
+  it('refresh lands first AND the PATCH stores nothing: the photo never appears at all', async () => {
+    const load = deferred<any>();
+    const patch = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: PHOTO } });
+
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+    expect(s().children[0].picture).toBeNull();
+
+    // A 200 that carries no picture: `res.picture ?? c.picture` falls back to
+    // the CURRENT value, which the refresh already blanked.
+    patch.resolve({ picture: null, slug: 'mira-o' });
+    await flush();
+    expect(s().children[0].picture).toBeNull();
+  });
+
+  it('the same window reverts a rename', async () => {
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Renamed', last: 'Nova', birth: BIRTH });
+    expect(s().children[0].first).toBe('Renamed');
+
+    await flush();
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+
+    expect(s().children[0].first).toBe('Mira'); // the rename is gone
+    expect(s().children[0].last).toBe('O');
+  });
+
+  it('the same window reverts a birthday edit', async () => {
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    const newBirth = BIRTH - 3 * 86400000;
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: newBirth });
+    expect(s().children[0].birth).toBe(newBirth);
+
+    await flush();
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+
+    expect(s().children[0].birth).toBe(BIRTH); // reverted
+  });
+
+  it('the same window reverts a gender change (which is a separate server write)', async () => {
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, gender: 'girl' });
+    expect(s().children[0].gender).toBe('girl');
+
+    await flush();
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+
+    expect(s().children[0].gender).toBeUndefined();
+  });
+
+  it('a child CREATED in the same window disappears entirely', async () => {
+    // `refresh` snapshots `s.children` before its fetch and hands that stale
+    // list to `applyServerLoad` as the local side, so a child created after the
+    // snapshot is in neither the server answer nor `mergeUnsynced`'s input.
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+    expect(s().children).toHaveLength(2);
+
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+
+    expect(s().children.map((c) => c.first)).toEqual(['Mira']);
+  });
+
+  it('nothing guards a refresh against an in-flight save (the entry/measurement merges have no child twin)', async () => {
+    // Entries logged mid-refresh survive: `applyServerLoad` re-reads the write
+    // queue after the fetch and merges it back (`mergeQueuedEntries`). Children
+    // have no such merge, so the same mid-flight write is lost.
+    const load = deferred<any>();
+    vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
+    const refreshP = s().refresh();
+    await flush();
+
+    useAppStore.setState({ offline: true });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Queued', last: 'Offline', birth: BIRTH });
+    await flush();
+    expect(h.pendingOps).toHaveLength(1); // the offline edit IS durably recorded
+
+    useAppStore.setState({ offline: false });
+    load.resolve(staleLoad());
+    await refreshP;
+    await flush();
+
+    // ...and it is still reverted in view, because the refresh reconciles
+    // children against the server answer alone.
+    expect(s().children[0].first).toBe('Mira');
+  });
+});
+
+// Adjacent exposure found while reproducing the above: an edit saved while
+// `offline` records `{op:'update', entity:'child'}` and the replay
+// (`flushPendingOps`) calls `updateChildOnServer(conn, payload)` with NO
+// PhotoChange, so the picked file is never uploaded at all — silently, with the
+// same "Updated" toast and no failure. `offline` is set by any refresh that
+// could not reach the server, including one fired by the AppState 'active' the
+// picker's return produces.
+describe('a photo picked while offline is never uploaded when the op replays', () => {
+  it('replays the child update with no photo change, so the picture is dropped', async () => {
+    const BIRTH = NOW - 90 * 86400000;
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o', picture: null }],
+      selectedChildId: 'c1',
+    });
+    const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
+    await flush();
+    expect(s().toast).toBe('Updated'); // no failure is ever reported
+    expect(s().children[0].picture).toBe(photo.uri);
+
+    useAppStore.setState({ offline: false });
+    await s().flushPendingOps();
+
+    // The replay went out with no photo change at all.
+    expect(h.childUpdateChange).toEqual([undefined]);
+  });
+});
