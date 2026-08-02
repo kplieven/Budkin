@@ -9,6 +9,7 @@ import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgoShort, fmtClock, fmtDur } from '@/lib/format';
 import { useTheme } from '@/theme/useTheme';
+import { type ChildAttribution } from './childAttribution';
 import { detailFor } from './detail';
 import { isTimer, type TimelineItem } from './groupByDay';
 import { timelineRowLabel } from './queuedMarker';
@@ -109,9 +110,25 @@ function OngoingHalo({ color, top }: { color: string; top: number }) {
  * `src/features/activity/queuedMarker.ts`) rather than this component reading
  * the store, so History and the desktop rail cannot end up disagreeing, and so
  * the rule stays testable: `vitest.config.ts` never loads a `.tsx`.
+ *
+ * `child` names whose row this is, as a tinted chip, and is likewise decided by
+ * the caller (`childAttribution`) rather than looked up here. OPTIONAL, and
+ * absent means "draw no chip": History passes one only while its household view
+ * is on, and the desktop rail passes none at all, being single-child by design
+ * where a name would be noise. A required prop would be a `tsc` error at that
+ * call site, which is the point of the `queued?: boolean` precedent it follows.
+ *
+ * The chip sits INSIDE the existing single content line, and must keep doing so.
+ * Row height here is a pure function of duration (`barHeight` and `minHeight`
+ * below), which is what lets the spine run straight and the clock labels sit at
+ * a capsule's head and foot; anything content-derived that could wrap would move
+ * it. So the chip is bounded (`maxWidth`, one line) rather than free to grow,
+ * and it never shrinks: the detail text beside it absorbs a narrow screen
+ * instead, since the chip is the information the household view exists to add.
  */
-export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = false }: {
+export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = false, child }: {
   item: TimelineItem; now: number; onPress: () => void; isFirst: boolean; isLast: boolean; queued?: boolean;
+  child?: ChildAttribution;
 }) {
   const t = useTheme();
   const timer = isTimer(item);
@@ -170,14 +187,16 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
       onPress={onPress}
       accessibilityRole="button"
       // An ongoing row carries its elapsed time in the label so a screen reader
-      // gets what the pill shows, and a queued row says so, so the clock marker
-      // below is never drawn without also being announced.
+      // gets what the pill shows, a queued row says so, and an attributed row
+      // names its child, so nothing the row draws is left unannounced. The
+      // spoken form comes from the same `childAttribution` call as the chip.
       accessibilityLabel={timelineRowLabel({
         activity: ACTIVITY_LABEL[type],
         ongoing,
         timer,
         elapsed: fmtDur(elapsedMin),
         queued,
+        child: child?.spoken,
       })}
       style={(s) => [
         // A faint full-bleed wash in the entry's own activity color, spanning the
@@ -265,9 +284,49 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
           <View style={{ width: CONTENT_H, height: CONTENT_H, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={type as IconName} color={color} size={17} />
           </View>
-          <Txt weight={700} size={16} tracking={-0.2}>
+          {/* numberOfLines so the line can never wrap: a wrapped label would
+              change a row height that must stay a pure function of duration.
+
+              `flexShrink: 0` looks redundant and is not. On web a Text lands in
+              this row as a flex item with no `flex-shrink` of its own, so it
+              takes CSS's initial value of 1 and shrinks; a View would not, since
+              react-native-web's View base style sets `flex-shrink: 0` (which is
+              why the chip below, the icon chip above and this row itself need no
+              such line). Adding the chip pushed this line past a 390px screen,
+              and shrink is distributed in proportion to content width, so the
+              label competed with the detail beside it and came out as "Diap…"
+              and "Fe…" while the detail still had room to give. The label
+              vocabulary is fixed and short (`ACTIVITY_LABEL`), so it holds its
+              width and the detail, the least important thing on the line,
+              absorbs a narrow screen on its own. Verified in a browser: the
+              computed `flex-shrink` is 1 without this and 0 with it. */}
+          <Txt weight={700} size={16} tracking={-0.2} numberOfLines={1} style={{ flexShrink: 0 }}>
             {ACTIVITY_LABEL[type]}
           </Txt>
+          {/* Whose row this is. Drawn in the child's own avatar tint (`t.dim`
+              when the list carries none), so two siblings' rows are told apart
+              by colour as well as by name. Deliberately not shrinkable and
+              capped instead: it is the one thing the household view adds, so a
+              long name ellipsizes inside its own chip rather than the chip
+              collapsing. Announced through the row's accessibilityLabel above,
+              never on its own: a second focusable element per row would double
+              the swipes needed to cross the timeline. */}
+          {child?.name ? (
+            <View
+              style={{
+                flexShrink: 0,
+                maxWidth: 96,
+                paddingHorizontal: 7,
+                paddingVertical: 2,
+                borderRadius: 7,
+                backgroundColor: hexA(child.color ?? t.dim, 0.16),
+              }}
+            >
+              <Txt weight={700} size={11.5} color={child.color ?? t.dim} numberOfLines={1}>
+                {child.name}
+              </Txt>
+            </View>
+          ) : null}
           {detail ? (
             <>
               <View style={{ width: 1, height: 18, backgroundColor: t.line }} />

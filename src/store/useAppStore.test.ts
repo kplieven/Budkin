@@ -2747,9 +2747,13 @@ describe('cache-first hydrate (server mode)', () => {
     expect(s().selectedChildId).toBe('c1');
     expect(s().lastFeed).toEqual({ c1: { feedType: 'formula', method: 'bottle' } });
 
-    // The background refresh was fired and asked the server for the persisted
-    // selection: children were populated from the entity store BEFORE the
-    // refresh read them, so the preferred-child fetch survives cache-first.
+    // The background refresh was fired and nominated the persisted selection:
+    // children were populated from the entity store BEFORE the refresh read
+    // them, so the selection survives cache-first. Since 0.15.0 this id no
+    // longer decides WHICH children are fetched (all of them are), only which
+    // one the answer nominates, but the ordering still matters: a refresh that
+    // read an empty child list would nominate the server's first child and
+    // silently move the selection off the persisted one.
     await flush();
     expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(501);
 
@@ -5769,71 +5773,30 @@ describe('history is scoped to the selected child', () => {
   });
 });
 
-describe('switching child refetches that child\'s records (server mode)', () => {
+describe('switching child is purely local (server mode)', () => {
   const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
   const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
   const expecting: Child = { id: 'localBean', first: 'Bean', last: '', birth: NOW + 60 * 86400000, color: '#ddd', expected: true };
-  const serverChildren = [
-    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
-    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
-  ];
-  const theoFeed: Entry = { id: 'tf1', childId: '2', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+  const theoFeed: Entry = { id: 'tf1', childId: 'localTheo', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
 
-  it("fetches the newly selected child, so its history is not left empty", async () => {
-    // In server mode `entries` only ever holds the ONE child the last fetch
-    // asked for. Scoping the display by child (the history-scope fix) is
-    // therefore only half the story: without a refetch, switching to a
-    // sibling shows "Nothing logged yet" until the user pulls to refresh.
-    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+  it('draws the sibling from records already in memory, with no refetch', async () => {
+    // This used to fire a refresh, because a load held only the child it fetched
+    // and the sibling would otherwise show "Nothing logged yet". Now every
+    // child's records are resident, so the switch is a local UI action and
+    // costing 13 requests per tap of the switcher to redraw what is already on
+    // screen would be pure waste.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [theoFeed] });
     vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: serverChildren,
-      entries: [theoFeed],
-      timers: [],
-      selectedChildId: '2',
-      lastFeed: {},
-      measurements: [],
-    });
 
     s().selectChild('localTheo');
     await flush();
 
-    // Asked the server for Theo, not Mira.
-    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(2);
-    // And his records are now what the History surfaces will render.
+    expect(vi.mocked(loadFromServer)).not.toHaveBeenCalled();
+    // And Theo's history is on screen anyway, which is the whole point.
     expect(entriesForChild(s().entries, 'localTheo').map((e) => e.id)).toEqual(['tf1']);
   });
 
-  it("keeps the other child's feeding prefill through the refetch", async () => {
-    // A load only ever covers the child it fetched, and this refetch fires on
-    // EVERY child switch, so taking the server's answer wholesale would wipe
-    // the sibling's prefill on each Mira-to-Theo-to-Mira round trip. The
-    // incoming key is a SERVER id and has to land under the local one.
-    useAppStore.setState({
-      children: [mira, theo],
-      selectedChildId: 'localMira',
-      lastFeed: { localMira: { feedType: 'solid', method: 'self' } },
-    });
-    vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: serverChildren,
-      entries: [theoFeed],
-      timers: [],
-      selectedChildId: '2',
-      lastFeed: { '2': { feedType: 'breast', method: 'left' } },
-      measurements: [],
-    });
-
-    s().selectChild('localTheo');
-    await flush();
-
-    expect(s().lastFeed).toEqual({
-      localMira: { feedType: 'solid', method: 'self' },
-      localTheo: { feedType: 'breast', method: 'left' },
-    });
-  });
-
-  it('does not hit the server in local mode', async () => {
+  it('does not hit the server in local mode either', async () => {
     useAppStore.setState({
       connection: { mode: 'local' },
       children: [mira, theo],
@@ -5844,43 +5807,21 @@ describe('switching child refetches that child\'s records (server mode)', () => 
     s().selectChild('localTheo');
     await flush();
 
-    // Local mode already holds every child's records in memory, so there is
-    // nothing to fetch and no server to fetch it from.
     expect(vi.mocked(loadFromServer)).not.toHaveBeenCalled();
     expect(s().selectedChildId).toBe('localTheo');
   });
 
-  it('still selects the child when the refetch fails', async () => {
-    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
-    vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
-
-    s().selectChild('localTheo');
-    await flush();
-
-    // The switch is a local UI action: it must land regardless of the network.
-    expect(s().selectedChildId).toBe('localTheo');
-  });
-
-  it('passes no preferred child when switching to an expecting one', async () => {
-    // An expecting child has no serverId, so there is nothing to ask for and
-    // loadFromServer falls back to the server's first child. The display
-    // filter is what keeps the sibling's records off the expecting screen.
+  it('selects an expecting child without reaching for the network', async () => {
+    // An expecting child has no serverId and no server records at all. The
+    // display filter is what keeps a sibling's records off their screen.
     useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localMira', entries: [] });
     vi.mocked(loadFromServer).mockClear();
-    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
-      children: serverChildren,
-      entries: [],
-      timers: [],
-      selectedChildId: '1',
-      lastFeed: {},
-      measurements: [],
-    });
 
     s().selectChild('localBean');
     await flush();
 
-    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBeNull();
+    expect(vi.mocked(loadFromServer)).not.toHaveBeenCalled();
+    expect(s().selectedChildId).toBe('localBean');
   });
 
   it('keeps resetting the insights cache (pre-existing behaviour)', async () => {
@@ -5899,6 +5840,144 @@ describe('switching child refetches that child\'s records (server mode)', () => 
     expect(s().insightsLoaded).toBe(false);
     expect(s().insightsEntries).toEqual([]);
     expect(s().insightsError).toBe(false);
+  });
+});
+
+describe('server mode holds every child, not just the selected one', () => {
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const serverChildren = [
+    { id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' },
+    { id: '2', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' },
+  ];
+  // Server-id keyed, the way a load hands them over; `remapChildIds` moves them
+  // into local id space on the way in.
+  const miraNap: Entry = { id: 'mn1', childId: '1', tags: [], type: 'sleep', start: NOW - 7200000, end: NOW - 5400000, nap: true };
+  const theoFeed: Entry = { id: 'tf1', childId: '2', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
+
+  it("keeps the sibling's records through a refresh instead of deleting them", async () => {
+    // The bug Item A exists for. A single-child load answered for the selection
+    // alone, and `applyServerLoad` replaces `entries` wholesale, so every
+    // refresh dropped the sibling's rows from state; the persistence
+    // subscription then deleted the month chunks that emptied, losing the
+    // history from disk as well.
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      treatments: [],
+      children: serverChildren,
+      entries: [miraNap, theoFeed],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: {},
+    });
+
+    await s().refresh();
+
+    expect(entriesForChild(s().entries, 'localMira').map((e) => e.id)).toEqual(['mn1']);
+    expect(entriesForChild(s().entries, 'localTheo').map((e) => e.id)).toEqual(['tf1']);
+  });
+
+  it('carries a feeding prefill for both children out of one load', async () => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', lastFeed: {} });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      treatments: [],
+      children: serverChildren,
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: { '1': { feedType: 'solid', method: 'self' }, '2': { feedType: 'breast', method: 'left' } },
+      measurements: [],
+      incompleteSlices: {},
+    });
+
+    await s().refresh();
+
+    // Both keys, both translated out of the server's id space.
+    expect(s().lastFeed).toEqual({
+      localMira: { feedType: 'solid', method: 'self' },
+      localTheo: { feedType: 'breast', method: 'left' },
+    });
+  });
+
+  it("freezes only the child whose slice degraded, and applies the sibling's answer", async () => {
+    // `incompleteSlices` is per (child, slice), so one child's timed-out request
+    // must not hold back the other's rows, and must not let the empty answer for
+    // its own slice through either.
+    const miraOldNap: Entry = { id: 'mn0', childId: 'localMira', tags: [], type: 'sleep', start: NOW - 86400000, end: NOW - 82800000, nap: true };
+    const theoOldFeed: Entry = { id: 'tf0', childId: 'localTheo', tags: [], type: 'feeding', start: NOW - 86400000, end: NOW - 82800000, feedType: 'breast', method: 'left', amount: null };
+    useAppStore.setState({
+      children: [mira, theo],
+      selectedChildId: 'localMira',
+      entries: [miraOldNap, theoOldFeed],
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      treatments: [],
+      children: serverChildren,
+      // Mira's sleep request failed, so her slice comes back empty; Theo's
+      // feeding answered and genuinely no longer holds the old row.
+      entries: [],
+      timers: [],
+      selectedChildId: '1',
+      lastFeed: {},
+      measurements: [],
+      incompleteSlices: { '1': ['sleep'] },
+    });
+
+    await s().refresh();
+
+    // Mira's nap is kept (her answer was a floor, not an answer)...
+    expect(entriesForChild(s().entries, 'localMira').map((e) => e.id)).toEqual(['mn0']);
+    // ...and Theo's deleted feed really is gone (his answer was whole).
+    expect(entriesForChild(s().entries, 'localTheo')).toEqual([]);
+  });
+});
+
+describe("editing a sibling's row from the History household view", () => {
+  // The household view puts a row on screen whose child is NOT the selected one,
+  // and tapping it opens the ordinary editor. The edit path PATCHes `child:`
+  // along with everything else, so seeding the sheet from the SELECTION rather
+  // than the record would move the server row to the wrong child. This is a
+  // pre-existing guarantee (`openEdit` seeds from the record, `save()` falls
+  // back to `existing?.childId`), pinned here because the household view is the
+  // first surface that routinely exercises it.
+  const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
+  const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
+  const theoNap: Entry = { id: 'tn1', childId: 'localTheo', tags: [], type: 'sleep', start: NOW - 7200000, end: NOW - 5400000, nap: true };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [theoNap] });
+  });
+
+  it("opens the sheet on the ROW's child, not the selected one", () => {
+    s().openEdit('tn1');
+    expect(s().sheetChildIds).toEqual(['localTheo']);
+  });
+
+  it('saves the edit back against that same child', async () => {
+    s().openEdit('tn1');
+    s().setNap(false);
+    await s().save();
+
+    const saved = s().entries.find((e) => e.id === 'tn1');
+    expect(saved?.childId).toBe('localTheo');
+    expect(saved).toMatchObject({ type: 'sleep', nap: false });
+  });
+
+  it('leaves the global selection where it was', async () => {
+    // Editing a sibling's row is not a way to switch child: the user goes back
+    // to the list still on whoever they were on.
+    s().openEdit('tn1');
+    await s().save();
+
+    expect(s().selectedChildId).toBe('localMira');
+  });
+
+  it('deletes a sibling row without touching the selected child', () => {
+    s().deleteEntry('tn1');
+    expect(s().entries.find((e) => e.id === 'tn1')).toBeUndefined();
+    expect(s().selectedChildId).toBe('localMira');
   });
 });
 

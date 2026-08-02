@@ -86,10 +86,12 @@ export interface ScheduleInput {
    *  reminders below (see `treatments`); the nap rules deliberately do NOT
    *  consult it, since a timer belongs to whoever started it. */
   selectedChildId: string;
-  /** Every treatment the store holds. `treatmentReminders` scopes to `selectedChildId`
-   *  itself, the same way `napReminders` does and for the same reason: in server
-   *  mode `s.entries` only ever holds the child the last fetch loaded, so dose
-   *  history for any other child is unreliable. */
+  /** Every treatment the store holds. `treatmentReminders` scopes to
+   *  `selectedChildId` itself. That was once forced (in server mode `s.entries`
+   *  held only the child the last fetch loaded, so any sibling's dose history
+   *  read as empty); since 0.15.0 every child's records are resident and it is a
+   *  deliberate narrowing instead, pending the product decision described at the
+   *  `treatmentDoses` construction site in `scheduleSync.ts`. */
   treatments: Treatment[];
   /** Per treatment id: doses logged since local midnight, and the most recent dose
    *  instant. Derived scalars rather than raw entries, matching `lastPumpAt` and
@@ -97,10 +99,10 @@ export interface ScheduleInput {
    *  `treatmentDoseScalars`, which owns the by-name dose attribution rule. */
   treatmentDoses: Record<string, { today: number; lastAt: number | null }>;
   /** Catalog keys the SELECTED child has already logged a milestone entry for.
-   *  Scoped the same way `treatments` and `lastSleepEndByChild` are, and for the same
-   *  reason: in server mode `s.entries` only holds the child the last fetch
-   *  loaded, so another child's milestone history reads as empty. Plain keys
-   *  rather than entries, so this file stays ignorant of `Entry`. */
+   *  Scoped the same way `treatments` is, and now for the same (product, no
+   *  longer data) reason. Plain keys rather than entries, so this file stays
+   *  ignorant of `Entry`. Note `lastSleepEndByChild` is NOT scoped like this: it
+   *  is keyed per child and, since 0.15.0, populated for all of them. */
   reachedMilestoneKeys: readonly string[];
   /** Catalog keys the selected child's parent has already answered the
    *  home-screen catch-up nudge for (yes, not yet, or dismissed). Persisted by
@@ -628,11 +630,12 @@ function treatmentReminders(input: ScheduleInput, now: number): ScheduledNotific
   const todayMidnight = startOfDay(now);
   const out: ScheduledNotification[] = [];
   for (const treatment of input.treatments) {
-    // Scoped to the selected child, and forced rather than chosen: in server
-    // mode `s.entries` only ever holds the child the last fetch loaded, so dose
-    // history for anyone else is unreliable. `napReminders` gates on the same
-    // constraint for the same reason. `isTreatmentActiveToday` also covers the
-    // paused flag and the fromDate/toDate range.
+    // Scoped to the selected child. This was forced rather than chosen until
+    // 0.15.0, when a load held only the child the last fetch asked for and any
+    // sibling's dose history was unreliable; the data is there now, so what
+    // keeps the scope narrow is the unmade product decision recorded in
+    // `scheduleSync.ts`. `isTreatmentActiveToday` also covers the paused flag
+    // and the fromDate/toDate range.
     if (!isTreatmentActiveToday(treatment, todayMidnight, input.selectedChildId)) continue;
     // A treatment always carries a name (the editor requires one), but gate on it the
     // same way `logMedicationFromTreatment` does: an alert titled " due" whose tap
@@ -730,10 +733,12 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
     out.push(...treatmentReminders(input, now));
   }
   if (input.prefs.milestoneCatchUp) {
-    // Selected child only, not every child: `reachedMilestoneKeys` can only ever
-    // describe one of them (see its comment on ScheduleInput), so looping would
-    // read every other child as having reached nothing and nudge their parent
-    // about milestones they logged months ago.
+    // Selected child only, not every child: `reachedMilestoneKeys` describes
+    // exactly one of them (see its comment on ScheduleInput), so looping here
+    // would read every other child as having reached nothing and nudge their
+    // parent about milestones they logged months ago. Widening this means
+    // widening that field to a per-child map first, which is the deferred work
+    // recorded in `scheduleSync.ts`, not a loop that can be added here alone.
     const selected = input.children.find((c) => c.id === input.selectedChildId);
     if (selected) out.push(...milestoneReminders(selected, input, now));
   }
@@ -802,10 +807,9 @@ function parseReminderId(id: string): ParsedReminderId | null {
  * Answers "not given" whenever it cannot answer confidently. A missing scalar
  * entry means the treatment was never CONSIDERED, not that no dose was logged:
  * `treatmentDoseScalars` gives every treatment it was handed a key, and
- * `scheduleSync` hands it the SELECTED child's treatments only, because in
- * server mode `entries` holds one child at a time and any other child's dose
- * history would read as empty. Dismissing on that would tell a parent a dose had
- * been given when the app had simply not loaded it.
+ * `scheduleSync` hands it the SELECTED child's treatments only (see there for
+ * why that scope survived 0.15.0). Dismissing on a missing key would tell a
+ * parent a dose had been given when the app had simply never looked.
  */
 function treatmentDoseGiven(
   input: ScheduleInput,
