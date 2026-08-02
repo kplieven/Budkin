@@ -12,6 +12,10 @@
  * `contentDescription` is the only string that reaches it. Returning both from
  * one call is what stops the tile naming a child that the screen reader still
  * announces as an anonymous "Start nap".
+ *
+ * The two differ in exactly one way, the name's length (see `NAME_CAP`), and
+ * they must never differ in any other. That is the reason they stay one call
+ * rather than becoming two functions the widget composes itself.
  */
 
 export interface NapLabels {
@@ -20,6 +24,30 @@ export interface NapLabels {
   /** the root contentDescription, the ONLY string a screen reader can reach */
   accessibilityLabel: string;
 }
+
+/**
+ * Longest name drawn on the tile before it is cut, in characters.
+ *
+ * A backstop against a pathological name, not a promise of a single line: the
+ * usable width depends on how far the user resized the widget and glyphs are
+ * not monospaced, so no character count can guarantee a fit. What it does
+ * guarantee is a bound. `RootWidget.java` measures the tree with
+ * `MeasureSpec.EXACTLY` at the real widget size, so an over-wide line wraps and
+ * the overflow is clipped out of the bitmap; on the napping branch the row that
+ * gets pushed out is the 26sp elapsed time, which is the whole point of the
+ * tile. An unnamed cap would let one long name cost the user the figure they
+ * opened the widget for.
+ *
+ * Ten is high enough that essentially every real first name passes through
+ * untouched (the cut is an edge case, not the common path) and low enough to
+ * bound the napping line at 21 characters.
+ *
+ * The cut happens HERE and not with `truncate="END"` on the `TextWidget`, which
+ * the library does support: that would ellipsise the whole line, so
+ * "Alexander · Start nap" becomes "Alexander · Star…" and the tile stops saying
+ * what tapping it does. Cutting the name keeps the verb.
+ */
+const NAME_CAP = 10;
 
 /**
  * The tile's strings for one state, naming the child only when that says
@@ -46,9 +74,13 @@ export function napLabels(opts: {
       ? { text: '● Napping', accessibilityLabel: 'Stop nap' }
       : { text: 'Start nap', accessibilityLabel: 'Start nap' };
   }
+  // Only the drawn name is capped. A `contentDescription` has no width, so
+  // there is nothing to save by cutting it and the screen-reader user gets the
+  // real name.
+  const shown = named.length > NAME_CAP ? `${named.slice(0, NAME_CAP)}…` : named;
   // "Ada, stop nap" mirrors the visible line with the separator spoken as a
   // pause, and follows the app's own "${child.first}, switch child" idiom.
   return opts.napping
-    ? { text: `● ${named} napping`, accessibilityLabel: `${named}, stop nap` }
-    : { text: `${named} · Start nap`, accessibilityLabel: `${named}, start nap` };
+    ? { text: `● ${shown} napping`, accessibilityLabel: `${named}, stop nap` }
+    : { text: `${shown} · Start nap`, accessibilityLabel: `${named}, start nap` };
 }
