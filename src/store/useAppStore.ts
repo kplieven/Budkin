@@ -77,6 +77,7 @@ import {
 } from '@/data/servers';
 import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
+import { sheetTargetIds } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
 import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
@@ -224,6 +225,22 @@ interface AppState {
   /** true while the "Connect Baby Buddy" adopt sheet is open (Settings, local mode) */
   adoptSheet: boolean;
   sheet: { type: ActivityType; confirm?: boolean } | null;
+  /**
+   * Which children the OPEN log sheet will file against, seeded when it opens
+   * and cleared with it. More than one means "log for both": `save()` writes one
+   * INDEPENDENT entry per id, separately editable and deletable afterwards.
+   *
+   * Deliberately NOT a field on `sheet`. `sheet` is replaced wholesale and never
+   * spread (`openSheet`, `openEdit`, `openTimerEdit`, `logMedicationFromTreatment`
+   * and, worst, `expandMedicationLog`), so a target living there would silently
+   * reset the moment the user tapped Edit in medication confirm mode. Not on `te`
+   * either: `setTE` coerces the feed amount and would have to learn to ignore it.
+   *
+   * EMPTY means "never seeded", not "nobody": `save()` then falls back to the
+   * binding it always had (the edited entry's child, else the source timer's,
+   * else the selection). See `sheetTargetIds`.
+   */
+  sheetChildIds: string[];
   /** id of the entry being edited, or null when logging a new one */
   editingId: string | null;
   /** id of the running timer being stopped+edited via the log sheet, or null */
@@ -389,6 +406,14 @@ interface AppActions {
   openSheet: (type: ActivityType) => void;
   openEdit: (entryId: string) => void;
   openTimerEdit: (timerId: string) => void;
+  /** Re-aim the open sheet at these children. Does NOT touch the global
+   *  selection: after saving for a sibling the user stays on whoever they were
+   *  on. An empty list is ignored, so a draft can never lose its owner. */
+  setSheetChildren: (ids: string[]) => void;
+  /** Add or remove one child from the sheet's target set ("log for both").
+   *  Removing the last one is a no-op, for the reason `setSheetChildren`
+   *  ignores an empty list. */
+  toggleSheetChild: (id: string) => void;
   closeSheet: () => void;
   deleteEntry: (id: string) => void;
   /** Restore the entry removed by the most recent deleteEntry (undo). */
@@ -1392,6 +1417,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   confirmBirthFor: null,
   adoptSheet: false,
   sheet: null,
+  sheetChildIds: [],
   editingId: null,
   fromTimerId: null,
   measurementSheet: null,
@@ -2965,6 +2991,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({
       sheet: { type },
+      // The draft is aimed HERE, at open, not read off the selection at save
+      // time: a warm notification tap for a sibling moves the selection with no
+      // action on the switcher, and this sheet is a root overlay that survives
+      // the navigation. Deep links select first and open second (see
+      // app/log/[type].tsx), so the link's child is the one pinned.
+      sheetChildIds: [get().selectedChildId],
       te: snapDraftAmount(type, te, get().unitSystem),
       editingId: null,
       fromTimerId: null,
@@ -3054,6 +3086,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
     set({
       sheet: { type: entry.type },
+      // An edit opens on whoever the record was about, never on the selection:
+      // the edit path PATCHes `child:` along with everything else, so a wrong
+      // seed here would move the server row too.
+      sheetChildIds: [entry.childId],
       te: snapDraftAmount(entry.type, te, s.unitSystem),
       editingId: entryId,
       fromTimerId: null,
@@ -3098,12 +3134,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (tm.notes != null) te.notes = tm.notes;
     set({
       sheet: { type },
+      // A timer belongs to whoever started it, the rule `stopTimer` follows for
+      // the button next to it. An unattributable timer (no owner even after
+      // `stampTimerOwners`) seeds nothing, so `save()` keeps its own fallback
+      // rather than this sheet inventing an owner for it.
+      sheetChildIds: tm.childId ? [tm.childId] : [],
       te: snapDraftAmount(type, te, s.unitSystem),
       editingId: null,
       fromTimerId: timerId,
     });
   },
-  closeSheet: () => set({ sheet: null, editingId: null, fromTimerId: null }),
+  setSheetChildren: (ids) => {
+    // An empty list is refused rather than stored: `sheetChildIds: []` already
+    // means "never seeded, use the old binding", so accepting one here would
+    // quietly hand the draft back to the global selection.
+    if (ids.length === 0) return;
+    set({ sheetChildIds: ids });
+  },
+  toggleSheetChild: (id) => {
+    const ids = get().sheetChildIds;
+    if (!ids.includes(id)) {
+      set({ sheetChildIds: [...ids, id] });
+      return;
+    }
+    // Untoggling the last target would leave the draft ownerless. The picker
+    // shows the remaining chip as selected, so this reads as "you cannot
+    // deselect everyone" rather than as a dead tap.
+    if (ids.length === 1) return;
+    set({ sheetChildIds: ids.filter((x) => x !== id) });
+  },
+  closeSheet: () => set({ sheet: null, sheetChildIds: [], editingId: null, fromTimerId: null }),
   deleteEntry: (id) => {
     const s = get();
     const index = s.entries.findIndex((e) => e.id === id);
@@ -3112,6 +3172,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       entries: s.entries.filter((e) => e.id !== id),
       sheet: s.editingId === id ? null : s.sheet,
+      sheetChildIds: s.editingId === id ? [] : s.sheetChildIds,
       editingId: s.editingId === id ? null : s.editingId,
     });
     detachEntry(get, set, entry, index);
@@ -3576,8 +3637,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // sharing one owner-resolution helper with `stopTimer`.
     //
     // A fresh draft is the selected child's, which is the only case left.
+    //
+    // All three are now only the FALLBACK: the sheet carries its own target
+    // (seeded from exactly these three when it opened, so the rule below is
+    // unchanged for every sheet the user never re-aimed), and an explicit pick
+    // in the header picker wins over all of it. That is what lets a save file
+    // against the child the sheet was opened for even when the global selection
+    // moved underneath it, and what makes re-aiming an edit move the record.
     const sourceTimer = s.fromTimerId ? s.timers.find((t) => t.id === s.fromTimerId) : undefined;
-    const childId = existing?.childId ?? sourceTimer?.childId ?? s.selectedChildId;
+    const fallbackChildId = existing?.childId ?? sourceTimer?.childId ?? s.selectedChildId;
+    const childId = sheetTargetIds(s.sheetChildIds, fallbackChildId)[0];
     const id = existing ? existing.id : 'e' + Date.now();
     // for breastfeeding "both", record the starting side as a left/right tag
     const tags =
@@ -3743,6 +3812,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
         entries: existing ? s.entries.filter((e) => e.id !== existing.id) : s.entries,
         timers: [...s.timers.filter((tm) => tm.id !== s.fromTimerId), timer],
         sheet: null,
+        sheetChildIds: [],
         editingId: null,
         fromTimerId: null,
       });
@@ -3757,10 +3827,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
 
     const patch: Partial<AppState> = existing
-      ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, editingId: null }
+      ? { entries: s.entries.map((e) => (e.id === id ? entry : e)), sheet: null, sheetChildIds: [], editingId: null }
       : {
           entries: [entry, ...s.entries],
           sheet: null,
+          sheetChildIds: [],
           fromTimerId: null,
           // stopping a running timer via "lasted X" drops the source timer
           ...(s.fromTimerId ? { timers: s.timers.filter((tm) => tm.id !== s.fromTimerId) } : {}),
@@ -3846,6 +3917,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       timers: s.timers.map((t) => (t.id === timerId ? { ...t, ...patch } : t)),
       sheet: null,
+      sheetChildIds: [],
       fromTimerId: null,
     });
     get().showToast('Details saved');

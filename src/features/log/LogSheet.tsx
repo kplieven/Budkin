@@ -15,6 +15,7 @@ import { TimeEntry } from '@/features/log/TimeEntry';
 import { ACTIVITY_LABEL, DIAPER_LEVELS, DURATION_SHORTCUTS, INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
+import { eligibleTargetChildren, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { fmtValue, toMetric, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
@@ -447,7 +448,13 @@ export function LogSheet() {
   const te = useAppStore((s) => s.te);
   const editingId = useAppStore((s) => s.editingId);
   const fromTimerId = useAppStore((s) => s.fromTimerId);
-  const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
+  // Raw selections, derived below in the render body: a selector that builds a
+  // fresh array (a .filter or a .map) makes zustand v5 see a snapshot that never
+  // settles, which blank-screens the web build.
+  const children = useAppStore((s) => s.children);
+  const sheetChildIds = useAppStore((s) => s.sheetChildIds);
+  const selectedChildId = useAppStore((s) => s.selectedChildId);
+  const setSheetChildren = useAppStore((s) => s.setSheetChildren);
   const setTE = useAppStore((s) => s.setTE);
   const toggleWet = useAppStore((s) => s.toggleWet);
   const toggleSolid = useAppStore((s) => s.toggleSolid);
@@ -465,6 +472,18 @@ export function LogSheet() {
   const deleteEntry = useAppStore((s) => s.deleteEntry);
   const closeSheet = useAppStore((s) => s.closeSheet);
   const expandMedicationLog = useAppStore((s) => s.expandMedicationLog);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Collapse the picker whenever the sheet changes. LogSheet itself never
+  // unmounts (it renders null while closed), so unlike TagField's reveal this
+  // state would otherwise survive from one open to the next. Adjusted DURING
+  // render against the previous value rather than in an effect: React re-runs
+  // this component before touching the DOM, so the picker is never painted
+  // open, and an effect here would be a setState-in-effect anyway.
+  const [pickerFor, setPickerFor] = useState(sheet);
+  if (sheet !== pickerFor) {
+    setPickerFor(sheet);
+    setPickerOpen(false);
+  }
 
   // Lazy-load the server tag list on first sheet open (cached in the store;
   // subsequent opens no-op). Mirrors how Settings lazy-loads the profile.
@@ -487,6 +506,14 @@ export function LogSheet() {
   const showVolume = type === 'feeding' && feedAmountIsVolume(te.feedType, te.method);
   const showIntake = type === 'feeding' && !feedAmountIsVolume(te.feedType, te.method);
   const showStartSide = type === 'feeding' && te.feedType === 'breast' && te.method === 'both';
+  // Who this save is for. `sheetChildIds` is empty only for a sheet nothing
+  // seeded, where the old rule (the global selection) still applies.
+  const targetIds = sheetTargetIds(sheetChildIds, selectedChildId);
+  const targetLabel = targetChildrenLabel(children, targetIds);
+  // A single-child household gets the plain static line it always had: a dead
+  // tap target for every solo-child user is worse than no affordance at all.
+  const options = eligibleTargetChildren(children);
+  const canRetarget = options.length > 1;
   // Marking a logged entry as still ongoing does not save changes to it, it
   // replaces it with a running timer, so the button must not promise an edit.
   const saveLabel = editingId
@@ -514,9 +541,22 @@ export function LogSheet() {
           <Txt weight={800} size={20} tracking={-0.3}>
             {editingId ? 'Edit' : 'Log'} {label.toLowerCase()}
           </Txt>
-          {childFirst ? (
+          {targetLabel && canRetarget ? (
+            <Pressable
+              onPress={() => setPickerOpen((v) => !v)}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: pickerOpen }}
+              accessibilityLabel={`Logging for ${targetLabel}. Change who this is for`}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', cursor: 'pointer' }}
+            >
+              <Txt unselectable weight={600} size={13} color={t.primary}>
+                for {targetLabel}
+              </Txt>
+              <Icon name={pickerOpen ? 'chevron-down' : 'chevron-right'} color={t.primary} size={13} />
+            </Pressable>
+          ) : targetLabel ? (
             <Txt weight={500} size={13} color={t.dim}>
-              for {childFirst}
+              for {targetLabel}
             </Txt>
           ) : null}
         </View>
@@ -525,6 +565,32 @@ export function LogSheet() {
 
       {/* scrollable body */}
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 12 }} keyboardShouldPersistTaps="handled">
+        {/* child picker, revealed by the header's "for X" line. It lives here
+            rather than in the header so a long roster scrolls with the body
+            instead of eating the sheet's fixed top. Picking does NOT move the
+            global selection: after logging for a sibling the user stays on
+            whoever they were on. */}
+        {pickerOpen && canRetarget && (
+          <>
+            <FieldLabel>Log for</FieldLabel>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+              {options.map((c) => (
+                <Chip
+                  key={c.id}
+                  label={c.first}
+                  color={color}
+                  swatch={c.color}
+                  selected={targetIds.includes(c.id)}
+                  onPress={() => {
+                    setSheetChildren([c.id]);
+                    setPickerOpen(false);
+                  }}
+                />
+              ))}
+            </View>
+          </>
+        )}
+
         {/* duration shortcuts (every interval activity): "log as just-ended" vs
             "start a live timer". Highlight tracks te.ongoing so the selected one
             is always the tinted one. */}

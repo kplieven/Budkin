@@ -470,6 +470,7 @@ beforeEach(() => {
     treatments: [],
     lastFeed: { feedType: 'breast', method: 'left' },
     sheet: null,
+    sheetChildIds: [],
     editingId: null,
     fromTimerId: null,
     measurementSheet: null,
@@ -2912,6 +2913,101 @@ describe('editing a record keeps it with the child it belongs to', () => {
     await flush();
     // The server mirror is created under Mira, not under the selected child.
     expect(h.timerPushed[0]).toMatchObject({ childServerId: 1 });
+  });
+});
+
+describe('the log sheet owns the child it is logging for', () => {
+  // The draft used to read the GLOBAL selection at save time, so anything that
+  // moved the selection under an open sheet re-aimed the draft. Once the sheet
+  // carries its own target, the selection moving underneath is irrelevant.
+  const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+
+  beforeEach(() => {
+    useAppStore.setState({ children: [mira, ivo], selectedChildId: 'c1' });
+  });
+
+  it('openSheet pins the selection as the sheet target', () => {
+    s().openSheet('diaper');
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('a fresh draft files against the sheet target, not a selection that moved under it', () => {
+    // A warm notification tap for a sibling moves the selection with no action
+    // on the switcher, and the sheet is a root overlay that survives the
+    // navigation, so the draft really does stay open over the new selection.
+    s().openSheet('diaper');
+    useAppStore.setState({ selectedChildId: 'c2' });
+    s().save();
+    expect(s().entries).toHaveLength(1);
+    expect(s().entries[0].childId).toBe('c1');
+  });
+
+  it('setSheetChildren re-aims the draft without moving the global selection', () => {
+    s().openSheet('diaper');
+    s().setSheetChildren(['c2']);
+    s().save();
+    expect(s().entries[0].childId).toBe('c2');
+    expect(s().selectedChildId).toBe('c1');
+  });
+
+  it('setSheetChildren ignores an empty list, so a draft can never lose its owner', () => {
+    s().openSheet('diaper');
+    s().setSheetChildren([]);
+    expect(s().sheetChildIds).toEqual(['c1']);
+  });
+
+  it('openEdit pins the entry\'s own child, not the selection', () => {
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c2', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('re-aiming an edit moves the record, server row and all', async () => {
+    useAppStore.setState({
+      entries: [{ id: 'f1', serverId: 11, childId: 'c1', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null }],
+    });
+    s().openEdit('f1');
+    s().setSheetChildren(['c2']);
+    s().save();
+
+    expect(s().entries[0].childId).toBe('c2');
+    await flush();
+    // The PATCH is addressed to Ivo's server row: the entry really moves.
+    expect(vi.mocked(updateEntryOnServer).mock.calls.at(-1)?.[2]).toBe(502);
+  });
+
+  it('openTimerEdit pins the timer\'s owner', () => {
+    useAppStore.setState({
+      timers: [{ id: 't1', childId: 'c2', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
+    });
+    s().openTimerEdit('t1');
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('closeSheet clears the target alongside the sheet itself', () => {
+    s().openSheet('diaper');
+    s().closeSheet();
+    expect(s().sheetChildIds).toEqual([]);
+  });
+
+  it('expandMedicationLog keeps the target, since it replaces `sheet` wholesale', () => {
+    // `sheet` is never spread, so a target living on it would silently reset
+    // here. This is why the target is its own top-level field.
+    s().openSheet('medication');
+    s().setSheetChildren(['c2']);
+    s().expandMedicationLog();
+    expect(s().sheetChildIds).toEqual(['c2']);
+  });
+
+  it('a sheet opened without a seeded target still falls back to the selection', () => {
+    // Nothing in the app opens a sheet this way, but `sheetChildIds` is state
+    // and an empty list has to keep meaning "whoever the old rule picked".
+    useAppStore.setState({ sheet: { type: 'diaper' }, sheetChildIds: [], te: { shape: 'point', tags: [], agoMin: 0 } });
+    s().save();
+    expect(s().entries[0].childId).toBe('c1');
   });
 });
 
