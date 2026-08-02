@@ -58,6 +58,18 @@ describe('napLabels caps a long name', () => {
     expect(long.text).toBe('Bartholome… · Start nap');
   });
 
+  it('does not leave a space before the ellipsis when the cut lands on one', () => {
+    expect(napLabels({ childName: 'Mary Jane Elizabeth', childCount: 2, napping: false }).text).toBe('Mary Jane… · Start nap');
+    expect(napLabels({ childName: 'Mary Jane Elizabeth', childCount: 2, napping: true }).text).toBe('● Mary Jane… napping');
+  });
+
+  it('shows fewer than the cap when trimming that space shortens the name', () => {
+    // "Mary Jane " is exactly ten characters, so the trim hands back nine. Short
+    // of the cap is expected: the cap is a bound, never a target.
+    const { text } = napLabels({ childName: 'Mary Jane Elizabeth', childCount: 2, napping: false });
+    expect(text.slice(0, text.indexOf('…'))).toBe('Mary Jane');
+  });
+
   // A contentDescription has no width, so there is nothing to save by cutting it
   // and the screen-reader user should get the real name.
   it('never truncates the accessible name', () => {
