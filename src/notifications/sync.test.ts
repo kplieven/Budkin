@@ -83,4 +83,23 @@ describe('initTimerNotificationSync gating', () => {
     expect(desired.mock.calls.length).toBe(builds + 1);
     expect(post.mock.calls.length).toBe(posts + 1);
   });
+
+  it('reposts nothing when the selected child changes', async () => {
+    const { post, useAppStore } = await setup();
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Ellie', last: '', birth: 0, color: '#208AEF' },
+        { id: 'c2', first: 'Wren', last: '', birth: 0, color: '#EF6D3A' },
+      ],
+      selectedChildId: 'c1',
+      timers: [{ id: 't1', childId: 'c1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }],
+    });
+    await flush();
+    const posts = post.mock.calls.length;
+
+    useAppStore.setState({ selectedChildId: 'c2' });
+    await flush();
+
+    expect(post.mock.calls.length).toBe(posts);
+  });
 });
