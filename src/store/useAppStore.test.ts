@@ -3152,6 +3152,81 @@ describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
   });
 });
 
+describe('re-aiming a feeding sheet re-seeds what that child was last fed', () => {
+  const mira: Child = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
+  const ivo: Child = { id: 'c2', first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
+  // Two genuinely different feeders, so all three seeds disagree and no
+  // coincidence can pass this: Mira takes the breast (last on the left, so her
+  // next is the right, and her method alternates to 'right'), Ivo takes a
+  // bottle (no side at all, so his start side is the opening default).
+  const miraFeed: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
+  const ivoFeed: Entry = { id: 'f2', childId: 'c2', type: 'feeding', start: NOW - 90 * M, end: NOW - 70 * M, feedType: 'formula', method: 'bottle', amount: 120, tags: [] };
+
+  beforeEach(() => {
+    useAppStore.setState({
+      children: [mira, ivo],
+      selectedChildId: 'c1',
+      entries: [miraFeed, ivoFeed],
+      lastFeed: { c1: { feedType: 'breast', method: 'left' }, c2: { feedType: 'formula', method: 'bottle' } },
+    });
+  });
+
+  const seeds = () => {
+    const { feedType, method, startSide } = s().te;
+    return { feedType, method, startSide };
+  };
+
+  it('follows a single-target re-aim', () => {
+    s().openSheet('feeding');
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'right', startSide: 'right' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'formula', method: 'bottle', startSide: 'left' });
+  });
+
+  it('follows a collapse back to one child', () => {
+    s().openSheet('feeding');
+    s().toggleSheetChild('c2');
+    // Two targets have no single history to read, so the shared draft stands.
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'right', startSide: 'right' });
+    s().toggleSheetChild('c1');
+    expect(seeds()).toEqual({ feedType: 'formula', method: 'bottle', startSide: 'left' });
+  });
+
+  it('never overwrites seeds the parent already chose', () => {
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'solid' });
+    s().setTE({ method: 'self' });
+    s().setTE({ startSide: 'left' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'self', startSide: 'left' });
+  });
+
+  it('still follows for the seeds the parent has NOT touched', () => {
+    // Per field, not all-or-nothing: one deliberate choice must not freeze the
+    // other two on the previous child's history.
+    s().openSheet('feeding');
+    s().setTE({ feedType: 'solid' });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'solid', method: 'bottle', startSide: 'left' });
+  });
+
+  it('never re-seeds an EDIT, whose values are the record\'s own', () => {
+    s().openEdit('f1');
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'left', startSide: undefined });
+    s().setSheetChildren(['c2']);
+    expect(seeds()).toEqual({ feedType: 'breast', method: 'left', startSide: undefined });
+  });
+
+  it('drops a stale amount when the re-seed crosses the volume/level line', () => {
+    // Mira's seeds put the draft on the intake scale, Ivo's on millilitres. An
+    // intake of 3 is not 3 ml, so the number left behind is meaningless there.
+    s().openSheet('feeding');
+    s().setTE({ amount: 3 });
+    s().setSheetChildren(['c2']);
+    expect(s().te.amount).toBeUndefined();
+  });
+});
+
 describe('logging for more than one child at once', () => {
   // "Log for both": one INDEPENDENT entry per target child, each separately
   // editable and deletable afterwards. No link field, no group id.
@@ -4858,6 +4933,48 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(h.q).toHaveLength(0);
     // The unsynced measurement survived the reconnect too.
     expect(s().measurements.map((m) => m.id)).toContain('mLocal');
+  });
+
+  it('a post-expiry reconnect carries the pre-map feeding fallback out of the entity store', async () => {
+    // hydrate's no-connection branch reads no entity store, so on a cold start
+    // parked at the reconnect screen this is the only place the legacy value
+    // can reach state. Without it the derive-on-read migration has a hole:
+    // the sheet would open on the built-in default rather than the value the
+    // pre-map build left behind.
+    h.entityOrigin = 'http://x';
+    useAppStore.setState({
+      connection: null,
+      connected: false,
+      children: [],
+      entries: [],
+      measurements: [],
+      selectedChildId: '',
+      lastFeed: {},
+      legacyLastFeed: LAST_FEED_DEFAULT,
+    });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: { feedType: 'formula', method: 'bottle' },
+    });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+    });
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    expect(s().legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    s().openSheet('feeding');
+    expect(s().te.feedType).toBe('formula');
   });
 
   it('a running local-only timer (serverId == null) survives connect even when the server answers an empty timers list', async () => {
