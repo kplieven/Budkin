@@ -48,6 +48,19 @@ describe('buildWidgetSnapshot child + queue fields', () => {
     const s = buildWidgetSnapshot({ ...baseState, rhythmOriginHour: 19, connection: null });
     expect(s.rhythmOriginHour).toBe(19);
   });
+
+  it('counts the household, so a widget can tell whether naming the child says anything', () => {
+    const sib: Child = { id: 'c2', first: 'Theo', last: 'L', birth: 0, color: '#000000' };
+    expect(buildWidgetSnapshot({ ...baseState, connection: null }).childCount).toBe(1);
+    expect(buildWidgetSnapshot({ ...baseState, children: [child, sib], connection: null }).childCount).toBe(2);
+  });
+
+  it('counts every child, not just the selected one', () => {
+    // An expecting child still makes the household ambiguous, so it counts.
+    const expecting: Child = { id: 'c3', first: 'Bean', last: 'L', birth: NOW + 86400000, color: '#111111', expected: true };
+    const s = buildWidgetSnapshot({ ...baseState, children: [child, expecting], connection: null });
+    expect(s.childCount).toBe(2);
+  });
 });
 
 describe('buildWidgetSnapshot child scoping', () => {
