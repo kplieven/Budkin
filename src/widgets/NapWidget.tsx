@@ -22,10 +22,6 @@ export function NapWidget({ snapshot, now }: { snapshot: WidgetSnapshot | null; 
   const sleepStart = snapshot?.sleepStart ?? null;
   const napping = sleepStart != null;
   const elapsed = napping ? fmtDur((now - sleepStart) / 60000) : '';
-  // Both strings come from the pure module, which is the only part of this
-  // widget a test can reach. They are one call because the drawn text is
-  // invisible to TalkBack (the tree is a bitmap): the label below is the only
-  // place a screen reader hears whose nap this tile toggles.
   const labels = napLabels({ childName: snapshot?.childName, childCount: snapshot?.childCount, napping });
 
   return (
