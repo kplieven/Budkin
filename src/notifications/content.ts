@@ -1,7 +1,8 @@
 /**
  * Pure shaping + reconcile logic for per-timer Android notifications. No native
  * calls and no I/O, so it is trivially unit-testable. The store subscriber
- * (`sync.ts`) turns `state.timers` into the desired notification set here, diffs
+ * (`sync.ts`) turns `state.timers` plus `state.children` into the desired
+ * notification set here, diffs
  * it against what was last posted, and dispatches the post/dismiss work to the
  * platform-split module.
  */
