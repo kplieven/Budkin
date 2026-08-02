@@ -2720,11 +2720,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
         picture: change.kind === 'none' ? existing.picture : pending,
       };
       const genderChanged = existing.gender !== child.gender;
-      set({
-        children: s.children.map((c) => (c.id === child.id ? child : c)),
+      set((st) => ({
+        children: st.children.map((c) => (c.id === child.id ? child : c)),
         childSheet: false,
         editingChildId: null,
-      });
+      }));
       get().showToast('Updated');
       const conn = s.connection;
       if (conn && conn.mode === 'server' && !s.offline) {
@@ -2746,12 +2746,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 // next rename or delete, and a 404'd delete is exactly how a
                 // deleted child used to come back.
                 const slug = res.slug ?? c.slug;
+                if (change.kind === 'none') return { ...c, slug };
                 // Swap the ephemeral local file URI for the durable server URL.
-                return change.kind === 'none' ? { ...c, slug } : { ...c, slug, picture: res.picture };
+                // On a remove, `null` IS the answer and must be kept; on a set it
+                // means the server stored nothing, and taking it would throw away
+                // the only copy of the photo the device still has.
+                const picture = change.kind === 'remove' ? res.picture : (res.picture ?? c.picture);
+                return { ...c, slug, picture };
               }),
             }));
           })
-          .catch(() => {});
+          .catch(() => {
+            // An online edit is queued nowhere (only the offline branch below
+            // records a pending op), so a failure here is lost work the next
+            // refresh will quietly undo. Say so rather than leaving the
+            // optimistic "Updated" standing, as deleteChild does on its own
+            // failure.
+            get().showToast(`Could not save ${child.first}`);
+          });
       } else if (conn && conn.mode === 'server' && s.offline && child.serverId != null) {
         // Already on the server, editing while offline: record the update so
         // it replays on reconnect instead of being silently overwritten by the
@@ -2776,8 +2788,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       color: nextChildColor(s.children),
       picture: change.kind === 'set' ? change.photo.uri : null,
     };
-    set({
-      children: [...s.children, child],
+    set((st) => ({
+      children: [...st.children, child],
       selectedChildId: localId,
       childSheet: false,
       editingChildId: null,
@@ -2785,7 +2797,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsLoaded: false,
       insightsEntries: [],
       insightsError: false,
-    });
+    }));
     get().showToast('Saved');
     const conn = s.connection;
     // An expected child holds a DUE date in `birth`, which the server's
@@ -2814,7 +2826,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
             void setChildGenderOnServer(conn, res.id, child.gender, Date.now()).catch(() => {});
           }
         })
-        .catch(() => {});
+        .catch(() => {
+          // The child itself is not lost: it stays local with no serverId, and
+          // the next flush pushes it. A photo picked in the same save IS lost
+          // though, because `buildUploadDeps` pushes children with no
+          // PhotoChange, so this cannot pass silently under the "Saved" above.
+          get().showToast(`Could not save ${child.first}`);
+        });
     }
   },
 

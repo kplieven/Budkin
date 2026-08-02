@@ -23,6 +23,7 @@ import {
   loadInsightsHistory,
   loadProfileFromServer,
   loadTagsFromServer,
+  pushChildToServer,
   pushEntryToServer,
   serverHasData,
   updateChildOnServer,
@@ -4134,6 +4135,63 @@ describe('children', () => {
     expect(s().children[0].picture).toBe('file:///keep.jpg');
     await flush();
     expect(h.childUpdateChange[0]).toEqual({ kind: 'none' });
+  });
+
+  // The reported symptom of the native photo bug: the upload failed, the sheet
+  // closed on an "Updated" toast, and nothing ever said otherwise, because the
+  // rejection went into a bare `.catch(() => {})`. An online edit is not queued
+  // anywhere (only an OFFLINE one records a pending op), so a failure here really
+  // is lost work and has to be said out loud. Mirrors deleteChild's
+  // "Could not delete X".
+  it('a failed child update says so instead of leaving the success toast standing', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], toast: null });
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'Renamed', birth: NOW });
+
+    expect(s().toast).toBe('Updated'); // optimistic, before the round trip
+    await flush();
+    expect(s().toast).toBe('Could not save Mira');
+  });
+
+  // The create twin of the case above. The local child itself survives a failed
+  // POST and the next flush retries it, but a photo picked in the same save does
+  // not ride that retry (`buildUploadDeps` pushes children with no PhotoChange),
+  // so the failure still costs something and still has to be said.
+  it('a failed child create says so instead of leaving the success toast standing', async () => {
+    vi.mocked(pushChildToServer).mockRejectedValueOnce(new Error('net'));
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
+
+    expect(s().toast).toBe('Saved'); // optimistic, before the round trip
+    await flush();
+    expect(s().toast).toBe('Could not save Nova');
+  });
+
+  it('a photo PATCH that stores nothing leaves the local URI standing on the response', async () => {
+    // A 200 carrying `picture: null` for a photo we just uploaded means the
+    // server did not store it. Trusting it destroys the one copy we still have.
+    // Only the response is guarded: `reconcileChildren` takes the server's
+    // `picture` wholesale, so the next refresh blanks it anyway. Worth having
+    // regardless, since it keeps the avatar until then instead of at once.
+    vi.mocked(updateChildOnServer).mockResolvedValueOnce({ picture: null, slug: SERVER_SLUG });
+    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg' };
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'set', photo } });
+
+    await flush();
+    expect(s().children[0].picture).toBe('file:///tmp/e.jpg');
+  });
+
+  it('a remove still clears the picture on the server response (null is the wanted value there)', async () => {
+    // The other half of the case above: on a remove, `null` is the answer, not a
+    // missing one, so it must NOT fall back to the local URI.
+    useAppStore.setState((st) => ({ children: st.children.map((c) => ({ ...c, picture: 'file:///old.jpg' })) }));
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'remove' } });
+
+    await flush();
+    expect(s().children[0].picture).toBeNull();
   });
 
   it('demo mode: create stays local, no server push', async () => {

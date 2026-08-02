@@ -1,3 +1,5 @@
+import { convertFormDataAsync } from 'expo/src/winter/fetch/convertFormData';
+import { installFormDataPatch } from 'expo/src/winter/FormData';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -19,7 +21,6 @@ import {
   isMilestoneNote,
   mapProfile,
   milestoneToNoteBody,
-  nativePicturePart,
   noteToBathEntry,
   noteToTreatment,
   noteToMilestoneEntry,
@@ -65,10 +66,110 @@ describe('child serialization', () => {
       picture: null,
     });
   });
+});
 
-  it('nativePicturePart maps a picked photo to the RN file descriptor', () => {
-    const photo: PickedPhoto = { uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' };
-    expect(nativePicturePart(photo)).toEqual({ uri: 'file:///tmp/a.jpg', name: 'a.jpg', type: 'image/png' });
+// On native the bundle does NOT run React Native's fetch: expo's Metro config
+// injects `expo/src/winter/runtime.native.ts` into every native bundle, which
+// patches `FormData` and swaps `globalThis.fetch` for expo/fetch (unless
+// EXPO_PUBLIC_USE_RN_FETCH is set, which this app never sets). expo/fetch
+// serializes a multipart body itself, and its encoder only understands a
+// string, a Blob, or an object exposing `bytes()`. React Native's `{ uri }`
+// file descriptor throws there, so a photo upload never left the device.
+//
+// These tests run the real encoder over the real FormData patch, so the picture
+// part is asserted in the shape the runtime actually accepts rather than the
+// one RN's own FormData would have wanted.
+//
+// That means deliberately reaching into expo's internals: the two imports at the
+// top of this file are unversioned paths that resolve only because expo ships no
+// `exports` map, so an SDK bump could move them. If they break, RE-POINT them.
+// Deleting the test restores the exact blind spot that hid this bug for months:
+// a hand-written stand-in would only ever encode what we already believe.
+describe('child photo upload serializes under expo/fetch', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** React Native's FormData, reduced to the `_parts` array expo's patch writes
+   *  to, with that patch applied. Local to the test: `installFormDataPatch`
+   *  mutates the prototype it is handed. */
+  class RNFormData {
+    _parts: [string, unknown][] = [];
+  }
+  installFormDataPatch(RNFormData as unknown as typeof FormData);
+
+  const PICTURE_BYTES = new TextEncoder().encode('\xff\xd8JPEG-BYTES');
+
+  /** A picked photo carrying a file object shaped like `expo-file-system`'s
+   *  `File`: `bytes()` plus the name/type the encoder writes into the part
+   *  headers. The real `File` is a native module and cannot load here. */
+  const photo = (): PickedPhoto => ({
+    uri: 'file:///cache/ImagePicker/cropped-42.jpg',
+    name: 'a.jpg',
+    type: 'image/jpeg',
+    nativeFile: {
+      name: 'cropped-42.jpg',
+      type: 'image/jpeg',
+      bytes: async () => PICTURE_BYTES,
+    },
+  });
+
+  /** Captures the RequestInit handed to fetch; returns a canned OK response. */
+  function captureInit(response: unknown) {
+    const calls: RequestInit[] = [];
+    vi.stubGlobal('FormData', RNFormData);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init?: RequestInit) => {
+        calls.push(init ?? {});
+        return jsonResponse(response);
+      }),
+    );
+    return calls;
+  }
+
+  /** The multipart body expo/fetch would actually put on the wire. */
+  async function encode(init: RequestInit): Promise<string> {
+    const { body } = await convertFormDataAsync(init.body as FormData);
+    return new TextDecoder().decode(body);
+  }
+
+  it('a photo PATCH encodes the picture part as bytes, alongside the name fields', async () => {
+    const child: Child = { ...CHILD, serverId: 5, slug: 'mira-doe' };
+    const calls = captureInit({ picture: 'https://x/media/mira.jpg', slug: 'mira-doe' });
+    await new BabybuddyClient('https://x', 't').updateChild(child, { kind: 'set', photo: photo() });
+
+    const wire = await encode(calls[0]);
+    expect(wire).toContain('name="picture"');
+    expect(wire).toContain('JPEG-BYTES');
+    // A rename made in the same save rides this body too, so it is lost with it.
+    expect(wire).toContain('name="first_name"');
+    expect(wire).toContain('Mira');
+  });
+
+  it('names the native part after the file, not after the picked name (web sends the latter)', async () => {
+    // expo's FormData patch keeps `append`'s third argument only for a real
+    // `Blob`, so a filename cannot be supplied for this part. Cosmetic: the
+    // picker's cache filename carries the right extension either way.
+    const calls = captureInit({ id: 9 });
+    await new BabybuddyClient('https://x', 't').createChild(CHILD, photo());
+
+    expect(await encode(calls[0])).toContain('filename="cropped-42.jpg"');
+  });
+
+  it('a create-with-photo POST encodes the picture part as bytes', async () => {
+    const calls = captureInit({ id: 9, slug: 'mira-doe', picture: 'https://x/media/mira.jpg' });
+    await new BabybuddyClient('https://x', 't').createChild(CHILD, photo());
+
+    expect(await encode(calls[0])).toContain('JPEG-BYTES');
+  });
+
+  it('a photo with no file behind it fails as a photo problem, not as an unreachable server', async () => {
+    const calls = captureInit({ id: 9 });
+    const unreadable: PickedPhoto = { uri: 'file:///cache/gone.jpg', name: 'a.jpg', type: 'image/jpeg' };
+
+    await expect(new BabybuddyClient('https://x', 't').createChild(CHILD, unreadable)).rejects.toThrow(
+      "Couldn't read the selected photo.",
+    );
+    expect(calls).toHaveLength(0); // raised before the request, so nothing to blame on the network
   });
 });
 
@@ -1753,5 +1854,17 @@ describe('requests abort instead of hanging on a black-holed server', () => {
       status: 0,
       message: "Couldn't reach server. Check the URL and your connection.",
     });
+  });
+
+  // The user-facing copy above blames the connection whatever went wrong, and
+  // `fetch` also rejects for reasons that are nothing to do with it (a body it
+  // cannot serialize, say). Keeping the original as `cause` is what leaves a
+  // trace of those; discarding it is how the native photo upload spent months
+  // looking like a network problem.
+  it('keeps the underlying failure as the ApiError cause', async () => {
+    const underlying = new Error('Unsupported FormDataPart implementation');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(underlying));
+    const err = await new BabybuddyClient('https://x', 't').listChildren().catch((e: unknown) => e);
+    expect((err as Error).cause).toBe(underlying);
   });
 });
