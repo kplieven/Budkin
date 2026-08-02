@@ -1,3 +1,10 @@
+// Imported, never `require`d: this file is ESM (see `export default` below), and
+// Expo loads it through a transpiler in which `require` is not defined. A
+// `require` here does not fail loudly, it throws into `gitDescribe`'s own catch
+// and silently yields no version at all, which is how the dev fallback came to
+// look like it worked while `expo config` reported no `extra.version` key.
+import { execSync } from 'node:child_process';
+
 /**
  * Variant overlay on top of app.json, which stays the source of truth for
  * everything shared. Expo reads app.json first and hands it here as `config`.
@@ -33,9 +40,7 @@ const IS_DEV = process.env.APP_VARIANT === 'development';
  */
 const gitDescribe = () => {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    return require('node:child_process')
-      .execSync('git describe --tags --always --dirty', { stdio: ['ignore', 'pipe', 'ignore'] })
+    return execSync('git describe --tags --always --dirty', { stdio: ['ignore', 'pipe', 'ignore'] })
       .toString()
       .trim();
   } catch {
