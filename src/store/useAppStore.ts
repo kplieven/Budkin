@@ -715,6 +715,27 @@ function backfillHeldBack(entries: Entry[], children: Child[]): Entry[] {
   );
 }
 
+/** Field-wise equality for two records of the same child, over the UNION of
+ *  their own keys so a key present-but-undefined on one side (`saveChild`
+ *  writes `gender: undefined` rather than omitting it) reads equal to an absent
+ *  one, and so a field added to `Child` later is compared without this needing
+ *  to be revisited. Deliberately not reference equality: an untouched child IS
+ *  the same object across an immutable update, but a map() that rebuilds every
+ *  child without changing a value is not an edit, and calling it one would
+ *  discard a real server-side change. */
+function sameChild(a: Child, b: Child | undefined): boolean {
+  if (b === undefined) return false;
+  if (a === b) return true;
+  // `keyof Child` is asserted at the index rather than on the set, because the
+  // store's own `type Set` alias (the zustand setter) shadows the global one in
+  // every TYPE position in this file. Same reason `carryOverIncomplete` spells
+  // its map/set parameters out.
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (a[k as keyof Child] !== b[k as keyof Child]) return false;
+  }
+  return true;
+}
+
 /** Reconcile a server child list onto the local one WITHOUT changing any local
  *  `id`. A child that exists on both sides is matched by `serverId` and the
  *  server's field values win, with two exceptions. The local `id` is preserved,
@@ -735,8 +756,59 @@ function backfillHeldBack(entries: Entry[], children: Child[]): Entry[] {
  *  is absent from the server list was deleted server-side and is dropped,
  *  matching today's behaviour. A never-pushed local whose `id` collides with a
  *  reconciled child's id is dropped too, so the result can never contain
- *  duplicate ids, matching what `mergeUnsynced` guaranteed. */
-export function reconcileChildren(serverChildren: ServerChild[], localChildren: Child[]): Child[] {
+ *  duplicate ids, matching what `mergeUnsynced` guaranteed.
+ *
+ *  `localBefore` is the caller's PRE-FETCH snapshot of its own child list: what
+ *  it held when the request that produced `serverChildren` went out. Anything
+ *  that differs from it (or is missing from it entirely) was written while the
+ *  fetch was in flight, so the answer in hand was composed BEFORE that write
+ *  and cannot be authoritative for it. Such a child keeps its whole local
+ *  record and is never dropped as deleted-server-side. This is the child
+ *  equivalent of reading the write queue after the fetch (see `refresh`), and
+ *  without it a photo, rename or birthday saved while the AppState 'active'
+ *  refresh was fetching was silently reverted, and a child created in that
+ *  window disappeared outright.
+ *
+ *  Keeping the WHOLE local record is deliberate, not a shortcut. `id` and
+ *  `color` are local by the rules above. `serverId` is the match key, so a
+ *  matched child's local and server values are equal by construction and
+ *  preserving it can never strand one; an unmatched kept child has no server
+ *  value to take. `slug` is the one field the server truly owns (Baby Buddy
+ *  DERIVES it from the name and a rename moves it), but the fresh one arrives
+ *  on the PATCH response, not on this GET: the local record either already
+ *  holds that re-stamp (then it is newer than the answer) or still holds the
+ *  slug the server had when the fetch went out (then it is the correct routing
+ *  key until the in-flight PATCH answers, which re-stamps it). Taking the
+ *  answer's slug instead would overwrite a completed re-stamp with the name it
+ *  replaced, which is exactly the stale key that 404s the next rename or
+ *  delete.
+ *
+ *  The cost of keeping the whole record, named: a field the ANSWER carries that
+ *  the local record does not have is dropped for this refresh too. The
+ *  realistic one is a `slug` for a child `uploadUnsynced` pushed, since its
+ *  `pushChild` captures only the new id. That is self-healing and harmless: the
+ *  child is no longer mid-fetch by the next refresh, which fills it in, and
+ *  until then `childKey` falls back to a `listChildren()` lookup by `serverId`
+ *  rather than failing.
+ *
+ *  A child REMOVED from the local list mid-fetch (`deleteChild`) is the one
+ *  case the snapshot does not overturn: the answer still lists it, so it comes
+ *  back exactly as it always did, and `deleteChild`'s own failure path is
+ *  written around that. The snapshot only supplies the id and tint it comes
+ *  back with, which stay the LOCAL ones so a queued entry written against that
+ *  child can still resolve its owner.
+ *
+ *  Omitted, the pre-fetch snapshot IS the local list, so no child reads as
+ *  written mid-fetch and every one of them reconciles as it always has. That is
+ *  what `connect` and `adopt` pass, having no snapshot to offer: `connect`
+ *  takes none because its fetch precedes its local read entirely, `adopt`
+ *  because the gap that leaves is accepted (see the note there, which names
+ *  what it does not cover). */
+export function reconcileChildren(
+  serverChildren: ServerChild[],
+  localChildren: Child[],
+  localBefore: Child[] = localChildren,
+): Child[] {
   const localByServerId = new Map<number, Child>();
   for (const c of localChildren) {
     if (c.serverId != null) localByServerId.set(c.serverId, c);
@@ -745,17 +817,41 @@ export function reconcileChildren(serverChildren: ServerChild[], localChildren: 
   for (const c of serverChildren) {
     if (c.serverId != null) serverIds.add(c.serverId);
   }
+  // Written while the fetch was in flight, so this answer predates it. Matched
+  // by local `id`: `serverId` is exactly one of the things a mid-flight push
+  // stamps, so it cannot be the key here.
+  const beforeById = new Map(localBefore.map((c) => [c.id, c]));
+  const writtenMidFetch = (c: Child) => !sameChild(c, beforeById.get(c.id));
+  // The mirror case: REMOVED from the local list while the fetch was in flight
+  // (`deleteChild`), and still in the answer, which went out before the DELETE
+  // did. It is re-added below, as it always has been, but under its old local
+  // id: a queued entry written against that child still carries it, and
+  // `childServerIdFor` could never resolve a server-derived one again. Empty
+  // whenever no snapshot was passed, since every local id is then present.
+  const localIds = new Set(localChildren.map((c) => c.id));
+  const removedMidFetch = new Map<number, Child>();
+  for (const c of localBefore) {
+    if (c.serverId != null && serverIds.has(c.serverId) && !localIds.has(c.id)) removedMidFetch.set(c.serverId, c);
+  }
   // Every child whose tint is already settled, gathered UP FRONT: the
   // never-pushed locals (always kept) and the locals a server child matches
   // (their color is preserved below). Seeding this from the local list instead
   // of filling it as the map runs is what makes the answer independent of the
   // server's ordering: a matched sibling listed after a new arrival is still
   // visible to it. Locals absent from the server list are deleted server-side,
-  // so they are left out and their tint is free again.
-  const assigned: Child[] = localChildren.filter((c) => c.serverId == null || serverIds.has(c.serverId));
+  // so they are left out and their tint is free again, unless they were written
+  // mid-fetch, which the answer is simply too old to know about. The mid-fetch
+  // REMOVALS are seeded here too, for the same ordering reason: they come back
+  // below wearing the tint they had.
+  const assigned: Child[] = [
+    ...localChildren.filter((c) => c.serverId == null || serverIds.has(c.serverId) || writtenMidFetch(c)),
+    ...removedMidFetch.values(),
+  ];
   const reconciled = serverChildren.map((sc) => {
     const local = sc.serverId != null ? localByServerId.get(sc.serverId) : undefined;
-    if (local) return { ...sc, id: local.id, color: local.color };
+    if (local) return writtenMidFetch(local) ? local : { ...sc, id: local.id, color: local.color };
+    const removed = sc.serverId != null ? removedMidFetch.get(sc.serverId) : undefined;
+    if (removed) return { ...sc, id: removed.id, color: removed.color };
     // Only a genuinely new child needs a tint, and only it joins `assigned`:
     // the matched ones are already in there, and counting them twice would
     // skew `nextChildColor`'s least-used fallback.
@@ -764,8 +860,14 @@ export function reconcileChildren(serverChildren: ServerChild[], localChildren: 
     return child;
   });
   const reconciledIds = new Set(reconciled.map((c) => c.id));
-  const neverPushed = localChildren.filter((c) => c.serverId == null && !reconciledIds.has(c.id));
-  return [...neverPushed, ...reconciled];
+  // Locals the server list did not account for: never pushed, or written while
+  // the fetch was in flight (a create the answer went out too early to list, a
+  // still-unacknowledged edit to a child deleted elsewhere). Prepended, which
+  // is where the never-pushed ones have always gone.
+  const kept = localChildren.filter(
+    (c) => !reconciledIds.has(c.id) && (c.serverId == null || writtenMidFetch(c)),
+  );
+  return [...kept, ...reconciled];
 }
 
 /** Translate incoming server-loaded records' `childId` from the server's child
@@ -1033,11 +1135,19 @@ export function carryOverIncomplete<T extends { id: string; childId: string }>(
  *
  * `local` is the caller's not-yet-reconciled local side: in-memory state for
  * a warm `refresh()`, in-memory or entity-store state for `connect()` (memory
- * is empty after a post-expiry cold start). `local.q` is the write queue,
- * read AFTER the fetch so an entry logged mid-request is included, and
- * `local.timers` is the on-device timer list, the source of truth (see
- * `refresh`). `extra` carries the caller's own connection-lifecycle keys,
- * merged into the same `set()` so subscribers see one atomic update.
+ * is empty after a post-expiry cold start). Both callers gather it after their
+ * fetch rather than from a snapshot taken before it, for the reason `local.q`
+ * (the write queue) spells out: a record written while the request was in
+ * flight is in neither the answer nor a pre-fetch snapshot, so applying the
+ * answer over such a snapshot loses it. "After the fetch" is the rule, not "at
+ * the instant of the apply": `connect` still has several storage awaits to go
+ * when it reads, and `refresh` deliberately reads `local.timers` from on-device
+ * storage BEFORE its fetch, so a widget start/stop reconciles even when the
+ * server is unreachable (see `refresh`). `local.childrenBefore` is the one
+ * input that is deliberately pre-fetch, and only `refresh` has one: it is what
+ * tells a mid-flight child write apart from a server-side change (see
+ * `reconcileChildren`). `extra` carries the caller's own connection-lifecycle
+ * keys, merged into the same `set()` so subscribers see one atomic update.
  */
 function applyServerLoad(
   set: Set,
@@ -1051,14 +1161,19 @@ function applyServerLoad(
     timers: Timer[];
     lastFeed: Record<string, LastFeed>;
     q: Entry[];
+    /** The caller's child list as it was when the fetch went out, when that
+     *  differs from `children` above. Only `refresh` has one: it is the only
+     *  caller that snapshots before fetching. See `reconcileChildren`. */
+    childrenBefore?: Child[];
   },
   extra: Partial<AppState> = {},
 ): void {
   // Children are reconciled by `serverId`, not merged: a child already known
   // to the server keeps its local id (entries/measurements reference it), and
   // a child created offline (serverId == null) is kept under its local id
-  // too. See `reconcileChildren`.
-  const reconciledChildren = reconcileChildren(data.children, local.children);
+  // too. A child written while the fetch was in flight keeps its local record
+  // whole, since this answer predates that write. See `reconcileChildren`.
+  const reconciledChildren = reconcileChildren(data.children, local.children, local.childrenBefore);
   // Incoming entries/measurements/timers carry the SERVER's child id; rewrite
   // it to the local id now that reconciliation has produced the authoritative
   // mapping. See `remapChildIds`.
@@ -2029,20 +2144,38 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const q = await loadQueue();
       // The whole reconcile-and-merge is `applyServerLoad` (shared with
       // `connect`); this warm reload's local side is in-memory state. The
-      // held-back entries the merge re-adds are already in `s.entries`: this
+      // held-back entries the merge re-adds are already in `cur.entries`: this
       // is a warm reload, not a cold restart, so nothing reads the entity
       // store here.
+      //
+      // Read at APPLY time, not from the pre-fetch `s` above, for the same
+      // reason the queue is read after the fetch: everything written while
+      // the request was in flight is missing from that snapshot, and applying
+      // the answer over it silently undoes the write. Returning from the OS
+      // image picker is exactly this window (it backgrounds the app, and
+      // AppState 'active' fires this refresh), which is how "updating a
+      // child's photo does nothing" happened. There is no await between here
+      // and the `set()` inside, so this IS the state the update lands on.
+      // Nothing doubles as a result: every helper that receives one of these
+      // `local.*` lists skips a record whose id the merged list already has
+      // (`mergeUnsynced`, `mergeHeldBackEntries`, `carryOverIncomplete`).
+      // `mergeQueuedEntries` does no de-duplication at all, but it is handed
+      // `q`, not state, and its own doc explains why none is needed there.
+      const cur = get();
       applyServerLoad(
         set,
         data,
         {
-          children: s.children,
-          entries: s.entries,
-          measurements: s.measurements,
-          treatments: s.treatments,
-          selectedChildId: s.selectedChildId,
+          children: cur.children,
+          // What the child list held when the fetch went out: the difference
+          // is the mid-flight write to preserve (see `reconcileChildren`).
+          childrenBefore: s.children,
+          entries: cur.entries,
+          measurements: cur.measurements,
+          treatments: cur.treatments,
+          selectedChildId: cur.selectedChildId,
           timers: localTimers,
-          lastFeed: s.lastFeed,
+          lastFeed: cur.lastFeed,
           q,
         },
         { connected: true, offline: false, networkOnline: true },
@@ -2299,13 +2432,26 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // connect() is allowed to reconcile them. See `loadEntityOrigin`.
     void saveEntityOrigin(normalizeServerUrl(serverUrl));
     void persistServers(savedServers);
-    // Read the pre-existing local children/entries/measurements before the
-    // set() below replaces them with the server's list.
+    const data = await loadFromServer(conn);
+    // The pre-existing local children/entries/measurements, which the set()
+    // below replaces with the server's list. Read AFTER the fetch, like
+    // `connect` and `refresh`: a record written while the request was in
+    // flight is in neither the answer nor a pre-fetch snapshot, so merging
+    // against a snapshot drops it (`treatments`, `timers` and `lastFeed` below
+    // have always been read here for the same reason).
+    //
+    // No pre-fetch snapshot is passed to `reconcileChildren` below, so unlike
+    // `refresh` this does NOT protect a write made DURING this GET to a child
+    // the answer already knows about: an edit to a synced child, or a create
+    // whose serverId was stamped mid-GET, still reconciles to the server's
+    // values. Only a never-pushed create survives, through the ordinary
+    // `serverId == null` rule. That gap is pre-existing and accepted rather
+    // than plumbed: this runs behind the modal adopt sheet, with no child
+    // editor open behind it and no path in this flow that saves one.
     const localChildren = get().children;
     const localEntries = get().entries;
     const localMeasurements = get().measurements;
     const localSelectedChildId = get().selectedChildId;
-    const data = await loadFromServer(conn);
     // Reconcile rather than taking the server list wholesale: the children
     // just uploaded above kept their local ids (only `serverId` was stamped),
     // and entries/measurements still reference those local ids. Taking
@@ -2848,13 +2994,36 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const pending = change.kind === 'set' ? change.photo.uri : change.kind === 'remove' ? null : undefined;
     const existing = s.editingChildId ? s.children.find((c) => c.id === s.editingChildId) : null;
     if (existing) {
+      // A photo change made while offline never reaches the server: the edit
+      // is recorded as a pending op below, and the replay
+      // (`flushPendingOps`) sends `updateChildOnServer(conn, payload)` with no
+      // PhotoChange, so the picked file is not uploaded and a removal is not
+      // cleared. Carrying it through the op log means copying the file out of
+      // Android's evictable cache at pick time, which this does not do. What
+      // it does do is stop the drop being silent: the change is not applied
+      // optimistically either, because a `file://` URI written into the child
+      // record would be persisted, shown as the avatar, and then blanked by
+      // the first refresh that reaches the server, by which point the file may
+      // be gone.
+      //
+      // Gated on the same `serverId != null` as the pending-op branch below,
+      // deliberately: with no server id no op is recorded, and no refresh can
+      // blank the picture either (`reconcileChildren` keeps a never-pushed
+      // local whole), so the file URI is the only copy that child has and
+      // dropping it here would be the deletion rather than the warning. Its
+      // photo is still lost later, when `uploadUnsynced` finally pushes the
+      // record without a PhotoChange; the create branch below signals that at
+      // the point such a record is first queued. Local mode has no server to
+      // drop anything, so it is untouched.
+      const conn = s.connection;
+      const photoDropped = change.kind !== 'none' && conn?.mode === 'server' && s.offline && existing.serverId != null;
       const child: Child = {
         ...existing,
         first: fields.first,
         last: fields.last,
         birth: fields.birth,
         gender: fields.gender,
-        picture: change.kind === 'none' ? existing.picture : pending,
+        picture: change.kind === 'none' || photoDropped ? existing.picture : pending,
       };
       const genderChanged = existing.gender !== child.gender;
       set((st) => ({
@@ -2862,8 +3031,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         childSheet: false,
         editingChildId: null,
       }));
-      get().showToast('Updated');
-      const conn = s.connection;
+      get().showToast(
+        photoDropped ? (change.kind === 'remove' ? 'Updated · photo not removed' : 'Updated · photo not saved') : 'Updated',
+      );
       if (conn && conn.mode === 'server' && !s.offline) {
         // Gender lives in its own `gender`-tagged note, not on the child record,
         // so it is a separate write. Fired only on an actual change: it costs a
@@ -2915,6 +3085,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // add it, and auto-select it (mirrors saveMeasurement's
     // optimistic-local-then-push pattern).
     const localId = 'child' + Date.now();
+    const conn = s.connection;
+    // The create twin of the edit branch's `photoDropped`, for the one create
+    // that is queued rather than pushed here: offline, the child is picked up
+    // later by `flushUnsynced` -> `uploadUnsynced`, whose `pushChild` takes a
+    // child and no PhotoChange at all, so the picked file is dropped exactly as
+    // the edit replay drops it. Same treatment for the same reason: say so, and
+    // do not write a `file://` URI into a record that is about to be pushed
+    // without it. An online create carries the photo on its own POST (and says
+    // so if that POST fails), and local mode has no server to drop anything.
+    const photoDropped = change.kind === 'set' && conn?.mode === 'server' && s.offline;
     const child: Child = {
       id: localId,
       first: fields.first,
@@ -2923,7 +3103,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       expected: fields.expected,
       gender: fields.gender,
       color: nextChildColor(s.children),
-      picture: change.kind === 'set' ? change.photo.uri : null,
+      picture: change.kind === 'set' && !photoDropped ? change.photo.uri : null,
     };
     set((st) => ({
       children: [...st.children, child],
@@ -2935,8 +3115,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsEntries: [],
       insightsError: false,
     }));
-    get().showToast('Saved');
-    const conn = s.connection;
+    get().showToast(photoDropped ? 'Saved · photo not saved' : 'Saved');
     // An expected child holds a DUE date in `birth`, which the server's
     // birth_date cannot legitimately hold. confirmBirth releases it later.
     if (conn && conn.mode === 'server' && !s.offline && !fields.expected) {
