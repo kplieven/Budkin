@@ -3,6 +3,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        # Falls back to the TAG this image is published under, which compose
+        # already refuses to build without (see `image:` below). That fallback
+        # is the point: a web build cannot label itself "dev", so a container
+        # left running an old image says so on screen. Set BUDKIN_VERSION
+        # explicitly to add the short sha, e.g. "0.15.1 (abc1234)".
+        BUDKIN_VERSION: ${BUDKIN_VERSION:-${TAG:?TAG is required}}
     image: git.karellievens.dev/karel/budkin:${TAG:?TAG is required}
     container_name: budkin_web
     ports:

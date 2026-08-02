@@ -145,23 +145,18 @@ export default function History() {
   const visible = filterItems(items, filter);
   const groups = groupByDay(visible, now);
 
-  const body =
-    // A running timer counts as something logged, so the empty state stays away
-    // while one is going.
-    items.length === 0 ? (
-      <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
-        <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
-          <Icon name="list" color={t.faint} size={34} />
-        </View>
-        <Txt weight={700} size={18}>
-          Nothing logged yet
-        </Txt>
-        <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 240, lineHeight: 20 }}>
-          Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.
-        </Txt>
-      </View>
-    ) : (
-      <>
+  // A running timer counts as something logged, so the empty state stays away
+  // while one is going.
+  const empty = items.length === 0;
+  const body = (
+    <>
+      {/* Rendered whenever there is EITHER something to filter or a household to
+          switch to, not only in the non-empty case. The toggle used to live
+          inside the populated branch, which made it unreachable on a child with
+          nothing logged: precisely the state in which someone wants to see the
+          rest of the household. `showFilters` then hides the day and activity
+          chips, which would otherwise open sheets with no options in them. */}
+      {(!empty || canShowHousehold) && (
         <HistoryFilterChips
           filter={filter}
           now={now}
@@ -172,8 +167,30 @@ export default function History() {
           household={canShowHousehold ? showHousehold : null}
           householdLabel={showHousehold ? 'Everyone' : (child?.first ?? 'This child')}
           onToggleHousehold={() => setHousehold((v) => !v)}
+          showFilters={!empty}
         />
-        {visible.length === 0 ? (
+      )}
+      {empty ? (
+        <View style={{ alignItems: 'center', paddingVertical: 64, paddingHorizontal: 24, gap: 14 }}>
+          <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="list" color={t.faint} size={34} />
+          </View>
+          <Txt weight={700} size={18}>
+            {showHousehold ? 'Nothing logged yet' : `Nothing logged for ${child?.first ?? 'this child'}`}
+          </Txt>
+          {/* When a sibling might have something, say so: the empty timeline is
+              the one place the household toggle is genuinely useful, and a
+              parent who has just added a second child would otherwise read this
+              as "the app has nothing" rather than "this child has nothing". */}
+          <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 240, lineHeight: 20 }}>
+            {!showHousehold && canShowHousehold
+              ? 'Switch to Everyone above to see the rest of the household, or tap a big button on Home to log something.'
+              : 'Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.'}
+          </Txt>
+        </View>
+      ) : (
+        <>
+          {visible.length === 0 ? (
           <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
             <Txt weight={700} size={16}>
               Nothing to show here
@@ -239,7 +256,9 @@ export default function History() {
           ))
         )}
       </>
-    );
+        )}
+      </>
+  );
 
   // Mounted as a sibling of the scroll container on both layouts, never inside
   // it: a sheet positions itself against its nearest positioned ancestor, and
