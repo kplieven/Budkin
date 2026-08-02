@@ -3055,11 +3055,8 @@ describe('logging for more than one child at once', () => {
   });
 
   it('gives each entry its OWN id', () => {
-    // `'e' + Date.now()` is millisecond resolution and this loop is
-    // synchronous, so both entries used to land with the same id. Everything
-    // id-keyed then hits both: the queue rewrite, the delete, the post-POST
-    // serverId stamp (which would put one child's server row on the sibling's
-    // entry) and React's list keys.
+    // Both entries used to land with the SAME id, and everything id-keyed then
+    // hit both. See where `built` is assembled in `save()`.
     bothDiapers();
     const ids = s().entries.map((e) => e.id);
     expect(new Set(ids).size).toBe(2);
@@ -3082,9 +3079,8 @@ describe('logging for more than one child at once', () => {
     useAppStore.setState({ offline: true });
     bothDiapers();
     await flush();
-    // One batched call, not one unguarded load-modify-save per child: N
-    // un-awaited single enqueues read the same pre-push queue and the last save
-    // clobbers the rest, so a twin's entry silently vanished.
+    // One batched call, not one per child. See `enqueueEntries` for the
+    // load-modify-save race that turns the difference into a lost entry.
     expect(vi.mocked(enqueueEntries)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(enqueueEntry)).not.toHaveBeenCalled();
     expect(h.q).toHaveLength(2);
