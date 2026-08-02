@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { openBrowserAsync } from 'expo-web-browser';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
@@ -7,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Txt } from '@/components/Txt';
+import { versionLabel } from '@/lib/appVersion';
 import { fontFamily } from '@/theme/fonts';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
@@ -284,6 +286,14 @@ export default function Onboarding() {
         >
           Learn how to host one
         </Txt>
+      </Txt>
+
+      {/* Repeated from Settings deliberately. Settings sits behind the
+          connection gate, so a disconnected or fresh install routes here and
+          can never reach it, which is exactly the state in which someone needs
+          to know what they are running. */}
+      <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 22 }}>
+        {versionLabel(Constants.expoConfig?.extra?.version)}
       </Txt>
     </ScrollView>
   );
