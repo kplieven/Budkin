@@ -81,12 +81,9 @@ export interface ScheduleInput {
    *  end. `napReminders` treats membership here exactly like a running sleep
    *  timer. */
   asleepChildIds: Record<string, true>;
-  /** Resolves a running timer that carries no `childId`. Every current timer
-   *  source stamps one (in-app start, the headless widget's `startSleepTimer`,
-   *  a server-loaded timer, a manual log), so this fallback is defensive for a
-   *  timer persisted by a build that predates that stamping, not a live gap.
-   *  Mirrors the `timer.childId ?? selectedChildId` fallback `mirrorTimerCreate`
-   *  uses in `useAppStore.ts`. */
+  /** The child the app currently has loaded. Scopes the treatment and pumping
+   *  reminders below (see `treatments`); the nap rules deliberately do NOT
+   *  consult it, since a timer belongs to whoever started it. */
   selectedChildId: string;
   /** Every treatment the store holds. `treatmentReminders` scopes to `selectedChildId`
    *  itself, the same way `napReminders` does and for the same reason: in server
@@ -412,14 +409,11 @@ function napReminders(child: Child, input: ScheduleInput, now: number): Schedule
   // TIMER, and separately an ongoing sleep ENTRY that carries no timer at all
   // (`asleepChildIds`; see its doc comment on ScheduleInput) — a running timer
   // does not exist for every ongoing sleep, e.g. one edited to "still
-  // ongoing". `runningTimer` is the shared rule; note it is asked about THIS
-  // child, not the selected one, so an ownerless timer resolves to the selected
-  // child alone and cannot silence every child's nudge at once. That ownerless
-  // case is defensive, not the normal widget path: every current timer source,
-  // including the headless widget, stamps a childId, so it only resolves a timer
-  // persisted before that stamping existed.
+  // ongoing". `runningTimer` is the shared rule, asked about THIS child: a
+  // timer belongs to whoever started it, so one child falling asleep can never
+  // silence another's nudge, and a timer with no owner at all silences nobody's.
   const asleep =
-    runningTimer(input.timers, 'sleep', child.id, input.selectedChildId) != null ||
+    runningTimer(input.timers, 'sleep', child.id) != null ||
     input.asleepChildIds[child.id] === true;
   if (asleep) return [];
 
@@ -848,7 +842,7 @@ function isStaleDelivered(parsed: ParsedReminderId, input: ScheduleInput, now: n
       // exactly the condition `napReminders` uses to refuse to schedule at all,
       // including the ongoing-sleep-entry case that carries no timer.
       return (
-        runningTimer(input.timers, 'sleep', parsed.head, input.selectedChildId) != null ||
+        runningTimer(input.timers, 'sleep', parsed.head) != null ||
         input.asleepChildIds[parsed.head] === true
       );
     case 'stale':

@@ -36,7 +36,7 @@ export function makeSeed(now: number): SeedData {
       { id: 'c1', first: 'Mira', last: 'Okafor', birth: now - 86 * DAY, color: CHILD_COLORS[0] },
       { id: 'c2', first: 'Theo', last: 'Okafor', birth: now - 86 * DAY, color: CHILD_COLORS[1] },
     ],
-    timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: now - 27 * M, saveAs: 'sleep' }],
+    timers: [{ id: 't1', childId: c1, activity: 'sleep', name: 'Sleep', start: now - 27 * M, saveAs: 'sleep' }],
     entries: [
       { id: 'e1', childId: c1, type: 'feeding', start: now - 96 * M, end: now - 78 * M, feedType: 'breast', method: 'right', amount: null, tags: [] },
       { id: 'e2', childId: c1, type: 'diaper', time: now - 41 * M, wet: true, solid: false, color: null, tags: [] },

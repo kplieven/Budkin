@@ -101,11 +101,10 @@ export function buildWidgetSnapshot(s: {
   const diaper = lastDiaper(entries);
   // The shared timer rule, keyed on `saveAs` (what the timer will be written as,
   // so a quick timer repointed to sleep counts) and scoped to the selected child
-  // (so a sibling's nap does not show up as this child's). The selected child is
-  // passed as both ids: an ownerless timer is the selected child's, and nobody
-  // else's. `napToggle` MUST look the running nap up the same way, or a tap on a
-  // widget showing "napping" would start a second timer.
-  const runningSleep = runningTimer(s.timers, 'sleep', s.selectedChildId, s.selectedChildId);
+  // (so a sibling's nap does not show up as this child's). `napToggle` MUST look
+  // the running nap up the same way, or a tap on a widget showing "napping"
+  // would start a second timer.
+  const runningSleep = runningTimer(s.timers, 'sleep', s.selectedChildId);
 
   return {
     childName: child ? child.first : '',
