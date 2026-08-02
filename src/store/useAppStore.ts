@@ -596,13 +596,39 @@ export function visibleTags(serverTags: Tag[], selected: string[]): Tag[] {
  * duplicate an entry that has already flushed. See `mergeQueuedEntries` above
  * for the entry-specific (queue-based) equivalent, and `mergeHeldBackEntries`
  * below for the narrower expecting-child subset that can never flush at all.
+ *
+ * `localBefore` is the caller's list as it was when the fetch went OUT, and it
+ * closes a second hole that `serverId == null` alone cannot. A record created
+ * while the request was in flight is in neither side: not in the answer, which
+ * predates it, and not in the unsynced set either, because its own push may
+ * already have stamped a `serverId` before this apply ran. It was therefore
+ * dropped, silently and unrecoverably. Anything absent from the snapshot is by
+ * definition newer than the answer, so it is kept.
+ *
+ * Why not simply keep every local the answer omits: that would resurrect a
+ * record genuinely DELETED server-side on every refresh, forever. The snapshot
+ * is what tells "created since the fetch" apart from "deleted elsewhere", and
+ * without one this behaves exactly as it always did. Same mechanism, and the
+ * same reasoning, as `reconcileChildren`'s `localBefore` (0.14.2).
+ *
+ * Known gap, deliberately not addressed here: an EDIT to an already-synced
+ * record made during the same window is still reverted to the answer's older
+ * values, because this merge decides per id and the id IS in the answer.
+ * `reconcileChildren` handles that case for children by comparing content.
  */
 export function mergeUnsynced<T extends { id: string; serverId?: number }>(
   serverList: T[],
   localList: T[],
+  localBefore?: T[],
 ): T[] {
   const serverIds = new Set(serverList.map((r) => r.id));
-  const unsynced = localList.filter((r) => r.serverId == null && !serverIds.has(r.id));
+  // Absent means "no snapshot passed", which is not the same as an empty one:
+  // callers without a pre-fetch snapshot (connect, adopt) keep the original
+  // rule, rather than having every local record read as created mid-fetch.
+  const beforeIds = localBefore && new Set(localBefore.map((r) => r.id));
+  const unsynced = localList.filter(
+    (r) => !serverIds.has(r.id) && (r.serverId == null || (beforeIds != null && !beforeIds.has(r.id))),
+  );
   return [...unsynced, ...serverList];
 }
 
@@ -1171,6 +1197,10 @@ function applyServerLoad(
      *  differs from `children` above. Only `refresh` has one: it is the only
      *  caller that snapshots before fetching. See `reconcileChildren`. */
     childrenBefore?: Child[];
+    /** The same, for measurements, and for the same reason: it is what tells a
+     *  record created while the request was in flight apart from one deleted
+     *  server-side. See `mergeUnsynced`. */
+    measurementsBefore?: Measurement[];
   },
   extra: Partial<AppState> = {},
 ): void {
@@ -1214,7 +1244,7 @@ function applyServerLoad(
     // source, further merged by `mergeHeldBackEntries` for an expecting
     // child's held-back entries.
     measurements: carryOverIncomplete(
-      mergeUnsynced(remappedMeasurements, local.measurements),
+      mergeUnsynced(remappedMeasurements, local.measurements, local.measurementsBefore),
       local.measurements,
       degradedSlices,
       (m) => m.kind,
@@ -2183,6 +2213,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           childrenBefore: s.children,
           entries: cur.entries,
           measurements: cur.measurements,
+          // The same snapshot, for the same reason. A measurement saved during
+          // this request whose push stamped a `serverId` before the apply is in
+          // neither the answer nor the unsynced set, so without this it is
+          // dropped outright (see `mergeUnsynced`).
+          measurementsBefore: s.measurements,
           treatments: cur.treatments,
           selectedChildId: cur.selectedChildId,
           timers: localTimers,
