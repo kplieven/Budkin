@@ -77,7 +77,14 @@ export function napLabels(opts: {
   // Only the drawn name is capped. A `contentDescription` has no width, so
   // there is nothing to save by cutting it and the screen-reader user gets the
   // real name.
-  const shown = named.length > NAME_CAP ? `${named.slice(0, NAME_CAP)}…` : named;
+  //
+  // The cut can land on a space ("Mary Jane Elizabeth" slices to "Mary Jane "),
+  // so the tail is trimmed before the ellipsis is appended. That can leave the
+  // drawn name shorter than the cap, which is fine: the cap is a bound, not a
+  // target. This trims the SLICE and not the raw name on purpose. A blank or
+  // padded name is a separate, pre-existing exposure shared with `StatusWidget`,
+  // and fixing one of those two sites would be worse than fixing neither.
+  const shown = named.length > NAME_CAP ? `${named.slice(0, NAME_CAP).replace(/\s+$/, '')}…` : named;
   // "Ada, stop nap" mirrors the visible line with the separator spoken as a
   // pause, and follows the app's own "${child.first}, switch child" idiom.
   return opts.napping
