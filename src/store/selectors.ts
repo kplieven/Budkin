@@ -6,7 +6,7 @@
 import type { Connection } from '@/data/repository';
 import { parseClockInput } from '@/lib/timeParse';
 import { normalizeWash, type WashKind } from '@/lib/wash';
-import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, Measurement, Timer } from '@/types/models';
+import type { ActivityType, BathRhythm, Treatment, TreatmentTimeOfDay, Entry, LastFeed, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState, TimeField } from '@/types/timeEntry';
 
 const M = 60000;
@@ -234,6 +234,35 @@ export function nextStartSide(entries: Entry[]): 'left' | 'right' {
             ? 'right'
             : null;
   return side === 'left' ? 'right' : side === 'right' ? 'left' : 'left';
+}
+
+/**
+ * The feeding prefill for a child with nothing logged yet, and the value the
+ * store boots on. Breast on the left is the neutral opening pair; `openSheet`
+ * alternates the side from it, so a fresh sheet suggests the right.
+ */
+export const LAST_FEED_DEFAULT: LastFeed = { feedType: 'breast', method: 'left' };
+
+/**
+ * One child's last feed: their own stored draft if they have one, else
+ * `fallback`. Exactly `rhythmForChild`'s shape and for the same reason.
+ *
+ * `fallback` is where the pre-map migration lives. A build before this map kept
+ * ONE account-wide value, and it is consulted here rather than seeded into the
+ * map by a hydration pass: no write, no ordering dependency, idempotent (see
+ * `legacyBathRhythm`). It reads as "every child inherits the old value" on the
+ * first launch and degrades to per-child as each child gets a real save.
+ *
+ * No child to scope to yields the fallback, not somebody else's draft: this is
+ * a seed the sheet SAVES, so a permissive read files one child's habits as
+ * another's.
+ */
+export function lastFeedForChild(
+  map: Record<string, LastFeed>,
+  childId: string | undefined,
+  fallback: LastFeed,
+): LastFeed {
+  return (childId ? map[childId] : undefined) ?? fallback;
 }
 
 /** Minutes since the most recent completed feeding ended, or null. */

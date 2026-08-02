@@ -58,6 +58,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 const KEY_ENTRIES_V1 = 'budkin.entries.v1';
 const KEY_MIGRATED = 'budkin.entriesMigrated.v2';
 const CHUNK_PREFIX = 'budkin.entries.v2.';
+const KEY_LAST_FEED = 'budkin.lastFeed.v1';
 
 const chunkKey = (y: number, m: number) => `${CHUNK_PREFIX}${y}-${String(m).padStart(2, '0')}`;
 
@@ -143,10 +144,27 @@ describe('entityStore persistence', () => {
     expect(loaded?.selectedChildId).toEqual('c1');
   });
 
-  it('round-trips the last-feed defaults', async () => {
-    await saveLastFeed({ feedType: 'formula', method: 'bottle' });
+  it('round-trips the last-feed defaults, per child', async () => {
+    await saveLastFeed({ c1: { feedType: 'formula', method: 'bottle' } });
     const loaded = await loadEntities();
-    expect(loaded?.lastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+    expect(loaded?.lastFeed).toEqual({ c1: { feedType: 'formula', method: 'bottle' } });
+    expect(loaded?.legacyLastFeed).toBeNull();
+  });
+
+  it('reads a pre-map last-feed value as the legacy fallback, not as a map', async () => {
+    // What a build before the per-child map left on the key. Both shapes are
+    // plain objects, so a naive object guard would take this as a map of two
+    // children called `feedType` and `method`.
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
+    const loaded = await loadEntities();
+    expect(loaded?.lastFeed).toEqual({});
+    expect(loaded?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
+  });
+
+  it('drops map entries that are not drafts rather than seeding a child with junk', async () => {
+    mem.store.set(KEY_LAST_FEED, JSON.stringify({ c1: { feedType: 'solid', method: 'self' }, c2: 'nonsense' }));
+    const loaded = await loadEntities();
+    expect(loaded?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
   });
 
   it('round-trips entries spanning several months as one union', async () => {
@@ -182,7 +200,8 @@ describe('entityStore persistence', () => {
       entries: [],
       measurements: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
   });
 
@@ -205,7 +224,8 @@ describe('entityStore persistence', () => {
       entries: [],
       measurements: [],
       selectedChildId: '',
-      lastFeed: { feedType: 'breast', method: 'left' },
+      lastFeed: {},
+      legacyLastFeed: null,
     });
   });
 
@@ -214,7 +234,7 @@ describe('entityStore persistence', () => {
     await saveEntries([entry('a'), entryAt('b', 2026, 6)]);
     await saveMeasurements([measurement('a')]);
     await saveSelectedChildId('c1');
-    await saveLastFeed({ feedType: 'solid', method: 'self' });
+    await saveLastFeed({ c1: { feedType: 'solid', method: 'self' } });
 
     await clearEntities();
 

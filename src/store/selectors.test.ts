@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Connection } from '@/data/repository';
-import { activeTreatmentsForChildToday, bathGivenToday, BATH_RHYTHM_DEFAULT, clampBathInterval, clampMinuteOfDay, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, legacyBathRhythm, minuteOfDayIsNap, nextStartSide, measurementsForChild, overruleLasted, parseMinuteOfDay, rhythmForChild, runningTimer, selectServerMode, startOfDay, teDurationMin, teEnd, teStart, timersForChild, washDueState } from '@/store/selectors';
-import type { BathRhythm, Treatment, Entry, Measurement, Timer } from '@/types/models';
+import { activeTreatmentsForChildToday, bathGivenToday, BATH_RHYTHM_DEFAULT, clampBathInterval, clampMinuteOfDay, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedForChild, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, legacyBathRhythm, minuteOfDayIsNap, nextStartSide, measurementsForChild, overruleLasted, parseMinuteOfDay, rhythmForChild, runningTimer, selectServerMode, startOfDay, teDurationMin, teEnd, teStart, timersForChild, washDueState } from '@/store/selectors';
+import type { BathRhythm, Treatment, Entry, LastFeed, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 const NOW = 1_700_000_000_000;
@@ -144,6 +144,21 @@ describe('nextStartSide', () => {
   });
   it('alternates from a single-side method', () => {
     expect(nextStartSide([feed('left', [])])).toBe('right');
+  });
+});
+
+describe('lastFeedForChild', () => {
+  const legacy: LastFeed = { feedType: 'solid', method: 'self' };
+  const map: Record<string, LastFeed> = { c1: { feedType: 'breast', method: 'right' } };
+
+  it('returns the child\'s own stored draft', () => {
+    expect(lastFeedForChild(map, 'c1', legacy)).toEqual({ feedType: 'breast', method: 'right' });
+  });
+  it('falls back for a sibling who has none of their own', () => {
+    expect(lastFeedForChild(map, 'c2', legacy)).toBe(legacy);
+  });
+  it('falls back with no child to scope to', () => {
+    expect(lastFeedForChild(map, undefined, legacy)).toBe(legacy);
   });
 });
 
