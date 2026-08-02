@@ -7683,6 +7683,61 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(clearAdoptTarget).toHaveBeenCalled();
   });
 
+  // The window: BottomSheet's scrim is a plain Pressable wired to onClose with
+  // no `busy` gate, so the adopt sheet can be dismissed mid-flight. adopt keeps
+  // awaiting its post-upload GET and the user is back on a fully interactive
+  // app, child editor included. These two pin that a write landing in that gap
+  // survives, the same way refresh's snapshots protect one.
+  it('keeps a child edit made DURING the post-upload reload', async () => {
+    const localChild: Child = { id: 'localF', first: 'Fay', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild], selectedChildId: 'localF' });
+    vi.mocked(loadFromServer).mockImplementationOnce(async () => {
+      // Dismiss-and-edit, in the gap: the answer below was assembled before
+      // this rename, so believing it wholesale would silently undo it.
+      useAppStore.setState({
+        children: [{ ...localChild, serverId: 501, first: 'Fayette' }],
+      });
+      return {
+        treatments: [],
+        children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW }],
+        entries: [],
+        timers: [],
+        selectedChildId: '501',
+        lastFeed: {},
+        measurements: [],
+      } as never;
+    });
+
+    await s().adopt('https://new.lan', 'tok');
+
+    expect(s().children.map((c) => c.first)).toEqual(['Fayette']);
+  });
+
+  it('keeps a measurement created DURING the post-upload reload', async () => {
+    const localChild: Child = { id: 'localG', first: 'Gus', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ children: [localChild], selectedChildId: 'localG', measurements: [] });
+    vi.mocked(loadFromServer).mockImplementationOnce(async () => {
+      // Saved and pushed in the gap, so it already carries a serverId and the
+      // `serverId == null` rule alone would not rescue it.
+      useAppStore.setState({
+        measurements: [{ id: 'm-gap', serverId: 88, childId: 'localG', kind: 'weight', value: 6.4, date: NOW }],
+      });
+      return {
+        treatments: [],
+        children: [{ id: '501', serverId: 501, first: 'Gus', last: '', birth: NOW }],
+        entries: [],
+        timers: [],
+        selectedChildId: '501',
+        lastFeed: {},
+        measurements: [],
+      } as never;
+    });
+
+    await s().adopt('https://new.lan', 'tok');
+
+    expect(s().measurements.map((m) => m.id)).toEqual(['m-gap']);
+  });
+
   it('a local child\'s id survives a successful adopt, and selectedChildId still points at a real child', async () => {
     const localChild: Child = { id: 'localF', first: 'Fay', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localF' });
