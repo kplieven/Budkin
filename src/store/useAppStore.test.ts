@@ -48,6 +48,10 @@ const h = vi.hoisted(() => ({
   timers: [] as unknown[],
   servers: [] as unknown[],
   pushed: [] as unknown[],
+  /** The `childServerId` argument each `pushEntryToServer` call went out with.
+   *  Separate from `pushed` (which several tests match wholesale) and the thing
+   *  that actually decides which child the server row lands under. */
+  pushedChildServerIds: [] as unknown[],
   updated: [] as unknown[],
   deleted: [] as unknown[],
   measPushed: [] as unknown[],
@@ -226,13 +230,14 @@ vi.mock('@/data/repository', () => ({
     measurements: [],
     treatments: [],
   })),
-  pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown) => {
+  pushEntryToServer: vi.fn(async (_conn: unknown, e: unknown, childServerId: unknown) => {
     if (h.pushFails) throw new Error('net');
     if (h.entryPushFails > 0) {
       h.entryPushFails -= 1;
       throw new Error('net');
     }
     h.pushed.push(e);
+    h.pushedChildServerIds.push(childServerId);
     return 999;
   }),
   updateEntryOnServer: vi.fn(async (_c: unknown, e: unknown) => {
@@ -399,6 +404,7 @@ beforeEach(() => {
   h.timers = [];
   h.servers = [];
   h.pushed = [];
+  h.pushedChildServerIds = [];
   h.updated = [];
   h.deleted = [];
   h.measPushed = [];
@@ -5460,6 +5466,37 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     expect(e.method).toBe('both');
     expect(e.tags).toContain('right'); // "both" folds the starting side into a tag
     expect(s().sheet).toBeNull();
+  });
+
+  it('stopping via "lasted X" files the entry against the timer\'s child, not the selection', async () => {
+    // The Timers tab deliberately lists every child's timers with no per-child
+    // filter, so tapping a sibling's running timer while another child is
+    // selected is the obvious thing to do. `stopTimer` gets this right; save()'s
+    // timer-stop path did not, because `existing` is null for a brand-new entry
+    // and the owner had nowhere to come from but the selection.
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      offline: false,
+      children: [
+        { id: 'localMira', serverId: 11, first: 'Mira', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
+        { id: 'localTheo', serverId: 22, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
+      ],
+      selectedChildId: 'localTheo',
+      timers: [{ id: 'tm', childId: 'localMira', activity: 'sleep', name: 'Sleep', start: NOW - 20 * M, saveAs: 'sleep' }],
+      entries: [],
+    });
+
+    s().openTimerEdit('tm');
+    s().setTimerLasted(20);
+    s().save();
+
+    expect(s().timers).toHaveLength(0); // the timer was stopped
+    expect(s().entries[0].childId).toBe('localMira');
+    await flush();
+    // And the server row lands under Mira: `commitWrite` resolves the child
+    // server id from the ENTRY, so a wrong owner here creates the record under
+    // the wrong child, which no local fix can take back.
+    expect(h.pushedChildServerIds).toEqual([11]);
   });
 
   it('"Still running" after a length keeps the timer live on save', () => {

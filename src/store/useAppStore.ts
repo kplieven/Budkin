@@ -3541,10 +3541,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const te = s.te;
     const now = s.now;
     const existing = s.editingId ? s.entries.find((e) => e.id === s.editingId) : null;
-    // An edit keeps the record with whoever it was about. Re-stamping the
+    // Three cases, in this order.
+    //
+    // An EDIT keeps the record with whoever it was about. Re-stamping the
     // selected child here would also move it server-side, since the update
     // PATCHes `child:` along with everything else.
-    const childId = existing?.childId ?? s.selectedChildId;
+    //
+    // A timer STOP (the "lasted X" path, `fromTimerId` set) belongs to whoever
+    // STARTED the timer, exactly as `stopTimer` decides for the button next to
+    // it. This one cannot read `existing`: the entry is brand new, so it is
+    // null, and the owner has to come off the timer. The Timers tab deliberately
+    // lists every child's timers with no per-child filter, so the timer being
+    // stopped need not belong to the selection, and stamping the selection here
+    // filed a sibling's nap against the wrong child, server row and all.
+    //
+    // A fresh draft is the selected child's, which is the only case left.
+    const sourceTimer = s.fromTimerId ? s.timers.find((t) => t.id === s.fromTimerId) : undefined;
+    const childId = existing?.childId ?? sourceTimer?.childId ?? s.selectedChildId;
     const id = existing ? existing.id : 'e' + Date.now();
     // for breastfeeding "both", record the starting side as a left/right tag
     const tags =
