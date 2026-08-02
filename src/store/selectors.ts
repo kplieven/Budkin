@@ -31,9 +31,9 @@ export function selectPendingCount(s: { queueCount: number; measurements: Measur
  * server-only affordances on it and they have to agree: Home's offline banner
  * and the desktop top bar's pill both feed it to `offlineBannerAction`
  * (`src/features/queue/offlineBanner.ts`), Settings shows its Offline queue row
- * on it, and History marks queued entries on it. Hand-copied, any one of them
- * can be changed without the others, and the app starts contradicting itself
- * about which mode it is in.
+ * on it, and History and the desktop timeline rail both mark queued entries on
+ * it. Hand-copied, any one of them can be changed without the others, and the
+ * app starts contradicting itself about which mode it is in.
  *
  * Takes a structural subset so it doubles as a stable zustand selector:
  * `useAppStore(selectServerMode)`. It returns a BOOLEAN and must keep doing so:

@@ -67,15 +67,31 @@ export interface Child {
  *  and overwriting the real one on every refresh. */
 export type ServerChild = Omit<Child, 'color'>;
 
+/** A file object a multipart upload part can be built from on native, kept
+ *  structural so no module needs the native type to describe one. Native
+ *  bundles run expo/fetch, not React Native's fetch, and its multipart encoder
+ *  only reads a string, a `Blob`, or an object exposing `bytes()`: RN's
+ *  `{ uri, name, type }` file descriptor throws there. `expo-file-system`'s
+ *  `File` satisfies this. */
+export interface UploadableFile {
+  bytes(): Promise<Uint8Array>;
+  readonly name: string;
+  readonly type: string;
+}
+
 /** A photo the user picked in the child sheet, normalized off the image-picker
  *  asset so the store / API layer never import expo-image-picker types.
  *  `file` is only populated on web (the raw File the picker exposes) and lets
- *  the upload builder skip a redundant fetch. */
+ *  the upload builder skip a redundant fetch; `nativeFile` is its native
+ *  counterpart, and is what the upload actually sends there (see
+ *  `UploadableFile`). Both are built in `src/lib/photo.ts`, which keeps the
+ *  native imports out of the API client. */
 export interface PickedPhoto {
   uri: string;
   name: string;
   type: string;
   file?: Blob;
+  nativeFile?: UploadableFile;
 }
 
 /** What to do with a child's photo on save. */

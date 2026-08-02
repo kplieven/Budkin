@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { entryTimestamp } from '@/types/models';
+import { ApiError } from '@/api/client';
+import { entryTimestamp, type ActivityType, type MeasurementKind, type Timer } from '@/types/models';
 
 import {
   deleteTimerFromServer,
@@ -11,7 +12,6 @@ import {
   serverHasData,
   updateTimerOnServer,
 } from './repository';
-import type { Timer } from '@/types/models';
 
 const DAY = 86400000;
 
@@ -34,7 +34,11 @@ const listTimers = vi.fn(async () => [] as any[]);
 const createTimer = vi.fn(async () => 11);
 const updateTimer = vi.fn(async () => undefined);
 const deleteTimer = vi.fn(async () => undefined);
-vi.mock('@/api/client', () => ({
+// Only the client class is stubbed; `ApiError` stays the real one, because
+// `loadFromServer` now reads its `status` to tell a 404 (an ANSWER: this server
+// has no such endpoint) from any other failure (an absent answer).
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
   BabybuddyClient: vi.fn().mockImplementation(() => ({
     listSleep,
     listFeedings,
@@ -177,6 +181,139 @@ describe('loadFromServer child selection', () => {
     for (const kind of ['weight', 'height', 'head', 'bmi']) {
       expect(listMeasurements).toHaveBeenCalledWith(kind, '9');
     }
+  });
+});
+
+describe('loadFromServer incompleteSlices (partial-load signal)', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const serverChildren = [{ id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' }];
+
+  // Every per-type list call degrades to [] on failure, so each one has to be
+  // put back to a known-good answer before a test fails exactly one of them.
+  const answerEverything = () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    listFeedings.mockReset().mockResolvedValue([]);
+    listSleep.mockReset().mockResolvedValue([]);
+    listChanges.mockReset().mockResolvedValue([]);
+    listPumping.mockReset().mockResolvedValue([]);
+    listTummy.mockReset().mockResolvedValue([]);
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listTemperature.mockReset().mockResolvedValue([]);
+    listMedication.mockReset().mockResolvedValue([]);
+    listChildTreatments.mockReset().mockResolvedValue([]);
+    listMeasurements.mockReset().mockResolvedValue([]);
+    listTimers.mockReset().mockResolvedValue([]);
+  };
+
+  it('names nothing when every per-type request answered', async () => {
+    answerEverything();
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({});
+  });
+
+  it('names the slices one failed request emptied, while the rest still loads', async () => {
+    answerEverything();
+    // The live repro: one timed-out /api/notes/ takes every note, bath and
+    // milestone out of `entries` with nothing in the answer saying so. ONE
+    // request, so all three of its slices are floors.
+    listChildNotes.mockRejectedValueOnce(new Error('timeout'));
+    listFeedings.mockResolvedValueOnce([
+      { id: 'f-1', type: 'feeding', childId: '7', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
+    ] as any);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+    expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
+  });
+
+  it('names only the failing measurement kind, not the three that answered', async () => {
+    answerEverything();
+    // weight is fetched first (see `kinds` in loadFromServer).
+    listMeasurements.mockReset().mockRejectedValueOnce(new Error('500')).mockResolvedValue([]);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({ '7': ['weight'] });
+  });
+
+  it('does NOT count a 404: an endpoint this server does not have is an ANSWER', async () => {
+    // /api/medication/ postdates several Baby Buddy releases, so an older
+    // instance 404s on it forever. Counting that as a degrade would freeze the
+    // slice on every load for good, which is the one outcome carry-over exists
+    // to avoid.
+    answerEverything();
+    listMedication.mockRejectedValueOnce(new ApiError(404, 'Not found'));
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({});
+  });
+
+  it('does count a 500 from the same endpoint (a failure, not a missing feature)', async () => {
+    answerEverything();
+    listMedication.mockRejectedValueOnce(new ApiError(500, 'Server Error'));
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({ '7': ['medication'] });
+  });
+
+  // Fail-closed coverage. `orEmpty` is the only thing that reports a failed
+  // fetch, and an unreported failure is read as a real answer, so its rows are
+  // DELETED rather than preserved (see `LoadResult.incompleteSlices`). Every
+  // slice in the vocabulary therefore has to be reachable from a fetch that
+  // routes through it. These two are `Record<Union, true>`, so adding an
+  // activity type or a measurement kind fails to TYPECHECK here until it is
+  // listed, and then fails the test below until some fetch reports it.
+  const ALL_ACTIVITIES: Record<ActivityType, true> = {
+    feeding: true,
+    sleep: true,
+    diaper: true,
+    pumping: true,
+    tummy: true,
+    bath: true,
+    milestone: true,
+    note: true,
+    temperature: true,
+    medication: true,
+  };
+  const ALL_MEASUREMENT_KINDS: Record<MeasurementKind, true> = { weight: true, height: true, head: true, bmi: true };
+
+  it('every activity type and measurement kind is covered by a fetch that reports its own failure', async () => {
+    answerEverything();
+    // Every per-type fetch fails at once. Named one by one on purpose: this
+    // list IS the set of fetches whose failures have to be reported, so a new
+    // fetch added without a line here surfaces as a slice nobody covers.
+    listFeedings.mockRejectedValueOnce(new Error('down'));
+    listSleep.mockRejectedValueOnce(new Error('down'));
+    listChanges.mockRejectedValueOnce(new Error('down'));
+    listPumping.mockRejectedValueOnce(new Error('down'));
+    listTummy.mockRejectedValueOnce(new Error('down'));
+    listChildNotes.mockRejectedValueOnce(new Error('down'));
+    listTemperature.mockRejectedValueOnce(new Error('down'));
+    listMedication.mockRejectedValueOnce(new Error('down'));
+    listChildTreatments.mockRejectedValueOnce(new Error('down'));
+    for (const kind of Object.keys(ALL_MEASUREMENT_KINDS)) listMeasurements.mockRejectedValueOnce(new Error(`down: ${kind}`));
+    // Account-wide, and deliberately uncounted: it belongs to no child's slice.
+    listGenders.mockRejectedValueOnce(new Error('down'));
+
+    const result = await loadFromServer(conn);
+
+    expect([...(result.incompleteSlices?.['7'] ?? [])].sort()).toEqual(
+      [...Object.keys(ALL_ACTIVITIES), ...Object.keys(ALL_MEASUREMENT_KINDS), 'treatment'].sort(),
+    );
+  });
+
+  it('names nothing when the account has no children to fetch', async () => {
+    answerEverything();
+    listChildren.mockReset().mockResolvedValueOnce([]);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.incompleteSlices).toEqual({});
   });
 });
 
