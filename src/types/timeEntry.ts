@@ -62,6 +62,19 @@ export interface TimeEntryState {
   method?: FeedMethod;
   /** for breastfeeding "both": which side she started on (saved as a left/right tag) */
   startSide?: 'left' | 'right';
+  /**
+   * The user picked this feeding value THEMSELVES, as opposed to it being the
+   * suggestion the sheet seeded from the child's own history on open. All three
+   * are CHILD-scoped, so re-aiming the sheet at a sibling re-seeds them (a
+   * breastfed twin and a bottle-fed one have genuinely different right answers),
+   * and these are what keep that recompute from overruling a decision already
+   * made. One flag per field, not one for the group: touching the feed type must
+   * not freeze the method and the side on the previous child's history. Mirrors
+   * `washEdited`.
+   */
+  feedTypeEdited?: boolean;
+  methodEdited?: boolean;
+  startSideEdited?: boolean;
   amount?: number;
   wet?: boolean;
   solid?: boolean;

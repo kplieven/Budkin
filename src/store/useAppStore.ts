@@ -113,6 +113,8 @@ import type {
   ChildGender,
   Treatment,
   Entry,
+  FeedMethod,
+  FeedType,
   LastFeed,
   Measurement,
   MeasurementKind,
@@ -1201,28 +1203,46 @@ function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSys
 }
 
 /**
+ * The three CHILD-scoped seeds a feeding draft opens on: what this child was
+ * last fed, and which breast comes next.
+ *
+ * One function so `openSheet`, `openTimerEdit` and a re-aim cannot arrive at
+ * different answers for the same child. `method` is the alternated side, which
+ * is why the last feed's own method is not simply echoed back.
+ */
+function feedingSeeds(
+  s: Pick<AppState, 'entries' | 'lastFeed' | 'legacyLastFeed'>,
+  childId: string | undefined,
+): { feedType: FeedType; method: FeedMethod; startSide: 'left' | 'right' } {
+  const last = lastFeedForChild(s.lastFeed, childId, s.legacyLastFeed);
+  return {
+    feedType: last.feedType || 'breast',
+    method: last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left',
+    startSide: nextStartSide(entriesForChild(s.entries, childId)),
+  };
+}
+
+/**
  * The draft the sheet should hold once it has been re-aimed at `ids`, or null
  * when nothing needs to move.
  *
- * Only a bath's suggested wash moves, taken in `openSheet` from that child's own
- * rhythm and bath history. Re-aiming the sheet changes whose rhythm applies, so
- * the suggestion has to follow, the same way the time-entry anchor chips do.
- * Leaving it behind would offer Mira's suggestion as Ivo's, and the sheet SAVES
- * it. (A sleep draft's nap flag looks similar and is not: the nap window is
- * global.)
+ * Two activities carry CHILD-scoped seeds: a bath's suggested wash, from that
+ * child's own rhythm and bath history, and a feeding's type, method and start
+ * side, from what that child was last fed. Re-aiming the sheet changes whose
+ * history applies, so the suggestions have to follow, the same way the
+ * time-entry anchor chips do. Leaving them behind would offer Mira's suggestion
+ * as Ivo's, and the sheet SAVES it: a breastfed twin and a bottle-fed one have
+ * genuinely different right answers. (A sleep draft's nap flag looks similar and
+ * is not: the nap window is global.)
  *
  * "Recompute the derived surfaces, leave the user's own choices alone" cuts both
- * ways, hence three guards. `washEdited` means the parent has already picked
- * quick or full, and a suggestion must never overrule a decision. An EDIT holds
- * the RECORD's wash, not a suggestion, so re-aiming an edit moves the record
- * without rewriting what it says happened. And a multi-target draft has no
- * single rhythm to read, so the shared value stands.
- *
- * A feeding draft's three seeds (type, method, start side) are child-scoped too
- * and deliberately do NOT move: each is a chip the parent may already have set,
- * and unlike `wash` there is no per-field record of that, so re-seeding here
- * could only overrule a decision it cannot see. The sheet opens on one child, so
- * the seeds are right for the child it was opened for.
+ * ways, hence three guards. The `*Edited` flags mean the parent has already
+ * picked, and a suggestion must never overrule a decision; they are per field,
+ * so choosing a feed type does not freeze the method and the side on the
+ * previous child. An EDIT holds the RECORD's own values, not suggestions, so
+ * re-aiming an edit moves the record without rewriting what it says happened.
+ * And a multi-target draft has no single history to read, so the shared values
+ * stand.
  */
 /** Point the open sheet at `ids`, carrying any child-scoped seed along with it.
  *  The one write path for the target, so `setSheetChildren` and
@@ -1233,14 +1253,37 @@ function aimSheetAt(get: Get, set: Set, ids: string[]): void {
 }
 
 function reseedTargetScopedDraft(s: AppStore, ids: string[]): TimeEntryState | null {
-  if (s.sheet?.type !== 'bath' || s.editingId || s.te.washEdited || ids.length !== 1) return null;
+  if (s.editingId || ids.length !== 1) return null;
   const childId = ids[0];
-  const wash = washDueState(
-    entriesForChild(s.entries, childId),
-    rhythmForChild(s.bathRhythms, childId, s.legacyRhythm),
-    s.now,
-  ).nextKind;
-  return wash === s.te.wash ? null : { ...s.te, wash };
+  if (s.sheet?.type === 'bath') {
+    if (s.te.washEdited) return null;
+    const wash = washDueState(
+      entriesForChild(s.entries, childId),
+      rhythmForChild(s.bathRhythms, childId, s.legacyRhythm),
+      s.now,
+    ).nextKind;
+    return wash === s.te.wash ? null : { ...s.te, wash };
+  }
+  if (s.sheet?.type === 'feeding') {
+    const seeds = feedingSeeds(s, childId);
+    const next: TimeEntryState = { ...s.te };
+    if (!s.te.feedTypeEdited) next.feedType = seeds.feedType;
+    if (!s.te.methodEdited) next.method = seeds.method;
+    if (!s.te.startSideEdited) next.startSide = seeds.startSide;
+    if (next.feedType === s.te.feedType && next.method === s.te.method && next.startSide === s.te.startSide) {
+      return null;
+    }
+    // The same stale-amount hazard `setTE` guards, reached by another door: the
+    // field means millilitres on one side of `feedAmountIsVolume` and an intake
+    // level on the other, and this re-seed can move the draft across that line.
+    // An intake of 3 is not 3 ml, so drop it rather than let it be saved,
+    // converted or snapped to the volume grid as the wrong kind of number.
+    if (feedAmountIsVolume(s.te.feedType, s.te.method) !== feedAmountIsVolume(next.feedType, next.method)) {
+      next.amount = undefined;
+    }
+    return next;
+  }
+  return null;
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1999,6 +2042,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connected: true,
           connecting: false,
           savedServers,
+          // The pre-map feeding fallback travels with the entities it belongs
+          // to. This is the only place it can reach state on a cold start
+          // parked at the reconnect screen: `hydrate`'s no-connection branch
+          // reads no entity store. Skipped when the read found none, so a
+          // fallback `hydrate` did manage to set is never reset to the default.
+          ...(saved?.legacyLastFeed ? { legacyLastFeed: saved.legacyLastFeed } : {}),
           // a newly-connected server's profile + tags haven't been fetched yet
           profile: null,
           profileLoaded: false,
@@ -3066,14 +3115,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.agoMin = 0;
     }
     if (type === 'feeding') {
-      // All three seeds are about THIS child. Unscoped, a twin's sheet opened
-      // on whichever of them was fed last and disagreed with the Home tile that
-      // sent you there, which computes its hint from child-scoped entries.
-      const last = lastFeedForChild(s.lastFeed, seedChildId, s.legacyLastFeed);
-      te.feedType = last.feedType || 'breast';
-      te.method = last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left';
-      // suggested starting breast, alternating from this child's last feed
-      te.startSide = nextStartSide(entriesForChild(s.entries, seedChildId));
+      // All three seeds are about THIS child. Unscoped, a twin's sheet opened on
+      // whichever of them was fed last and disagreed with the Home tile that
+      // sent you there, which computes its hint from child-scoped entries. They
+      // follow a re-aim from here too (see `reseedTargetScopedDraft`), which is
+      // why the computation is shared rather than written out twice.
+      const seeds = feedingSeeds(s, seedChildId);
+      te.feedType = seeds.feedType;
+      te.method = seeds.method;
+      te.startSide = seeds.startSide;
     }
     if (type === 'pumping') {
       te.amount = 90;
@@ -3251,12 +3301,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // child's, so the two routinely disagree. A timer nothing could attribute
       // has no scoped history at all, and borrows nobody's rather than falling
       // back to whoever happens to be selected.
-      const last = lastFeedForChild(s.lastFeed, tm.childId, s.legacyLastFeed);
-      te.feedType = tm.feedType ?? (last.feedType || 'breast');
-      te.method =
-        tm.method ??
-        (last.method === 'left' ? 'right' : last.method === 'right' ? 'left' : last.method || 'left');
-      te.startSide = tm.startSide ?? nextStartSide(entriesForChild(s.entries, tm.childId));
+      const seeds = feedingSeeds(s, tm.childId);
+      te.feedType = tm.feedType ?? seeds.feedType;
+      te.method = tm.method ?? seeds.method;
+      te.startSide = tm.startSide ?? seeds.startSide;
       if (tm.amount != null) te.amount = tm.amount;
     }
     if (type === 'pumping') {
@@ -3616,6 +3664,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ) {
         next.amount = undefined;
       }
+      // The feeding chips are the setter for the three CHILD-scoped feeding
+      // seeds, so this is where "the parent chose it" gets recorded. Same job
+      // `setWash` does for the bath suggestion, and the flags keep a re-aim from
+      // overruling the choice (see `reseedTargetScopedDraft`). Every production
+      // caller is a chip tap; a compound patch (tests) marks each key it names.
+      if ('feedType' in patch) next.feedTypeEdited = true;
+      if ('method' in patch) next.methodEdited = true;
+      if ('startSide' in patch) next.startSideEdited = true;
       if ('agoMin' in patch) next.absTime = undefined; // point: a relative pick drops the edit anchor
       // A manual time pick (precise editor, "Now") deselects the "When" anchor,
       // unless the patch itself is that anchor selection.
