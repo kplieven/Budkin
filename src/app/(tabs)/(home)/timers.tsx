@@ -11,6 +11,7 @@ import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
+import { timerChildSuffix } from '@/features/timers/timerAttribution';
 import { ACTIVITY_LABEL, TIMER_SAVE_OPTIONS } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { fmtAgo, fmtElapsedClock } from '@/lib/format';
@@ -38,6 +39,10 @@ export default function Timers() {
   // whether its mirror has reached Baby Buddy yet. Hidden in local mode.
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  // The roster every card attributes against. Raw select (stable reference);
+  // the naming is derived per card in the render body, never in the selector,
+  // which would hand zustand v5 a fresh array every render.
+  const children = useAppStore((s) => s.children);
 
   // Pull-to-refresh, mirroring Home: native uses the platform RefreshControl;
   // touch-capable web gets the custom gesture; a refresh() also pulls + reconciles
@@ -57,7 +62,9 @@ export default function Timers() {
   // timer belonging to a born sibling must stay visible and stoppable even
   // while the selected child is still expected. Only the affordance that
   // CREATES a new timer for the selected child is guarded below; the list
-  // itself always renders.
+  // itself always renders. Because of that, each card names the child it
+  // belongs to once the household has two: without it, two siblings napping
+  // gives two cards that are identical down to their button labels.
   const body = (
     <>
       {timers.length === 0 && (
@@ -77,6 +84,10 @@ export default function Timers() {
       <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 14 } : { gap: 14 }}>
         {timers.map((tm) => {
           const color = t.activity[tm.saveAs];
+          // The timer's OWN child, never the selected one. `who.spoken` goes on
+          // the three action labels below, which are otherwise byte-identical
+          // between two cards running the same activity.
+          const who = timerChildSuffix(tm.childId, children);
           return (
             <View
               key={tm.id}
@@ -99,6 +110,7 @@ export default function Timers() {
                 <View style={{ flex: 1 }}>
                   <Txt weight={700} size={16}>
                     {tm.name}
+                    {who.drawn}
                   </Txt>
                   <Txt weight={500} size={12.5} color={t.dim}>
                     started {fmtAgo(tm.start, now)}
@@ -170,7 +182,7 @@ export default function Timers() {
                 <Pressable
                   onPress={() => discardTimer(tm.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Discard ${tm.name} timer`}
+                  accessibilityLabel={`Discard ${tm.name} timer${who.spoken}`}
                   style={(s) => [
                     { flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
                     isHovered(s) && { backgroundColor: t.elevated },
@@ -183,7 +195,7 @@ export default function Timers() {
                 <Pressable
                   onPress={() => openTimerEdit(tm.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Edit ${tm.name} timer`}
+                  accessibilityLabel={`Edit ${tm.name} timer${who.spoken}`}
                   style={(s) => [
                     { flex: 1, height: 50, borderRadius: 14, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
                     isHovered(s) && { backgroundColor: t.elevated },
@@ -196,7 +208,7 @@ export default function Timers() {
                 <Pressable
                   onPress={() => stopTimer(tm.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Stop and save ${tm.name} timer`}
+                  accessibilityLabel={`Stop and save ${tm.name} timer${who.spoken}`}
                   style={(s) => [
                     { flex: 1.7, height: 50, borderRadius: 14, backgroundColor: color, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6, cursor: 'pointer' },
                     isHovered(s) && { boxShadow: t.shadow },
