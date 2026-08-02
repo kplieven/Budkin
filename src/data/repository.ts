@@ -52,6 +52,23 @@ export interface LoadResult {
   /** The selected child's treatment regimens, read from their `treatment`-tagged
    *  notes. Empty in local mode and whenever the fetch fails. */
   treatments: Treatment[];
+  /** SERVER child ids this load FETCHED whose per-type requests all answered.
+   *  A fetched child absent from here had at least one request degrade to []
+   *  (see the `.catch`es below), so its `entries`/`measurements`/`treatments`
+   *  slice is a FLOOR, not an answer: consumers must carry the slice they
+   *  already hold over instead of accepting it, or one timed-out /api/notes/
+   *  deletes every note, bath and milestone this device had. Exactly the
+   *  `timers: null` distinction, per child.
+   *
+   *  Optional, and absent means every fetched child came back whole: the only
+   *  two construction sites are in this file, and a caller that cannot degrade
+   *  should not have to say so.
+   *
+   *  Says nothing about a child this load did NOT fetch. A load covers ONE
+   *  child (see `lastFeed`), and the siblings it skipped are not incomplete
+   *  answers, they were never asked about; what happens to their records is a
+   *  separate question from this one. */
+  completeChildIds?: string[];
 }
 
 /** Validate the connection and load children + recent entries from the server.
@@ -102,23 +119,36 @@ export async function loadFromServer(
       : undefined;
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
+  // Flipped by `orEmpty` below the moment any per-type request degrades, which
+  // is what `completeChildIds` reports to the caller. One degrade is enough:
+  // the concatenation loses a whole type with nothing in the shape saying so.
+  let complete = true;
+  /** The degrade-to-empty catch every per-type call shares, recording that it
+   *  fired rather than swallowing it silently. */
+  const orEmpty =
+    <T>(empty: T) =>
+    (): T => {
+      complete = false;
+      return empty;
+    };
+
   let entries: Entry[] = [];
   let treatments: Treatment[] = [];
   if (selectedChildId) {
     const [f, s, d, p, tt, notesData, temp, med, treatmentList] = await Promise.all([
-      client.listFeedings(selectedChildId).catch(() => []),
-      client.listSleep(selectedChildId).catch(() => []),
-      client.listChanges(selectedChildId).catch(() => []),
-      client.listPumping(selectedChildId).catch(() => []),
-      client.listTummy(selectedChildId).catch(() => []),
+      client.listFeedings(selectedChildId).catch(orEmpty([])),
+      client.listSleep(selectedChildId).catch(orEmpty([])),
+      client.listChanges(selectedChildId).catch(orEmpty([])),
+      client.listPumping(selectedChildId).catch(orEmpty([])),
+      client.listTummy(selectedChildId).catch(orEmpty([])),
       // ONE /api/notes/ request, partitioned into milestones + baths + general notes.
-      client.listChildNotes(selectedChildId).catch(() => ({ baths: [], milestones: [], notes: [] })),
-      client.listTemperature(selectedChildId).catch(() => []),
-      client.listMedication(selectedChildId).catch(() => []),
+      client.listChildNotes(selectedChildId).catch(orEmpty({ baths: [], milestones: [], notes: [] })),
+      client.listTemperature(selectedChildId).catch(orEmpty([])),
+      client.listMedication(selectedChildId).catch(orEmpty([])),
       // Treatments come from a SECOND /api/notes/ request filtered by the `treatment` tag,
       // not out of `listChildNotes`: a treatment note is dated at the regimen's start,
       // so a long-running treatment would drop out of the recent-notes window.
-      client.listChildTreatments(selectedChildId).catch(() => [] as Treatment[]),
+      client.listChildTreatments(selectedChildId).catch(orEmpty([] as Treatment[])),
     ]);
     entries = [...f, ...s, ...d, ...p, ...tt, ...notesData.baths, ...notesData.milestones, ...notesData.notes, ...temp, ...med];
     treatments = treatmentList;
@@ -138,7 +168,7 @@ export async function loadFromServer(
   if (selectedChildId) {
     const kinds: MeasurementKind[] = ['weight', 'height', 'head', 'bmi'];
     const lists = await Promise.all(
-      kinds.map((k) => client.listMeasurements(k, selectedChildId).catch(() => [] as Measurement[])),
+      kinds.map((k) => client.listMeasurements(k, selectedChildId).catch(orEmpty([] as Measurement[]))),
     );
     measurements = lists.flat();
   }
@@ -163,7 +193,19 @@ export async function loadFromServer(
     timers = null;
   }
 
-  return { children, entries, timers, selectedChildId, lastFeed, measurements, treatments };
+  return {
+    children,
+    entries,
+    timers,
+    selectedChildId,
+    lastFeed,
+    measurements,
+    treatments,
+    // The one child this load fetched, and only when nothing degraded (see
+    // `LoadResult.completeChildIds`). An account with no children fetched
+    // nothing, so it names nothing.
+    completeChildIds: selectedChildId && complete ? [selectedChildId] : [],
+  };
 }
 
 /**

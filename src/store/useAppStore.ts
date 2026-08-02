@@ -918,6 +918,67 @@ type Get = StoreApi<AppStore>['getState'];
 type Set = StoreApi<AppStore>['setState'];
 
 /**
+ * The LOCAL ids of the children whose slice of a server load is INCOMPLETE:
+ * fetched by that load, but with at least one per-type request degraded to []
+ * (see `LoadResult.completeChildIds`). Their records must be carried over
+ * rather than replaced, exactly as a null `timers` keeps the on-device timers.
+ *
+ * An absent `completeChildIds` names nobody: it means every fetched child came
+ * back whole, which is the field's own contract and what lets a caller that
+ * cannot degrade say nothing at all.
+ *
+ * A load covers exactly ONE child, `data.selectedChildId` (see
+ * `LoadResult.lastFeed`), so that child is the only one this can ever name. A
+ * sibling the load skipped is not an incomplete answer, it is no answer at
+ * all, and what the wholesale replace below does to a sibling's records is a
+ * separate question from this one; whoever makes a load cover more than one
+ * child widens this with it.
+ */
+function incompleteLoadChildIds(data: LoadResult, reconciledChildren: Child[]): ReadonlySet<string> {
+  if (data.completeChildIds == null || data.completeChildIds.includes(data.selectedChildId)) return new Set();
+  // The fetched child in LOCAL id space, matched by `serverId` against the
+  // reconciled list, the way `resolveSelectedChildId` matches it.
+  const fetched = reconciledChildren.find((c) => String(c.serverId) === data.selectedChildId);
+  return new Set(fetched ? [fetched.id] : []);
+}
+
+/**
+ * Put a child's own records back over an INCOMPLETE server answer (see
+ * `incompleteLoadChildIds`): drop what the load offered for that child, whose
+ * set is a FLOOR rather than an answer, and carry `previous` over instead.
+ * Without this, one timed-out per-type request empties the child's entries,
+ * and the persistence subscription then has `saveEntries` delete the month
+ * chunks that emptying just produced.
+ *
+ * Carried over, deliberately NOT unioned with the partial answer: a union
+ * would keep a record deleted in Baby Buddy's own UI alive for as long as that
+ * child kept coming back incomplete, while a carry-over is one refresh late
+ * and no more. Again exactly what a null `timers` does.
+ *
+ * `previous` may hold rows the merged list has too (callers fold the write
+ * queue into both), so a row already present is skipped rather than
+ * duplicated. Returns the input untouched when nothing is incomplete, so an
+ * ordinary load does not churn the reference.
+ */
+function carryOverIncomplete<T extends { id: string; childId: string }>(
+  merged: T[],
+  previous: T[],
+  // `ReadonlySet`, not `Set`: the store's own `type Set` alias (the zustand
+  // setter, above) shadows the global one for every TYPE position in this file.
+  incompleteChildIds: ReadonlySet<string>,
+): T[] {
+  if (incompleteChildIds.size === 0) return merged;
+  const out = merged.filter((r) => !incompleteChildIds.has(r.childId));
+  const seen = new Set(out.map((r) => r.id));
+  for (const r of previous) {
+    if (!incompleteChildIds.has(r.childId) || seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
+}
+
+/**
  * Apply a successful `loadFromServer` result over the local view of the same
  * data, as ONE `set()`: reconcile children by `serverId` so local ids survive
  * (see `reconcileChildren`), remap incoming child references into local id
@@ -968,6 +1029,11 @@ function applyServerLoad(
   // mapping. See `remapChildIds`.
   const remappedEntries = remapChildIds(data.entries, reconciledChildren);
   const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
+  // A child this load fetched but did not answer for in full (see
+  // `LoadResult.completeChildIds`). Each of the three record merges below
+  // carries the device's own slice over for such a child instead of taking the
+  // floor the load returned.
+  const incompleteChildIds = incompleteLoadChildIds(data, reconciledChildren);
   // Keep the caller's current selection if it's still visible, checked
   // against the RECONCILED list (not just the server's) so a local child kept
   // visible by reconcileChildren above doesn't get silently deselected;
@@ -988,9 +1054,25 @@ function applyServerLoad(
     // `mergeUnsynced`'s doc comment): the queue merge below is entries' only
     // source, further merged by `mergeHeldBackEntries` for an expecting
     // child's held-back entries.
-    measurements: mergeUnsynced(remappedMeasurements, local.measurements),
-    entries: mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, local.q), local.entries, reconciledChildren),
-    treatments: mergeTreatments(data.treatments, local.treatments, reconciledChildren),
+    measurements: carryOverIncomplete(
+      mergeUnsynced(remappedMeasurements, local.measurements),
+      local.measurements,
+      incompleteChildIds,
+    ),
+    entries: carryOverIncomplete(
+      mergeHeldBackEntries(mergeQueuedEntries(remappedEntries, local.q), local.entries, reconciledChildren),
+      // The previous slice is state PLUS the write queue, which callers read
+      // after the fetch: an entry logged while the request was in flight is in
+      // neither the state snapshot nor a floor of an answer, and dropping it
+      // here would be the very loss this guard exists to prevent.
+      [...local.q, ...local.entries],
+      incompleteChildIds,
+    ),
+    treatments: carryOverIncomplete(
+      mergeTreatments(data.treatments, local.treatments, reconciledChildren),
+      local.treatments,
+      incompleteChildIds,
+    ),
     selectedChildId,
     // A null `timers` is "the fetch failed, unknown" (see
     // `LoadResult.timers`), not "none running": keep the on-device copy
@@ -2208,6 +2290,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // server (uploadUnsynced skips them: no server child to attach them to),
     // so this can never duplicate one that already flushed.
     const mergedEntries = mergeHeldBackEntries(remappedEntries, localEntries, reconciledChildren);
+    // The partial-load guard, at adopt's own hand-rolled copy of the merge: a
+    // child the reload fetched but did not answer for in full keeps the records
+    // this device already holds rather than the floor the load returned, or one
+    // degraded request deletes the history this adopt has just uploaded. See
+    // `incompleteLoadChildIds`. Nothing to fold in from the write queue here:
+    // adopt pushes the unsynced records itself and reads no queue.
+    const incompleteChildIds = incompleteLoadChildIds(data, reconciledChildren);
     // Keep the current selection if it's still visible after reconciliation
     // (checked against the RECONCILED list, not just the server's, so an
     // expecting child kept visible by reconcileChildren above doesn't get
@@ -2220,9 +2309,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({
       ...data,
       children: reconciledChildren,
-      entries: mergedEntries,
-      measurements: mergedMeasurements,
-      treatments: mergeTreatments(data.treatments, get().treatments, reconciledChildren),
+      entries: carryOverIncomplete(mergedEntries, localEntries, incompleteChildIds),
+      measurements: carryOverIncomplete(mergedMeasurements, localMeasurements, incompleteChildIds),
+      treatments: carryOverIncomplete(
+        mergeTreatments(data.treatments, get().treatments, reconciledChildren),
+        get().treatments,
+        incompleteChildIds,
+      ),
       // A null `timers` is "the fetch failed, unknown" (see
       // `LoadResult.timers`) and must never land in state through the
       // `...data` spread above: keep the in-memory timers as they are. A

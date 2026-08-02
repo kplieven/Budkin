@@ -180,6 +180,69 @@ describe('loadFromServer child selection', () => {
   });
 });
 
+describe('loadFromServer completeChildIds (partial-load signal)', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const serverChildren = [{ id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' }];
+
+  // Every per-type list call degrades to [] on failure, so each one has to be
+  // put back to a known-good answer before a test fails exactly one of them.
+  const answerEverything = () => {
+    listChildren.mockReset().mockResolvedValueOnce(serverChildren);
+    listFeedings.mockReset().mockResolvedValue([]);
+    listSleep.mockReset().mockResolvedValue([]);
+    listChanges.mockReset().mockResolvedValue([]);
+    listPumping.mockReset().mockResolvedValue([]);
+    listTummy.mockReset().mockResolvedValue([]);
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listTemperature.mockReset().mockResolvedValue([]);
+    listMedication.mockReset().mockResolvedValue([]);
+    listChildTreatments.mockReset().mockResolvedValue([]);
+    listMeasurements.mockReset().mockResolvedValue([]);
+    listTimers.mockReset().mockResolvedValue([]);
+  };
+
+  it('names the fetched child when every per-type request answered', async () => {
+    answerEverything();
+
+    const result = await loadFromServer(conn);
+
+    expect(result.completeChildIds).toEqual(['7']);
+  });
+
+  it('leaves the fetched child out when a per-type request fails, while the rest still loads', async () => {
+    answerEverything();
+    // The live repro: one timed-out /api/notes/ takes every note, bath and
+    // milestone out of `entries` with nothing in the answer saying so.
+    listChildNotes.mockRejectedValueOnce(new Error('timeout'));
+    listFeedings.mockResolvedValueOnce([
+      { id: 'f-1', type: 'feeding', childId: '7', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
+    ] as any);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.completeChildIds).toEqual([]);
+    expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
+  });
+
+  it('leaves the fetched child out when a measurement request fails too', async () => {
+    answerEverything();
+    listMeasurements.mockReset().mockRejectedValueOnce(new Error('500')).mockResolvedValue([]);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.completeChildIds).toEqual([]);
+  });
+
+  it('names no child when the account has none to fetch', async () => {
+    answerEverything();
+    listChildren.mockReset().mockResolvedValueOnce([]);
+
+    const result = await loadFromServer(conn);
+
+    expect(result.completeChildIds).toEqual([]);
+  });
+});
+
 describe('serverHasData', () => {
   it('returns true when the server already has at least one child', async () => {
     listChildren.mockReset().mockResolvedValueOnce([{ id: '1', first: 'Ada', last: 'Lovelace', birth: 0, color: '#fff' }]);
