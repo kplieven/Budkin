@@ -25,6 +25,7 @@ import { Icon } from '@/components/Icon';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { ANCHOR_LABEL, anchorLabel, dayGroupLabel, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
+import { anchorChildId } from '@/lib/logTargets';
 import {
   derivedField,
   endAnchorVisible,
@@ -134,8 +135,11 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
-  // Primitive selector, so no new reference per render (zustand v5).
+  // Primitive selector, so no new reference per render (zustand v5). The array
+  // is selected raw (the stored reference, never a fresh one) for the same
+  // reason, and scoped below in the render body.
   const selectedChildId = useAppStore((s) => s.selectedChildId);
+  const sheetChildIds = useAppStore((s) => s.sheetChildIds);
   // Editing a running timer (opened via openTimerEdit): Start, End and Lasted are
   // all focusable. Editing End or Lasted to a fixed value flips ongoing false so
   // save() stops the timer and logs it; leaving it ongoing saves details only.
@@ -163,12 +167,16 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const endIsToday = new Date(end).toDateString() === new Date(now).toDateString();
   const resultSub = isInterval ? `running · ${fmtDur(duration)} so far` : relDayLabel(end, now);
 
-  // Scoped to the selected child: `entries` holds every child's records. This
-  // is the one surface where an unscoped read PERSISTS a wrong value rather
-  // than only displaying one, since tapping a suggestion chip or an end anchor
-  // writes that timestamp onto the new entry. Offering a sibling's last feed
-  // as this child's anchor would save it as fact.
-  const childEntries = entriesForChild(entries, selectedChildId);
+  // Scoped to the child the SHEET is aimed at, not the global selection:
+  // `entries` holds every child's records. This is the one surface where an
+  // unscoped read PERSISTS a wrong value rather than only displaying one, since
+  // tapping a suggestion chip or an end anchor writes that timestamp onto the
+  // new entry. Offering a sibling's last feed as this child's anchor would save
+  // it as fact, and re-aiming the sheet at a sibling used to leave exactly that
+  // on screen. With SEVERAL children targeted there is no single right answer,
+  // so `anchorChildId` yields undefined and `entriesForChild` yields nothing,
+  // which drops every anchor chip (see its doc comment).
+  const childEntries = entriesForChild(entries, anchorChildId(sheetChildIds, selectedChildId));
   const lastFeed = lastFeedEndMinAgo(childEntries, now);
   const lastWake = lastWakeMinAgo(childEntries, now);
   const lastDiaper = lastDiaperMinAgo(childEntries, now);
