@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
@@ -12,6 +13,7 @@ import { Txt } from '@/components/Txt';
 import { ConfirmDisconnectSheet } from '@/features/connect/ConfirmDisconnectSheet';
 import { entryCountLabel } from '@/features/queue/queueView';
 import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
+import { versionLabel } from '@/lib/appVersion';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
@@ -699,6 +701,15 @@ export default function Settings() {
           <Icon name="chevron-right" color={t.faint} size={18} />
         </Pressable>
       </View>
+
+      {/* Which build this is. Last thing on the screen, dimmed and centred, so
+          it reads as a footer rather than as a setting. It exists because
+          nothing else in the app can answer the question: a stale install and a
+          container left on an old image are both completely invisible
+          otherwise, and both have cost real time. See src/lib/appVersion.ts. */}
+      <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 18, marginBottom: 4 }}>
+        {versionLabel(Constants.expoConfig?.extra?.version)}
+      </Txt>
     </>
   );
 
