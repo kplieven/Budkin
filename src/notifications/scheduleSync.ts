@@ -9,6 +9,7 @@ import { applyScheduled } from '@/notifications/applySchedule';
 import { desiredScheduled, type ScheduleInput } from '@/notifications/scheduled';
 import { treatmentDoseScalars, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
+import type { Treatment } from '@/types/models';
 
 let started = false;
 
@@ -54,6 +55,33 @@ function toInput(s: State, now: number): ScheduleInput {
       }
     }
   }
+
+  // Doses for EVERY child's treatments, grouped by the treatment's own child.
+  //
+  // Grouped rather than passed in one call, and that is load-bearing rather
+  // than tidy: `treatmentDoseScalars` attributes a dose to a treatment by
+  // trimmed, case-insensitive NAME, because a `MedicationEntry` carries no
+  // treatment reference that survives sync. One call over every treatment and
+  // every entry would let a dose logged for one child settle a sibling's
+  // identically named regimen, and two children on the same medicine is
+  // ordinary rather than contrived.
+  //
+  // Grouped by `treatment.childId` rather than by walking `s.children`, so that
+  // every treatment the store holds gets a key even if its child is gone. That
+  // keeps `treatmentDoseScalars`' contract intact: a missing key means the
+  // treatment was never considered, which is exactly what `treatmentDoseGiven`
+  // reads it as.
+  const treatmentsByChild = new Map<string, Treatment[]>();
+  for (const t of s.treatments) {
+    const group = treatmentsByChild.get(t.childId);
+    if (group) group.push(t);
+    else treatmentsByChild.set(t.childId, [t]);
+  }
+  const treatmentDoses: Record<string, { today: number; lastAt: number | null }> = {};
+  for (const [childId, group] of treatmentsByChild) {
+    Object.assign(treatmentDoses, treatmentDoseScalars(group, entriesForChild(s.entries, childId), now));
+  }
+
   return {
     children: s.children,
     timers: s.timers,
@@ -74,20 +102,7 @@ function toInput(s: State, now: number): ScheduleInput {
     asleepChildIds,
     selectedChildId: s.selectedChildId,
     treatments: s.treatments,
-    // Still scoped to the selected child, but no longer because the data forces
-    // it. Until 0.15.0 `s.entries` held one child in server mode, so counting
-    // doses for anyone else read their history as empty; now every child's
-    // records are resident and this scoping is a PRODUCT choice that has not
-    // been made yet. Widening it means deciding what a sibling's alert says (a
-    // bare "Paracetamol due" is ambiguous once two children are in treatment),
-    // what its notification id is, and how the catch-up nudge picks between
-    // children. Narrow is the conservative direction: it under-notifies rather
-    // than firing an unattributable alert. See the 0.15.0 plan, item A4.
-    treatmentDoses: treatmentDoseScalars(
-      s.treatments.filter((c) => c.childId === s.selectedChildId),
-      entriesForChild(s.entries, s.selectedChildId),
-      now,
-    ),
+    treatmentDoses,
     // Scoped to the selected child on both halves, for the same reason as
     // `treatmentDoses` above. `answeredMilestonePrompts` is already keyed by child;
     // `reachedForChild` does the filtering for the other.
