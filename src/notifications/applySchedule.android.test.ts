@@ -78,7 +78,6 @@ function scheduleInput(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
     lastPumpAt: null,
     lastSleepEndByChild: {},
     asleepChildIds: {},
-    selectedChildId: 'c1',
     treatments: [],
     treatmentDoses: {},
     reachedMilestoneKeysByChild: {},

@@ -100,7 +100,6 @@ function toInput(s: State, now: number): ScheduleInput {
     lastPumpAt,
     lastSleepEndByChild,
     asleepChildIds,
-    selectedChildId: s.selectedChildId,
     treatments: s.treatments,
     treatmentDoses,
     // Per child, so the catch-up nudge can answer for each of them. One
@@ -202,18 +201,18 @@ export function initScheduledReminderSync(): void {
     // launch-time run plus state-change runs is sufficient and a tick-driven
     // rebuild would be pure churn.
     //
-    // `selectedChildId` is a first-class input to the desired set, NOT a
-    // `timers`-adjacent disambiguator, and this entry must not be dropped. The
-    // justification used to be that `napReminders` resolved an ownerless sleep
-    // timer's owner as `timer.childId ?? selectedChildId`; that rule is retired
-    // (a timer belongs to whoever started it, see `timerBelongsTo`), so do not
-    // go looking for it. Two rules still read the selection directly, and
-    // neither is reachable from any other slice compared here:
-    // `treatmentReminders` scopes every treatment to the selected child and
-    // returns nothing at all while that child is `expected`, and the
-    // milestone-catch-up branch runs for the selected child alone. Switching
-    // children therefore changes the desired set with every other slice in this
-    // list untouched.
+    // `selectedChildId` is deliberately NOT compared here, and its absence is
+    // load-bearing rather than an oversight. Nothing in the desired set reads
+    // the selection as of 0.15.2: treatment reminders cover every child, and the
+    // milestone catch-up nudge loops them. Comparing it would rebuild the whole
+    // set and make a native round trip every time the user switches children,
+    // for a set that cannot have changed.
+    //
+    // Two retired justifications, so nobody restores this by rediscovering
+    // them: `napReminders` once resolved an ownerless sleep timer's owner as
+    // `timer.childId ?? selectedChildId` (a timer belongs to whoever started it
+    // now, see `timerBelongsTo`), and the treatment and milestone rules once
+    // scoped themselves to the selection.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&
@@ -235,8 +234,7 @@ export function initScheduledReminderSync(): void {
       // it does: `answerMilestonePrompt` writes only this slice, so without it
       // the alert would survive until the next foreground reconcile and ask
       // about a milestone the parent has already answered.
-      state.answeredMilestonePrompts === previous.answeredMilestonePrompts &&
-      state.selectedChildId === previous.selectedChildId
+      state.answeredMilestonePrompts === previous.answeredMilestonePrompts
     ) {
       return;
     }

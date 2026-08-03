@@ -352,10 +352,9 @@ describe('toInput lastPumpAt derivation', () => {
 });
 
 describe('nap anchor projection', () => {
-  it('projects the latest ended sleep per child, and the selected child', async () => {
+  it('projects the latest ended sleep per child', async () => {
     const { desired, useAppStore } = await setup();
     useAppStore.setState({
-      selectedChildId: 'c1',
       entries: [
         { id: 'e1', childId: 'c1', type: 'sleep', start: 1_000, end: 2_000, nap: true, tags: [] },
         { id: 'e2', childId: 'c1', type: 'sleep', start: 3_000, end: 4_000, nap: true, tags: [] },
@@ -367,7 +366,6 @@ describe('nap anchor projection', () => {
     await flush();
     const input = desired.mock.calls.at(-1)?.[0];
     expect(input?.lastSleepEndByChild).toEqual({ c1: 4_000, c2: 6_000 });
-    expect(input?.selectedChildId).toBe('c1');
   });
 
   it('projects children with an ongoing sleep entry into asleepChildIds', async () => {
@@ -395,17 +393,18 @@ describe('nap anchor projection', () => {
     expect(desired.mock.calls.length).toBeGreaterThan(before);
   });
 
-  it('reconciles when selectedChildId changes', async () => {
-    // `napReminders` resolves an ownerless running sleep timer's owner as
-    // `timer.childId ?? input.selectedChildId`, so selectedChildId is a
-    // genuine input to the desired set, not just a disambiguator that
-    // `timers` already covers. A change to it alone must trigger a rebuild.
+  it('does not reconcile when only the selected child changes', async () => {
+    // Nothing in the desired set reads the selection as of 0.15.2: treatment
+    // reminders cover every child and the milestone catch-up nudge loops them,
+    // so a switch cannot change what Android should hold. The justification for
+    // the old entry was the two rules that did read it; both are gone, and the
+    // even older one (an ownerless sleep timer resolving to
+    // `timer.childId ?? selectedChildId`) was retired before that.
     const { desired, useAppStore } = await setup();
-    await flush();
-    const before = desired.mock.calls.length;
+    const builds = desired.mock.calls.length;
     useAppStore.setState({ selectedChildId: 'c2' });
     await flush();
-    expect(desired.mock.calls.length).toBeGreaterThan(before);
+    expect(desired.mock.calls.length).toBe(builds);
   });
 });
 

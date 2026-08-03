@@ -53,7 +53,6 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   lastPumpAt: null,
   lastSleepEndByChild: {},
   asleepChildIds: {},
-  selectedChildId: 'c1',
   treatments: [],
   treatmentDoses: {},
   reachedMilestoneKeysByChild: {},
@@ -541,7 +540,6 @@ describe('desiredScheduled: pumping', () => {
       input({
         prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
         lastPumpAt: at(2026, 9, 1, 6),
-        selectedChildId: 'c1',
         timers: [timer({ id: 'p1', childId: 'c2', activity: 'pumping', saveAs: 'pumping', start: at(2026, 9, 1, 6, 50) })],
       }),
       at(2026, 9, 1, 7),
@@ -654,13 +652,11 @@ describe('nap suggestions', () => {
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
-  it('lets an ownerless sleep timer suppress nobody\'s nudge, selected child included', () => {
-    // A timer persisted before childId stamping existed says nothing about who
-    // is asleep, so it cannot answer for the selected child either. `hydrate`
-    // stamps those on load; the nudge rule refuses to guess in the meantime.
+  it("lets an ownerless sleep timer suppress nobody's nudge", () => {
+    // Nothing here consults a selection any more (0.15.2 removed it from the
+    // input entirely), so an ownerless timer answers for nobody at all.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
-    expect(naps(napInput({ timers: [t], selectedChildId: 'c1' })).length).toBe(1);
-    expect(naps(napInput({ timers: [t], selectedChildId: 'c2' })).length).toBe(1);
+    expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
   it('says nothing while the child has an ongoing sleep ENTRY with no running timer', () => {
@@ -997,7 +993,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
 
   it('schedules nothing while the pref is off', () => {
     const out = desiredScheduled(
-      input({ prefs: only({ treatmentReminders: false }), treatments: [treatment()], selectedChildId: 'c1' }),
+      input({ prefs: only({ treatmentReminders: false }), treatments: [treatment()] }),
       at(2026, 9, 2, 6),
     );
     expect(out).toEqual([]);
@@ -1353,7 +1349,6 @@ describe('staleDelivered', () => {
     it("a sibling's nap does not dismiss this child's nudge", () => {
       const i = input({
         children: [rowan, wren],
-        selectedChildId: 'c1',
         timers: [timer({ id: 't1', childId: 'c2', saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
         asleepChildIds: { c2: true },
       });
@@ -1362,7 +1357,7 @@ describe('staleDelivered', () => {
 
     it("keys on the identifier's own child, not the selected one", () => {
       // c2 is asleep and c2's banner must go, even though c1 is selected.
-      const i = input({ children: [rowan, wren], selectedChildId: 'c1', asleepChildIds: { c2: true } });
+      const i = input({ children: [rowan, wren], asleepChildIds: { c2: true } });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
         napId('c2', fireAt),
       ]);
@@ -1371,7 +1366,6 @@ describe('staleDelivered', () => {
     it('dismisses nothing for an ownerless sleep timer, as napReminders suppresses nothing', () => {
       const i = input({
         children: [rowan, wren],
-        selectedChildId: 'c1',
         timers: [timer({ id: 't1', childId: undefined, saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
       });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([]);
