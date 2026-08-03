@@ -92,6 +92,17 @@ export interface PickedPhoto {
   type: string;
   file?: Blob;
   nativeFile?: UploadableFile;
+  /** True when `uri` points at a copy in the document directory rather than at
+   *  the picker's own cache file, so it will still be there after a reboot and
+   *  can be uploaded on a later reconnect.
+   *
+   *  A recorded fact, never inferred from the URI's prefix. This codebase has
+   *  been bitten before by deducing a state that should have been written down;
+   *  see the note on `heldBack` below. False on web (no document directory, and
+   *  the picked URI is a `blob:` that dies on reload) and whenever the copy
+   *  failed, which is the one case that still warrants the "photo not saved"
+   *  warning. */
+  durable: boolean;
 }
 
 /** What to do with a child's photo on save. */

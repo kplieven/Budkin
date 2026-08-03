@@ -240,25 +240,33 @@ Do not build this without a fresh decision from the user. It was scoped twice an
 
 ## Separate smaller items, independent of A and B
 
-- [ ] **Show a version somewhere in the app.** Nothing displays one today. During the 0.14.x photo
+- [x] **Show a version somewhere in the app.** Nothing displays one today. During the 0.14.x photo
       investigation neither the user nor the assistant could confirm which build was installed, which
       cost real time twice. Settings is the obvious home. Cheapest item here by far.
-- [ ] **An offline photo cannot survive reconnect.** A queued op is JSON on disk and cannot carry a
+      Shipped in 0.15.1: foot of Settings, and the connect screen, which is reachable when Settings
+      is not.
+- [x] **An offline photo cannot survive reconnect.** A queued op is JSON on disk and cannot carry a
       file, and the picked URI lives in Android's evictable cache directory. Both the edit and create
       paths now SAY so in the toast (`Saved · photo not saved`) rather than dropping it silently, but
       the real fix is to copy the picked file to the document directory at pick time and record that
       path on the op. Same root cause covers an EXPECTING child's photo, which is held back and then
       pushed by `confirmBirth` without it.
-- [ ] **A measurement created mid-refresh can still be dropped.** If its push stamps a `serverId`
+      Shipped in 0.15.2, verified on device. See `checkpoints/2026-08-03-offline-photo.md`.
+- [x] **A measurement created mid-refresh can still be dropped.** If its push stamps a `serverId`
       before the apply, `mergeUnsynced` (which only merges `serverId == null` rows) discards it. Same
       class as the child bug fixed in 0.14.2, not reachable deterministically in a test without
       controlling push timing.
-- [ ] **`adopt` has a narrower version of the same mid-flight defect.** Its local reads now happen
+      Fixed in 0.15.2 (`8312d41`).
+- [x] **`adopt` has a narrower version of the same mid-flight defect.** Its local reads now happen
       after the await, but it gets no snapshot diff, so an edit during its post-upload GET is still
       reverted and a create stamped during it is still dropped. Very low severity: adopt runs inside a
       modal sheet with `busy` set and no path to save a child. Documented at the call site.
-- [ ] **`deleteChild` never purges `treatments`** (only children, entries, measurements). Nor
+      Fixed in 0.15.2 (`46e1f61`). The comment claiming it was unreachable was wrong, and `fc52059`
+      corrects it.
+- [x] **`deleteChild` never purges `treatments`** (only children, entries, measurements). Nor
       `lastFeed`, which is consistent with `bathRhythms`. Pre-existing.
+      Treatments purged in 0.15.2 (`ec71d47`), and restored if the delete fails. `lastFeed` is
+      deliberately still not purged.
 
 ---
 
@@ -288,3 +296,5 @@ directly. Merge in a temporary detached worktree and push the resulting commit s
 - `docs/superpowers/checkpoints/2026-08-02-child-edit-race.md`: 0.14.2.
 - `docs/superpowers/checkpoints/2026-08-02-photo-multipart.md`: 0.14.3, including how three releases
   were needed for one bug and what the process failure was.
+- `docs/superpowers/checkpoints/2026-08-03-offline-photo.md`: 0.15.2, the offline photo and the four
+  smaller items that closed this queue. A4 above is the only item left open, deliberately.

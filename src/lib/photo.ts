@@ -2,6 +2,7 @@ import { File } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 
+import { persistPhotoFile } from '@/lib/photoFile';
 import type { PickedPhoto } from '@/types/models';
 
 export type PickResult =
@@ -37,13 +38,29 @@ function uploadFile(uri: string): PickedPhoto['nativeFile'] {
   }
 }
 
-function normalize(asset: ImagePicker.ImagePickerAsset): PickedPhoto {
+/** Normalize the picker's asset, copying the file somewhere it will survive.
+ *
+ *  The copy happens HERE, at pick time, rather than at save time. It costs one
+ *  extra write per pick and orphans a file when the sheet is then cancelled
+ *  (which `sweepPhotoFiles` collects at launch), and it buys two things worth
+ *  more than that: `saveChild` stays synchronous, in a store where several
+ *  shipped bugs have been mid-flight write races, and every path downstream
+ *  handles plain serializable data.
+ *
+ *  It also fixes a case nobody reported: in LOCAL mode the cache URI was the
+ *  only copy a photo ever had, so it broke whenever Android reclaimed the file
+ *  and there was no server copy to fall back on. */
+async function normalize(asset: ImagePicker.ImagePickerAsset): Promise<PickedPhoto> {
+  const name = asset.fileName ?? 'photo.jpg';
+  const durableUri = await persistPhotoFile(asset.uri, name);
+  const uri = durableUri ?? asset.uri;
   return {
-    uri: asset.uri,
-    name: asset.fileName ?? 'photo.jpg',
+    uri,
+    name,
     type: asset.mimeType ?? 'image/jpeg',
     file: (asset as { file?: Blob }).file, // web only; undefined on native
-    nativeFile: uploadFile(asset.uri),
+    nativeFile: uploadFile(uri),
+    durable: durableUri != null,
   };
 }
 
@@ -62,5 +79,5 @@ export async function pickChildPhoto(source: 'library' | 'camera'): Promise<Pick
       ? await ImagePicker.launchCameraAsync(OPTIONS)
       : await ImagePicker.launchImageLibraryAsync(OPTIONS);
   if (result.canceled || !result.assets?.[0]) return { ok: false, reason: 'cancelled' };
-  return { ok: true, photo: normalize(result.assets[0]) };
+  return { ok: true, photo: await normalize(result.assets[0]) };
 }
