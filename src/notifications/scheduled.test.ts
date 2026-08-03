@@ -53,11 +53,10 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   lastPumpAt: null,
   lastSleepEndByChild: {},
   asleepChildIds: {},
-  selectedChildId: 'c1',
   treatments: [],
   treatmentDoses: {},
-  reachedMilestoneKeys: [],
-  answeredMilestoneKeys: [],
+  reachedMilestoneKeysByChild: {},
+  answeredMilestoneKeysByChild: {},
   ...over,
 });
 
@@ -541,7 +540,6 @@ describe('desiredScheduled: pumping', () => {
       input({
         prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
         lastPumpAt: at(2026, 9, 1, 6),
-        selectedChildId: 'c1',
         timers: [timer({ id: 'p1', childId: 'c2', activity: 'pumping', saveAs: 'pumping', start: at(2026, 9, 1, 6, 50) })],
       }),
       at(2026, 9, 1, 7),
@@ -654,13 +652,11 @@ describe('nap suggestions', () => {
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
-  it('lets an ownerless sleep timer suppress nobody\'s nudge, selected child included', () => {
-    // A timer persisted before childId stamping existed says nothing about who
-    // is asleep, so it cannot answer for the selected child either. `hydrate`
-    // stamps those on load; the nudge rule refuses to guess in the meantime.
+  it("lets an ownerless sleep timer suppress nobody's nudge", () => {
+    // Nothing here consults a selection any more (0.15.3 removed it from the
+    // input entirely), so an ownerless timer answers for nobody at all.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
-    expect(naps(napInput({ timers: [t], selectedChildId: 'c1' })).length).toBe(1);
-    expect(naps(napInput({ timers: [t], selectedChildId: 'c2' })).length).toBe(1);
+    expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
   it('says nothing while the child has an ongoing sleep ENTRY with no running timer', () => {
@@ -775,8 +771,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     ...over,
   });
 
-  const run = (over: Partial<ScheduleInput>, now: number) =>
-    desiredScheduled(input({ prefs: only({}), selectedChildId: 'c1', ...over }), now);
+  const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
+    desiredScheduled(input({ prefs: only(p), children: [child()], ...over }), now);
 
   it('schedules each chosen slot at its mapped wall-clock hour', () => {
     const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));
@@ -788,7 +784,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   it('names the treatment and carries its dosage and treatment-seeded tap target', () => {
     const out = run({ treatments: [treatment({ dosage: 5, dosageUnit: 'mg' })] }, at(2026, 9, 2, 6));
     expect(out[0].kind).toBe('treatment');
-    expect(out[0].title).toBe('Omeprazol due');
+    expect(out[0].title).toBe('Rowan · Omeprazol due');
     expect(out[0].body).toBe('5 mg');
     expect(out[0].data.url).toBe('/log/medication?treatment=treatment1&child=c1');
     expect(out[0].identifier).toBe(`${REMINDER_PREFIX}treatment:treatment1:${at(2026, 9, 2, 8)}`);
@@ -883,7 +879,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
       at(2026, 9, 2, 6),
     );
     const first = out.filter((n) => n.fireAt === at(2026, 9, 2, 8));
-    expect(first.map((n) => n.title).sort()).toEqual(['Amoxicilline due', 'Omeprazol due']);
+    expect(first.map((n) => n.title).sort()).toEqual(['Rowan · Amoxicilline due', 'Rowan · Omeprazol due']);
   });
 
   it('stops at toDate rather than scheduling past the end of the regimen', () => {
@@ -907,18 +903,86 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     expect(run({ treatments: [treatment({ toDate: at(2026, 9, 1) })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing for a treatment belonging to another child', () => {
+  it('schedules nothing for a treatment whose child is not in the roster', () => {
+    // An orphan record. `deleteChild` purges a deleted child's treatments as of
+    // 0.15.2, so this is the stale-record case rather than the ordinary one, and
+    // an alert naming nobody is worse than no alert.
     expect(run({ treatments: [treatment({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing while the selected child is expected, since a treatment cannot be dosed against a due date', () => {
+  it("covers a child who is not selected", () => {
+    // The point of the change: a sibling's regimen now produces alerts. There is
+    // no selection in the input at all after this task's sibling task, so what
+    // this pins is that every treatment with a live child is scheduled.
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] })],
+      },
+      at(2026, 9, 2, 6),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((n) => n.identifier.includes('treatment2'))).toBe(true);
+  });
+
+  it('names the child in the title, so two children are told apart', () => {
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+      },
+      at(2026, 9, 2, 6),
+    );
+    const first = out.filter((n) => n.fireAt === at(2026, 9, 2, 8));
+    expect(first.map((n) => n.title).sort()).toEqual(['Rowan · Omeprazol due', 'Wren · Omeprazol due']);
+  });
+
+  it('gates `expected` per treatment, not across the household', () => {
     // Every other reminder kind guards `child.expected`; this one must too,
     // because resolveLogDeepLink (src/lib/logDeepLink.ts) refuses to open
     // anything for an expected child, so a scheduled "X due" alert would be a
-    // tap the app itself cannot service.
-    expect(
-      run({ treatments: [treatment()], children: [child({ id: 'c1', expected: true })] }, at(2026, 9, 2, 6)),
-    ).toEqual([]);
+    // tap the app itself cannot service. Applied per child now: one expecting
+    // child must not silence a born sibling's regimen.
+    const expecting = child({ id: 'c2', first: 'Wren', expected: true });
+    const out = run(
+      {
+        children: [child(), expecting],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+      },
+      at(2026, 9, 2, 6),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((n) => n.identifier.includes('treatment1'))).toBe(true);
+  });
+
+  it("keeps each treatment's dose suppression on its own scalars", () => {
+    // Two children on the same medicine. c1 has had today's dose, c2 has not.
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+        treatmentDoses: {
+          treatment1: { today: 1, lastAt: at(2026, 9, 2, 5) },
+          treatment2: { today: 0, lastAt: null },
+        },
+      },
+      at(2026, 9, 2, 6),
+    );
+    const today = out.filter((n) => n.fireAt < at(2026, 9, 3));
+    expect(today).toHaveLength(1);
+    expect(today.every((n) => n.identifier.includes('treatment2'))).toBe(true);
   });
 
   it('schedules nothing for a treatment whose name is blank', () => {
@@ -929,7 +993,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
 
   it('schedules nothing while the pref is off', () => {
     const out = desiredScheduled(
-      input({ prefs: only({ treatmentReminders: false }), treatments: [treatment()], selectedChildId: 'c1' }),
+      input({ prefs: only({ treatmentReminders: false }), treatments: [treatment()] }),
       at(2026, 9, 2, 6),
     );
     expect(out).toEqual([]);
@@ -958,7 +1022,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
   });
 
   const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
-    desiredScheduled(input({ prefs: only(p), selectedChildId: 'c1', ...over }), now);
+    desiredScheduled(input({ prefs: only(p), children: [child()], ...over }), now);
 
   it('anchors the grid on the last logged dose', () => {
     const out = run(
@@ -968,7 +1032,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
     expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 14));
     expect(out[1].fireAt).toBe(at(2026, 9, 2, 22));
-    expect(out[0].title).toBe('Amoxicilline due');
+    expect(out[0].title).toBe('Rowan · Amoxicilline due');
   });
 
   it('re-anchors when a newer dose is logged', () => {
@@ -1135,7 +1199,7 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('names the typical window when only one milestone closes', () => {
-    const out = run({ reachedMilestoneKeys: ['first-smile'] });
+    const out = run({ reachedMilestoneKeysByChild: { c1: ['first-smile'] } });
     const solo = out.find((n) => n.identifier.includes('lifts-head'));
     expect(solo?.title).toBe('A milestone to check for Rowan.');
     expect(solo?.body).toBe('Lifts head. Most babies do this by 3 months.');
@@ -1143,14 +1207,19 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('skips milestones already logged or already answered', () => {
-    const out = run({ reachedMilestoneKeys: ['lifts-head'], answeredMilestoneKeys: ['first-smile'] });
+    const out = run({
+      reachedMilestoneKeysByChild: { c1: ['lifts-head'] },
+      answeredMilestoneKeysByChild: { c1: ['first-smile'] },
+    });
     expect(out.some((n) => n.identifier.includes('lifts-head'))).toBe(false);
     expect(out.some((n) => n.identifier.includes('first-smile'))).toBe(false);
   });
 
   it('changes the identifier when one of a batch is logged, so the diff replaces it', () => {
     const before = run().find((n) => n.identifier.includes('lifts-head'));
-    const after = run({ reachedMilestoneKeys: ['first-smile'] }).find((n) => n.identifier.includes('lifts-head'));
+    const after = run({ reachedMilestoneKeysByChild: { c1: ['first-smile'] } }).find((n) =>
+      n.identifier.includes('lifts-head'),
+    );
     expect(before?.identifier).not.toBe(after?.identifier);
     expect(before?.fireAt).toBe(after?.fireAt);
   });
@@ -1170,12 +1239,46 @@ describe('desiredScheduled: milestone catch-up', () => {
     expect(run({ children: [child({ expected: true })] })).toEqual([]);
   });
 
-  it('only ever covers the selected child', () => {
-    // `reachedMilestoneKeys` can only describe one child, so a second child's
-    // empty history must not be read as "reached nothing".
+  it('nudges every child, each against their own history', () => {
+    // Was "only ever covers the selected child". The keys can answer per child
+    // now, so a sibling is no longer read as having reached nothing.
+    const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
+    const out = run({
+      children: [born, sibling],
+      reachedMilestoneKeysByChild: { c1: ['lifts-head'] },
+    });
+
+    expect(out.some((n) => n.identifier.includes(':c1:'))).toBe(true);
+    expect(out.some((n) => n.identifier.includes(':c2:'))).toBe(true);
+    // c1 logged it, c2 did not, so only c2 is nudged about it.
+    const liftsHead = out.filter((n) => n.identifier.includes('lifts-head'));
+    expect(liftsHead).toHaveLength(1);
+    expect(liftsHead[0].identifier).toContain(':c2:');
+  });
+
+  it('gives two children closing the same window two alerts, each deep-linking to its own child', () => {
     const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
     const out = run({ children: [born, sibling] });
-    expect(out.every((n) => n.identifier.includes(':c1:'))).toBe(true);
+
+    const sameMorning = out.filter((n) => n.fireAt === out[0].fireAt);
+    expect(sameMorning).toHaveLength(2);
+    expect(sameMorning.map((n) => n.data.url).sort()).toEqual([
+      '/milestones?child=c1',
+      '/milestones?child=c2',
+    ]);
+    // `lifts-head` and `first-smile` both close at 3 months (see the "groups
+    // every milestone" test above), so the earliest window for a newborn
+    // always groups both into one notification per child, not one milestone.
+    expect(sameMorning.map((n) => n.title).sort()).toEqual(
+      [`2 milestones to check for Rowan.`, `2 milestones to check for Wren.`].sort(),
+    );
+  });
+
+  it("reads a child with no entry in either map as having reached nothing", () => {
+    // The maps are sparse: a child who has logged no milestone and answered no
+    // prompt has no key at all, which must not throw and must not suppress.
+    const out = run({ reachedMilestoneKeysByChild: {}, answeredMilestoneKeysByChild: {} });
+    expect(out.length).toBeGreaterThan(0);
   });
 });
 
@@ -1246,7 +1349,6 @@ describe('staleDelivered', () => {
     it("a sibling's nap does not dismiss this child's nudge", () => {
       const i = input({
         children: [rowan, wren],
-        selectedChildId: 'c1',
         timers: [timer({ id: 't1', childId: 'c2', saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
         asleepChildIds: { c2: true },
       });
@@ -1254,8 +1356,9 @@ describe('staleDelivered', () => {
     });
 
     it("keys on the identifier's own child, not the selected one", () => {
-      // c2 is asleep and c2's banner must go, even though c1 is selected.
-      const i = input({ children: [rowan, wren], selectedChildId: 'c1', asleepChildIds: { c2: true } });
+      // c2 is asleep, so c2's banner must go; c1's must not, because the sweep
+      // asks about each identifier's own child, not a single child for the whole call.
+      const i = input({ children: [rowan, wren], asleepChildIds: { c2: true } });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
         napId('c2', fireAt),
       ]);
@@ -1264,7 +1367,6 @@ describe('staleDelivered', () => {
     it('dismisses nothing for an ownerless sleep timer, as napReminders suppresses nothing', () => {
       const i = input({
         children: [rowan, wren],
-        selectedChildId: 'c1',
         timers: [timer({ id: 't1', childId: undefined, saveAs: 'sleep', start: at(2026, 10, 31, 10, 20) })],
       });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([]);
@@ -1384,10 +1486,10 @@ describe('staleDelivered', () => {
     });
 
     it('KEEPS a slot for a treatment with no dose scalars, whose history is unreliable', () => {
-      // In server mode `entries` only holds the selected child, so another
-      // child's dose history reads as empty. `treatmentDoseScalars` gives every
-      // treatment it considered a key, so an absent key means "not considered",
-      // never "no doses".
+      // A treatment in `input.treatments` with no entry in `treatmentDoses` is
+      // "never considered", not "no doses given": `treatmentDoseScalars` keys
+      // every treatment it is handed, so a missing key cannot mean an empty
+      // dose history. That is why the slot is kept rather than dismissed.
       const i = input({ treatments: [t({ id: 'treatment2', childId: 'c2' })], treatmentDoses: {} });
       expect(staleDelivered(i, [treatmentId('treatment2', morning)], now)).toEqual([]);
     });

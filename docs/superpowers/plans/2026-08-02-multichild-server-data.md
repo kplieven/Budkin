@@ -108,10 +108,13 @@ limiter anywhere in the repo, and no incremental/since-timestamp fetching in `sr
       is entirely about the single-child invariant. `deleteChild` does NOT refetch: an earlier
       scoping pass claimed it did, and that is stale. Verify with
       `grep -n "get().refresh()" src/store/useAppStore.ts` before touching anything.
-- [ ] **A4 (optional, deferrable).** Widen the reminder scoping that was forced by the single-child
+- [x] **A4 (optional, deferrable).** Widen the reminder scoping that was forced by the single-child
       invariant: `treatmentDoses` / `reachedMilestoneKeys` / `answeredMilestoneKeys` in
       `src/notifications/scheduleSync.ts`, and `treatmentReminders` / the milestone catch-up branch in
       `src/notifications/scheduled.ts`. Leaving these alone is SAFE (conservative, not wrong).
+      Done in 0.15.3: both rules now cover every child, and `selectedChildId`
+      left `ScheduleInput` entirely. See
+      `specs/2026-08-03-reminder-scoping-design.md`.
 - [ ] **A5. Repair the stale comments.** Roughly 18 blocks assert the single-child invariant, in
       `repository.ts`, `useAppStore.ts`, `scheduleSync.ts` and `scheduled.ts`. One of them
       (`scheduleSync.ts`) already carries a stale LINE reference. These are load-bearing here.
