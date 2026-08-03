@@ -77,21 +77,21 @@ describe('pendingPhotos persistence', () => {
   });
 
   it('serializes mutations, so one landing during another is not clobbered', async () => {
-    // The reason `removePendingOp` re-reads too: a caller holding a stale
-    // snapshot must not clobber a write that landed after it read.
+    // Both mutators are read-modify-write over one stored map, and both are
+    // fired without being awaited. Two interleaving would each write back the
+    // map they read, and the second to finish would drop the first one's
+    // change. A re-read at the start of each call, which is all
+    // `removePendingOp` does, cannot fix that: both callers re-read, and both
+    // read the same map. Only ordering them does.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), clearPendingPhoto('c1')]);
     const map = await loadPendingPhotos();
     expect(map.c2).toEqual(set('file:///doc/b.jpg'));
   });
 
-  it('a rejected mutation does not poison the ones queued behind it', async () => {
+  it('a wipe landing during a mutation does not leave the record behind', async () => {
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
-    await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), setPendingPhoto('c3', set('file:///doc/c.jpg'))]);
-    expect(await loadPendingPhotos()).toEqual({
-      c1: set('file:///doc/a.jpg'),
-      c2: set('file:///doc/b.jpg'),
-      c3: set('file:///doc/c.jpg'),
-    });
+    await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), clearPendingPhotos()]);
+    expect(await loadPendingPhotos()).toEqual({});
   });
 });
