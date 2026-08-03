@@ -234,12 +234,19 @@ Real node coverage:
   and records nothing.
 - `src/data/sync.test.ts`: the `pushChild` return widening.
 
-**The gap, stated plainly.** No test in this repo can reach the actual file
-copy: `expo-file-system`'s `File` is a native module, and `vitest` runs in node.
-The mocked seam pins the CONTRACT (that a deferred save records the durable URI,
-and that the flush reopens exactly that URI) and cannot pin the copy. This is
-the same class of gap where 0.14.3's bug lived, after being flagged when 0.14.1
-shipped and accepted anyway.
+Plus `src/lib/photoFile.test.ts`, which mocks `expo-file-system` and `Platform`
+and imports the module directly, the way `permission.android.test.ts` already
+does for its own native surface. It pins the web guards, the exists-checks, the
+swallow-and-continue paths, and `sweepPhotoFiles`'s keep-set filter, which is
+the only code in this feature that deletes user data.
+
+**The gap, stated plainly.** What no test here can reach is the native call
+doing real I/O: whether the copy actually lands a readable file in the document
+directory on a device. Mocks pin the logic around that call, and the contract
+between the layers (that a deferred save records the durable URI, and that the
+flush reopens exactly that URI), but a mock that answers correctly proves
+nothing about the filesystem underneath it. This is the same class of gap where
+0.14.3's bug lived, after being flagged when 0.14.1 shipped and accepted anyway.
 
 So the acceptance test is on device and must actually be run before this is
 called done:

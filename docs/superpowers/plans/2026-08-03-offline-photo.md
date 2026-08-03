@@ -13,7 +13,7 @@
 - Read the exact versioned Expo docs at https://docs.expo.dev/versions/v56.0.0/ before writing code against an Expo module. The `expo-file-system` API used here is the modern one: `Paths.document`, `new Directory(...)`, `new File(...)`, NOT the deprecated `FileSystem.documentDirectory` string API.
 - **Native only.** Every function in `src/lib/photoFile.ts` returns the not-durable answer on web (`Platform.OS === 'web'`). Web keeps today's `Saved · photo not saved` warning.
 - **No em-dashes** anywhere: prose, code comments, commit messages, UI copy. Use commas, colons, or separate sentences.
-- `vitest` runs in the **node** environment and matches `src/**/*.test.ts` only. It can never load `expo-file-system`, `expo-image-picker`, or any `.tsx`. Native modules are reached only through a mocked seam.
+- `vitest` runs in the **node** environment and matches `src/**/*.test.ts` only, so no `.tsx` is testable. A native module cannot be loaded for real, but it CAN be mocked with `vi.mock` and the module under test then imported directly: `src/notifications/permission.android.test.ts` and `src/data/servers.test.ts` (for `expo-secure-store`) are the precedents. So "it imports a native module" is not a reason to leave a file untested. What genuinely stays out of reach is the native call doing real I/O on a device, which is why Task 8 exists.
 - Never return a new object/array reference from a `useAppStore` selector (zustand v5 infinite loop). Not expected to come up here, but it is a standing rule.
 - Local child ids are stable: a push stamps `serverId` and deliberately leaves `id` alone. The pending-photo map is keyed by `id` and relies on that.
 - Run `npx tsc --noEmit` and `npx eslint .` before every commit. The suite is `npx vitest run`.
@@ -23,9 +23,10 @@
 ## File Structure
 
 **Created:**
-- `src/lib/photoName.ts` — the pure filename rule. Exists so it can be tested at all; `photoFile.ts` cannot be loaded by vitest.
+- `src/lib/photoName.ts` — the pure filename rule, extracted so the naming logic is testable without any mocking at all.
 - `src/lib/photoName.test.ts`
-- `src/lib/photoFile.ts` — the native file shell: copy, reopen, discard, sweep. Imports `expo-file-system` and `Platform`, nothing else. Untestable by design, kept as thin as possible.
+- `src/lib/photoFile.ts` — the native file shell: copy, reopen, discard, sweep. Imports `expo-file-system` and `Platform`, nothing else.
+- `src/lib/photoFile.test.ts` — mocks `expo-file-system` and `Platform` and imports the module directly, per `permission.android.test.ts`. Pins the web guards, the exists-checks, the swallow-and-continue paths, and above all `sweepPhotoFiles`'s keep-set filter, which is the only code in this feature that deletes user data.
 - `src/data/pendingPhotos.ts` — the AsyncStorage map. Modelled on `src/data/pendingOps.ts`.
 - `src/data/pendingPhotos.test.ts`
 
