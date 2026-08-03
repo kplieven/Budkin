@@ -11,8 +11,12 @@
 import type { Child, Treatment, Entry, Measurement, ServerChild } from '@/types/models';
 
 export interface UploadDeps {
-  /** POST a child, return its new server id (or undefined on failure). */
-  pushChild: (child: Child) => Promise<number | undefined>;
+  /** POST a child, returning its new server id and, when the push carried a
+   *  photo, the picture URL the server stored. Undefined `id` means the push
+   *  did not land. The picture is reported because a child pushed on reconnect
+   *  still has a device-local file path as its `picture`, which only the server
+   *  URL can replace. */
+  pushChild: (child: Child) => Promise<{ id?: number; picture?: string | null } | undefined>;
   /** POST an entry, given the server id of its owning child, return its new
    *  server id (or undefined). The entry's own `childId` stays local; the
    *  server id is passed alongside, never written into the record. */
@@ -35,11 +39,11 @@ export interface UploadState {
   treatments?: Treatment[];
 }
 
-async function tryPush<T, A extends unknown[]>(
-  push: (value: T, ...args: A) => Promise<number | undefined>,
+async function tryPush<R, T, A extends unknown[]>(
+  push: (value: T, ...args: A) => Promise<R | undefined>,
   value: T,
   ...args: A
-): Promise<number | undefined> {
+): Promise<R | undefined> {
   try {
     return await push(value, ...args);
   } catch {
@@ -80,8 +84,14 @@ export async function uploadUnsynced(
   // birth_date for the server. It stays local until confirmBirth releases it.
   for (const child of children) {
     if (child.serverId != null || child.expected) continue;
-    const id = await tryPush(deps.pushChild, child);
-    if (id != null) child.serverId = id;
+    const res = await tryPush(deps.pushChild, child);
+    if (res?.id != null) {
+      child.serverId = res.id;
+      // `!= null`, so a push that carried no photo (which answers null) cannot
+      // blank a local file path. Only a push that uploaded one has anything to
+      // say about the picture.
+      if (res.picture != null) child.picture = res.picture;
+    }
     done++;
     onProgress?.(done, total);
   }

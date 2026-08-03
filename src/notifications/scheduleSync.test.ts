@@ -35,6 +35,15 @@ vi.mock('@/data/secureKv', () => ({
   kvRemove: vi.fn(async () => {}),
 }));
 
+// `@/lib/photoFile` pulls in expo-file-system and react-native's Platform,
+// both native; stub it so the store module (saveChild's deferred-photo path)
+// imports under node.
+vi.mock('@/lib/photoFile', () => ({
+  reopenPhotoFile: vi.fn(() => undefined),
+  discardPhotoFile: vi.fn(async () => {}),
+  sweepPhotoFiles: vi.fn(async () => {}),
+}));
+
 vi.mock('@/notifications/applySchedule', () => ({
   applyScheduled: vi.fn(async () => {}),
 }));
