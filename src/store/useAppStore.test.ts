@@ -4170,7 +4170,7 @@ describe('children', () => {
   });
 
   it('saveChild create with a photo sets picture optimistically, then swaps in the server URL', async () => {
-    const photo = { uri: 'file:///tmp/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+    const photo = { uri: 'file:///tmp/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
 
@@ -4181,7 +4181,7 @@ describe('children', () => {
   });
 
   it('saveChild edit with a photo swaps the local URI for the server URL', async () => {
-    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg' };
+    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg', durable: true };
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'set', photo } });
 
@@ -4249,7 +4249,7 @@ describe('children', () => {
     // `picture` wholesale, so the next refresh blanks it anyway. Worth having
     // regardless, since it keeps the avatar until then instead of at once.
     vi.mocked(updateChildOnServer).mockResolvedValueOnce({ picture: null, slug: SERVER_SLUG });
-    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg' };
+    const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg', durable: true };
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: '', birth: NOW, photo: { kind: 'set', photo } });
 
@@ -9437,7 +9437,7 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     slug: 'mira-o',
     picture: null,
   };
-  const PHOTO = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+  const PHOTO = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
 
   /** What the server answers a GET issued BEFORE the photo PATCH landed: the
    *  child as it was, with no picture. */
@@ -9749,7 +9749,7 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
 // including one fired by the AppState 'active' the picker's return produces.
 describe('a photo picked while offline is dropped by the replay, and said so', () => {
   const BIRTH = NOW - 90 * 86400000;
-  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
   const offlineChild = () => {
     useAppStore.setState({
       offline: true,
@@ -9849,7 +9849,7 @@ describe('a photo picked while offline is dropped by the replay, and said so', (
 // dropped exactly as the edit replay drops it. Treating the two paths
 // differently would be worse than either treatment applied consistently.
 describe('a photo picked while creating a child offline is dropped by the push, and said so', () => {
-  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg' };
+  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
   const created = () => s().children[s().children.length - 1];
 
   it('does not report a bare "Saved" for a photo it cannot upload', async () => {
