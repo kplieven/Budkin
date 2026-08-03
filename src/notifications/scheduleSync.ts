@@ -9,6 +9,7 @@ import { applyScheduled } from '@/notifications/applySchedule';
 import { desiredScheduled, type ScheduleInput } from '@/notifications/scheduled';
 import { treatmentDoseScalars, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
+import type { Treatment } from '@/types/models';
 
 let started = false;
 
@@ -54,6 +55,33 @@ function toInput(s: State, now: number): ScheduleInput {
       }
     }
   }
+
+  // Doses for EVERY child's treatments, grouped by the treatment's own child.
+  //
+  // Grouped rather than passed in one call, and that is load-bearing rather
+  // than tidy: `treatmentDoseScalars` attributes a dose to a treatment by
+  // trimmed, case-insensitive NAME, because a `MedicationEntry` carries no
+  // treatment reference that survives sync. One call over every treatment and
+  // every entry would let a dose logged for one child settle a sibling's
+  // identically named regimen, and two children on the same medicine is
+  // ordinary rather than contrived.
+  //
+  // Grouped by `treatment.childId` rather than by walking `s.children`, so that
+  // every treatment the store holds gets a key even if its child is gone. That
+  // keeps `treatmentDoseScalars`' contract intact: a missing key means the
+  // treatment was never considered, which is exactly what `treatmentDoseGiven`
+  // reads it as.
+  const treatmentsByChild = new Map<string, Treatment[]>();
+  for (const t of s.treatments) {
+    const group = treatmentsByChild.get(t.childId);
+    if (group) group.push(t);
+    else treatmentsByChild.set(t.childId, [t]);
+  }
+  const treatmentDoses: Record<string, { today: number; lastAt: number | null }> = {};
+  for (const [childId, group] of treatmentsByChild) {
+    Object.assign(treatmentDoses, treatmentDoseScalars(group, entriesForChild(s.entries, childId), now));
+  }
+
   return {
     children: s.children,
     timers: s.timers,
@@ -72,27 +100,18 @@ function toInput(s: State, now: number): ScheduleInput {
     lastPumpAt,
     lastSleepEndByChild,
     asleepChildIds,
-    selectedChildId: s.selectedChildId,
     treatments: s.treatments,
-    // Still scoped to the selected child, but no longer because the data forces
-    // it. Until 0.15.0 `s.entries` held one child in server mode, so counting
-    // doses for anyone else read their history as empty; now every child's
-    // records are resident and this scoping is a PRODUCT choice that has not
-    // been made yet. Widening it means deciding what a sibling's alert says (a
-    // bare "Paracetamol due" is ambiguous once two children are in treatment),
-    // what its notification id is, and how the catch-up nudge picks between
-    // children. Narrow is the conservative direction: it under-notifies rather
-    // than firing an unattributable alert. See the 0.15.0 plan, item A4.
-    treatmentDoses: treatmentDoseScalars(
-      s.treatments.filter((c) => c.childId === s.selectedChildId),
-      entriesForChild(s.entries, s.selectedChildId),
-      now,
+    treatmentDoses,
+    // Per child, so the catch-up nudge can answer for each of them. One
+    // `reachedForChild` pass per child, where there was one pass in total
+    // before: `toInput` already walks `s.entries` on every reconcile and a
+    // household is one to four children, so this is not worth folding into the
+    // walk above until it measurably costs something.
+    reachedMilestoneKeysByChild: Object.fromEntries(
+      s.children.map((c) => [c.id, [...reachedForChild(s.entries, c.id).keys()]]),
     ),
-    // Scoped to the selected child on both halves, for the same reason as
-    // `treatmentDoses` above. `answeredMilestonePrompts` is already keyed by child;
-    // `reachedForChild` does the filtering for the other.
-    reachedMilestoneKeys: [...reachedForChild(s.entries, s.selectedChildId).keys()],
-    answeredMilestoneKeys: s.answeredMilestonePrompts[s.selectedChildId] ?? [],
+    // Already keyed by child in the store, so it passes straight through.
+    answeredMilestoneKeysByChild: s.answeredMilestonePrompts,
   };
 }
 
@@ -182,18 +201,18 @@ export function initScheduledReminderSync(): void {
     // launch-time run plus state-change runs is sufficient and a tick-driven
     // rebuild would be pure churn.
     //
-    // `selectedChildId` is a first-class input to the desired set, NOT a
-    // `timers`-adjacent disambiguator, and this entry must not be dropped. The
-    // justification used to be that `napReminders` resolved an ownerless sleep
-    // timer's owner as `timer.childId ?? selectedChildId`; that rule is retired
-    // (a timer belongs to whoever started it, see `timerBelongsTo`), so do not
-    // go looking for it. Two rules still read the selection directly, and
-    // neither is reachable from any other slice compared here:
-    // `treatmentReminders` scopes every treatment to the selected child and
-    // returns nothing at all while that child is `expected`, and the
-    // milestone-catch-up branch runs for the selected child alone. Switching
-    // children therefore changes the desired set with every other slice in this
-    // list untouched.
+    // `selectedChildId` is deliberately NOT compared here, and its absence is
+    // load-bearing rather than an oversight. Nothing in the desired set reads
+    // the selection as of 0.15.3: treatment reminders cover every child, and the
+    // milestone catch-up nudge loops them. Comparing it would rebuild the whole
+    // set and make a native round trip every time the user switches children,
+    // for a set that cannot have changed.
+    //
+    // Two retired justifications, so nobody restores this by rediscovering
+    // them: `napReminders` once resolved an ownerless sleep timer's owner as
+    // `timer.childId ?? selectedChildId` (a timer belongs to whoever started it
+    // now, see `timerBelongsTo`), and the treatment and milestone rules once
+    // scoped themselves to the selection.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&
@@ -215,8 +234,7 @@ export function initScheduledReminderSync(): void {
       // it does: `answerMilestonePrompt` writes only this slice, so without it
       // the alert would survive until the next foreground reconcile and ask
       // about a milestone the parent has already answered.
-      state.answeredMilestonePrompts === previous.answeredMilestonePrompts &&
-      state.selectedChildId === previous.selectedChildId
+      state.answeredMilestonePrompts === previous.answeredMilestonePrompts
     ) {
       return;
     }

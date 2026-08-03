@@ -352,10 +352,9 @@ describe('toInput lastPumpAt derivation', () => {
 });
 
 describe('nap anchor projection', () => {
-  it('projects the latest ended sleep per child, and the selected child', async () => {
+  it('projects the latest ended sleep per child', async () => {
     const { desired, useAppStore } = await setup();
     useAppStore.setState({
-      selectedChildId: 'c1',
       entries: [
         { id: 'e1', childId: 'c1', type: 'sleep', start: 1_000, end: 2_000, nap: true, tags: [] },
         { id: 'e2', childId: 'c1', type: 'sleep', start: 3_000, end: 4_000, nap: true, tags: [] },
@@ -367,7 +366,6 @@ describe('nap anchor projection', () => {
     await flush();
     const input = desired.mock.calls.at(-1)?.[0];
     expect(input?.lastSleepEndByChild).toEqual({ c1: 4_000, c2: 6_000 });
-    expect(input?.selectedChildId).toBe('c1');
   });
 
   it('projects children with an ongoing sleep entry into asleepChildIds', async () => {
@@ -395,17 +393,18 @@ describe('nap anchor projection', () => {
     expect(desired.mock.calls.length).toBeGreaterThan(before);
   });
 
-  it('reconciles when selectedChildId changes', async () => {
-    // `napReminders` resolves an ownerless running sleep timer's owner as
-    // `timer.childId ?? input.selectedChildId`, so selectedChildId is a
-    // genuine input to the desired set, not just a disambiguator that
-    // `timers` already covers. A change to it alone must trigger a rebuild.
+  it('does not reconcile when only the selected child changes', async () => {
+    // Nothing in the desired set reads the selection as of 0.15.3: treatment
+    // reminders cover every child and the milestone catch-up nudge loops them,
+    // so a switch cannot change what Android should hold. The justification for
+    // the old entry was the two rules that did read it; both are gone, and the
+    // even older one (an ownerless sleep timer resolving to
+    // `timer.childId ?? selectedChildId`) was retired before that.
     const { desired, useAppStore } = await setup();
-    await flush();
-    const before = desired.mock.calls.length;
+    const builds = desired.mock.calls.length;
     useAppStore.setState({ selectedChildId: 'c2' });
     await flush();
-    expect(desired.mock.calls.length).toBeGreaterThan(before);
+    expect(desired.mock.calls.length).toBe(builds);
   });
 });
 
@@ -493,7 +492,7 @@ describe('treatment projection', () => {
     expect(input.treatmentDoses.treatment1.lastAt).toBe(doseAt);
   });
 
-  it('scopes dose scalars to the selected child', async () => {
+  it("scopes each treatment's doses to that treatment's own child", async () => {
     const { desired, useAppStore } = await setup();
     useAppStore.setState({
       selectedChildId: 'c1',
@@ -502,8 +501,44 @@ describe('treatment projection', () => {
     });
     await flush();
 
-    // The dose belongs to another child, so it must not count toward c1's treatment.
+    // The dose belongs to another child, so it cannot count toward a c1 treatment.
     expect(desired.mock.calls.at(-1)![0].treatmentDoses.treatment1).toEqual({ today: 0, lastAt: null });
+  });
+
+  it("gives a non-selected child's treatment its own scalars", async () => {
+    // The point of the whole change. Until now only the selected child's
+    // treatments got a key at all, so a sibling's regimen was invisible here.
+    const { desired, useAppStore } = await setup();
+    const doseAt = Date.now() - 60_000;
+    useAppStore.setState({
+      selectedChildId: 'c1',
+      treatments: [treatmentRec, { ...treatmentRec, id: 'treatment2', childId: 'c2' }],
+      entries: [dose('c2', doseAt)],
+    });
+    await flush();
+
+    const input = desired.mock.calls.at(-1)![0];
+    expect(input.treatmentDoses.treatment2).toEqual({ today: 1, lastAt: doseAt });
+  });
+
+  it('does not let one child\'s dose settle a sibling\'s identically named treatment', async () => {
+    // The hazard this task exists to avoid. Dose-to-treatment attribution is by
+    // NAME (a MedicationEntry carries no treatment reference that survives
+    // sync), and two children on the same medicine is the ordinary case. Handing
+    // `treatmentDoseScalars` both children's treatments and both children's
+    // entries at once would cross-attribute silently.
+    const { desired, useAppStore } = await setup();
+    const doseAt = Date.now() - 60_000;
+    useAppStore.setState({
+      selectedChildId: 'c1',
+      treatments: [treatmentRec, { ...treatmentRec, id: 'treatment2', childId: 'c2' }],
+      entries: [dose('c1', doseAt)],
+    });
+    await flush();
+
+    const input = desired.mock.calls.at(-1)![0];
+    expect(input.treatmentDoses.treatment1).toEqual({ today: 1, lastAt: doseAt });
+    expect(input.treatmentDoses.treatment2).toEqual({ today: 0, lastAt: null });
   });
 
   it('rebuilds when the treatments list changes', async () => {
@@ -528,6 +563,48 @@ describe('treatment projection', () => {
     useAppStore.setState({ treatmentRemindersEnabledAt: Date.now() });
     await flush();
     expect(desired.mock.calls.length).toBeGreaterThan(builds);
+  });
+});
+
+describe('milestone projection', () => {
+  const milestoneEntry = (childId: string, key: string, time: number): Entry => ({
+    id: `ms-${childId}-${key}`,
+    childId,
+    type: 'milestone',
+    key,
+    time,
+    text: key,
+    tags: [],
+  });
+
+  it("keys reached and answered milestones under each child's own id, never the other's", async () => {
+    // A mis-keyed map would silently nudge a parent about a milestone their
+    // OTHER child logged, or hide the nudge they're actually due for.
+    const { desired, useAppStore } = await setup();
+    const loggedAt = Date.now() - 60_000;
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Rowan', last: '', birth: Date.now(), color: '#fff' },
+        { id: 'c2', first: 'Wren', last: '', birth: Date.now(), color: '#fff' },
+      ],
+      // c1 logged a milestone entry; c2 answered a home-screen prompt instead.
+      entries: [milestoneEntry('c1', 'rolls-over', loggedAt)],
+      answeredMilestonePrompts: { c2: ['first-word'] },
+    });
+    await flush();
+
+    const input = desired.mock.calls.at(-1)![0];
+    expect(input.reachedMilestoneKeysByChild.c1).toEqual(['rolls-over']);
+    expect(input.answeredMilestoneKeysByChild.c2).toEqual(['first-word']);
+    // Cross-checks: c1's reached key never lands on c2, and c2's answered key
+    // never lands on c1.
+    expect(input.reachedMilestoneKeysByChild.c2).toEqual([]);
+    // c1 answered nothing, so it has no key at all in the answered map (that
+    // map is a straight passthrough of the store's sparse record, unlike the
+    // always-present-but-possibly-empty reached map above). `milestoneReminders`
+    // reads a missing key with `?? []`, so this is exactly the "reached
+    // nothing" case for c1, not a bug.
+    expect(input.answeredMilestoneKeysByChild.c1).toBeUndefined();
   });
 });
 
