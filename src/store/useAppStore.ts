@@ -1039,7 +1039,7 @@ function resolveSelectedChildId(reconciledChildren: Child[], serverSelectedChild
  *  (serverId == null) records up to the server. */
 function buildUploadDeps(conn: Connection): UploadDeps {
   return {
-    pushChild: (c) => pushChildToServer(conn, c).then((r) => r?.id),
+    pushChild: (c) => pushChildToServer(conn, c),
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
     pushTreatment: (c, childServerId) => pushTreatmentToServer(conn, c, childServerId),

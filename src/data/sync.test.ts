@@ -48,7 +48,7 @@ const treatment = (overrides: Partial<Treatment> = {}): Treatment => ({
 const emptyState = (): UploadState => ({ children: [], entries: [], measurements: [], treatments: [] });
 
 const makeDeps = (overrides: Partial<UploadDeps> = {}): UploadDeps => ({
-  pushChild: vi.fn(async () => 100),
+  pushChild: vi.fn(async () => ({ id: 100 })),
   pushEntry: vi.fn(async () => 200),
   pushMeasurement: vi.fn(async () => 300),
   pushTreatment: vi.fn(async () => 400),
@@ -67,7 +67,7 @@ describe('uploadUnsynced', () => {
     const deps: UploadDeps = {
       pushChild: vi.fn(async (c) => {
         log.push(`child:${c.id}`);
-        return 10;
+        return { id: 10 };
       }),
       pushEntry: vi.fn(async (e) => {
         log.push(`entry:${e.id}`);
@@ -95,7 +95,7 @@ describe('uploadUnsynced', () => {
       measurements: [],
     };
     const pushEntry = vi.fn(async () => 200);
-    const deps = makeDeps({ pushChild: vi.fn(async () => 10), pushEntry });
+    const deps = makeDeps({ pushChild: vi.fn(async () => ({ id: 10 })), pushEntry });
 
     await uploadUnsynced(state, deps);
 
@@ -110,7 +110,7 @@ describe('uploadUnsynced', () => {
       treatments: [treatment({ id: 'cu1', childId: 'child1' })],
     };
     const pushTreatment = vi.fn(async () => 400);
-    const deps = makeDeps({ pushChild: vi.fn(async () => 42), pushTreatment });
+    const deps = makeDeps({ pushChild: vi.fn(async () => ({ id: 42 })), pushTreatment });
 
     await uploadUnsynced(state, deps);
 
@@ -181,7 +181,7 @@ describe('uploadUnsynced', () => {
       measurements: [measurement({ id: 'm1', childId: 'child1' })],
     };
     const pushMeasurement = vi.fn(async () => 300);
-    const deps = makeDeps({ pushChild: vi.fn(async () => 42), pushMeasurement });
+    const deps = makeDeps({ pushChild: vi.fn(async () => ({ id: 42 })), pushMeasurement });
 
     await uploadUnsynced(state, deps);
 
@@ -189,7 +189,7 @@ describe('uploadUnsynced', () => {
   });
 
   it('does not push a child that already has a serverId', async () => {
-    const pushChild = vi.fn(async () => 999);
+    const pushChild = vi.fn(async () => ({ id: 999 }));
     const state: UploadState = {
       ...emptyState(),
       children: [child({ id: 'c1', serverId: 5 })],
@@ -223,7 +223,7 @@ describe('uploadUnsynced', () => {
   });
 
   it('leaves a child unsynced when pushChild throws, and does not abort the rest', async () => {
-    const otherPushChild = vi.fn(async (_c: Child) => 11);
+    const otherPushChild = vi.fn(async (_c: Child) => ({ id: 11 }));
     const state: UploadState = {
       children: [child({ id: 'c1', serverId: undefined }), child({ id: 'c2', serverId: undefined })],
       entries: [],
@@ -319,6 +319,48 @@ describe('uploadUnsynced', () => {
     expect(calls.map(([done]) => done)).toEqual([1, 2, 3]);
   });
 
+  it('stamps the picture the server stored over the local file path', async () => {
+    // A child created offline carries a document-directory URI as its picture.
+    // The push uploads that file, and the server answers with its own URL,
+    // which has to replace the local path or the avatar keeps pointing at a
+    // file only this device can read.
+    const state: UploadState = {
+      children: [child({ id: 'c1', picture: 'file:///doc/childPhotos/photo-1.jpg' })],
+      entries: [],
+      measurements: [],
+    };
+    const deps = makeDeps({ pushChild: vi.fn(async () => ({ id: 42, picture: 'https://srv/media/c1.jpg' })) });
+
+    const result = await uploadUnsynced(state, deps);
+
+    expect(result.children[0].serverId).toBe(42);
+    expect(result.children[0].picture).toBe('https://srv/media/c1.jpg');
+  });
+
+  it('leaves the local picture alone when the push carried no photo', async () => {
+    // Only a push that actually uploaded a photo gets an answer about one. A
+    // null must never clobber a local path: that is the avatar going blank.
+    const state: UploadState = {
+      children: [child({ id: 'c1', picture: 'file:///doc/childPhotos/photo-1.jpg' })],
+      entries: [],
+      measurements: [],
+    };
+    const deps = makeDeps({ pushChild: vi.fn(async () => ({ id: 42, picture: null })) });
+
+    const result = await uploadUnsynced(state, deps);
+
+    expect(result.children[0].serverId).toBe(42);
+    expect(result.children[0].picture).toBe('file:///doc/childPhotos/photo-1.jpg');
+  });
+
+  it('leaves a child unsynced when the push returns no id', async () => {
+    const state: UploadState = { children: [child({ id: 'c1' })], entries: [], measurements: [] };
+
+    const result = await uploadUnsynced(state, makeDeps({ pushChild: vi.fn(async () => ({ id: undefined })) }));
+
+    expect(result.children[0].serverId).toBeUndefined();
+  });
+
   it('does not mutate the input state', async () => {
     const state: UploadState = {
       children: [child({ id: 'c1' })],
@@ -379,7 +421,7 @@ describe('expected children are held back from the server', () => {
     const deps = makeDeps({
       pushChild: vi.fn(async (c: Child) => {
         pushed.push(c);
-        return 99;
+        return { id: 99 };
       }),
     });
 
