@@ -45,9 +45,10 @@ const KEY = 'budkin.pendingPhotos.v1';
 let mutations: Promise<unknown> = Promise.resolve();
 
 function serialize<T>(work: () => Promise<T>): Promise<T> {
-  const run = mutations.then(work, work);
-  // Swallow on the CHAIN only, never on `run`: a caller still sees its own
-  // rejection, while a failed mutation does not poison the ones queued behind it.
+  const run = mutations.then(work);
+  // Swallow on the CHAIN only, never on `run`, so a caller still sees its own
+  // rejection. Nothing in this module can reject today (both helpers swallow),
+  // so this guards a future one from stalling every mutation behind it.
   mutations = run.catch(() => {});
   return run;
 }
@@ -87,7 +88,12 @@ export async function setPendingPhoto(childId: string, photo: PendingPhoto): Pro
   });
 }
 
-/** Drop one child's record, returning it so its file can be discarded. */
+/**
+ * Drop one child's record, returning it so its file can be discarded.
+ *
+ * Serialized with `setPendingPhoto` to prevent concurrent mutations from
+ * clobbering each other. See `serialize` above.
+ */
 export async function clearPendingPhoto(childId: string): Promise<PendingPhoto | undefined> {
   return serialize(async () => {
     const map = await loadPendingPhotos();
@@ -99,10 +105,15 @@ export async function clearPendingPhoto(childId: string): Promise<PendingPhoto |
   });
 }
 
+/** Drop every record. Serialized with the other two: an unserialized wipe can
+ *  land BETWEEN a mutation's read and its write, and the mutation then writes
+ *  its whole map back, resurrecting records this was called to remove. */
 export async function clearPendingPhotos(): Promise<void> {
-  try {
-    await AsyncStorage.removeItem(KEY);
-  } catch {
-    /* ignore */
-  }
+  return serialize(async () => {
+    try {
+      await AsyncStorage.removeItem(KEY);
+    } catch {
+      /* ignore */
+    }
+  });
 }
