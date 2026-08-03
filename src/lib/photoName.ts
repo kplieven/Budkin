@@ -1,8 +1,9 @@
 /** The name a picked photo is copied to in the document directory.
  *
- *  Its own module because `src/lib/photoFile.ts` imports `expo-file-system` and
- *  so cannot be loaded by the node test runner at all. Same precedent as
- *  `src/lib/appVersion.ts`.
+ *  Its own module so the naming rule is testable with no mocking at all.
+ *  `src/lib/photoFile.ts` imports `expo-file-system` and only loads under
+ *  vitest once that module is mocked (see `photoFile.test.ts`); this one
+ *  needs none of that.
  *
  *  The extension is taken from the source name so the stored file is still
  *  recognisable as an image, and because the native multipart part is named
