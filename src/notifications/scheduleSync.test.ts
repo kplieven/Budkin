@@ -394,7 +394,7 @@ describe('nap anchor projection', () => {
   });
 
   it('does not reconcile when only the selected child changes', async () => {
-    // Nothing in the desired set reads the selection as of 0.15.2: treatment
+    // Nothing in the desired set reads the selection as of 0.15.3: treatment
     // reminders cover every child and the milestone catch-up nudge loops them,
     // so a switch cannot change what Android should hold. The justification for
     // the old entry was the two rules that did read it; both are gone, and the
@@ -563,6 +563,48 @@ describe('treatment projection', () => {
     useAppStore.setState({ treatmentRemindersEnabledAt: Date.now() });
     await flush();
     expect(desired.mock.calls.length).toBeGreaterThan(builds);
+  });
+});
+
+describe('milestone projection', () => {
+  const milestoneEntry = (childId: string, key: string, time: number): Entry => ({
+    id: `ms-${childId}-${key}`,
+    childId,
+    type: 'milestone',
+    key,
+    time,
+    text: key,
+    tags: [],
+  });
+
+  it("keys reached and answered milestones under each child's own id, never the other's", async () => {
+    // A mis-keyed map would silently nudge a parent about a milestone their
+    // OTHER child logged, or hide the nudge they're actually due for.
+    const { desired, useAppStore } = await setup();
+    const loggedAt = Date.now() - 60_000;
+    useAppStore.setState({
+      children: [
+        { id: 'c1', first: 'Rowan', last: '', birth: Date.now(), color: '#fff' },
+        { id: 'c2', first: 'Wren', last: '', birth: Date.now(), color: '#fff' },
+      ],
+      // c1 logged a milestone entry; c2 answered a home-screen prompt instead.
+      entries: [milestoneEntry('c1', 'rolls-over', loggedAt)],
+      answeredMilestonePrompts: { c2: ['first-word'] },
+    });
+    await flush();
+
+    const input = desired.mock.calls.at(-1)![0];
+    expect(input.reachedMilestoneKeysByChild.c1).toEqual(['rolls-over']);
+    expect(input.answeredMilestoneKeysByChild.c2).toEqual(['first-word']);
+    // Cross-checks: c1's reached key never lands on c2, and c2's answered key
+    // never lands on c1.
+    expect(input.reachedMilestoneKeysByChild.c2).toEqual([]);
+    // c1 answered nothing, so it has no key at all in the answered map (that
+    // map is a straight passthrough of the store's sparse record, unlike the
+    // always-present-but-possibly-empty reached map above). `milestoneReminders`
+    // reads a missing key with `?? []`, so this is exactly the "reached
+    // nothing" case for c1, not a bug.
+    expect(input.answeredMilestoneKeysByChild.c1).toBeUndefined();
   });
 });
 
