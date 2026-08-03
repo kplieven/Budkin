@@ -140,13 +140,27 @@ describe('pendingPhotos persistence', () => {
     expect(await loadPendingPhotos()).toEqual({});
   });
 
-  it('re-reads before writing, so a record written during an in-flight save survives', async () => {
-    // The reason `removePendingOp` re-reads too: a caller holding a stale
-    // snapshot must not clobber a write that landed after it read.
+  it('serializes mutations, so one landing during another is not clobbered', async () => {
+    // Both mutators are read-modify-write over one stored map, and both are
+    // fired without being awaited. Two interleaving would each write back the
+    // map they read, and the second to finish would drop the first one's
+    // change. A re-read at the start of each call, which is all
+    // `removePendingOp` does, cannot fix that: both callers re-read, and both
+    // read the same map. Only ordering them does.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), clearPendingPhoto('c1')]);
     const map = await loadPendingPhotos();
     expect(map.c2).toEqual(set('file:///doc/b.jpg'));
+  });
+
+  it('a rejected mutation does not poison the ones queued behind it', async () => {
+    await setPendingPhoto('c1', set('file:///doc/a.jpg'));
+    await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), setPendingPhoto('c3', set('file:///doc/c.jpg'))]);
+    expect(await loadPendingPhotos()).toEqual({
+      c1: set('file:///doc/a.jpg'),
+      c2: set('file:///doc/b.jpg'),
+      c3: set('file:///doc/c.jpg'),
+    });
   });
 });
 ```
@@ -211,30 +225,52 @@ async function save(map: Record<string, PendingPhoto>): Promise<void> {
 }
 
 /**
+ * Mutations run one at a time. Both of them are read-modify-write over a
+ * single stored map, and both are fired without being awaited: a save records
+ * a photo with `void`, and a flush settles one while the loop continues. Two
+ * of those interleaving would each write back the map they read, so the second
+ * to finish silently drops the first one's change, and a dropped change here
+ * is a lost photo.
+ *
+ * A re-read at the start of each call, which is all `removePendingOp` does,
+ * cannot fix that: both callers re-read, and both read the same map. Only
+ * ordering them does.
+ */
+let mutations: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(work: () => Promise<T>): Promise<T> {
+  const run = mutations.then(work, work);
+  // Swallow on the CHAIN only, never on `run`: a caller still sees its own
+  // rejection, while a failed mutation does not poison the ones queued behind it.
+  mutations = run.catch(() => {});
+  return run;
+}
+
+/**
  * Record what this child owes the server, replacing anything already recorded
  * for them, and return the replaced record so the caller can discard the file
  * it pointed at.
- *
- * Re-reads the stored map instead of writing one the caller holds, for the same
- * reason `removePendingOp` re-reads: a record written for a DIFFERENT child
- * while this call was in flight must survive.
  */
 export async function setPendingPhoto(childId: string, photo: PendingPhoto): Promise<PendingPhoto | undefined> {
-  const map = await loadPendingPhotos();
-  const prev = map[childId];
-  map[childId] = photo;
-  await save(map);
-  return prev;
+  return serialize(async () => {
+    const map = await loadPendingPhotos();
+    const prev = map[childId];
+    map[childId] = photo;
+    await save(map);
+    return prev;
+  });
 }
 
 /** Drop one child's record, returning it so its file can be discarded. */
 export async function clearPendingPhoto(childId: string): Promise<PendingPhoto | undefined> {
-  const map = await loadPendingPhotos();
-  const prev = map[childId];
-  if (prev === undefined) return undefined;
-  delete map[childId];
-  await save(map);
-  return prev;
+  return serialize(async () => {
+    const map = await loadPendingPhotos();
+    const prev = map[childId];
+    if (prev === undefined) return undefined;
+    delete map[childId];
+    await save(map);
+    return prev;
+  });
 }
 
 export async function clearPendingPhotos(): Promise<void> {

@@ -97,9 +97,13 @@ that are not stylistic:
   photo there makes two offline photo edits upload two files. A map keyed by
   child id overwrites, which is what re-picking a photo means.
 
-Every mutation re-reads the stored map before writing it back, for the same
-reason `removePendingOp` re-reads: a write landing during a flush must not be
-clobbered by the flush's stale snapshot.
+Mutations are serialized: both are read-modify-write over one stored map, and
+both are fired without being awaited (a save records with `void`, a flush
+settles inside its loop), so two interleaving would each write back the map
+they read and the second would drop the first one's change. A dropped change
+here is a lost photo. Re-reading at the start of each call, which is all
+`removePendingOp` does, does not fix that, because both callers re-read and
+both read the same map.
 
 The map is NOT mirrored into store state. Nothing needs it synchronously: the
 avatar reads `child.picture`, and the flush paths are already async.
