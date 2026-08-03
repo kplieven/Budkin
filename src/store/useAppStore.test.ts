@@ -44,7 +44,7 @@ import { enqueueEntries, enqueueEntry } from '@/data/queue';
 import { addPendingOp, clearPendingOps } from '@/data/pendingOps';
 import type { PendingOp } from '@/data/pendingOps';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
-import type { Child, Treatment, Entry, Measurement, MilestoneEntry, Profile, Tag, Timer } from '@/types/models';
+import type { Child, Treatment, Entry, Measurement, MilestoneEntry, Profile, PhotoChange, Tag, Timer } from '@/types/models';
 import type { LoadSlice } from '@/data/repository';
 
 // Shared mock state (hoisted so the vi.mock factories can close over it).
@@ -9944,6 +9944,111 @@ describe('a photo picked while offline is recorded for the replay', () => {
     await flush();
     expect(h.pendingPhotos).toEqual({});
     expect(h.childUpdateChange).toEqual([{ kind: 'set', photo }]);
+  });
+});
+
+describe('the op replay uploads the photo recorded with it', () => {
+  const BIRTH = NOW - 90 * 86400000;
+  const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const offlineEdit = (change: PhotoChange) => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o', picture: null }],
+      selectedChildId: 'c1',
+      toast: null,
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: change });
+  };
+
+  it('sends the photo on the replayed PATCH', async () => {
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    await s().flushPendingOps();
+
+    expect(h.childUpdateChange).toEqual([{ kind: 'set', photo: expect.objectContaining({ uri: photo.uri }) }]);
+  });
+
+  it('swaps the local file path for the URL the server stored', async () => {
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    await s().flushPendingOps();
+
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+  });
+
+  it('clears the record and discards the file once it has landed', async () => {
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    await s().flushPendingOps();
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
+  it('replays a recorded removal, and takes the server’s null', async () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o', picture: 'https://srv/old.jpg' }],
+      selectedChildId: 'c1',
+    });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'remove' } });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    await s().flushPendingOps();
+
+    expect(h.childUpdateChange).toEqual([{ kind: 'remove' }]);
+    expect(s().children[0].picture).toBeNull();
+    expect(h.pendingPhotos).toEqual({});
+  });
+
+  it('keeps the record when the replay fails, so the next flush retries it', async () => {
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+
+    await s().flushPendingOps();
+
+    expect(h.pendingPhotos.c1).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
+    expect(h.discardedPhotos).toEqual([]);
+    expect(h.pendingOps).toHaveLength(1); // the op is kept too
+  });
+
+  it('drops the record when the child is gone server-side (404)', async () => {
+    // Terminal for the op, and terminal for the photo: nothing will ever accept
+    // it. Leaving the record would keep the file forever.
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new ApiError(404, 'gone'));
+
+    await s().flushPendingOps();
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  it('sends the child without a photo when the file has gone missing, and stops asking', async () => {
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+    h.photoFileMissing = true;
+
+    await s().flushPendingOps();
+
+    expect(h.childUpdateChange).toEqual([{ kind: 'none' }]);
+    expect(h.childUpdated).toHaveLength(1); // the name and birthday still land
+    expect(h.pendingPhotos).toEqual({});
   });
 });
 

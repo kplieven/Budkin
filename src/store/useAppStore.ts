@@ -1081,6 +1081,36 @@ async function recordPendingPhoto(childId: string, change: PhotoChange, serverBa
   }
 }
 
+/**
+ * The PhotoChange a deferred push should carry for this child, reopened from
+ * the recorded path. `{kind:'none'}` when nothing is owed.
+ *
+ * A recorded `set` whose file has gone missing also answers `{kind:'none'}`,
+ * and drops the record on the way out: pushing the child without the photo at
+ * least lands the name and birthday, and no retry can bring the file back. A
+ * document-directory file going missing has no ordinary cause, which is why
+ * this is silent rather than a toast.
+ */
+async function pendingPhotoChange(childId: string): Promise<PhotoChange> {
+  const rec = (await loadPendingPhotos())[childId];
+  if (rec == null) return { kind: 'none' };
+  if (rec.kind === 'remove') return { kind: 'remove' };
+  const photo = reopenPhotoFile(rec);
+  if (!photo) {
+    await settlePendingPhoto(childId);
+    return { kind: 'none' };
+  }
+  return { kind: 'set', photo };
+}
+
+/** Finished with this child's pending photo: drop the record and the file.
+ *  Called only where the answer is final, a confirmed upload or a target that
+ *  is gone server-side, never on a retryable failure. */
+async function settlePendingPhoto(childId: string): Promise<void> {
+  const gone = await clearPendingPhoto(childId);
+  if (gone?.kind === 'set') await discardPhotoFile(gone.uri);
+}
+
 type Get = StoreApi<AppStore>['getState'];
 type Set = StoreApi<AppStore>['setState'];
 
@@ -2776,15 +2806,31 @@ export const useAppStore = create<AppStore>((set, get) => ({
             // snapshot above, so the re-stamp below is visible to the next op.
             const live = get().children.find((c) => c.id === op.payload.id);
             const payload = live?.slug ? { ...op.payload, slug: live.slug } : op.payload;
-            const res = await updateChildOnServer(conn, payload);
+            // The photo recorded alongside this op, if any. Reopened from the
+            // document directory, which is why it is still there: the file the
+            // picker handed back lived in Android's evictable cache.
+            const change = await pendingPhotoChange(op.payload.id);
+            const res = await updateChildOnServer(conn, payload, change);
             // A replayed rename moves the slug server-side, and the child
             // endpoints are keyed by it, so re-stamp it here the same way
             // saveChild's online edit does. Otherwise the next delete goes out
-            // with a stale slug, 404s, and the child comes back.
+            // with a stale slug, 404s, and the child comes back. The picture is
+            // stamped in the same pass: until now this child's `picture` has
+            // been a device-local file path that only this device can read.
             const slug = res?.slug;
-            if (slug) {
+            if (slug || change.kind !== 'none') {
               set((st) => ({
-                children: st.children.map((c) => (c.id === op.payload.id ? { ...c, slug } : c)),
+                children: st.children.map((c) => {
+                  if (c.id !== op.payload.id) return c;
+                  const next = slug ? { ...c, slug } : c;
+                  if (change.kind === 'none') return next;
+                  // On a remove, `null` IS the answer and must be kept; on a
+                  // set it means the server stored nothing, and taking it would
+                  // throw away the only copy the device still has. Same rule as
+                  // saveChild's online edit.
+                  const picture = change.kind === 'remove' ? (res?.picture ?? null) : (res?.picture ?? c.picture);
+                  return { ...next, picture };
+                }),
               }));
             }
             // Gender lives in its own `gender`-tagged note, not on the child
@@ -2843,6 +2889,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // run had already replayed. `removePendingOp` re-reads the file and
         // drops one op instead of overwriting the list wholesale, so anything
         // this run was not asked to remove is left alone.
+        //
+        // Reached on success and on a terminal 404 alike, and never on a
+        // retryable failure (which `continue`s above), which is exactly when
+        // this child will never need its pending photo again. A no-op when
+        // nothing was recorded.
+        if (op.op === 'update' && op.entity === 'child') await settlePendingPhoto(op.payload.id);
         await removePendingOp(op);
       }
     })();
