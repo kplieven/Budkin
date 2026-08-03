@@ -3513,9 +3513,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return;
       }
     }
-    // Only once the delete has stuck. The catch above restores the child and
-    // returns, and a restored child still owes the server its photo.
-    void settlePendingPhoto(id);
+    // Only when the child is really gone: either the server confirmed the
+    // delete (the catch above returns, so reaching here means it stuck), or
+    // there was no server row to delete in the first place. A server-backed
+    // child deleted while OFFLINE is neither: the DELETE never went out, the
+    // next refresh brings the child back, and discarding its pending photo
+    // here would be the one deletion nothing can undo.
+    if (!serverBacked || doServerDelete) void settlePendingPhoto(id);
     get().showToast(`${child.first} deleted`);
     // Reconcile after the DELETE this action just sent, which Baby Buddy
     // cascades server-side over the child's whole history.

@@ -10250,6 +10250,39 @@ describe('pending photos do not outlive what they belong to', () => {
     expect(h.discardedPhotos).toEqual([]);
   });
 
+  it('keeps the pending photo when a server-backed child is deleted while OFFLINE', async () => {
+    // The DELETE never goes out, so the next refresh brings this child back.
+    // Discarding the photo here would be the one deletion nothing can undo.
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o' }],
+      selectedChildId: 'c1',
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().deleteChild('c1');
+
+    expect(h.pendingPhotos.c1).toBeDefined();
+    expect(h.discardedPhotos).toEqual([]);
+  });
+
+  it('settles the pending photo for a local-only child deleted offline (it is really gone)', async () => {
+    // No serverId: never pushed, so there is no server row and nothing a
+    // later refresh could resurrect. Unlike the server-backed offline case
+    // above, this delete is final.
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff' }],
+      selectedChildId: 'c1',
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().deleteChild('c1');
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
   it('disconnecting clears every record and sweeps every file', async () => {
     h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
 
@@ -10294,5 +10327,39 @@ describe('pending photos do not outlive what they belong to', () => {
     await flush();
 
     expect(h.sweptKeeps).toEqual([[]]);
+  });
+
+  it('hydrate with no saved connection still sweeps, keeping only pending records', async () => {
+    // No entity store is read on this branch, so there is no roster: the keep
+    // set can only come from pending records, and that is exactly the point
+    // (a record recorded before ever connecting must not be swept away).
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    h.pendingPhotos.c1 = { kind: 'set', uri: 'file:///doc/childPhotos/waiting.jpg', name: 'p.jpg', type: 'image/jpeg' };
+
+    await s().hydrate();
+    await flush();
+
+    expect(h.sweptKeeps).toEqual([['file:///doc/childPhotos/waiting.jpg']]);
+  });
+
+  it('hydrate in server mode sweeps too, not just the local-mode branch', async () => {
+    // A narrow assertion on purpose: this branch also kicks off a background
+    // refresh(), and the point here is only that the sweep call on THIS exit
+    // is not missing, not what refresh() goes on to do.
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', picture: 'file:///doc/childPhotos/shown.jpg' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: null,
+    });
+
+    await s().hydrate();
+    await flush();
+
+    expect(h.sweptKeeps).toHaveLength(1);
+    expect(h.sweptKeeps[0]).toEqual(['file:///doc/childPhotos/shown.jpg']);
   });
 });
