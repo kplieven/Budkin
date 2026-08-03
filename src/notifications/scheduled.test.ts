@@ -978,13 +978,14 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
           treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
         ],
         treatmentDoses: {
-          treatment1: { today: 1, lastAt: at(2026, 9, 2, 8) },
+          treatment1: { today: 1, lastAt: at(2026, 9, 2, 5) },
           treatment2: { today: 0, lastAt: null },
         },
       },
-      at(2026, 9, 2, 9),
+      at(2026, 9, 2, 6),
     );
     const today = out.filter((n) => n.fireAt < at(2026, 9, 3));
+    expect(today).toHaveLength(1);
     expect(today.every((n) => n.identifier.includes('treatment2'))).toBe(true);
   });
 
