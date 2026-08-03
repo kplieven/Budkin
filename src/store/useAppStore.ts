@@ -66,7 +66,14 @@ import {
   removePendingOp,
   savePendingOps,
 } from '@/data/pendingOps';
-import { clearPendingPhoto, clearPendingPhotos, loadPendingPhotos, setPendingPhoto } from '@/data/pendingPhotos';
+import {
+  clearPendingPhoto,
+  clearPendingPhotoIf,
+  clearPendingPhotos,
+  loadPendingPhotos,
+  setPendingPhoto,
+} from '@/data/pendingPhotos';
+import type { PendingPhoto } from '@/data/pendingPhotos';
 import { discardPhotoFile, reopenPhotoFile, sweepPhotoFiles } from '@/lib/photoFile';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntries, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
@@ -1044,12 +1051,14 @@ function buildUploadDeps(conn: Connection): UploadDeps {
     // A child pushed here may owe the server a photo: one picked while offline,
     // or picked for a child the server had never seen. The record is settled
     // only on a push that actually landed, so a failure retries with the photo
-    // still attached. The picture is reported back only when one was uploaded,
-    // so a `null` from a photoless POST can never blank a local file path.
+    // still attached, and only if it is still the record this push consumed: a
+    // photo re-picked DURING the POST is a new record that this push never
+    // carried. The picture is reported back only when one was uploaded, so a
+    // `null` from a photoless POST can never blank a local file path.
     pushChild: async (c) => {
-      const change = await pendingPhotoChange(c.id);
+      const { change, consumed } = await pendingPhotoChange(c.id);
       const res = await pushChildToServer(conn, c, change);
-      if (res?.id != null && change.kind !== 'none') await settlePendingPhoto(c.id);
+      if (res?.id != null && consumed) await settlePendingPhoto(c.id, consumed);
       return { id: res?.id, picture: change.kind === 'set' ? (res?.picture ?? undefined) : undefined };
     },
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
@@ -1093,31 +1102,52 @@ async function recordPendingPhoto(childId: string, change: PhotoChange, serverBa
 
 /**
  * The PhotoChange a deferred push should carry for this child, reopened from
- * the recorded path. `{kind:'none'}` when nothing is owed.
+ * the recorded path, together with the RECORD that change was read from.
+ *
+ * The record travels with the change because every consumer awaits a network
+ * round trip before settling, and the settle has to be able to tell the record
+ * it consumed from one written during that round trip. See
+ * `settlePendingPhoto`. `consumed` is present exactly when `change.kind` is not
+ * `'none'`, so a caller can guard on either.
  *
  * A recorded `set` whose file has gone missing also answers `{kind:'none'}`,
  * and drops the record on the way out: pushing the child without the photo at
  * least lands the name and birthday, and no retry can bring the file back. A
  * document-directory file going missing has no ordinary cause, which is why
- * this is silent rather than a toast.
+ * this is silent rather than a toast. Nothing is reported as consumed there,
+ * because the record is already dealt with here.
  */
-async function pendingPhotoChange(childId: string): Promise<PhotoChange> {
+async function pendingPhotoChange(
+  childId: string,
+): Promise<{ change: PhotoChange; consumed: PendingPhoto | undefined }> {
   const rec = (await loadPendingPhotos())[childId];
-  if (rec == null) return { kind: 'none' };
-  if (rec.kind === 'remove') return { kind: 'remove' };
+  if (rec == null) return { change: { kind: 'none' }, consumed: undefined };
+  if (rec.kind === 'remove') return { change: { kind: 'remove' }, consumed: rec };
   const photo = reopenPhotoFile(rec);
   if (!photo) {
-    await settlePendingPhoto(childId);
-    return { kind: 'none' };
+    await settlePendingPhoto(childId, rec);
+    return { change: { kind: 'none' }, consumed: undefined };
   }
-  return { kind: 'set', photo };
+  return { change: { kind: 'set', photo }, consumed: rec };
 }
 
-/** Finished with this child's pending photo: drop the record and the file.
- *  Called only where the answer is final, a confirmed upload or a target that
- *  is gone server-side, never on a retryable failure. */
-async function settlePendingPhoto(childId: string): Promise<void> {
-  const gone = await clearPendingPhoto(childId);
+/**
+ * Finished with this child's pending photo: drop the record and the file.
+ * Called only where the answer is final, a confirmed upload or a target that
+ * is gone server-side, never on a retryable failure.
+ *
+ * Pass the record the caller CONSUMED whenever there is one. Every consumer
+ * reads the record, awaits a round trip, then settles, and a re-pick during
+ * that window writes a new record: clearing unconditionally would delete a
+ * photo that was never uploaded, file and all, which is the one thing this
+ * store exists to prevent. Compare-and-clear leaves such a record alone, and
+ * the next push carries it.
+ *
+ * The unconditional form is for callers that mean "this child is gone, drop
+ * whatever is there": `deleteChild`, and a replay that 404s.
+ */
+async function settlePendingPhoto(childId: string, consumed?: PendingPhoto): Promise<void> {
+  const gone = consumed ? await clearPendingPhotoIf(childId, consumed) : await clearPendingPhoto(childId);
   if (gone?.kind === 'set') await discardPhotoFile(gone.uri);
 }
 
@@ -2468,6 +2498,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
         },
       );
       void saveConnection(conn);
+      // A cross-origin connect took the local side as empty (see the gate
+      // above), so the children the load just installed are the server's and
+      // the previous ones are gone with their ids. Every pending record is
+      // keyed by one of those ids: nothing will ever consume it, and
+      // `sweepChildPhotos` reads one as a reason to keep its file forever.
+      // Drop them and collect what that frees, the pairing `disconnect` uses.
+      // Sequenced, not two `void`s: a sweep that read the map first would keep
+      // exactly the files the wipe just orphaned.
+      if (!sameOrigin) void clearPendingPhotos().then(() => sweepChildPhotos(get().children));
       // The entity store's contents (about to be written by the persistence
       // subscription) now belong to this server: re-stamp the origin label
       // the gate above reads.
@@ -2713,6 +2752,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // Local-mode data accumulates in the entity store from here: label it so
     // a later server connect cannot merge it by serverId. See `loadEntityOrigin`.
     void saveEntityOrigin('local');
+    // The child list was just replaced, so a pending record keyed by a child
+    // that is no longer here belongs to nobody. Reachable by a 401 session
+    // expiry followed by choosing local mode. Nothing would ever consume such a
+    // record, and `sweepChildPhotos` reads one as a reason to keep its file
+    // forever, so drop them and collect what that frees. Sequenced, not two
+    // `void`s: a sweep that read the map first would keep exactly the files the
+    // wipe just orphaned.
+    //
+    // Swept against the children this mode DOES have, unlike `disconnect`'s
+    // empty keep set: in local mode a child's `picture` is the durable copy
+    // itself, and there is no server URL to fall back on. This is also what
+    // eventually collects the file of a server-backed child deleted in local
+    // mode, whose record `deleteChild` deliberately keeps (see the note there
+    // on a delete a later refresh could undo).
+    void clearPendingPhotos().then(() => sweepChildPhotos(get().children));
   },
   disconnect: () => {
     void clearConnection();
@@ -2834,6 +2888,21 @@ export const useAppStore = create<AppStore>((set, get) => ({
       const ops = await loadPendingOps();
       if (ops.length === 0) return;
       for (const op of ops) {
+        // What the settle below needs, decided inside the try/catch and read
+        // after it. The three outcomes are deliberately different:
+        //
+        // - success: compare-and-clear against `consumedPhoto`, the record this
+        //   pass actually sent, so a photo re-picked DURING the round trip is
+        //   left for its own push instead of being cleared and its file deleted
+        //   unread.
+        // - terminal 404: clear unconditionally. The child is gone server-side
+        //   and the op goes with it, so no push will ever carry a record for
+        //   this child again, and one left behind strands its file forever
+        //   (the launch sweep keeps every file a record names).
+        // - retryable failure: neither. The `continue` in the catch skips all
+        //   of this, so the record and the file wait for the next flush.
+        let consumedPhoto: PendingPhoto | undefined;
+        let childGone = false;
         try {
           if (op.op === 'update' && op.entity === 'child') {
             // Address the child by the slug state holds RIGHT NOW, not the one
@@ -2850,7 +2919,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
             // The photo recorded alongside this op, if any. Reopened from the
             // document directory, which is why it is still there: the file the
             // picker handed back lived in Android's evictable cache.
-            const change = await pendingPhotoChange(op.payload.id);
+            const { change, consumed } = await pendingPhotoChange(op.payload.id);
+            consumedPhoto = consumed;
             const res = await updateChildOnServer(conn, payload, change);
             // A replayed rename moves the slug server-side, and the child
             // endpoints are keyed by it, so re-stamp it here the same way
@@ -2921,6 +2991,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // deletes alike: retrying can never succeed, and before this
           // classification such an op was replayed forever on every flush.
           // Fall through and remove it like a success.
+          childGone = true;
+        }
+        // Settle this child's pending photo, on the terms set out at the top of
+        // the loop. Nothing to do on a success that consumed no record.
+        if (op.op === 'update' && op.entity === 'child') {
+          if (childGone) await settlePendingPhoto(op.payload.id);
+          else if (consumedPhoto) await settlePendingPhoto(op.payload.id, consumedPhoto);
         }
         // Replayed, or terminally gone: drop the op from the file one at a
         // time, by value, rather than saving a survivors list once the whole
@@ -2930,12 +3007,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // run had already replayed. `removePendingOp` re-reads the file and
         // drops one op instead of overwriting the list wholesale, so anything
         // this run was not asked to remove is left alone.
-        //
-        // Reached on success and on a terminal 404 alike, and never on a
-        // retryable failure (which `continue`s above), which is exactly when
-        // this child will never need its pending photo again. A no-op when
-        // nothing was recorded.
-        if (op.op === 'update' && op.entity === 'child') await settlePendingPhoto(op.payload.id);
         await removePendingOp(op);
       }
     })();
@@ -3228,6 +3299,24 @@ export const useAppStore = create<AppStore>((set, get) => ({
         if (genderChanged && child.serverId != null) {
           void setChildGenderOnServer(conn, child.serverId, child.gender, Date.now()).catch(() => {});
         }
+        // Whatever this child still owed the server BEFORE this PATCH went out.
+        // Read only when this save uploads the photo itself, which is the case
+        // where an older record is superseded the moment the server answers.
+        // Left there, it names a photo this child no longer owes: an earlier
+        // offline edit's op can survive a retryable failure, and the next flush
+        // would then hand that op the stale record, re-upload the superseded
+        // file, and stamp its URL back over the one saved here.
+        //
+        // Cleared by VALUE on success (see `settlePendingPhoto`), never
+        // unconditionally: if the connection dropped mid-PATCH and the user
+        // recorded a newer photo, that record is the one thing carrying it.
+        //
+        // Nothing is RECORDED on this path, deliberately. An online edit is
+        // queued nowhere, so a record written when the PATCH fails would have
+        // no op to consume it, and the launch sweep would protect its file
+        // forever.
+        const staleRecord =
+          uploadsNow && change.kind !== 'none' ? loadPendingPhotos().then((m) => m[child.id]) : null;
         void updateChildOnServer(conn, child, change)
           .then((res) => {
             if (!res) return;
@@ -3249,6 +3338,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
                 return { ...c, slug, picture };
               }),
             }));
+            // The server has this photo now, so the older record it supersedes
+            // can go (see `staleRecord`). Its own chain rather than an awaited
+            // step, so a settle that somehow throws cannot reach the catch
+            // below and report a save that in fact landed as a failure.
+            if (staleRecord) {
+              void staleRecord
+                .then((stale) => (stale ? settlePendingPhoto(child.id, stale) : undefined))
+                .catch(() => {});
+            }
           })
           .catch(() => {
             // An online edit is queued nowhere (only the offline branch below
@@ -3335,8 +3433,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
         .catch(() => {
           // The child itself is not lost: it stays local with no serverId, and
           // the next flush pushes it. A photo picked in the same save IS lost
-          // though, because `buildUploadDeps` pushes children with no
-          // PhotoChange, so this cannot pass silently under the "Saved" above.
+          // though, because nothing recorded it: this save was online and not
+          // expecting, so it carried the photo on the POST rather than
+          // deferring it, and the flush's `pushChild` finds no record to send.
+          // So this cannot pass silently under the "Saved" above.
           get().showToast(`Could not save ${child.first}`);
         });
     }
@@ -3371,10 +3471,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
         // An expecting child is held back from the server, so a photo picked
         // for it has been waiting in `pendingPhotos` since it was created, even
         // if the app was online the whole time. This push is its first chance.
-        const change = await pendingPhotoChange(id);
+        const { change, consumed } = await pendingPhotoChange(id);
         const res = await pushChildToServer(conn, bornChild, change);
         if (!res || res.id == null) return;
-        if (change.kind !== 'none') await settlePendingPhoto(id);
+        // Compare-and-clear: a photo re-picked while this POST was in flight is
+        // a record this push never carried, and dropping it would delete the
+        // newer file unread. See `settlePendingPhoto`.
+        if (consumed) await settlePendingPhoto(id, consumed);
         // Stamp the server id, the slug and the server's picture URL, exactly
         // as saveChild's create push does (see the note there on why the local
         // `id` is left alone and why the slug matters).

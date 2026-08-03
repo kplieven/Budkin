@@ -31,12 +31,12 @@ export type PendingPhoto =
 const KEY = 'budkin.pendingPhotos.v1';
 
 /**
- * Mutations run one at a time. Both of them are read-modify-write over a
- * single stored map, and both are fired without being awaited: a save records
- * a photo with `void`, and a flush settles one while the loop continues. Two
- * of those interleaving would each write back the map they read, so the
- * second to finish silently drops the first one's change, and a dropped
- * change here is a lost photo.
+ * Mutations run one at a time. They are all read-modify-write over a single
+ * stored map, and they are fired without being awaited: a save records a photo
+ * with `void`, and a flush settles one while the loop continues. Two of those
+ * interleaving would each write back the map they read, so the second to
+ * finish silently drops the first one's change, and a dropped change here is a
+ * lost photo.
  *
  * A re-read at the start of each call, which is all `removePendingOp` does,
  * cannot fix that: both callers re-read, and both read the same map. Only
@@ -75,7 +75,7 @@ async function save(map: Record<string, PendingPhoto>): Promise<void> {
  * for them, and return the replaced record so the caller can discard the file
  * it pointed at.
  *
- * Serialized with `clearPendingPhoto` to prevent concurrent mutations from
+ * Serialized with the other mutators to prevent concurrent mutations from
  * clobbering each other. See `serialize` above.
  */
 export async function setPendingPhoto(childId: string, photo: PendingPhoto): Promise<PendingPhoto | undefined> {
@@ -91,7 +91,11 @@ export async function setPendingPhoto(childId: string, photo: PendingPhoto): Pro
 /**
  * Drop one child's record, returning it so its file can be discarded.
  *
- * Serialized with `setPendingPhoto` to prevent concurrent mutations from
+ * Unconditional: it drops whatever is recorded RIGHT NOW, which is what a
+ * caller saying "this child is gone" means. A caller that consumed a record
+ * and then awaited a round trip wants `clearPendingPhotoIf` instead.
+ *
+ * Serialized with the other mutators to prevent concurrent mutations from
  * clobbering each other. See `serialize` above.
  */
 export async function clearPendingPhoto(childId: string): Promise<PendingPhoto | undefined> {
@@ -105,7 +109,37 @@ export async function clearPendingPhoto(childId: string): Promise<PendingPhoto |
   });
 }
 
-/** Drop every record. Serialized with the other two: an unserialized wipe can
+/** Two records naming the same thing. `uri` alone identifies a `set`: the file
+ *  name carries the epoch millisecond it was copied at, and `name`/`type`
+ *  describe the same file. */
+function sameRecord(a: PendingPhoto, b: PendingPhoto): boolean {
+  if (a.kind !== b.kind) return false;
+  return a.kind === 'set' && b.kind === 'set' ? a.uri === b.uri : true;
+}
+
+/**
+ * Drop this child's record only if it is still the one the caller consumed,
+ * and return it when it was. Every consumer reads the record, awaits a network
+ * round trip, then clears: an unconditional clear destroys a photo recorded
+ * during that window, which is the one thing this store exists to prevent.
+ * Matching on the whole record rather than on identity, since it makes a round
+ * trip through JSON.
+ *
+ * Serialized with the other mutators to prevent concurrent mutations from
+ * clobbering each other. See `serialize` above.
+ */
+export async function clearPendingPhotoIf(childId: string, expected: PendingPhoto): Promise<PendingPhoto | undefined> {
+  return serialize(async () => {
+    const map = await loadPendingPhotos();
+    const prev = map[childId];
+    if (prev === undefined || !sameRecord(prev, expected)) return undefined;
+    delete map[childId];
+    await save(map);
+    return prev;
+  });
+}
+
+/** Drop every record. Serialized with the others: an unserialized wipe can
  *  land BETWEEN a mutation's read and its write, and the mutation then writes
  *  its whole map back, resurrecting records this was called to remove. */
 export async function clearPendingPhotos(): Promise<void> {

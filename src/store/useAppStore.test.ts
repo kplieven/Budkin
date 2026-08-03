@@ -399,6 +399,16 @@ vi.mock('@/data/pendingPhotos', () => ({
     delete h.pendingPhotos[childId];
     return prev;
   }),
+  // Compare-and-clear, by value: the real one matches `kind` plus a `set`'s
+  // `uri`, because the record makes a round trip through JSON and can never be
+  // the same object the caller consumed.
+  clearPendingPhotoIf: vi.fn(async (childId: string, expected: { kind: string; uri?: string }) => {
+    const prev = h.pendingPhotos[childId] as { kind: string; uri?: string } | undefined;
+    if (!prev || prev.kind !== expected.kind) return undefined;
+    if (prev.kind === 'set' && prev.uri !== expected.uri) return undefined;
+    delete h.pendingPhotos[childId];
+    return prev;
+  }),
   clearPendingPhotos: vi.fn(async () => {
     h.pendingPhotos = {};
   }),
@@ -10362,4 +10372,334 @@ describe('pending photos do not outlive what they belong to', () => {
     expect(h.sweptKeeps).toHaveLength(1);
     expect(h.sweptKeeps[0]).toEqual(['file:///doc/childPhotos/shown.jpg']);
   });
+
+  it('enterLocal drops the records the server session left, and sweeps what that frees', async () => {
+    // Reachable by a 401 session expiry followed by choosing local mode. The
+    // child list is replaced here, so a record keyed by a server-session child
+    // is owed to nobody: nothing consumes it, and the sweep reads it as a
+    // reason to keep its file forever.
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'L1', first: 'Ada', last: 'O', birth: BIRTH, color: '#fff', picture: 'file:///doc/childPhotos/local.jpg' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'L1',
+      lastFeed: {},
+      legacyLastFeed: null,
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().enterLocal();
+    await flush();
+
+    expect(h.pendingPhotos).toEqual({});
+    // Against the local children, NOT with `disconnect`'s empty keep set: in
+    // local mode a child's picture IS the durable copy, with no server URL to
+    // fall back on.
+    expect(h.sweptKeeps).toEqual([['file:///doc/childPhotos/local.jpg']]);
+  });
+
+  it('a cross-origin connect drops the records that belonged to the other server', async () => {
+    // The origin gate treats the local side as empty, so the children those
+    // records are keyed by are gone with their ids.
+    h.entityOrigin = 'https://old.lan';
+    useAppStore.setState({ connection: null, connected: false, children: [], entries: [], measurements: [], selectedChildId: '' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'Zoe', last: 'Q', birth: NOW - 30 * 86400000 }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      treatments: [],
+    });
+    h.pendingPhotos.cA = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().connect('http://x', 't2');
+    await flush();
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.sweptKeeps).toEqual([[]]); // the server's children name no local file
+  });
+
+  it('a SAME-origin reconnect keeps them, because those children are still here', async () => {
+    // The expiry-reconnect path. A photo picked before the session expired is
+    // still owed by the same child, and the flush this connect kicks off is
+    // what finally uploads it.
+    h.entityOrigin = 'http://x';
+    useAppStore.setState({ connection: null, connected: false, children: [], entries: [], measurements: [], selectedChildId: '' });
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      treatments: [],
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().connect('http://x', 't');
+    await flush();
+
+    expect(h.pendingPhotos.c1).toBeDefined();
+    expect(h.sweptKeeps).toEqual([]);
+  });
+});
+
+// Finding 1 of the whole-feature review. Every consumer of a pending record
+// reads it, awaits a network round trip, then clears: an unconditional clear
+// destroys a photo recorded during that window, which is the one thing this
+// store exists to prevent.
+describe('a photo re-picked while a push is in flight survives that push', () => {
+  const BIRTH = NOW - 90 * 86400000;
+  const first = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const second = { uri: 'file:///doc/childPhotos/photo-2.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const rec = (uri: string) => ({ kind: 'set', uri, name: 'pick.jpg', type: 'image/jpeg' });
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const syncedOfflineChild = () => {
+    useAppStore.setState({
+      offline: true,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o', picture: null }],
+      selectedChildId: 'c1',
+      toast: null,
+    });
+  };
+
+  it('uploadUnsynced’s pushChild leaves the newer record alone, file and all', async () => {
+    // No offline transition needed: a child created offline still has
+    // `serverId == null` once the connection is back, so a re-pick is deferred
+    // (there is no server row to PATCH) and records a SECOND time while the
+    // create's POST is in flight. Clearing unconditionally on that POST's
+    // success drops the newer record and discards its file, so the newer photo
+    // is gone from disk, from the record and from the screen, with no toast.
+    useAppStore.setState({ offline: true, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo: first } });
+    await flush();
+    const created = s().children[s().children.length - 1];
+    useAppStore.setState({ offline: false });
+    vi.mocked(uploadUnsynced).mockClear();
+    await s().flushUnsynced();
+    const deps = vi.mocked(uploadUnsynced).mock.calls[0][1];
+
+    const post = deferred<any>();
+    vi.mocked(pushChildToServer).mockReturnValueOnce(post.promise as any);
+    const pushing = deps.pushChild(created);
+    await flush(); // the record is read and the POST is out
+
+    // The re-pick. `updateChildOnServer` answers as the real client does for a
+    // child with no server row (see the "even ONLINE" test above): nothing.
+    vi.mocked(updateChildOnServer).mockResolvedValueOnce(undefined);
+    s().openEditChild(created.id);
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo: second } });
+    await flush();
+
+    post.resolve({ id: 777, slug: 'nova-o', picture: SERVER_PIC });
+    await pushing;
+
+    expect(h.pendingPhotos[created.id]).toEqual(rec(second.uri));
+    expect(h.discardedPhotos).toEqual([first.uri]); // the re-pick's own, never the newer file
+  });
+
+  it('the op replay leaves a photo recorded during its PATCH alone', async () => {
+    syncedOfflineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: first } });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    const patch = deferred<any>();
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+    const flushing = s().flushPendingOps();
+    await flush();
+    // Offline again mid-request, and a re-pick. Written straight into the map:
+    // reaching it through `saveChild` would mean flipping the connection state
+    // underneath the flush that is being tested.
+    h.pendingPhotos.c1 = rec(second.uri);
+
+    patch.resolve({ picture: SERVER_PIC, slug: 'mira-o' });
+    await flushing;
+
+    expect(h.pendingPhotos.c1).toEqual(rec(second.uri));
+    expect(h.discardedPhotos).toEqual([]);
+    expect(h.pendingOps).toHaveLength(0); // the op itself still replayed and went
+  });
+
+  it('a replay that carried no photo does not clear one recorded during it', async () => {
+    syncedOfflineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Renamed', last: 'O', birth: BIRTH }); // a rename, no photo
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    const patch = deferred<any>();
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+    const flushing = s().flushPendingOps();
+    await flush();
+    h.pendingPhotos.c1 = rec(first.uri);
+
+    patch.resolve({ picture: null, slug: 'mira-o' });
+    await flushing;
+
+    expect(h.pendingPhotos.c1).toEqual(rec(first.uri));
+    expect(h.discardedPhotos).toEqual([]);
+  });
+
+  it('but a terminal 404 still clears whatever is there, newer or not', async () => {
+    // Deliberately NOT compare-and-clear. The child is gone server-side and
+    // the op goes with it, so no push will ever carry this child's photo
+    // again, and a record left behind holds its file forever.
+    syncedOfflineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: first } });
+    await flush();
+    useAppStore.setState({ offline: false });
+
+    const patch = deferred<any>();
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+    const flushing = s().flushPendingOps();
+    await flush();
+    h.pendingPhotos.c1 = rec(second.uri);
+
+    patch.reject(new ApiError(404, 'gone'));
+    await flushing;
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([second.uri]);
+  });
+
+  it('confirmBirth leaves a photo re-picked during its POST alone', async () => {
+    useAppStore.setState({ offline: false, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, expected: true, photo: { kind: 'set', photo: first } });
+    await flush();
+    const localId = s().children[s().children.length - 1].id;
+
+    const post = deferred<any>();
+    vi.mocked(pushChildToServer).mockReturnValueOnce(post.promise as any);
+    s().confirmBirth(localId, NOW);
+    await flush();
+    h.pendingPhotos[localId] = rec(second.uri);
+
+    post.resolve({ id: 777, slug: 'nova-o', picture: SERVER_PIC });
+    await flush();
+
+    expect(h.pendingPhotos[localId]).toEqual(rec(second.uri));
+    expect(h.discardedPhotos).toEqual([]);
+  });
+});
+
+// Finding 2 of the whole-feature review. An online save uploads the photo on
+// its own PATCH, so any record this child was still carrying names a photo it
+// no longer owes, and a queued op that outlived a retryable failure would
+// replay it over the newer one.
+describe('an online save clears the record its own upload supersedes', () => {
+  const BIRTH = NOW - 90 * 86400000;
+  const first = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const second = { uri: 'file:///doc/childPhotos/photo-2.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const third = { uri: 'file:///doc/childPhotos/photo-3.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const rec = (uri: string) => ({ kind: 'set', uri, name: 'pick.jpg', type: 'image/jpeg' });
+
+  const syncedChild = (over: Partial<Child> = {}) => {
+    useAppStore.setState({
+      offline: false,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o', picture: null, ...over }],
+      selectedChildId: 'c1',
+      toast: null,
+    });
+  };
+
+  /** An offline photo edit whose replay then fails retryably: a self-hosted
+   *  500, or unreachable while the phone still reports network. Both the op
+   *  and the record survive, which is the state the bug needs. */
+  const offlineEditThenFailedFlush = async () => {
+    useAppStore.setState({ offline: true });
+    syncedChild();
+    useAppStore.setState({ offline: true });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: first } });
+    await flush();
+    useAppStore.setState({ offline: false });
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+    await s().flushPendingOps();
+  };
+
+  it('clears the stale record, and discards the file it named', async () => {
+    await offlineEditThenFailedFlush();
+    expect(h.pendingPhotos.c1).toEqual(rec(first.uri)); // the premise: it survived
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: second } });
+    await flush();
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([first.uri]);
+  });
+
+  it('so the surviving op cannot re-upload the photo it superseded', async () => {
+    await offlineEditThenFailedFlush();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: second } });
+    await flush();
+    h.childUpdateChange = [];
+
+    await s().flushPendingOps();
+
+    // Left uncleared, the replay is handed `{set first}` and stamps that older
+    // photo's URL back over the one this save just put on the server.
+    expect(h.childUpdateChange).toEqual([{ kind: 'none' }]);
+  });
+
+  it('leaves a photo recorded while that PATCH was in flight', async () => {
+    // Offline mid-request and a re-pick: that record is the only thing
+    // carrying the newest photo, so an unconditional clear would delete it.
+    syncedChild();
+    h.pendingPhotos.c1 = rec(first.uri);
+    const patch = deferred<any>();
+    vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: second } });
+    await flush(); // the pre-PATCH read has resolved, the PATCH is out
+    h.pendingPhotos.c1 = rec(third.uri);
+
+    patch.resolve({ picture: SERVER_PIC, slug: 'mira-o' });
+    await flush();
+
+    expect(h.pendingPhotos.c1).toEqual(rec(third.uri));
+    expect(h.discardedPhotos).toEqual([]);
+  });
+
+  it('records nothing when the online PATCH fails, so no orphan is left behind', async () => {
+    // Recording here would be the wrong fix for this finding: an online edit is
+    // queued nowhere, so nothing would ever consume that record, and the launch
+    // sweep would protect its file forever.
+    syncedChild();
+    vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
+
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: second } });
+    await flush();
+
+    expect(s().toast).toBe('Could not save Mira');
+    expect(h.pendingPhotos).toEqual({});
+  });
+
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
 });

@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { clearPendingPhoto, clearPendingPhotos, loadPendingPhotos, setPendingPhoto } from '@/data/pendingPhotos';
+import {
+  clearPendingPhoto,
+  clearPendingPhotoIf,
+  clearPendingPhotos,
+  loadPendingPhotos,
+  setPendingPhoto,
+} from '@/data/pendingPhotos';
 import type { PendingPhoto } from '@/data/pendingPhotos';
 
 // In-memory stand-in for the native AsyncStorage module.
@@ -65,6 +71,48 @@ describe('pendingPhotos persistence', () => {
     expect(await loadPendingPhotos()).toEqual({});
   });
 
+  it('clears conditionally when the record is still the one that was consumed', async () => {
+    // The consumer read this record, awaited a round trip, and is now clearing
+    // it. Nothing else wrote in between, so it goes.
+    await setPendingPhoto('c1', set('file:///doc/a.jpg'));
+    expect(await clearPendingPhotoIf('c1', set('file:///doc/a.jpg'))).toEqual(set('file:///doc/a.jpg'));
+    expect(await loadPendingPhotos()).toEqual({});
+  });
+
+  it('matches by value, not by identity, because the record round-trips through JSON', async () => {
+    await setPendingPhoto('c1', set('file:///doc/a.jpg'));
+    const consumed = (await loadPendingPhotos()).c1; // a different object every read
+    expect(await clearPendingPhotoIf('c1', consumed)).toBeDefined();
+  });
+
+  it('leaves a record written DURING the round trip alone', async () => {
+    // The whole point: the photo re-picked while the upload was in flight was
+    // never sent, so clearing it here would delete it, file and all, with
+    // nothing left to upload it.
+    await setPendingPhoto('c1', set('file:///doc/a.jpg'));
+    await setPendingPhoto('c1', set('file:///doc/b.jpg'));
+    expect(await clearPendingPhotoIf('c1', set('file:///doc/a.jpg'))).toBeUndefined();
+    expect(await loadPendingPhotos()).toEqual({ c1: set('file:///doc/b.jpg') });
+  });
+
+  it('will not clear a set on behalf of a consumed removal, or the reverse', async () => {
+    await setPendingPhoto('c1', { kind: 'remove' });
+    expect(await clearPendingPhotoIf('c1', set('file:///doc/a.jpg'))).toBeUndefined();
+    await setPendingPhoto('c2', set('file:///doc/a.jpg'));
+    expect(await clearPendingPhotoIf('c2', { kind: 'remove' })).toBeUndefined();
+    expect(await loadPendingPhotos()).toEqual({ c1: { kind: 'remove' }, c2: set('file:///doc/a.jpg') });
+  });
+
+  it('clears a consumed removal', async () => {
+    await setPendingPhoto('c1', { kind: 'remove' });
+    expect(await clearPendingPhotoIf('c1', { kind: 'remove' })).toEqual({ kind: 'remove' });
+    expect(await loadPendingPhotos()).toEqual({});
+  });
+
+  it('conditionally clearing an absent child is a no-op returning undefined', async () => {
+    expect(await clearPendingPhotoIf('nobody', set('file:///doc/a.jpg'))).toBeUndefined();
+  });
+
   it('clears every child at once', async () => {
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     await clearPendingPhotos();
@@ -87,6 +135,16 @@ describe('pendingPhotos persistence', () => {
     await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), clearPendingPhoto('c1')]);
     const map = await loadPendingPhotos();
     expect(map.c2).toEqual(set('file:///doc/b.jpg'));
+  });
+
+  it('serializes the conditional clear too, so a write landing beside it is not clobbered', async () => {
+    // Unserialized, the clear would write back the map it read and drop `c2`.
+    await setPendingPhoto('c1', set('file:///doc/a.jpg'));
+    await Promise.all([
+      setPendingPhoto('c2', set('file:///doc/b.jpg')),
+      clearPendingPhotoIf('c1', set('file:///doc/a.jpg')),
+    ]);
+    expect(await loadPendingPhotos()).toEqual({ c2: set('file:///doc/b.jpg') });
   });
 
   it('a wipe landing during a mutation does not leave the record behind', async () => {
