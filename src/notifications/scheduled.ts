@@ -807,9 +807,11 @@ function parseReminderId(id: string): ParsedReminderId | null {
  * Answers "not given" whenever it cannot answer confidently. A missing scalar
  * entry means the treatment was never CONSIDERED, not that no dose was logged:
  * `treatmentDoseScalars` gives every treatment it was handed a key, and
- * `scheduleSync` hands it the SELECTED child's treatments only (see there for
- * why that scope survived 0.15.0). Dismissing on a missing key would tell a
- * parent a dose had been given when the app had simply never looked.
+ * `scheduleSync` now hands it every child's treatments, grouped so that one
+ * child's dose cannot settle a sibling's identically named regimen. A key can
+ * therefore only be missing for a treatment that left the store mid-flight, and
+ * answering "given" on that would tell a parent a dose had been given when the
+ * app had simply never looked.
  */
 function treatmentDoseGiven(
   input: ScheduleInput,
