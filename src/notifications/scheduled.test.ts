@@ -653,7 +653,7 @@ describe('nap suggestions', () => {
   });
 
   it("lets an ownerless sleep timer suppress nobody's nudge", () => {
-    // Nothing here consults a selection any more (0.15.2 removed it from the
+    // Nothing here consults a selection any more (0.15.3 removed it from the
     // input entirely), so an ownerless timer answers for nobody at all.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
@@ -1356,7 +1356,8 @@ describe('staleDelivered', () => {
     });
 
     it("keys on the identifier's own child, not the selected one", () => {
-      // c2 is asleep and c2's banner must go, even though c1 is selected.
+      // c2 is asleep, so c2's banner must go; c1's must not, because the sweep
+      // asks about each identifier's own child, not a single child for the whole call.
       const i = input({ children: [rowan, wren], asleepChildIds: { c2: true } });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
         napId('c2', fireAt),
@@ -1485,10 +1486,10 @@ describe('staleDelivered', () => {
     });
 
     it('KEEPS a slot for a treatment with no dose scalars, whose history is unreliable', () => {
-      // In server mode `entries` only holds the selected child, so another
-      // child's dose history reads as empty. `treatmentDoseScalars` gives every
-      // treatment it considered a key, so an absent key means "not considered",
-      // never "no doses".
+      // A treatment in `input.treatments` with no entry in `treatmentDoses` is
+      // "never considered", not "no doses given": `treatmentDoseScalars` keys
+      // every treatment it is handed, so a missing key cannot mean an empty
+      // dose history. That is why the slot is kept rather than dismissed.
       const i = input({ treatments: [t({ id: 'treatment2', childId: 'c2' })], treatmentDoses: {} });
       expect(staleDelivered(i, [treatmentId('treatment2', morning)], now)).toEqual([]);
     });

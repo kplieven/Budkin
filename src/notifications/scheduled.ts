@@ -83,7 +83,7 @@ export interface ScheduleInput {
    *  timer. */
   asleepChildIds: Record<string, true>;
   /** Every treatment the store holds. `treatmentReminders` covers each of them
-   *  against its own child, as of 0.15.2. It was scoped to the selected child
+   *  against its own child, as of 0.15.3. It was scoped to the selected child
    *  before that: forced until 0.15.0 (a server load held only the child the
    *  last fetch asked for, so a sibling's dose history read as empty), then
    *  merely narrow until the product decision was made. */
@@ -94,7 +94,7 @@ export interface ScheduleInput {
    *  `treatmentDoseScalars`, which owns the by-name dose attribution rule. */
   treatmentDoses: Record<string, { today: number; lastAt: number | null }>;
   /** Per child, the catalog keys that child has already logged a milestone
-   *  entry for. Per child rather than one list since 0.15.2: the catch-up nudge
+   *  entry for. Per child rather than one list since 0.15.3: the catch-up nudge
    *  covers every child, and one list could only ever answer for one of them,
    *  which read every sibling as having reached nothing. Plain keys rather than
    *  entries, so this file stays ignorant of `Entry`. Sparse: a child with
@@ -624,7 +624,7 @@ function treatmentReminders(input: ScheduleInput, now: number): ScheduledNotific
   const todayMidnight = startOfDay(now);
   const out: ScheduledNotification[] = [];
   for (const treatment of input.treatments) {
-    // The treatment's OWN child. Scoped to the selected child until 0.15.2,
+    // The treatment's OWN child. Scoped to the selected child until 0.15.3,
     // which was forced before 0.15.0 (a server load held one child, so a
     // sibling's dose history read as empty) and merely narrow afterwards.
     const child = input.children.find((c) => c.id === treatment.childId);
@@ -743,7 +743,7 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   }
   if (input.prefs.milestoneCatchUp) {
     // Every child, each against their own two key lists. This was the selected
-    // child alone until 0.15.2, when `reachedMilestoneKeys` could only describe
+    // child alone until 0.15.3, when `reachedMilestoneKeys` could only describe
     // one of them; looping then would have read every sibling as having reached
     // nothing and nudged their parent about milestones logged months ago.
     for (const c of input.children) out.push(...milestoneReminders(c, input, now));
@@ -814,10 +814,12 @@ function parseReminderId(id: string): ParsedReminderId | null {
  * entry means the treatment was never CONSIDERED, not that no dose was logged:
  * `treatmentDoseScalars` gives every treatment it was handed a key, and
  * `scheduleSync` now hands it every child's treatments, grouped so that one
- * child's dose cannot settle a sibling's identically named regimen. A key can
- * therefore only be missing for a treatment that left the store mid-flight, and
- * answering "given" on that would tell a parent a dose had been given when the
- * app had simply never looked.
+ * child's dose cannot settle a sibling's identically named regimen. A missing
+ * key should not be reachable from the current projection: every member of
+ * `s.treatments` lands in exactly one group, and both `treatments` and
+ * `treatmentDoses` come from the same `toInput` snapshot. The branch stays as
+ * defensive code anyway, because answering "given" on a missing key would tell
+ * a parent a dose had been given when the app had never looked.
  */
 function treatmentDoseGiven(
   input: ScheduleInput,

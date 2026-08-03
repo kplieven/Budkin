@@ -203,7 +203,7 @@ export function initScheduledReminderSync(): void {
     //
     // `selectedChildId` is deliberately NOT compared here, and its absence is
     // load-bearing rather than an oversight. Nothing in the desired set reads
-    // the selection as of 0.15.2: treatment reminders cover every child, and the
+    // the selection as of 0.15.3: treatment reminders cover every child, and the
     // milestone catch-up nudge loops them. Comparing it would rebuild the whole
     // set and make a native round trip every time the user switches children,
     // for a set that cannot have changed.

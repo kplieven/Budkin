@@ -28,11 +28,11 @@
 
 **No files are created.** Five are modified:
 
-- `src/notifications/scheduleSync.ts` — the projection. `toInput` (lines 30-97) builds the per-child dose scalars and the per-child milestone maps; the subscriber's slice gate (lines 197-222) loses its `selectedChildId` entry.
-- `src/notifications/scheduled.ts` — the rules. `ScheduleInput` (lines 68-111), `treatmentNote` (486), `treatmentTimesOfDayReminders` (527), `treatmentEveryHoursReminders` (569), `treatmentReminders` (617), `milestoneReminders` (663), `desiredScheduled`'s catch-up branch (735-744), and one stale comment in `treatmentDoseGiven` (around 808).
-- `src/notifications/scheduled.test.ts` — the `input` fixture (line 49) and the treatment and milestone describes.
-- `src/notifications/scheduleSync.test.ts` — the dose scalar tests (around 486-505) and the two selection tests (355, 398).
-- `src/notifications/applySchedule.android.test.ts` — one `ScheduleInput` fixture (line 81).
+- `src/notifications/scheduleSync.ts`: the projection. `toInput` (lines 30-97) builds the per-child dose scalars and the per-child milestone maps; the subscriber's slice gate (lines 197-222) loses its `selectedChildId` entry.
+- `src/notifications/scheduled.ts`: the rules. `ScheduleInput` (lines 68-111), `treatmentNote` (486), `treatmentTimesOfDayReminders` (527), `treatmentEveryHoursReminders` (569), `treatmentReminders` (617), `milestoneReminders` (663), `desiredScheduled`'s catch-up branch (735-744), and one stale comment in `treatmentDoseGiven` (around 808).
+- `src/notifications/scheduled.test.ts`: the `input` fixture (line 49) and the treatment and milestone describes.
+- `src/notifications/scheduleSync.test.ts`: the dose scalar tests (around 486-505) and the two selection tests (355, 398).
+- `src/notifications/applySchedule.android.test.ts`: one `ScheduleInput` fixture (line 81).
 
 `src/notifications/sync.test.ts` and `src/notifications/register.android.test.ts` also mention `selectedChildId`, but both read it from the STORE (timer notifications, and choosing a child on tap). Neither builds a `ScheduleInput`. **Do not touch them.**
 
