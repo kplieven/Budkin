@@ -1121,6 +1121,26 @@ async function settlePendingPhoto(childId: string): Promise<void> {
   if (gone?.kind === 'set') await discardPhotoFile(gone.uri);
 }
 
+/**
+ * Delete every stored photo file nothing points at any more: neither a child's
+ * `picture` nor a pending record. Collects the orphans no single call site can,
+ * a sheet cancelled after picking, a crash between the copy and the save, a
+ * record dropped because its child turned out to be gone server-side.
+ *
+ * Only a `file:` picture is a candidate to keep; a server URL names nothing on
+ * this device.
+ */
+async function sweepChildPhotos(children: Child[]): Promise<void> {
+  const keep: string[] = [];
+  for (const c of children) {
+    if (c.picture && c.picture.startsWith('file:')) keep.push(c.picture);
+  }
+  for (const rec of Object.values(await loadPendingPhotos())) {
+    if (rec.kind === 'set') keep.push(rec.uri);
+  }
+  await sweepPhotoFiles(keep);
+}
+
 type Get = StoreApi<AppStore>['getState'];
 type Set = StoreApi<AppStore>['setState'];
 
@@ -2151,6 +2171,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // selection: an ownerless timer stays ownerless until a later hydrate has
       // something to attribute it to.
       set({ hydrating: false, ...queueMirror(q), timers: savedTimers });
+      // Collect the photo copies nothing points at any more. Off the critical
+      // path: hydrate's contract is "the UI can render".
+      void sweepChildPhotos(get().children);
       return;
     }
     if (conn.mode === 'local') {
@@ -2168,6 +2191,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         timers: stampTimerOwners(savedTimers, e?.children ?? [], e?.selectedChildId ?? ''),
         ...queueMirror(q),
       });
+      // Collect the photo copies nothing points at any more. Off the critical
+      // path: hydrate's contract is "the UI can render".
+      void sweepChildPhotos(get().children);
       return;
     }
     // Cache-first: read the durable entity store, enter the app on it
@@ -2225,6 +2251,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // now about the selection alone. Deliberately not awaited: hydrate's
     // contract is now "the UI can render", not "the server has answered".
     void get().refresh();
+    // Collect the photo copies nothing points at any more. Off the critical
+    // path: hydrate's contract is "the UI can render".
+    void sweepChildPhotos(get().children);
   },
   refresh: async () => {
     const s = get();
@@ -2690,6 +2719,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void clearQueue();
     void clearEntities();
     void clearPendingOps();
+    void clearPendingPhotos();
+    void sweepPhotoFiles([]);
     set({
       connection: null,
       connected: false,
@@ -3482,6 +3513,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         return;
       }
     }
+    // Only once the delete has stuck. The catch above restores the child and
+    // returns, and a restored child still owes the server its photo.
+    void settlePendingPhoto(id);
     get().showToast(`${child.first} deleted`);
     // Reconcile after the DELETE this action just sent, which Baby Buddy
     // cascades server-side over the child's whole history.
