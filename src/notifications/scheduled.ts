@@ -86,12 +86,11 @@ export interface ScheduleInput {
    *  reminders below (see `treatments`); the nap rules deliberately do NOT
    *  consult it, since a timer belongs to whoever started it. */
   selectedChildId: string;
-  /** Every treatment the store holds. `treatmentReminders` scopes to
-   *  `selectedChildId` itself. That was once forced (in server mode `s.entries`
-   *  held only the child the last fetch loaded, so any sibling's dose history
-   *  read as empty); since 0.15.0 every child's records are resident and it is a
-   *  deliberate narrowing instead, pending the product decision described at the
-   *  `treatmentDoses` construction site in `scheduleSync.ts`. */
+  /** Every treatment the store holds. `treatmentReminders` covers each of them
+   *  against its own child, as of 0.15.2. It was scoped to the selected child
+   *  before that: forced until 0.15.0 (a server load held only the child the
+   *  last fetch asked for, so a sibling's dose history read as empty), then
+   *  merely narrow until the product decision was made. */
   treatments: Treatment[];
   /** Per treatment id: doses logged since local midnight, and the most recent dose
    *  instant. Derived scalars rather than raw entries, matching `lastPumpAt` and
@@ -485,7 +484,7 @@ export const TREATMENT_AHEAD = 8;
  *  inside nine days. */
 export const TREATMENT_MAX_DAYS = 14;
 
-function treatmentNote(treatment: Treatment, fireAt: number): ScheduledNotification {
+function treatmentNote(treatment: Treatment, child: Child, fireAt: number): ScheduledNotification {
   const dosage = treatmentDosageLabel(treatment);
   return {
     // Keyed on the id, not the name: the id survives a rename and a rename must
@@ -501,7 +500,14 @@ function treatmentNote(treatment: Treatment, fireAt: number): ScheduledNotificat
     // advances, because fireAt derives from the anchor and the interval.
     identifier: `${REMINDER_PREFIX}treatment:${treatment.id}:${fireAt}`,
     kind: 'treatment',
-    title: `${treatment.name.trim()} due`,
+    // The child leads, in the shape `staleReminders` already uses. Two siblings
+    // on the same medicine would otherwise produce two alerts reading exactly
+    // alike, and the identifier that tells them apart is not on screen. Named
+    // unconditionally rather than only when the household has more than one
+    // child in treatment: a title that changes with unrelated state would have
+    // `diffScheduled` rewrite every pending alert the moment a second regimen
+    // starts.
+    title: `${child.first} · ${treatment.name.trim()} due`,
     // The dosage is the single most useful thing this can carry: it puts "5 mg"
     // on the lock screen without the parent opening the app. With no dosage
     // recorded there is nothing to say, so fall back to the instruction.
@@ -528,6 +534,7 @@ function treatmentNote(treatment: Treatment, fireAt: number): ScheduledNotificat
  */
 function treatmentTimesOfDayReminders(
   treatment: Treatment,
+  child: Child,
   input: ScheduleInput,
   now: number,
   todayMidnight: number,
@@ -552,7 +559,7 @@ function treatmentTimesOfDayReminders(
       if (day === 0 && dosesToday >= k + 1) continue;
       const fireAt = timeOfDaySlotMs(dayMidnight, slots[k]);
       if (fireAt <= now) continue;
-      out.push(treatmentNote(treatment, fireAt));
+      out.push(treatmentNote(treatment, child, fireAt));
     }
   }
   return out;
@@ -570,6 +577,7 @@ function treatmentTimesOfDayReminders(
  */
 function treatmentEveryHoursReminders(
   treatment: Treatment,
+  child: Child,
   input: ScheduleInput,
   now: number,
 ): ScheduledNotification[] {
@@ -606,7 +614,7 @@ function treatmentEveryHoursReminders(
     const fireAt = anchor + n * interval;
     if (fireAt <= now) continue;
     if (endsAt != null && fireAt >= endsAt) break;
-    out.push(treatmentNote(treatment, fireAt));
+    out.push(treatmentNote(treatment, child, fireAt));
   }
   return out;
 }
@@ -617,36 +625,36 @@ function treatmentEveryHoursReminders(
  * reports back a schedule the user typed in. That is why it ships on.
  */
 function treatmentReminders(input: ScheduleInput, now: number): ScheduledNotification[] {
-  // Every treatment here is already scoped to `selectedChildId` by `isTreatmentActiveToday`
-  // below, so one check against the selected child is correct and sufficient; no
-  // per-treatment lookup is needed. Gate on `expected` the same way `dueReminders`,
-  // `ageReminders` and `napReminders` do, but for a different reason: those
-  // three have no fact to report yet (no age, no wake window) while an expecting
-  // child is due, not born. A treatment cannot be dosed against a due date either,
-  // AND `resolveLogDeepLink` (src/lib/logDeepLink.ts) refuses to open anything
-  // for an expected child, so without this guard the alert would fire and its
-  // own tap target would refuse to service it.
-  const selectedChild = input.children.find((c) => c.id === input.selectedChildId);
-  if (selectedChild?.expected) return [];
-
   const todayMidnight = startOfDay(now);
   const out: ScheduledNotification[] = [];
   for (const treatment of input.treatments) {
-    // Scoped to the selected child. This was forced rather than chosen until
-    // 0.15.0, when a load held only the child the last fetch asked for and any
-    // sibling's dose history was unreliable; the data is there now, so what
-    // keeps the scope narrow is the unmade product decision recorded in
-    // `scheduleSync.ts`. `isTreatmentActiveToday` also covers the paused flag
-    // and the fromDate/toDate range.
-    if (!isTreatmentActiveToday(treatment, todayMidnight, input.selectedChildId)) continue;
+    // The treatment's OWN child. Scoped to the selected child until 0.15.2,
+    // which was forced before 0.15.0 (a server load held one child, so a
+    // sibling's dose history read as empty) and merely narrow afterwards.
+    const child = input.children.find((c) => c.id === treatment.childId);
+    // No child in the roster: an orphan record whose child is gone. `deleteChild`
+    // purges treatments as of 0.15.2, so this is the stale-record case, and an
+    // alert that can name nobody is worse than no alert.
+    if (!child) continue;
+    // Gate on `expected` the same way `dueReminders`, `ageReminders` and
+    // `napReminders` do, but for a different reason: those three have no fact to
+    // report yet while a child is due rather than born. A treatment cannot be
+    // dosed against a due date either, AND `resolveLogDeepLink`
+    // (src/lib/logDeepLink.ts) refuses to open anything for an expected child,
+    // so without this guard the alert would fire and its own tap target would
+    // refuse to service it. Per treatment, so one expecting child cannot
+    // silence a born sibling's regimen.
+    if (child.expected) continue;
+    // Covers the paused flag and the fromDate/toDate range too.
+    if (!isTreatmentActiveToday(treatment, todayMidnight, treatment.childId)) continue;
     // A treatment always carries a name (the editor requires one), but gate on it the
     // same way `logMedicationFromTreatment` does: an alert titled " due" whose tap
     // that action then refuses would be a dead tap.
     if (!treatment.name.trim()) continue;
     out.push(
       ...(treatment.scheduleMode === 'everyHours'
-        ? treatmentEveryHoursReminders(treatment, input, now)
-        : treatmentTimesOfDayReminders(treatment, input, now, todayMidnight)),
+        ? treatmentEveryHoursReminders(treatment, child, input, now)
+        : treatmentTimesOfDayReminders(treatment, child, input, now, todayMidnight)),
     );
   }
   return out;

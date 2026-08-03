@@ -775,8 +775,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     ...over,
   });
 
-  const run = (over: Partial<ScheduleInput>, now: number) =>
-    desiredScheduled(input({ prefs: only({}), selectedChildId: 'c1', ...over }), now);
+  const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
+    desiredScheduled(input({ prefs: only(p), children: [child()], ...over }), now);
 
   it('schedules each chosen slot at its mapped wall-clock hour', () => {
     const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));
@@ -788,7 +788,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   it('names the treatment and carries its dosage and treatment-seeded tap target', () => {
     const out = run({ treatments: [treatment({ dosage: 5, dosageUnit: 'mg' })] }, at(2026, 9, 2, 6));
     expect(out[0].kind).toBe('treatment');
-    expect(out[0].title).toBe('Omeprazol due');
+    expect(out[0].title).toBe('Rowan · Omeprazol due');
     expect(out[0].body).toBe('5 mg');
     expect(out[0].data.url).toBe('/log/medication?treatment=treatment1&child=c1');
     expect(out[0].identifier).toBe(`${REMINDER_PREFIX}treatment:treatment1:${at(2026, 9, 2, 8)}`);
@@ -883,7 +883,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
       at(2026, 9, 2, 6),
     );
     const first = out.filter((n) => n.fireAt === at(2026, 9, 2, 8));
-    expect(first.map((n) => n.title).sort()).toEqual(['Amoxicilline due', 'Omeprazol due']);
+    expect(first.map((n) => n.title).sort()).toEqual(['Rowan · Amoxicilline due', 'Rowan · Omeprazol due']);
   });
 
   it('stops at toDate rather than scheduling past the end of the regimen', () => {
@@ -907,18 +907,85 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
     expect(run({ treatments: [treatment({ toDate: at(2026, 9, 1) })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing for a treatment belonging to another child', () => {
+  it('schedules nothing for a treatment whose child is not in the roster', () => {
+    // An orphan record. `deleteChild` purges a deleted child's treatments as of
+    // 0.15.2, so this is the stale-record case rather than the ordinary one, and
+    // an alert naming nobody is worse than no alert.
     expect(run({ treatments: [treatment({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
-  it('schedules nothing while the selected child is expected, since a treatment cannot be dosed against a due date', () => {
+  it("covers a child who is not selected", () => {
+    // The point of the change: a sibling's regimen now produces alerts. There is
+    // no selection in the input at all after this task's sibling task, so what
+    // this pins is that every treatment with a live child is scheduled.
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] })],
+      },
+      at(2026, 9, 2, 6),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((n) => n.identifier.includes('treatment2'))).toBe(true);
+  });
+
+  it('names the child in the title, so two children are told apart', () => {
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+      },
+      at(2026, 9, 2, 6),
+    );
+    const first = out.filter((n) => n.fireAt === at(2026, 9, 2, 8));
+    expect(first.map((n) => n.title).sort()).toEqual(['Rowan · Omeprazol due', 'Wren · Omeprazol due']);
+  });
+
+  it('gates `expected` per treatment, not across the household', () => {
     // Every other reminder kind guards `child.expected`; this one must too,
     // because resolveLogDeepLink (src/lib/logDeepLink.ts) refuses to open
     // anything for an expected child, so a scheduled "X due" alert would be a
-    // tap the app itself cannot service.
-    expect(
-      run({ treatments: [treatment()], children: [child({ id: 'c1', expected: true })] }, at(2026, 9, 2, 6)),
-    ).toEqual([]);
+    // tap the app itself cannot service. Applied per child now: one expecting
+    // child must not silence a born sibling's regimen.
+    const expecting = child({ id: 'c2', first: 'Wren', expected: true });
+    const out = run(
+      {
+        children: [child(), expecting],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+      },
+      at(2026, 9, 2, 6),
+    );
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.every((n) => n.identifier.includes('treatment1'))).toBe(true);
+  });
+
+  it("keeps each treatment's dose suppression on its own scalars", () => {
+    // Two children on the same medicine. c1 has had today's dose, c2 has not.
+    const sibling = child({ id: 'c2', first: 'Wren' });
+    const out = run(
+      {
+        children: [child(), sibling],
+        treatments: [
+          treatment({ timesOfDay: ['morning'] }),
+          treatment({ id: 'treatment2', childId: 'c2', timesOfDay: ['morning'] }),
+        ],
+        treatmentDoses: {
+          treatment1: { today: 1, lastAt: at(2026, 9, 2, 8) },
+          treatment2: { today: 0, lastAt: null },
+        },
+      },
+      at(2026, 9, 2, 9),
+    );
+    const today = out.filter((n) => n.fireAt < at(2026, 9, 3));
+    expect(today.every((n) => n.identifier.includes('treatment2'))).toBe(true);
   });
 
   it('schedules nothing for a treatment whose name is blank', () => {
@@ -958,7 +1025,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
   });
 
   const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
-    desiredScheduled(input({ prefs: only(p), selectedChildId: 'c1', ...over }), now);
+    desiredScheduled(input({ prefs: only(p), children: [child()], ...over }), now);
 
   it('anchors the grid on the last logged dose', () => {
     const out = run(
@@ -968,7 +1035,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
     expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out[0].fireAt).toBe(at(2026, 9, 2, 14));
     expect(out[1].fireAt).toBe(at(2026, 9, 2, 22));
-    expect(out[0].title).toBe('Amoxicilline due');
+    expect(out[0].title).toBe('Rowan · Amoxicilline due');
   });
 
   it('re-anchors when a newer dose is logged', () => {
