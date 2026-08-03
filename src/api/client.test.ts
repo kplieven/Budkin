@@ -110,6 +110,7 @@ describe('child photo upload serializes under expo/fetch', () => {
       type: 'image/jpeg',
       bytes: async () => PICTURE_BYTES,
     },
+    durable: true,
   });
 
   /** Captures the RequestInit handed to fetch; returns a canned OK response. */
@@ -184,7 +185,7 @@ describe('child photo upload serializes under expo/fetch', () => {
 
   it('a photo with no file behind it fails as a photo problem, not as an unreachable server', async () => {
     const calls = captureInit({ id: 9 });
-    const unreadable: PickedPhoto = { uri: 'file:///cache/gone.jpg', name: 'a.jpg', type: 'image/jpeg' };
+    const unreadable: PickedPhoto = { uri: 'file:///cache/gone.jpg', name: 'a.jpg', type: 'image/jpeg', durable: false };
 
     await expect(new BabybuddyClient('https://x', 't').createChild(CHILD, unreadable)).rejects.toThrow(
       "Couldn't read the selected photo.",
