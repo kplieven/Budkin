@@ -6,9 +6,12 @@
  * wait for a reconnect cannot live there, so it is copied here at pick time.
  *
  * Split out of `src/lib/photo.ts` so the store can import the file half without
- * pulling in `expo-image-picker`. Nothing in here can be reached by the node
- * test runner: `expo-file-system`'s `File` and `Directory` are native modules.
- * The one piece of logic that CAN be tested lives in `./photoName`.
+ * pulling in `expo-image-picker`. Tested in `./photoFile.test.ts` by mocking
+ * `expo-file-system`'s `File`/`Directory`/`Paths` and `react-native`'s
+ * `Platform`, the same way `permission.android.test.ts` mocks
+ * `expo-notifications` to load a native-importing module under node. What
+ * stays out of reach here is the native call doing real I/O on a device,
+ * which is why Task 8's on-device acceptance test exists.
  */
 
 import { Directory, File, Paths } from 'expo-file-system';
