@@ -1041,7 +1041,17 @@ function resolveSelectedChildId(reconciledChildren: Child[], serverSelectedChild
  *  (serverId == null) records up to the server. */
 function buildUploadDeps(conn: Connection): UploadDeps {
   return {
-    pushChild: (c) => pushChildToServer(conn, c),
+    // A child pushed here may owe the server a photo: one picked while offline,
+    // or picked for a child the server had never seen. The record is settled
+    // only on a push that actually landed, so a failure retries with the photo
+    // still attached. The picture is reported back only when one was uploaded,
+    // so a `null` from a photoless POST can never blank a local file path.
+    pushChild: async (c) => {
+      const change = await pendingPhotoChange(c.id);
+      const res = await pushChildToServer(conn, c, change);
+      if (res?.id != null && change.kind !== 'none') await settlePendingPhoto(c.id);
+      return { id: res?.id, picture: change.kind === 'set' ? (res?.picture ?? undefined) : undefined };
+    },
     pushEntry: (e, childServerId) => pushEntryToServer(conn, e, childServerId),
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
     pushTreatment: (c, childServerId) => pushTreatmentToServer(conn, c, childServerId),
@@ -2959,7 +2969,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
         set((st) => ({
           children: st.children.map((c) => {
             const u = result.children.find((r) => r.id === c.id);
-            return u && u.serverId != null ? { ...c, serverId: u.serverId } : c;
+            if (!u || u.serverId == null) return c;
+            // The uploader stamps `picture` only for a child whose push
+            // actually uploaded a photo, so diff against the PRE-upload
+            // snapshot `s` to tell that apart from the copy it always returns.
+            // Same technique `syncedCount` above uses.
+            const before = s.children.find((r) => r.id === c.id);
+            const changed = before != null && u.picture !== before.picture;
+            return changed ? { ...c, serverId: u.serverId, picture: u.picture } : { ...c, serverId: u.serverId };
           }),
           measurements: st.measurements.map((m) => {
             const u = result.measurements.find((r) => r.id === m.id);
@@ -3319,21 +3336,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // online. In local mode or offline, leave the child for the normal
     // reconnect path.
     if (conn && conn.mode === 'server' && !s.offline) {
-      void pushChildToServer(conn, bornChild)
-        .then((res) => {
-          if (!res || res.id == null) return;
-          // Stamp the server id, the slug and the server's picture URL, exactly
-          // as saveChild's create push does (see the note there on why the local
-          // `id` is left alone and why the slug matters).
-          set((st) => ({
-            children: st.children.map((c) =>
-              c.id === id
-                ? { ...c, serverId: res.id, slug: res.slug ?? c.slug, picture: res.picture ?? c.picture }
-                : c,
-            ),
-          }));
-        })
-        .catch(() => {});
+      void (async () => {
+        // An expecting child is held back from the server, so a photo picked
+        // for it has been waiting in `pendingPhotos` since it was created, even
+        // if the app was online the whole time. This push is its first chance.
+        const change = await pendingPhotoChange(id);
+        const res = await pushChildToServer(conn, bornChild, change);
+        if (!res || res.id == null) return;
+        if (change.kind !== 'none') await settlePendingPhoto(id);
+        // Stamp the server id, the slug and the server's picture URL, exactly
+        // as saveChild's create push does (see the note there on why the local
+        // `id` is left alone and why the slug matters).
+        set((st) => ({
+          children: st.children.map((c) =>
+            c.id === id ? { ...c, serverId: res.id, slug: res.slug ?? c.slug, picture: res.picture ?? c.picture } : c,
+          ),
+        }));
+      })().catch(() => {});
     }
   },
 
