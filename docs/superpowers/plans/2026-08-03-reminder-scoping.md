@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-03-reminder-scoping-design.md`. Read it before Task 1.
 
-**Branch:** `feat/reminder-scoping`, already created off `main` at `216b54a` with the spec committed as `9f42577`. Do not create another branch and do not merge to `main`; the user runs releases explicitly.
+**Branch:** `feat/reminder-scoping`, already created off `main` at `bf9d6d4` (release 0.15.2) with the spec committed as `9f42577`. Do not create another branch and do not merge to `main`; the user runs releases explicitly.
 
 ## Global Constraints
 
