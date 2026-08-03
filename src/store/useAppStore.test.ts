@@ -9981,6 +9981,20 @@ describe('the op replay uploads the photo recorded with it', () => {
     expect(s().children[0].picture).toBe(SERVER_PIC);
   });
 
+  it('stamps the picture even when the response carries no slug', async () => {
+    // The `change.kind !== 'none'` half of the set() guard is what covers this.
+    // The old guard only fired on a slug, so a response without one left the
+    // child pointing at a local file path the server had just replaced.
+    offlineEdit({ kind: 'set', photo });
+    await flush();
+    useAppStore.setState({ offline: false });
+    vi.mocked(updateChildOnServer).mockResolvedValueOnce({ picture: SERVER_PIC, slug: undefined });
+
+    await s().flushPendingOps();
+
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+  });
+
   it('clears the record and discards the file once it has landed', async () => {
     offlineEdit({ kind: 'set', photo });
     await flush();
