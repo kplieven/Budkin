@@ -10215,3 +10215,84 @@ describe('a deferred push carries the recorded photo', () => {
     expect(s().children[0].picture).toBe(SERVER_PIC);
   });
 });
+
+describe('pending photos do not outlive what they belong to', () => {
+  const BIRTH = NOW - 90 * 86400000;
+  const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+
+  it('deleting a child drops its pending photo and the file', async () => {
+    useAppStore.setState({
+      offline: false,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o' }],
+      selectedChildId: 'c1',
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    await s().deleteChild('c1');
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
+  it('keeps the pending photo when the server delete fails and the child comes back', async () => {
+    useAppStore.setState({
+      offline: false,
+      children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', slug: 'mira-o' }],
+      selectedChildId: 'c1',
+    });
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+    h.childDeleteFails = true;
+
+    await s().deleteChild('c1');
+
+    expect(s().children).toHaveLength(1); // restored
+    expect(h.pendingPhotos.c1).toBeDefined();
+    expect(h.discardedPhotos).toEqual([]);
+  });
+
+  it('disconnecting clears every record and sweeps every file', async () => {
+    h.pendingPhotos.c1 = { kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' };
+
+    s().disconnect();
+    await flush();
+
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.sweptKeeps).toEqual([[]]);
+  });
+
+  it('hydrate sweeps files nothing points at, keeping pictures and pending records', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', picture: 'file:///doc/childPhotos/shown.jpg' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: null,
+    });
+    h.pendingPhotos.c2 = { kind: 'set', uri: 'file:///doc/childPhotos/waiting.jpg', name: 'p.jpg', type: 'image/jpeg' };
+
+    await s().hydrate();
+    await flush();
+
+    expect(h.sweptKeeps).toHaveLength(1);
+    expect([...h.sweptKeeps[0]].sort()).toEqual(['file:///doc/childPhotos/shown.jpg', 'file:///doc/childPhotos/waiting.jpg']);
+  });
+
+  it('the sweep ignores a picture that is a server URL', async () => {
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', picture: 'https://srv/media/c1.jpg' }],
+      entries: [],
+      measurements: [],
+      selectedChildId: 'c1',
+      lastFeed: {},
+      legacyLastFeed: null,
+    });
+
+    await s().hydrate();
+    await flush();
+
+    expect(h.sweptKeeps).toEqual([[]]);
+  });
+});
