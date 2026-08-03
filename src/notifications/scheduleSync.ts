@@ -103,11 +103,16 @@ function toInput(s: State, now: number): ScheduleInput {
     selectedChildId: s.selectedChildId,
     treatments: s.treatments,
     treatmentDoses,
-    // Scoped to the selected child on both halves, for the same reason as
-    // `treatmentDoses` above. `answeredMilestonePrompts` is already keyed by child;
-    // `reachedForChild` does the filtering for the other.
-    reachedMilestoneKeys: [...reachedForChild(s.entries, s.selectedChildId).keys()],
-    answeredMilestoneKeys: s.answeredMilestonePrompts[s.selectedChildId] ?? [],
+    // Per child, so the catch-up nudge can answer for each of them. One
+    // `reachedForChild` pass per child, where there was one pass in total
+    // before: `toInput` already walks `s.entries` on every reconcile and a
+    // household is one to four children, so this is not worth folding into the
+    // walk above until it measurably costs something.
+    reachedMilestoneKeysByChild: Object.fromEntries(
+      s.children.map((c) => [c.id, [...reachedForChild(s.entries, c.id).keys()]]),
+    ),
+    // Already keyed by child in the store, so it passes straight through.
+    answeredMilestoneKeysByChild: s.answeredMilestonePrompts,
   };
 }
 

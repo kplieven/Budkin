@@ -56,8 +56,8 @@ const input = (over: Partial<ScheduleInput> = {}): ScheduleInput => ({
   selectedChildId: 'c1',
   treatments: [],
   treatmentDoses: {},
-  reachedMilestoneKeys: [],
-  answeredMilestoneKeys: [],
+  reachedMilestoneKeysByChild: {},
+  answeredMilestoneKeysByChild: {},
   ...over,
 });
 
@@ -1135,7 +1135,7 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('names the typical window when only one milestone closes', () => {
-    const out = run({ reachedMilestoneKeys: ['first-smile'] });
+    const out = run({ reachedMilestoneKeysByChild: { c1: ['first-smile'] } });
     const solo = out.find((n) => n.identifier.includes('lifts-head'));
     expect(solo?.title).toBe('A milestone to check for Rowan.');
     expect(solo?.body).toBe('Lifts head. Most babies do this by 3 months.');
@@ -1143,14 +1143,19 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('skips milestones already logged or already answered', () => {
-    const out = run({ reachedMilestoneKeys: ['lifts-head'], answeredMilestoneKeys: ['first-smile'] });
+    const out = run({
+      reachedMilestoneKeysByChild: { c1: ['lifts-head'] },
+      answeredMilestoneKeysByChild: { c1: ['first-smile'] },
+    });
     expect(out.some((n) => n.identifier.includes('lifts-head'))).toBe(false);
     expect(out.some((n) => n.identifier.includes('first-smile'))).toBe(false);
   });
 
   it('changes the identifier when one of a batch is logged, so the diff replaces it', () => {
     const before = run().find((n) => n.identifier.includes('lifts-head'));
-    const after = run({ reachedMilestoneKeys: ['first-smile'] }).find((n) => n.identifier.includes('lifts-head'));
+    const after = run({ reachedMilestoneKeysByChild: { c1: ['first-smile'] } }).find((n) =>
+      n.identifier.includes('lifts-head'),
+    );
     expect(before?.identifier).not.toBe(after?.identifier);
     expect(before?.fireAt).toBe(after?.fireAt);
   });
@@ -1170,12 +1175,46 @@ describe('desiredScheduled: milestone catch-up', () => {
     expect(run({ children: [child({ expected: true })] })).toEqual([]);
   });
 
-  it('only ever covers the selected child', () => {
-    // `reachedMilestoneKeys` can only describe one child, so a second child's
-    // empty history must not be read as "reached nothing".
+  it('nudges every child, each against their own history', () => {
+    // Was "only ever covers the selected child". The keys can answer per child
+    // now, so a sibling is no longer read as having reached nothing.
+    const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
+    const out = run({
+      children: [born, sibling],
+      reachedMilestoneKeysByChild: { c1: ['lifts-head'] },
+    });
+
+    expect(out.some((n) => n.identifier.includes(':c1:'))).toBe(true);
+    expect(out.some((n) => n.identifier.includes(':c2:'))).toBe(true);
+    // c1 logged it, c2 did not, so only c2 is nudged about it.
+    const liftsHead = out.filter((n) => n.identifier.includes('lifts-head'));
+    expect(liftsHead).toHaveLength(1);
+    expect(liftsHead[0].identifier).toContain(':c2:');
+  });
+
+  it('gives two children closing the same window two alerts, each deep-linking to its own child', () => {
     const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
     const out = run({ children: [born, sibling] });
-    expect(out.every((n) => n.identifier.includes(':c1:'))).toBe(true);
+
+    const sameMorning = out.filter((n) => n.fireAt === out[0].fireAt);
+    expect(sameMorning).toHaveLength(2);
+    expect(sameMorning.map((n) => n.data.url).sort()).toEqual([
+      '/milestones?child=c1',
+      '/milestones?child=c2',
+    ]);
+    // `lifts-head` and `first-smile` both close at 3 months (see the "groups
+    // every milestone" test above), so the earliest window for a newborn
+    // always groups both into one notification per child, not one milestone.
+    expect(sameMorning.map((n) => n.title).sort()).toEqual(
+      [`2 milestones to check for Rowan.`, `2 milestones to check for Wren.`].sort(),
+    );
+  });
+
+  it("reads a child with no entry in either map as having reached nothing", () => {
+    // The maps are sparse: a child who has logged no milestone and answered no
+    // prompt has no key at all, which must not throw and must not suppress.
+    const out = run({ reachedMilestoneKeysByChild: {}, answeredMilestoneKeysByChild: {} });
+    expect(out.length).toBeGreaterThan(0);
   });
 });
 
