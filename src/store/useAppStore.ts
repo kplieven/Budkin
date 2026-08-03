@@ -66,6 +66,8 @@ import {
   removePendingOp,
   savePendingOps,
 } from '@/data/pendingOps';
+import { clearPendingPhoto, clearPendingPhotos, loadPendingPhotos, setPendingPhoto } from '@/data/pendingPhotos';
+import { discardPhotoFile, reopenPhotoFile, sweepPhotoFiles } from '@/lib/photoFile';
 import { loadPrefs, savePrefs } from '@/data/prefs';
 import { clearQueue, enqueueEntries, enqueueEntry, loadQueue, removeQueuedEntry, updateQueuedEntry } from '@/data/queue';
 import { buildSleepEntry } from '@/data/sleepTimer';
@@ -1044,6 +1046,39 @@ function buildUploadDeps(conn: Connection): UploadDeps {
     pushMeasurement: (m, childServerId) => pushMeasurementToServer(conn, m, childServerId),
     pushTreatment: (c, childServerId) => pushTreatmentToServer(conn, c, childServerId),
   };
+}
+
+/**
+ * Record what a child owes the server, for a save that will not upload the
+ * photo itself. Called only when the change is durable: a cache URI recorded
+ * here would name a file Android can reclaim before the reconnect.
+ *
+ * A removal always REPLACES whatever was recorded, never adds to it. On a
+ * server-backed child it becomes `{kind:'remove'}`, because the server has to
+ * be told; on a child the server has never seen it clears the record instead,
+ * because the create that eventually pushes that child carries no photo
+ * anyway. Getting this wrong is a live bug rather than a tidiness point: pick a
+ * photo offline, then remove it offline, and a stale `set` would upload the
+ * photo the user just deleted.
+ *
+ * The file a record replaces is discarded here rather than left to the launch
+ * sweep, so re-picking ten times offline does not hold ten files.
+ */
+async function recordPendingPhoto(childId: string, change: PhotoChange, serverBacked: boolean): Promise<void> {
+  const prev =
+    change.kind === 'set'
+      ? await setPendingPhoto(childId, {
+          kind: 'set',
+          uri: change.photo.uri,
+          name: change.photo.name,
+          type: change.photo.type,
+        })
+      : serverBacked
+        ? await setPendingPhoto(childId, { kind: 'remove' })
+        : await clearPendingPhoto(childId);
+  if (prev?.kind === 'set' && !(change.kind === 'set' && change.photo.uri === prev.uri)) {
+    await discardPhotoFile(prev.uri);
+  }
 }
 
 type Get = StoreApi<AppStore>['getState'];
@@ -3049,29 +3084,23 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const pending = change.kind === 'set' ? change.photo.uri : change.kind === 'remove' ? null : undefined;
     const existing = s.editingChildId ? s.children.find((c) => c.id === s.editingChildId) : null;
     if (existing) {
-      // A photo change made while offline never reaches the server: the edit
-      // is recorded as a pending op below, and the replay
-      // (`flushPendingOps`) sends `updateChildOnServer(conn, payload)` with no
-      // PhotoChange, so the picked file is not uploaded and a removal is not
-      // cleared. Carrying it through the op log means copying the file out of
-      // Android's evictable cache at pick time, which this does not do. What
-      // it does do is stop the drop being silent: the change is not applied
-      // optimistically either, because a `file://` URI written into the child
-      // record would be persisted, shown as the avatar, and then blanked by
-      // the first refresh that reaches the server, by which point the file may
-      // be gone.
+      // A photo change is uploaded by this save only when there is a server to
+      // send it to, right now, AND a server row to send it to: `updateChild`
+      // returns before doing anything when `serverId == null`, so editing a
+      // child the server has never seen is a no-op even with a full
+      // connection. Every other case defers to a later push, and every deferred
+      // case records the photo so that push can carry it.
       //
-      // Gated on the same `serverId != null` as the pending-op branch below,
-      // deliberately: with no server id no op is recorded, and no refresh can
-      // blank the picture either (`reconcileChildren` keeps a never-pushed
-      // local whole), so the file URI is the only copy that child has and
-      // dropping it here would be the deletion rather than the warning. Its
-      // photo is still lost later, when `uploadUnsynced` finally pushes the
-      // record without a PhotoChange; the create branch below signals that at
-      // the point such a record is first queued. Local mode has no server to
-      // drop anything, so it is untouched.
+      // `photoDropped` now means only that the photo could not be made durable
+      // (web, or a copy that failed): a cache URI would be persisted, drawn as
+      // the avatar, and then point at nothing once Android reclaimed the file.
+      // That is the one case still worth warning about. Local mode has no
+      // server to owe anything to.
       const conn = s.connection;
-      const photoDropped = change.kind !== 'none' && conn?.mode === 'server' && s.offline && existing.serverId != null;
+      const uploadsNow = conn?.mode === 'server' && !s.offline && existing.serverId != null;
+      const deferred = conn?.mode === 'server' && change.kind !== 'none' && !uploadsNow;
+      const durable = change.kind === 'remove' || (change.kind === 'set' && change.photo.durable);
+      const photoDropped = deferred && !durable;
       const child: Child = {
         ...existing,
         first: fields.first,
@@ -3086,9 +3115,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
         childSheet: false,
         editingChildId: null,
       }));
-      get().showToast(
-        photoDropped ? (change.kind === 'remove' ? 'Updated · photo not removed' : 'Updated · photo not saved') : 'Updated',
-      );
+      // A removal is always durable (there is no file to persist), so
+      // `photoDropped` can only be true here for a 'set': the "photo not
+      // removed" message a drop-it removal used to earn is unreachable now
+      // that a removal is recorded and applied instead of dropped.
+      get().showToast(photoDropped ? 'Updated · photo not saved' : 'Updated');
+      if (deferred && durable) void recordPendingPhoto(child.id, change, existing.serverId != null);
       if (conn && conn.mode === 'server' && !s.offline) {
         // Gender lives in its own `gender`-tagged note, not on the child record,
         // so it is a separate write. Fired only on an actual change: it costs a
@@ -3141,15 +3173,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // optimistic-local-then-push pattern).
     const localId = 'child' + Date.now();
     const conn = s.connection;
-    // The create twin of the edit branch's `photoDropped`, for the one create
-    // that is queued rather than pushed here: offline, the child is picked up
-    // later by `flushUnsynced` -> `uploadUnsynced`, whose `pushChild` takes a
-    // child and no PhotoChange at all, so the picked file is dropped exactly as
-    // the edit replay drops it. Same treatment for the same reason: say so, and
-    // do not write a `file://` URI into a record that is about to be pushed
-    // without it. An online create carries the photo on its own POST (and says
-    // so if that POST fails), and local mode has no server to drop anything.
-    const photoDropped = change.kind === 'set' && conn?.mode === 'server' && s.offline;
+    // The create twin of the edit branch. A create uploads its photo on its own
+    // POST only when online AND not expecting: an expected child holds a DUE
+    // date the server cannot accept as a birth_date, so it is held back until
+    // `confirmBirth` and its photo has to wait with it. Everything deferred is
+    // recorded below so the eventual push can carry it, and `photoDropped`
+    // again means only "could not be made durable".
+    const photoDropped = change.kind === 'set' && conn?.mode === 'server' && !change.photo.durable && (s.offline || !!fields.expected);
+    const deferredPhoto =
+      change.kind === 'set' && conn?.mode === 'server' && change.photo.durable && (s.offline || !!fields.expected);
     const child: Child = {
       id: localId,
       first: fields.first,
@@ -3171,6 +3203,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsError: false,
     }));
     get().showToast(photoDropped ? 'Saved · photo not saved' : 'Saved');
+    // `false`: this child has no server row yet, so a removal has nothing to
+    // tell the server (see `recordPendingPhoto`). Only a set reaches here.
+    if (deferredPhoto) void recordPendingPhoto(localId, change, false);
     // An expected child holds a DUE date in `birth`, which the server's
     // birth_date cannot legitimately hold. confirmBirth releases it later.
     if (conn && conn.mode === 'server' && !s.offline && !fields.expected) {

@@ -88,6 +88,12 @@ const h = vi.hoisted(() => ({
    *  the write queue until the user pulled to refresh. */
   entryPushFails: 0,
   pendingOps: [] as unknown[],
+  pendingPhotos: {} as Record<string, unknown>,
+  discardedPhotos: [] as string[],
+  sweptKeeps: [] as string[][],
+  /** Makes `reopenPhotoFile` report the file as gone, which models the one
+   *  failure the document directory can still have. */
+  photoFileMissing: false,
   adoptTarget: null as string | null,
   pushFails: false,
   childDeleteFails: false,
@@ -381,6 +387,46 @@ vi.mock('@/data/pendingOps', () => ({
   }),
 }));
 
+vi.mock('@/data/pendingPhotos', () => ({
+  loadPendingPhotos: vi.fn(async () => h.pendingPhotos),
+  setPendingPhoto: vi.fn(async (childId: string, photo: unknown) => {
+    const prev = h.pendingPhotos[childId];
+    h.pendingPhotos[childId] = photo;
+    return prev;
+  }),
+  clearPendingPhoto: vi.fn(async (childId: string) => {
+    const prev = h.pendingPhotos[childId];
+    delete h.pendingPhotos[childId];
+    return prev;
+  }),
+  clearPendingPhotos: vi.fn(async () => {
+    h.pendingPhotos = {};
+  }),
+}));
+
+// The native file layer. Nothing in the node runner can reach the real one, so
+// what these tests pin is the CONTRACT: that a deferred save records the
+// durable URI, and that a push reopens exactly the URI that was recorded.
+vi.mock('@/lib/photoFile', () => ({
+  reopenPhotoFile: vi.fn((stored: { uri: string; name: string; type: string }) =>
+    h.photoFileMissing
+      ? undefined
+      : {
+          uri: stored.uri,
+          name: stored.name,
+          type: stored.type,
+          durable: true,
+          nativeFile: { name: stored.name, type: stored.type, bytes: async () => new Uint8Array() },
+        },
+  ),
+  discardPhotoFile: vi.fn(async (uri: string) => {
+    h.discardedPhotos.push(uri);
+  }),
+  sweepPhotoFiles: vi.fn(async (keep: string[]) => {
+    h.sweptKeeps.push(keep);
+  }),
+}));
+
 // The persisted adopt target (Finding 2): backs the server-switch reset in
 // `adopt` so it survives an app kill between an abandoned `partial` adoption
 // and a later retry/switch — mirrors the AsyncStorage-backed mocks above.
@@ -440,6 +486,10 @@ beforeEach(() => {
   resetTimerRetryForTests();
   resetQueueRetryForTests();
   h.pendingOps = [];
+  h.pendingPhotos = {};
+  h.discardedPhotos.length = 0;
+  h.sweptKeeps.length = 0;
+  h.photoFileMissing = false;
   h.adoptTarget = null;
   h.pushFails = false;
   h.childDeleteFails = false;
@@ -9738,18 +9788,16 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
   });
 });
 
-// Same root cause, the offline half: an edit saved while `offline` records
-// `{op:'update', entity:'child'}` and the replay (`flushPendingOps`) calls
-// `updateChildOnServer(conn, payload)` with NO PhotoChange, so the picked file
-// is never uploaded at all. Carrying it through the op log needs the file
-// copied out of Android's evictable cache at pick time, which is a bigger
-// change; what this suite pins is that the drop is no longer SILENT and that
-// nothing is left on screen (or in the entity store) that the replay will not
-// deliver. `offline` is set by any refresh that could not reach the server,
-// including one fired by the AppState 'active' the picker's return produces.
-describe('a photo picked while offline is dropped by the replay, and said so', () => {
+// The offline half of the photo story: an edit saved while `offline` records
+// `{op:'update', entity:'child'}`, and the photo it carries is recorded
+// alongside it in `pendingPhotos` so the replay can upload it. What this suite
+// pins is that the record is written, that the picture is applied immediately
+// (the file is durable, so there is something real behind the optimistic
+// write), and that a photo that could NOT be made durable still says so.
+describe('a photo picked while offline is recorded for the replay', () => {
   const BIRTH = NOW - 90 * 86400000;
-  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const cachePhoto = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: false };
   const offlineChild = () => {
     useAppStore.setState({
       offline: true,
@@ -9759,25 +9807,28 @@ describe('a photo picked while offline is dropped by the replay, and said so', (
     });
   };
 
-  it('does not report a bare "Updated" for a photo it cannot save', async () => {
+  it('records the durable photo against the child', async () => {
     offlineChild();
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
     await flush();
-    expect(s().toast).toBe('Updated · photo not saved');
+    expect(h.pendingPhotos.c1).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
   });
 
-  it('does not show the photo it is about to drop', async () => {
-    // The optimistic write is what makes an online save feel instant. Offline
-    // there is nothing behind it: the file URI would be persisted into the
-    // child record, shown as the avatar, and then blanked by the first refresh
-    // that reaches the server, after Android may already have evicted the
-    // file. Leaving the old picture in place is the honest answer.
+  it('reports a plain "Updated", because the photo is no longer being dropped', async () => {
     offlineChild();
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
     await flush();
-    expect(s().children[0].picture).toBeNull();
+    expect(s().toast).toBe('Updated');
+  });
+
+  it('shows the photo straight away', async () => {
+    offlineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
+    await flush();
+    expect(s().children[0].picture).toBe(photo.uri);
   });
 
   it('still records the rest of the edit as a pending op', async () => {
@@ -9786,27 +9837,43 @@ describe('a photo picked while offline is dropped by the replay, and said so', (
     s().saveChild({ first: 'Renamed', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
     await flush();
     expect(h.pendingOps).toHaveLength(1);
-
-    useAppStore.setState({ offline: false });
-    await s().flushPendingOps();
-
-    expect(h.childUpdated).toHaveLength(1);
-    expect((h.childUpdated[0] as Child).first).toBe('Renamed');
-    // Still no photo change on the replay: that is the part this item does not
-    // fix, and the toast above is what stops it being silent.
-    expect(h.childUpdateChange).toEqual([undefined]);
   });
 
-  it('says a removal did not go through either, and leaves the picture up', async () => {
-    // The replay's PATCH omits `picture` entirely (see `childBody`), so an
-    // offline removal never reaches the server any more than an upload does.
+  it('records a removal too, and blanks the picture immediately', async () => {
     offlineChild();
     useAppStore.setState((st) => ({ children: [{ ...st.children[0], picture: 'https://srv/old.jpg' }] }));
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'remove' } });
     await flush();
-    expect(s().toast).toBe('Updated · photo not removed');
-    expect(s().children[0].picture).toBe('https://srv/old.jpg');
+    expect(h.pendingPhotos.c1).toEqual({ kind: 'remove' });
+    expect(s().toast).toBe('Updated');
+    expect(s().children[0].picture).toBeNull();
+  });
+
+  it('re-picking overwrites the record and discards the file it replaced', async () => {
+    // Ten picks offline must not hold ten files until the next launch.
+    const second = { ...photo, uri: 'file:///doc/childPhotos/photo-2.jpg' };
+    offlineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
+    await flush();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: second } });
+    await flush();
+    expect(h.pendingPhotos.c1).toEqual({ kind: 'set', uri: second.uri, name: 'pick.jpg', type: 'image/jpeg' });
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
+  it('warns, and records nothing, when the photo could not be made durable', async () => {
+    // Web, or a copy that failed. The cache URI would be persisted, drawn as
+    // the avatar, and then point at nothing once Android reclaimed the file.
+    offlineChild();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: cachePhoto } });
+    await flush();
+    expect(s().toast).toBe('Updated · photo not saved');
+    expect(s().children[0].picture).toBeNull();
+    expect(h.pendingPhotos).toEqual({});
   });
 
   it('reports a plain "Updated" when the offline edit carries no photo', async () => {
@@ -9815,9 +9882,10 @@ describe('a photo picked while offline is dropped by the replay, and said so', (
     s().saveChild({ first: 'Renamed', last: 'O', birth: BIRTH });
     await flush();
     expect(s().toast).toBe('Updated');
+    expect(h.pendingPhotos).toEqual({});
   });
 
-  it('reports a plain "Updated" for a photo saved in LOCAL mode, where there is no server to drop it', async () => {
+  it('records nothing in LOCAL mode, where there is no server to owe a photo to', async () => {
     offlineChild();
     useAppStore.setState({ connection: { mode: 'local' } });
     s().openEditChild('c1');
@@ -9825,64 +9893,116 @@ describe('a photo picked while offline is dropped by the replay, and said so', (
     await flush();
     expect(s().toast).toBe('Updated');
     expect(s().children[0].picture).toBe(photo.uri);
+    expect(h.pendingPhotos).toEqual({});
   });
 
-  it('keeps the photo, and the plain "Updated", for a child the server has never seen', () => {
-    // The signal is gated on the same `serverId != null` as the pending-op
-    // branch it describes: with no server id there is no op to record and no
-    // refresh that can blank the picture (`reconcileChildren` keeps a
-    // never-pushed local whole), so the file URI is all this child has and
-    // dropping it here would delete the only copy.
+  it('records for a child the server has never seen, even ONLINE', async () => {
+    // `BabybuddyClient.updateChild` returns before doing anything when
+    // `serverId == null`, so this edit is a server no-op with a full
+    // connection. Its photo is deferred exactly like an offline one, and
+    // gating the record on `serverId != null` would strand it.
+    //
+    // The default `updateChildOnServer` mock is more permissive than the real
+    // client (it answers regardless of serverId), so this one call opts into
+    // the faithful "no server row" answer to exercise that no-op.
+    vi.mocked(updateChildOnServer).mockResolvedValueOnce(undefined);
+    offlineChild();
+    useAppStore.setState((st) => ({
+      offline: false,
+      children: [{ ...st.children[0], serverId: undefined, slug: undefined }],
+    }));
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
+    await flush();
+    expect(h.pendingPhotos.c1).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
+    expect(s().children[0].picture).toBe(photo.uri);
+    expect(h.pendingOps).toHaveLength(0); // no op: there is no server row to update
+  });
+
+  it('removing a photo from a never-pushed child CLEARS the pending set rather than queueing a removal', async () => {
+    // The bug this prevents: pick offline, then remove offline, and a stale
+    // `set` record would upload the photo the user just deleted. A create
+    // carries no photo anyway, so there is nothing to tell the server.
     offlineChild();
     useAppStore.setState((st) => ({ children: [{ ...st.children[0], serverId: undefined, slug: undefined }] }));
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
-    expect(s().toast).toBe('Updated');
-    expect(s().children[0].picture).toBe(photo.uri);
-    expect(h.pendingOps).toHaveLength(0); // nothing was queued to drop it
+    await flush();
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'remove' } });
+    await flush();
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+    expect(s().children[0].picture).toBeNull();
+  });
+
+  it('records nothing for an online edit of a synced child, whose PATCH carries the photo itself', async () => {
+    offlineChild();
+    useAppStore.setState({ offline: false });
+    s().openEditChild('c1');
+    s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo } });
+    await flush();
+    expect(h.pendingPhotos).toEqual({});
+    expect(h.childUpdateChange).toEqual([{ kind: 'set', photo }]);
   });
 });
 
-// The CREATE twin of the block above, and the same root cause: an offline
-// create is pushed later by `flushUnsynced` -> `uploadUnsynced`, whose
-// `pushChild` takes a child and no PhotoChange at all, so the picked file is
-// dropped exactly as the edit replay drops it. Treating the two paths
-// differently would be worse than either treatment applied consistently.
-describe('a photo picked while creating a child offline is dropped by the push, and said so', () => {
-  const photo = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+// The CREATE twin of the block above. An offline create is pushed later by
+// `flushUnsynced` -> `uploadUnsynced`, and an EXPECTING child is held back even
+// with a full connection, so both defer their photo and both record it.
+describe('a photo picked while creating a child is recorded when the push is deferred', () => {
+  const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+  const cachePhoto = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: false };
   const created = () => s().children[s().children.length - 1];
 
-  it('does not report a bare "Saved" for a photo it cannot upload', async () => {
+  it('records the photo, reports a plain "Saved", and shows it', async () => {
     useAppStore.setState({ offline: true, toast: null });
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
     await flush();
-    expect(s().toast).toBe('Saved · photo not saved');
+    expect(s().toast).toBe('Saved');
+    expect(created().picture).toBe(photo.uri);
+    expect(h.pendingPhotos[created().id]).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
   });
 
-  it('does not show the photo it is about to drop', async () => {
-    useAppStore.setState({ offline: true });
+  it('records an EXPECTING child’s photo even when online, because that child is held back', async () => {
+    useAppStore.setState({ offline: false, toast: null });
     s().openAddChild();
-    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, expected: true, photo: { kind: 'set', photo } });
     await flush();
-    expect(created().picture).toBeNull();
-    expect(created().first).toBe('Nova'); // the child itself is still created
+    expect(s().toast).toBe('Saved');
+    expect(created().picture).toBe(photo.uri);
+    expect(h.pendingPhotos[created().id]).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
+    expect(h.childPushed).toHaveLength(0); // held back, as it always was
   });
 
-  it('reports a plain "Saved" for an online create, whose POST carries the photo', () => {
+  it('records nothing for an online create, whose POST carries the photo', () => {
     useAppStore.setState({ offline: false, toast: null });
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
     expect(s().toast).toBe('Saved');
     expect(created().picture).toBe(photo.uri); // optimistic, until the POST answers
+    expect(h.pendingPhotos).toEqual({});
   });
 
-  it('reports a plain "Saved" for an offline create in LOCAL mode', async () => {
+  it('warns, and records nothing, when the photo could not be made durable', async () => {
+    useAppStore.setState({ offline: true, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo: cachePhoto } });
+    await flush();
+    expect(s().toast).toBe('Saved · photo not saved');
+    expect(created().picture).toBeNull();
+    expect(created().first).toBe('Nova'); // the child itself is still created
+    expect(h.pendingPhotos).toEqual({});
+  });
+
+  it('records nothing for an offline create in LOCAL mode', async () => {
     useAppStore.setState({ offline: true, connection: { mode: 'local' }, toast: null });
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
     await flush();
     expect(s().toast).toBe('Saved');
     expect(created().picture).toBe(photo.uri);
+    expect(h.pendingPhotos).toEqual({});
   });
 });
