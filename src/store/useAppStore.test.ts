@@ -10125,3 +10125,93 @@ describe('a photo picked while creating a child is recorded when the push is def
     expect(h.pendingPhotos).toEqual({});
   });
 });
+
+describe('a deferred push carries the recorded photo', () => {
+  const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
+
+  it('uploadUnsynced’s pushChild sends it, and settles the record', async () => {
+    // `@/data/sync` is mocked in this file, so reach the real dep the store
+    // handed it rather than the uploader's behaviour, which Task 3 covers.
+    // `mockClear` first: `mock.calls` accumulates across tests in this file.
+    useAppStore.setState({ offline: true, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
+    await flush();
+    const created = s().children[s().children.length - 1];
+    useAppStore.setState({ offline: false });
+    vi.mocked(uploadUnsynced).mockClear();
+
+    await s().flushUnsynced();
+    const deps = vi.mocked(uploadUnsynced).mock.calls[0][1];
+    const res = await deps.pushChild(created);
+
+    expect(h.childPushChange).toEqual([{ kind: 'set', photo: expect.objectContaining({ uri: photo.uri }) }]);
+    expect(res).toEqual({ id: 777, picture: SERVER_PIC });
+    expect(h.pendingPhotos[created.id]).toBeUndefined();
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
+  it('reports no picture when the child owed none, so a null cannot blank a local path', async () => {
+    const plain = { id: 'plain', first: 'A', last: '', birth: NOW, color: '#fff' };
+    useAppStore.setState({ offline: false, children: [plain], selectedChildId: 'plain' });
+    vi.mocked(uploadUnsynced).mockClear();
+
+    await s().flushUnsynced();
+    const deps = vi.mocked(uploadUnsynced).mock.calls[0][1];
+    const res = await deps.pushChild(plain);
+
+    expect(h.childPushChange).toEqual([{ kind: 'none' }]);
+    expect(res).toEqual({ id: 777, picture: undefined });
+  });
+
+  it('keeps the record when the push fails', async () => {
+    useAppStore.setState({ offline: true, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
+    await flush();
+    const created = s().children[s().children.length - 1];
+    useAppStore.setState({ offline: false });
+    vi.mocked(uploadUnsynced).mockClear();
+    await s().flushUnsynced();
+    const deps = vi.mocked(uploadUnsynced).mock.calls[0][1];
+    vi.mocked(pushChildToServer).mockRejectedValueOnce(new Error('net'));
+
+    await expect(deps.pushChild(created)).rejects.toThrow();
+
+    expect(h.pendingPhotos[created.id]).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
+    expect(h.discardedPhotos).toEqual([]);
+  });
+
+  it('confirmBirth carries the photo the expecting child was created with', async () => {
+    useAppStore.setState({ offline: false, toast: null });
+    s().openAddChild();
+    s().saveChild({ first: 'Nova', last: 'O', birth: NOW, expected: true, photo: { kind: 'set', photo } });
+    await flush();
+    const localId = s().children[s().children.length - 1].id;
+
+    s().confirmBirth(localId, NOW);
+    await flush();
+
+    expect(h.childPushChange).toEqual([{ kind: 'set', photo: expect.objectContaining({ uri: photo.uri }) }]);
+    expect(s().children.find((c) => c.id === localId)?.picture).toBe(SERVER_PIC);
+    expect(h.pendingPhotos[localId]).toBeUndefined();
+    expect(h.discardedPhotos).toEqual([photo.uri]);
+  });
+
+  it('flushUnsynced stamps the picture the push reported', async () => {
+    useAppStore.setState({
+      offline: false,
+      children: [{ id: 'c1', first: 'Nova', last: 'O', birth: NOW, color: '#fff', picture: photo.uri }],
+    });
+    vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
+      children: state.children.map((c) => ({ ...c, serverId: 501, picture: SERVER_PIC })),
+      entries: state.entries,
+      measurements: state.measurements,
+    }));
+
+    await s().flushUnsynced();
+
+    expect(s().children[0].serverId).toBe(501);
+    expect(s().children[0].picture).toBe(SERVER_PIC);
+  });
+});
