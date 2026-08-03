@@ -82,10 +82,6 @@ export interface ScheduleInput {
    *  end. `napReminders` treats membership here exactly like a running sleep
    *  timer. */
   asleepChildIds: Record<string, true>;
-  /** The child the app currently has loaded. Scopes the treatment and pumping
-   *  reminders below (see `treatments`); the nap rules deliberately do NOT
-   *  consult it, since a timer belongs to whoever started it. */
-  selectedChildId: string;
   /** Every treatment the store holds. `treatmentReminders` covers each of them
    *  against its own child, as of 0.15.2. It was scoped to the selected child
    *  before that: forced until 0.15.0 (a server load held only the child the
