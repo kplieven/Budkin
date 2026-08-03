@@ -81,8 +81,8 @@ function scheduleInput(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
     selectedChildId: 'c1',
     treatments: [],
     treatmentDoses: {},
-    reachedMilestoneKeys: [],
-    answeredMilestoneKeys: [],
+    reachedMilestoneKeysByChild: {},
+    answeredMilestoneKeysByChild: {},
     ...overrides,
   };
 }

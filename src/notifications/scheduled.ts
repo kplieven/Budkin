@@ -98,16 +98,18 @@ export interface ScheduleInput {
    *  `lastSleepEndByChild`, so this file stays ignorant of `Entry`. Built by
    *  `treatmentDoseScalars`, which owns the by-name dose attribution rule. */
   treatmentDoses: Record<string, { today: number; lastAt: number | null }>;
-  /** Catalog keys the SELECTED child has already logged a milestone entry for.
-   *  Scoped the same way `treatments` is, and now for the same (product, no
-   *  longer data) reason. Plain keys rather than entries, so this file stays
-   *  ignorant of `Entry`. Note `lastSleepEndByChild` is NOT scoped like this: it
-   *  is keyed per child and, since 0.15.0, populated for all of them. */
-  reachedMilestoneKeys: readonly string[];
-  /** Catalog keys the selected child's parent has already answered the
-   *  home-screen catch-up nudge for (yes, not yet, or dismissed). Persisted by
-   *  src/data/milestonePrompts.ts. */
-  answeredMilestoneKeys: readonly string[];
+  /** Per child, the catalog keys that child has already logged a milestone
+   *  entry for. Per child rather than one list since 0.15.2: the catch-up nudge
+   *  covers every child, and one list could only ever answer for one of them,
+   *  which read every sibling as having reached nothing. Plain keys rather than
+   *  entries, so this file stays ignorant of `Entry`. Sparse: a child with
+   *  nothing logged has no key, which reads correctly as "reached nothing". */
+  reachedMilestoneKeysByChild: Record<string, readonly string[]>;
+  /** Per child, the catalog keys whose home-screen catch-up nudge that child's
+   *  parent has already answered (yes, not yet, or dismissed). Persisted by
+   *  src/data/milestonePrompts.ts, which already stores it keyed by child, so
+   *  this is that map passed straight through. */
+  answeredMilestoneKeysByChild: Record<string, readonly string[]>;
 }
 
 /** 09:00 local on the calendar day containing `ms`. Built from local Y/M/D
@@ -655,7 +657,7 @@ function treatmentReminders(input: ScheduleInput, now: number): ScheduledNotific
  * having logged them. The scheduled twin of the home-screen `MilestoneNudge`
  * card: both ask the same question about the same milestones, so both derive
  * "due" from `catchUpDueAt`, and answering the card retires the notification
- * through `answeredMilestoneKeys`.
+ * through `answeredMilestoneKeysByChild`.
  *
  * Shares `AGE_HORIZON_MONTHS`, since these are absolute calendar instants off
  * the birth date exactly like the age reminders.
@@ -670,7 +672,10 @@ function milestoneReminders(
   if (child.expected) return [];
 
   const horizon = addMonths(now, AGE_HORIZON_MONTHS);
-  const done = new Set([...input.reachedMilestoneKeys, ...input.answeredMilestoneKeys]);
+  const done = new Set([
+    ...(input.reachedMilestoneKeysByChild[child.id] ?? []),
+    ...(input.answeredMilestoneKeysByChild[child.id] ?? []),
+  ]);
 
   // Several windows close at the same age (`lifts-head` and `first-smile` both
   // at 3 months), so group by instant: one alert per catalog entry would land
@@ -733,14 +738,11 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
     out.push(...treatmentReminders(input, now));
   }
   if (input.prefs.milestoneCatchUp) {
-    // Selected child only, not every child: `reachedMilestoneKeys` describes
-    // exactly one of them (see its comment on ScheduleInput), so looping here
-    // would read every other child as having reached nothing and nudge their
-    // parent about milestones they logged months ago. Widening this means
-    // widening that field to a per-child map first, which is the deferred work
-    // recorded in `scheduleSync.ts`, not a loop that can be added here alone.
-    const selected = input.children.find((c) => c.id === input.selectedChildId);
-    if (selected) out.push(...milestoneReminders(selected, input, now));
+    // Every child, each against their own two key lists. This was the selected
+    // child alone until 0.15.2, when `reachedMilestoneKeys` could only describe
+    // one of them; looping then would have read every sibling as having reached
+    // nothing and nudged their parent about milestones logged months ago.
+    for (const c of input.children) out.push(...milestoneReminders(c, input, now));
   }
   return out;
 }
