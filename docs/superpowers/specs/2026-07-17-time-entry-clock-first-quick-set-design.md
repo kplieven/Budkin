@@ -1,7 +1,15 @@
 # Clock-first time panels with a compact "Quick set" strip
 
 Date: 2026-07-17
-Status: Approved design, pending implementation plan
+Status: SUPERSEDED by `2026-08-05-quick-set-first-design.md`
+
+> The clock-first ordering below was shipped and then reverted on 2026-08-05.
+> The risk this document names in its own Problem section, that demoting the
+> anchors below the clock would turn them into an overlooked footer, is exactly
+> what happened: the anchors went unused. Do not restore the ordering here.
+> The single-line horizontally-scrollable strip that this design introduced was
+> the good half and it survives; only the order, the "Quick set" caption, and
+> the compact chip preset were undone.
 
 ## Problem
 
