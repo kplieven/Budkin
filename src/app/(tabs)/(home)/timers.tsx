@@ -128,10 +128,20 @@ export default function Timers() {
                 <Txt weight={600} size={12.5} color={t.dim}>
                   Started earlier?
                 </Txt>
+                {/* These carry the "m" too: they sit on the same card as the TimeAdjuster
+                    nudges, so a bare label here would disagree with a "+15m" one right below.
+                    Unlike those nudges these chips do not grow, so paddingHorizontal is real
+                    width and it drops 12 → 8 (matched on "Exact…" below, since a wide desktop
+                    card puts all four on one line where the difference would show).
+                    The row wraps by design and "Exact…" already sits on a second line at phone
+                    widths, so it is the label plus these three that has to hold line one. With
+                    "m" at padding 12 that line measures 279px against the 281px a 360dp card
+                    gives it, and 277px on the narrowest desktop card, so it wraps a nudge away.
+                    At 8 it measures 255px, the slack the bare labels used to have. */}
                 {([
-                  ['−15', -15],
-                  ['−5', -5],
-                  ['+5', 5],
+                  ['−15m', -15],
+                  ['−5m', -5],
+                  ['+5m', 5],
                 ] as const).map(([lbl, d]) => (
                   <Pressable
                     key={lbl}
@@ -139,7 +149,7 @@ export default function Timers() {
                     accessibilityRole="button"
                     accessibilityLabel={d < 0 ? `Move start ${-d} minutes earlier` : `Move start ${d} minutes later`}
                     style={(s) => [
-                      { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
+                      { paddingHorizontal: 8, paddingVertical: 7, borderRadius: 11, backgroundColor: t.chip, borderWidth: 1.5, borderColor: t.line, cursor: 'pointer' },
                       isHovered(s) && { borderColor: t.line2 },
                     ]}
                   >
@@ -155,7 +165,7 @@ export default function Timers() {
                   accessibilityState={{ selected: exactFor === tm.id }}
                   style={(s) => [
                     {
-                      paddingHorizontal: 12,
+                      paddingHorizontal: 8,
                       paddingVertical: 7,
                       borderRadius: 11,
                       backgroundColor: exactFor === tm.id ? hexA(color, 0.16) : t.chip,
@@ -173,7 +183,9 @@ export default function Timers() {
               </View>
 
               {exactFor === tm.id && (
-                <View style={{ marginTop: 12 }}>
+                // marginBottom replaces the one TimeAdjuster used to carry itself,
+                // so the gap to the action buttons below is unchanged.
+                <View style={{ marginTop: 12, marginBottom: 12 }}>
                   <TimeAdjuster mode="clock" value={tm.start} now={now} color={color} onChange={(ms) => setTimerStart(tm.id, ms)} />
                 </View>
               )}
