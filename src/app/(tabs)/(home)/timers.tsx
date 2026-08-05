@@ -183,7 +183,9 @@ export default function Timers() {
               </View>
 
               {exactFor === tm.id && (
-                <View style={{ marginTop: 12 }}>
+                // marginBottom replaces the one TimeAdjuster used to carry itself,
+                // so the gap to the action buttons below is unchanged.
+                <View style={{ marginTop: 12, marginBottom: 12 }}>
                   <TimeAdjuster mode="clock" value={tm.start} now={now} color={color} onChange={(ms) => setTimerStart(tm.id, ms)} />
                 </View>
               )}
