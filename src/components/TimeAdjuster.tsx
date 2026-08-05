@@ -105,7 +105,10 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
   };
 
   return (
-    <View style={{ backgroundColor: t.bg, borderWidth: 1.5, borderColor: t.line, borderRadius: 16, padding: 12, gap: 10, marginBottom: 12 }}>
+    // No outer margin: spacing below is the parent's business. It used to carry
+    // marginBottom 12 from when the Quick set strip always followed it; the strip
+    // now leads its panel and this sits last, where that margin was dead space.
+    <View style={{ backgroundColor: t.bg, borderWidth: 1.5, borderColor: t.line, borderRadius: 16, padding: 12, gap: 10 }}>
       <TextInput
         value={text ?? display}
         onFocus={() => setText('')}
