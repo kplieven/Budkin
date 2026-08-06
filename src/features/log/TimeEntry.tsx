@@ -226,7 +226,11 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   );
 
   return (
-    <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 16 }}>
+    // The 10 is a `gap`, not a marginBottom on the readout, so it exists only
+    // when a panel is actually open. As a margin it was unconditional, and with
+    // nothing focused the card padded 16 above the readout and 26 below it. The
+    // old two-line readout hid that; a one-line card is too short to.
+    <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, gap: 10, marginBottom: 16 }}>
       {/* readout: pills are the summary AND the selector */}
       {/* ONE line, not two. Start → End leads and the duration (or the day/status
           caption that stands in for it) is pushed to the trailing edge, because
@@ -251,9 +255,10 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
           360dp there are only 256px and every value takes the two-line fallback;
           closing THAT gap means dropping the clock icon or shrinking the clocks,
           which is a bigger call than this layout. */}
-      {/* marginBottom 10 against the panels' internal gap of 14: the strip groups
-          with the pills whose value it sets, and the exact editor sits apart. */}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      {/* The card's gap of 10 against the panels' internal gap of 14: the strip
+          groups with the pills whose value it sets, and the exact editor sits
+          apart. */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Icon name="clock" color={color} size={18} />
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', rowGap: 5 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -305,7 +310,7 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
 
       {/* one focused panel */}
       {isInterval && !timerEdit && editing === 'end' && (
-        <View style={{ gap: 14, marginBottom: 4 }}>
+        <View style={{ gap: 14 }}>
           <QuickSetStrip>
             <Chip
               label="Now"
@@ -338,7 +343,7 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
       )}
 
       {isInterval && timerEdit && editing === 'end' && (
-        <View style={{ gap: 14, marginBottom: 4 }}>
+        <View style={{ gap: 14 }}>
           {/* The caption leads the whole panel, not just the clock. It warns that
               setting an end stops the timer, and a Quick set chip does exactly
               that, so it has to precede the chips as well as the exact editor.
@@ -378,7 +383,7 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
       )}
 
       {isInterval && editing === 'start' && (
-        <View style={{ gap: 14, marginBottom: 4 }}>
+        <View style={{ gap: 14 }}>
           <QuickSetStrip>
             <Chip
               label="Now"
@@ -422,14 +427,14 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
         </View>
       )}
 
+      {/* No wrapper: this panel is a lone adjuster, so the card's own gap and
+          padding are the whole spacing story. */}
       {isInterval && !timerEdit && editing === 'lasted' && (
-        <View style={{ marginBottom: 4 }}>
-          <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
-        </View>
+        <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
       )}
 
       {isInterval && timerEdit && editing === 'lasted' && (
-        <View style={{ gap: 10, marginBottom: 4 }}>
+        <View style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
             <Chip label="Still running" color={color} selected={!!te.ongoing} onPress={setOngoing} />
           </View>
@@ -441,7 +446,7 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
       )}
 
       {!isInterval && (
-        <View style={{ gap: 14, marginBottom: 4 }}>
+        <View style={{ gap: 14 }}>
           <QuickSetStrip>
             <Chip
               label="Now"
