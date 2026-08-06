@@ -80,7 +80,9 @@ function ValuePill({
       accessibilityState={{ selected: active }}
       style={(s) => [
         {
-          paddingHorizontal: big ? 9 : 8,
+          // `big` is 8, not 9, so the one-line readout in TimeEntry still fits a
+          // 375pt phone. Two pills' worth of padding is 4 of the 7px that buys.
+          paddingHorizontal: 8,
           paddingVertical: big ? 4 : 2,
           borderRadius: 9,
           backgroundColor: active ? color : t.chip,
@@ -226,12 +228,35 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   return (
     <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 16 }}>
       {/* readout: pills are the summary AND the selector */}
+      {/* ONE line, not two. Start → End leads and the duration (or the day/status
+          caption that stands in for it) is pushed to the trailing edge, because
+          the clocks only ask for about half the card and the rest was dead space
+          with "lasted" stacked underneath it.
+          · The push is a flexBasis-0 spacer, not marginLeft 'auto', because this
+            row must keep its flexWrap escape hatch for a large font scale or a
+            day label in front of the duration ("Yesterday · lasted 35m", which
+            does not fit at 360dp). A zero-base spacer never causes the wrap
+            itself; it just eats the first line's slack. An auto margin would
+            survive the wrap and right-align the duration on its own line, where
+            a plain spacer leaves it left-aligned, i.e. exactly the old two-line
+            layout. Degrade to the thing this replaced, not to something new.
+          · The 8px minimum separation is the SPACER's minWidth, not an outer
+            columnGap, because a columnGap would be charged twice (once each side
+            of the spacer) against the wrap threshold for one visible gap.
+          · Both groups keep their own flexWrap so the pills inside them can break
+            before the outer row has to.
+          The row needs 267px and a 375pt phone gives it 271, which is why the two
+          gaps here (6 and 5) and the `big` pill padding are each a notch tighter
+          than they read: the 7px they save is a whole phone size, measured. At
+          360dp there are only 256px and every value takes the two-line fallback;
+          closing THAT gap means dropping the clock icon or shrinking the clocks,
+          which is a bigger call than this layout. */}
       {/* marginBottom 10 against the panels' internal gap of 14: the strip groups
           with the pills whose value it sets, and the exact editor sits apart. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 }}>
         <Icon name="clock" color={color} size={18} />
-        <View style={{ flex: 1, gap: 5 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', rowGap: 5 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {isInterval ? (
               <>
                 <ValuePill big label={fmtClock(start as number)} color={color} active={editing === 'start'} dimmed={derived === 'start'} onPress={() => focus('start')} />
@@ -248,7 +273,8 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
               <ValuePill big label={fmtClock(end)} color={color} active={editing === 'when'} onPress={() => focus('when')} />
             )}
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <View style={{ flex: 1, minWidth: 8 }} />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
             {isInterval && !te.ongoing ? (
               <>
                 {!endIsToday && (
