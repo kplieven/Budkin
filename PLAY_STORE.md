@@ -79,13 +79,13 @@ Two consequences to keep in view:
 
 ## 1. Play Console account
 
-- [ ] Register at https://play.google.com/console/signup. One-time **$25**.
-- [ ] Complete identity verification. Personal accounts need a government ID and
+- [x] Register at https://play.google.com/console/signup. One-time **$25**.
+- [x] Complete identity verification. Personal accounts need a government ID and
       address; organisation accounts need a **D-U-N-S number**, which takes
       noticeably longer to obtain.
 - [ ] Create the app. Package name must be exactly `dev.karellievens.budkin`.
       The creation flow asks free or paid: answer **paid**.
-- [ ] Set up a **payments profile** (Setup > Payments profile). Selling a paid app
+- [x] Set up a **payments profile** (Setup > Payments profile). Selling a paid app
       is impossible without one, it wants bank and tax details, and verification is
       not instant. Start it early so it is not what holds up the launch.
 - [ ] Set the price to **2.00 EUR** under **Monetize > Pricing** (the console
@@ -162,21 +162,71 @@ required. It goes to the `internal` track as a `draft` per `eas.json`.
 
 ## 6. Store listing
 
+> **The marketing site is live.** `https://budkin.karellievens.dev/` is a landing
+> page for the app: what it is, the feature list, a "Get it on Google Play"
+> button, and the privacy policy at `/privacy.html`. Its copy is the obvious
+> source for the short and full descriptions below, and it already carries the
+> "unofficial client, not affiliated with or endorsed by Baby Buddy" line that
+> the naming item asks for, so keep the two wordings in sync. Its Play button
+> points at `play.google.com/store/apps/details?id=dev.karellievens.budkin`,
+> which stays a 404 until the listing goes public in step 8.
+
 Assets:
 
 - [x] App icon, 512x512 PNG. Already built at `assets/brand/play-store-icon.png`,
       with no alpha channel, which Play requires.
 - [ ] Feature graphic, 1024x500.
-- [ ] At least 2 phone screenshots. Add 7-inch and 10-inch tablet sets if you
-      want tablet visibility.
+- [x] At least 2 phone screenshots. **Upload the eight in
+      `assets/store/screenshots/device/slides/`**: captioned, 1080x1920,
+      24-bit, no alpha, checked against Play's rules. They are captured from the
+      app running on a real phone, in Local mode on generated fake data, so no
+      Baby Buddy server is involved and the production app is never touched
+      (everything happens in the development build's own sandbox). `alt-notes`
+      and `alt-timers` sit beside them if you want to swap a slot.
+
+      A browser-rendered set is kept at `assets/store/screenshots/slides/` as a
+      fallback. It is faster to regenerate but it is RN-web, not Android.
+
+      Full method and its many device-specific traps:
+      `docs/superpowers/specs/2026-08-05-play-store-screenshots-design.md`.
+      To regenerate, with the phone on USB, Metro running
+      (`BUDKIN_VERSION=<tag> APP_VARIANT=development npx expo start --dev-client`)
+      and `adb reverse tcp:8081 tcp:8081` set:
+
+      ```sh
+      python3 scripts/screenshots/seedDevice.py --theme light --day-start <hour>
+      python3 scripts/screenshots/captureDevice.py --theme light
+      python3 scripts/screenshots/seedDevice.py --theme dark --day-start <hour>
+      python3 scripts/screenshots/captureDevice.py --only history
+      python3 scripts/screenshots/seedDevice.py --theme light --day-start <hour> --no-tutorial
+      python3 scripts/screenshots/captureDevice.py --only welcome
+      python3 scripts/screenshots/frames.py --src assets/store/screenshots/device --crop-top 100
+      ```
+
+      `--day-start` takes the app's own "Day starts at" option just AFTER the
+      current time (19, 12, 7 or 0), which keeps the Insights trends from ending
+      on a cliff. Play caps a side at twice the other, so the raw 1080x2340
+      phone captures are NOT uploadable on their own; the 1080x1920 slides are.
+      Add 7-inch and 10-inch tablet sets if you want tablet visibility.
 - [ ] Short description, max 80 characters.
 - [ ] Full description, max 4000 characters.
 
 Four that are specific to Budkin and easy to get rejected on:
 
-- [ ] **Privacy policy URL.** Mandatory and must be publicly reachable. Host it
-      on the existing web deploy (Caddy to the nginx container, see
-      `docker-compose.yml`), for example at `/privacy`.
+- [x] **Privacy policy URL.** Done, on the marketing site. Paste
+      **`https://budkin.karellievens.dev/privacy.html`** into the console, with
+      the `.html`. The site is a flat static export behind Cloudflare and the
+      extensionless `/privacy` returns a bare 404 to the public internet, which
+      is the rejection Play hands out for an unreachable policy URL. A local DNS
+      rewrite points this hostname at the home server, so `/privacy` can look
+      fine from inside the LAN. Check it the way a reviewer would, resolving
+      through a public resolver rather than the local one:
+
+      ```sh
+      IP=$(dig +short @1.1.1.1 budkin.karellievens.dev | head -1)
+      curl -sI --resolve budkin.karellievens.dev:443:$IP \
+        https://budkin.karellievens.dev/privacy.html
+      ```
 - [ ] **App access.** Budkin normally talks to a self-hosted Baby Buddy server,
       which a reviewer does not have. State explicitly that **Local mode needs no
       account and no server**, and give the exact tap path to reach it. Skipping
