@@ -2,12 +2,11 @@
  * Serialize a running Timer's structural fields into (and out of) the one
  * free-form field a Baby Buddy timer exposes: `name`. `child` and `start` ride
  * natively on the BB timer, so `name` carries only the fields that shape the
- * committed entry: saveAs (as the leading human label), feed type, method,
- * start side, nap flag, and amount. Freeform notes/tags and the tummy milestone
- * text are deliberately NOT carried; they stay on the device where they were
- * typed. The `v1` marker after the label versions the grammar and doubles as
- * the "made by Budkin" signal: a name without it (e.g. a timer created in Baby
- * Buddy's own UI) decodes to a generic feeding timer that is still stoppable.
+ * committed entry. Freeform notes/tags and the tummy milestone text are
+ * deliberately NOT carried; they stay on the device where they were typed. The
+ * `v1` marker after the label versions the grammar and doubles as the "made by
+ * Budkin" signal: a name without it (e.g. a timer created in Baby Buddy's own UI)
+ * decodes to a generic feeding timer that is still stoppable.
  */
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import type { ActivityType, FeedMethod, FeedType, Timer } from '@/types/models';
@@ -15,7 +14,7 @@ import type { ActivityType, FeedMethod, FeedType, Timer } from '@/types/models';
 const SEP = ' · ';
 const VERSION = 'v1';
 
-// Reverse of ACTIVITY_LABEL, built once: display label -> saveAs activity.
+// Reverse of ACTIVITY_LABEL: display label -> saveAs activity.
 const LABEL_TO_ACTIVITY: Record<string, ActivityType> = Object.fromEntries(
   (Object.entries(ACTIVITY_LABEL) as [ActivityType, string][]).map(([k, v]) => [v, k]),
 );
@@ -30,18 +29,13 @@ export interface DecodedTimer {
 }
 
 /**
- * NOTE the `amt:` token is the draft's raw `amount`, never a converted one.
- * For a pumping timer, and for any feed that measures a volume, that is
- * canonical MILLILITRES; for a feed taken at the breast it is the intake level
- * (see `INTAKE_LEVELS`), which has no unit at all. Either way the device's
- * units preference must not touch it: imperial (fl oz) is a display lens only,
- * and this string is shared state, since the timer name is what another device
- * decodes when it picks the timer up. Writing a converted number here would
- * corrupt the amount across devices. Do not change the encoding.
- *
- * The `ft:`/`m:` tokens ride alongside, so a decoder can always tell which of
- * the two an `amt:` is. That is why the level needs no marker of its own and
- * the grammar version does not move.
+ * The `amt:` token is the draft's RAW `amount`, never a converted one: canonical
+ * MILLILITRES for a pumping timer and any feed that measures a volume, or the
+ * unitless intake level (see `INTAKE_LEVELS`) for a feed at the breast. The
+ * device's units preference must not touch it, since imperial is a display lens
+ * only and this string is shared state that another device decodes when it picks
+ * the timer up. The `ft:`/`m:` tokens ride alongside, so a decoder can always tell
+ * which of the two an `amt:` is, which is why the level needs no marker of its own.
  */
 export function encodeTimerName(t: Timer): string {
   const toks: string[] = [VERSION];
@@ -100,12 +94,9 @@ export function serverTimerToTimer(
   };
 }
 
-/**
- * Merge the device's local running timers with the server's. Same-account cross
- * device: the server is authoritative for timers that carry a serverId, but
- * local-only fields (notes/tags, never sent to the server) and not-yet-pushed
- * local timers (serverId == null) are preserved.
- */
+/** The server is authoritative for timers that carry a serverId, but local-only
+ *  fields (notes/tags, never sent to the server) and not-yet-pushed local timers
+ *  (serverId == null) are preserved. */
 export function reconcileTimers(local: Timer[], server: Timer[]): Timer[] {
   const serverById = new Map<number, Timer>();
   for (const t of server) if (t.serverId != null) serverById.set(t.serverId, t);

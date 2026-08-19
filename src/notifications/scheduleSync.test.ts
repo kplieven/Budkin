@@ -13,9 +13,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
     removeItem: vi.fn(async (k: string) => {
       mem.store.delete(k);
     }),
-    // The entity store's month-chunked entries (see src/data/entityStore.ts)
-    // use the batch API; without these the chunked saveEntries warns on every
-    // store write this file triggers.
+    // The entity store's month-chunked entries use the batch API; without these
+    // the chunked saveEntries warns on every store write this file triggers.
     getAllKeys: vi.fn(async () => [...mem.store.keys()]),
     multiGet: vi.fn(async (keys: string[]) => keys.map((k) => [k, mem.store.get(k) ?? null] as const)),
     multiSet: vi.fn(async (pairs: [string, string][]) => {
@@ -27,17 +26,14 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-// `@/data/secureKv` pulls in expo-secure-store (native, transitively
-// react-native) via storage/servers; stub it so the store module imports under node.
+// secureKv and photoFile both pull in native modules (expo-secure-store,
+// expo-file-system, react-native's Platform) that the store imports transitively.
 vi.mock('@/data/secureKv', () => ({
   kvGet: vi.fn(async () => null),
   kvSet: vi.fn(async () => {}),
   kvRemove: vi.fn(async () => {}),
 }));
 
-// `@/lib/photoFile` pulls in expo-file-system and react-native's Platform,
-// both native; stub it so the store module (saveChild's deferred-photo path)
-// imports under node.
 vi.mock('@/lib/photoFile', () => ({
   reopenPhotoFile: vi.fn(() => undefined),
   discardPhotoFile: vi.fn(async () => {}),
@@ -59,9 +55,8 @@ vi.mock('@/notifications/scheduled', async (importActual) => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-// `hydrating` defaults to false: most tests want a store that already finished
-// hydrating (the realistic state for a "then the user does X" scenario). The
-// hydration-gating tests below override it to true to exercise the gate itself.
+// `hydrating` defaults to false, the realistic state for a "then the user does X"
+// scenario. The hydration-gating tests override it to exercise the gate itself.
 async function setup(opts: { hydrating?: boolean } = {}) {
   vi.resetModules();
   const { desiredScheduled } = await import('@/notifications/scheduled');
@@ -70,11 +65,9 @@ async function setup(opts: { hydrating?: boolean } = {}) {
   useAppStore.setState({ hydrating: opts.hydrating ?? false });
   const desired = vi.mocked(desiredScheduled);
   const apply = vi.mocked(applyScheduled);
-  // Captured before initScheduledReminderSync's launch-time run, so callers can
-  // measure exactly what THIS setup() produced. The mock factories above are
-  // shared across every setup() call in this file (their call history is
-  // cumulative, not reset per vi.resetModules()), so an absolute count would
-  // silently include earlier tests' calls; see the `.at(-1)` note below.
+  // Captured before initScheduledReminderSync's launch-time run: mock call
+  // history is cumulative across setup() calls, not reset per vi.resetModules(),
+  // so an absolute count would include earlier tests' calls.
   const appliesAtInit = apply.mock.calls.length;
   const buildsAtInit = desired.mock.calls.length;
   const { initScheduledReminderSync, reconcileNow } = await import('@/notifications/scheduleSync');
@@ -117,9 +110,8 @@ describe('initScheduledReminderSync gating', () => {
 
 describe('hydration gating (regression: launch must not reconcile pre-hydration state)', () => {
   it('does not reconcile at launch while the store is still hydrating', async () => {
-    // Mirrors the real mount sequence: `hydrating` is still true (hydrate()'s
-    // async work hasn't landed yet) when initScheduledReminderSync's
-    // launch-time run fires.
+    // Mirrors the real mount sequence: hydrate()'s async work has not landed when
+    // initScheduledReminderSync's launch-time run fires.
     const { apply, appliesAtInit } = await setup({ hydrating: true });
 
     expect(apply.mock.calls.length).toBe(appliesAtInit);
@@ -139,11 +131,9 @@ describe('hydration gating (regression: launch must not reconcile pre-hydration 
   });
 
   it('reconciles on the hydrating transition alone, with no other slice changing', async () => {
-    // Isolates the subtlety: a set() that flips ONLY `hydrating` (nothing else
-    // in the compared slice list changes) must still trigger a run. If
-    // `hydrating` were left out of the slice comparison, this exact set()
-    // would look like "nothing changed" and the post-hydration reconcile
-    // would never happen.
+    // If `hydrating` were left out of the compared slice list, this exact set()
+    // would look like "nothing changed" and the post-hydration reconcile would
+    // never happen.
     const { apply, appliesAtInit, useAppStore } = await setup({ hydrating: true });
 
     useAppStore.setState({ hydrating: false });
@@ -156,8 +146,6 @@ describe('hydration gating (regression: launch must not reconcile pre-hydration 
     const { apply, appliesAtInit, useAppStore } = await setup({ hydrating: true });
     const dueSoon = Date.now() + 14 * 24 * 60 * 60 * 1000; // comfortably in the future
 
-    // The true-to-false hydrating transition, alongside the real children the
-    // store hydrated with, must trigger exactly one reconcile.
     useAppStore.setState({
       hydrating: false,
       children: [{ id: 'c1', first: 'Due', last: 'Soon', birth: dueSoon, color: '#fff', expected: true }],
@@ -217,8 +205,7 @@ describe('run serialization (concurrent store changes must not interleave OS cal
     });
     await flush();
 
-    // Neither triggered a new call: they were coalesced behind the busy run,
-    // not interleaved with it.
+    // Coalesced behind the busy run, not interleaved with it.
     expect(apply.mock.calls.length).toBe(appliesBefore + 1);
     expect(desired.mock.calls.length).toBe(buildsBefore + 1);
 
@@ -226,8 +213,8 @@ describe('run serialization (concurrent store changes must not interleave OS cal
     await flush();
     await flush();
 
-    // Exactly one follow-up run landed, built from c3 (the LATEST queued
-    // state), never from the c2 state that arrived in between.
+    // One follow-up run, built from c3 (the LATEST queued state), never from the
+    // c2 state that arrived in between.
     expect(apply.mock.calls.length).toBe(appliesBefore + 2);
     expect(desired.mock.calls.length).toBe(buildsBefore + 2);
     const lastInput = desired.mock.calls.at(-1)?.[0];
@@ -262,8 +249,6 @@ describe('reconcileNow (manual reconcile for call sites that touch no gated stor
     const appliesBefore = apply.mock.calls.length;
     const buildsBefore = desired.mock.calls.length;
 
-    // Hang the first run mid-flight, the way a real applyScheduled would sit
-    // across several awaited native calls.
     let resolveFirst!: () => void;
     const pending = new Promise<void>((resolve) => {
       resolveFirst = resolve;
@@ -275,17 +260,16 @@ describe('reconcileNow (manual reconcile for call sites that touch no gated stor
     expect(apply.mock.calls.length).toBe(appliesBefore + 1);
     expect(desired.mock.calls.length).toBe(buildsBefore + 1);
 
-    // The store changes (which on its own would also ask for a run via the
-    // subscriber) and then reconcileNow is called again, both while the first
-    // run is still in flight.
+    // A store change (which on its own would also ask for a run via the
+    // subscriber) and a second reconcileNow, both while the first run is in flight.
     useAppStore.setState({
       children: [{ id: 'cLatest', first: 'Latest', last: 'Latest', birth: Date.now(), color: '#fff' }],
     });
     reconcileNow();
     await flush();
 
-    // Neither triggered a new call: both were coalesced behind the busy run,
-    // not interleaved with it as a second concurrent read-then-write pass.
+    // Both coalesced behind the busy run, not interleaved with it as a second
+    // concurrent read-then-write pass.
     expect(apply.mock.calls.length).toBe(appliesBefore + 1);
     expect(desired.mock.calls.length).toBe(buildsBefore + 1);
 
@@ -293,7 +277,6 @@ describe('reconcileNow (manual reconcile for call sites that touch no gated stor
     await flush();
     await flush();
 
-    // Exactly one follow-up run landed, built from the latest state.
     expect(apply.mock.calls.length).toBe(appliesBefore + 2);
     expect(desired.mock.calls.length).toBe(buildsBefore + 2);
     const lastInput = desired.mock.calls.at(-1)?.[0];
@@ -372,10 +355,8 @@ describe('nap anchor projection', () => {
     const { desired, useAppStore } = await setup();
     useAppStore.setState({
       entries: [
-        // Ongoing, no matching Timer (e.g. edited to "still ongoing", or a
-        // server record with no end): must still mark c1 asleep.
+        // Ongoing with no matching Timer: must still mark c1 asleep.
         { id: 'e1', childId: 'c1', type: 'sleep', start: 1_000, end: null, nap: true, tags: [] },
-        // Ended: must NOT appear in asleepChildIds.
         { id: 'e2', childId: 'c2', type: 'sleep', start: 2_000, end: 3_000, nap: true, tags: [] },
       ],
     });
@@ -394,12 +375,8 @@ describe('nap anchor projection', () => {
   });
 
   it('does not reconcile when only the selected child changes', async () => {
-    // Nothing in the desired set reads the selection as of 0.15.3: treatment
-    // reminders cover every child and the milestone catch-up nudge loops them,
-    // so a switch cannot change what Android should hold. The justification for
-    // the old entry was the two rules that did read it; both are gone, and the
-    // even older one (an ownerless sleep timer resolving to
-    // `timer.childId ?? selectedChildId`) was retired before that.
+    // Nothing in the desired set reads the selection, so a switch cannot change
+    // what Android should hold.
     const { desired, useAppStore } = await setup();
     const builds = desired.mock.calls.length;
     useAppStore.setState({ selectedChildId: 'c2' });
@@ -409,14 +386,12 @@ describe('nap anchor projection', () => {
 });
 
 describe('nap suggestion end-to-end (regression: toInput\'s key space (e.childId) and napReminders\' lookup key (child.id) are aligned only by inspection)', () => {
-  // `desiredScheduled` above is a spy wrapping the REAL implementation
-  // (`vi.fn(actual.desiredScheduled)`), so this exercises the genuine
-  // toInput -> napReminders handoff end to end, not a mock of it.
+  // `desiredScheduled` above is a spy wrapping the REAL implementation, so this
+  // exercises the genuine toInput -> napReminders handoff, not a mock of it.
   it('carries a real kind: "nap" reminder through to applyScheduled', async () => {
-    // Fake ONLY Date, so `flush`'s real setTimeout still resolves. Date.now()
-    // (what `run()` in scheduleSync.ts uses as `now`) becomes deterministic,
-    // so the fire-time arithmetic below is robust to whatever wall-clock time
-    // the suite actually runs at.
+    // Fake ONLY Date, so `flush`'s real setTimeout still resolves. `run()` reads
+    // Date.now() as its `now`, so the arithmetic below stops depending on when
+    // the suite happens to run.
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       const fixedNow = new Date(2026, 6, 15, 10, 0, 0).getTime(); // 10:00 local, well inside quiet hours
@@ -428,7 +403,7 @@ describe('nap suggestion end-to-end (regression: toInput\'s key space (e.childId
       // nudge fires 90 - NAP_LEAD_MIN(15) = 75 minutes after waking.
       const birth = fixedNow - 60 * 24 * 60 * 60 * 1000;
       // Woke 10 minutes before "now": fire = woke + 75min = now + 65min, i.e.
-      // 11:05 local — in the future and inside 07:00-19:00 quiet hours.
+      // 11:05 local, in the future and inside 07:00-19:00 quiet hours.
       const woke = fixedNow - 10 * 60 * 1000;
 
       useAppStore.setState({
@@ -476,8 +451,6 @@ describe('treatment projection', () => {
     type: 'medication',
     name: 'Omeprazol',
     time,
-    // `tags` is required on EntryBase; omitting it is a type error, not an
-    // inferred default.
     tags: [],
   });
 
@@ -506,8 +479,7 @@ describe('treatment projection', () => {
   });
 
   it("gives a non-selected child's treatment its own scalars", async () => {
-    // The point of the whole change. Until now only the selected child's
-    // treatments got a key at all, so a sibling's regimen was invisible here.
+    // Every child's treatments get a key, not just the selected child's.
     const { desired, useAppStore } = await setup();
     const doseAt = Date.now() - 60_000;
     useAppStore.setState({
@@ -522,11 +494,9 @@ describe('treatment projection', () => {
   });
 
   it('does not let one child\'s dose settle a sibling\'s identically named treatment', async () => {
-    // The hazard this task exists to avoid. Dose-to-treatment attribution is by
-    // NAME (a MedicationEntry carries no treatment reference that survives
-    // sync), and two children on the same medicine is the ordinary case. Handing
-    // `treatmentDoseScalars` both children's treatments and both children's
-    // entries at once would cross-attribute silently.
+    // Attribution is by NAME (a MedicationEntry carries no treatment reference
+    // that survives sync), so handing `treatmentDoseScalars` both children's
+    // treatments and entries at once would cross-attribute silently.
     const { desired, useAppStore } = await setup();
     const doseAt = Date.now() - 60_000;
     useAppStore.setState({
@@ -578,8 +548,8 @@ describe('milestone projection', () => {
   });
 
   it("keys reached and answered milestones under each child's own id, never the other's", async () => {
-    // A mis-keyed map would silently nudge a parent about a milestone their
-    // OTHER child logged, or hide the nudge they're actually due for.
+    // A mis-keyed map would nudge a parent about a milestone their OTHER child
+    // logged, or hide the one they are due for.
     const { desired, useAppStore } = await setup();
     const loggedAt = Date.now() - 60_000;
     useAppStore.setState({
@@ -596,24 +566,17 @@ describe('milestone projection', () => {
     const input = desired.mock.calls.at(-1)![0];
     expect(input.reachedMilestoneKeysByChild.c1).toEqual(['rolls-over']);
     expect(input.answeredMilestoneKeysByChild.c2).toEqual(['first-word']);
-    // Cross-checks: c1's reached key never lands on c2, and c2's answered key
-    // never lands on c1.
     expect(input.reachedMilestoneKeysByChild.c2).toEqual([]);
-    // c1 answered nothing, so it has no key at all in the answered map (that
-    // map is a straight passthrough of the store's sparse record, unlike the
-    // always-present-but-possibly-empty reached map above). `milestoneReminders`
-    // reads a missing key with `?? []`, so this is exactly the "reached
-    // nothing" case for c1, not a bug.
+    // The answered map is a straight passthrough of the store's sparse record,
+    // unlike the reached map above, so a child who answered nothing has no key.
     expect(input.answeredMilestoneKeysByChild.c1).toBeUndefined();
   });
 });
 
 describe('delivered-sweep projection', () => {
   it('hands applyScheduled the SAME projection it built the desired set from', async () => {
-    // The reconciler's delivered-notification sweep answers its staleness
-    // questions from this projection. Rebuilding it there, or passing a second
-    // `now`, would let the two halves of one reconcile straddle local midnight
-    // and disagree about what "today" means.
+    // Rebuilding the projection inside the delivered sweep, or passing a second
+    // `now`, would let one reconcile straddle local midnight.
     const { apply, desired, useAppStore } = await setup();
     useAppStore.setState({
       children: [{ id: 'c1', first: 'Rowan', last: '', birth: Date.now() - 86_400_000, color: '#208AEF' }],

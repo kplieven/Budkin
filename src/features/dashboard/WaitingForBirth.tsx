@@ -3,11 +3,9 @@ import { View } from 'react-native';
 import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 
-/**
- * Placeholder for the views that key off a child's age while that child is
- * still expected. One component so the three tabs cannot drift apart in copy.
- * `what` names the view, e.g. "Growth charts".
- */
+/** Placeholder for the views that key off a child's age while that child is still
+ *  expected. One component so the three tabs cannot drift apart in copy. `what` names
+ *  the view, e.g. "Growth charts". */
 export function WaitingForBirth({ what }: { what: string }) {
   const t = useTheme();
   return (

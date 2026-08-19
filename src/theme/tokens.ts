@@ -1,7 +1,6 @@
 /**
- * Design tokens for Baby Buddy, ported exactly from the design handoff.
- * Two themes: Night (default) and Daylight. All hex/rgba values match the
- * handoff's Design Tokens table and the reference implementation's theme().
+ * Design tokens, ported exactly from the design handoff: every hex/rgba value
+ * matches its Design Tokens table. Two themes, Night (default) and Daylight.
  */
 
 export type ThemeMode = 'dark' | 'light';
@@ -9,14 +8,10 @@ export type ThemeMode = 'dark' | 'light';
 export type ActivityKey = 'feeding' | 'sleep' | 'diaper' | 'pumping' | 'tummy' | 'bath' | 'temperature' | 'medication' | 'note' | 'milestone';
 
 export interface Palette {
-  /** true for Night mode */
   dark: boolean;
   bg: string;
-  /** card / input surface (handoff "surface", reference bg2) */
   surface: string;
-  /** chip / inset surface (handoff "chip", reference bg3) */
   chip: string;
-  /** elevated surface (handoff "elevated", reference bg4) */
   elevated: string;
   line: string;
   line2: string;
@@ -76,6 +71,10 @@ const DAYLIGHT: Palette = {
   insightDirty: '#B27C4E',
 };
 
+// Hues are picked to stay distinct from their neighbours (temperature's
+// thermometer red against tummy's coral, medication's orchid violet against
+// sleep's periwinkle). Notes are "paper", deliberately unsaturated, and
+// milestone shares that tint because both are tagged notes.
 const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
   feeding: '#F0A878',
   sleep: '#A99EDC',
@@ -83,15 +82,9 @@ const ACTIVITY_NIGHT: Record<ActivityKey, string> = {
   pumping: '#E6BE5E',
   tummy: '#EA958A',
   bath: '#6FB2D8',
-  // thermometer red — distinct from tummy's softer salmon coral
   temperature: '#E4675E',
-  // orchid violet — a pharmacy/medicine hue, distinct from sleep's cooler
-  // periwinkle lavender and warmer than the note grey
   medication: '#C88AD6',
-  // calm neutral stone-grey — a note is "paper", deliberately unsaturated so it
-  // reads as neutral next to the vivid activity hues
   note: '#9AA0A6',
-  // milestones share the note surface (both are tagged notes); same neutral tint
   milestone: '#9AA0A6',
 };
 
@@ -108,7 +101,7 @@ const ACTIVITY_DAYLIGHT: Record<ActivityKey, string> = {
   milestone: '#787E85',
 };
 
-/** Diaper "solid" stool color swatches — identical in both themes. */
+/** Diaper "solid" stool color swatches, identical in both themes. */
 export const SOLID_COLORS: Record<'black' | 'brown' | 'green' | 'yellow', string> = {
   black: '#3A3330',
   brown: '#7A5230',
@@ -125,5 +118,5 @@ export function makeTheme(mode: ThemeMode): Theme {
   };
 }
 
-/** Activity tint alpha used for icon-wrap / card-tint backgrounds (handoff: 16%). */
+/** Activity tint alpha for icon-wrap / card-tint backgrounds (handoff: 16%). */
 export const ACTIVITY_TINT_ALPHA = 0.16;

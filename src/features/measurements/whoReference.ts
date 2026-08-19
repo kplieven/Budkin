@@ -1,8 +1,7 @@
 /**
- * WHO Child Growth Standards, applied to a child's growth chart. The reference
- * is drawn only for a recorded girl/boy gender and only for ages 0 to 60
- * months (WHO's range). Curves are computed from the LMS parameters in
- * `whoLms.ts` via the standard WHO formula.
+ * WHO Child Growth Standards, applied to a child's growth chart. The reference is
+ * drawn only for a recorded girl/boy gender and only for ages 0 to 60 months (WHO's
+ * range), from the LMS parameters in `whoLms.ts`.
  */
 import { toDisplay, type UnitSystem } from '@/lib/units';
 import type { ChildGender, MeasurementKind } from '@/types/models';
@@ -30,7 +29,7 @@ export const PCTS: { p: number; z: number; emphasis: boolean }[] = [
 
 /** WHO LMS -> the measurement value at z standard deviations from the median. */
 export function valueAtZ({ L, M, S }: Lms, z: number): number {
-  // L can be exactly 0 (e.g. some BMI rows); the power form is undefined there.
+  // L can be exactly 0 (e.g. some BMI rows) and the power form is undefined there.
   return Math.abs(L) < 1e-7 ? M * Math.exp(S * z) : M * Math.pow(1 + L * S * z, 1 / L);
 }
 
@@ -41,7 +40,7 @@ export function hasWhoAgeOverlap(birthMs: number, tMin: number, tMax: number): b
   return ageMaxMonths >= 0 && ageMinMonths <= 60;
 }
 
-/** One WHO percentile curve, sampled along the time axis in display units. */
+/** One percentile curve, sampled along the time axis in display units. */
 export interface GrowthCurve {
   p: number;
   label: string;
@@ -61,10 +60,10 @@ function lmsAtAge(table: Lms[], ageMonths: number): Lms {
 }
 
 /**
- * The five WHO percentile curves for `kind` and `gender`, sampled monthly
- * across the visible time range [tMin, tMax] and clamped to ages 0..60 months,
- * in the caller's display units. Returns null when no reference applies (gender
- * not girl/boy, or the range is entirely outside 0..60 months).
+ * The five percentile curves for `kind` and `gender`, sampled monthly across the
+ * visible range [tMin, tMax], clamped to ages 0..60 months, in the caller's display
+ * units. Null when no reference applies (gender not girl/boy, or the range lies
+ * entirely outside 0..60 months).
  */
 export function referenceCurves(
   kind: MeasurementKind,
@@ -83,8 +82,8 @@ export function referenceCurves(
   const t1 = Math.min(tMax, birthMs + 60 * MONTH_MS); // clamp to age <= 60
   if (t1 < t0) return null;
 
-  // Sample at both endpoints plus every whole-month boundary strictly between,
-  // so the polyline follows the smooth WHO curve rather than the sparse logs.
+  // Sample at both endpoints plus every whole-month boundary strictly between, so the
+  // polyline follows the smooth WHO curve rather than the sparse logs.
   const ts: number[] = [t0];
   const first = Math.floor((t0 - birthMs) / MONTH_MS) + 1;
   const last = Math.ceil((t1 - birthMs) / MONTH_MS) - 1;

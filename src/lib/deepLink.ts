@@ -1,48 +1,29 @@
 /**
- * The `?child=` a deep link carries: written here, read back here, and resolved
- * against the roster here. Notifications and widget buttons are built while one
- * child is current and tapped while another may be, and every write site in the
- * store reads the global selection, so a link that means "this is about Wren"
- * has to say so.
+ * The `?child=` a deep link carries: written, read back, and resolved against the roster
+ * here. Notifications and widget buttons are built while one child is current and tapped
+ * while another may be, and every write site in the store reads the global selection, so
+ * a link has to name its own child.
  *
- * A query parameter rather than a `data` field because it is the only mechanism
- * both producers share: a widget button is an `OPEN_URI` intent with nothing but
- * a url, and the notification funnel already navigates by url.
- *
- * Pure, and a `.ts` module rather than route code, for the reason
- * `logDeepLink.ts` gives at the top of that file: vitest only reaches `.ts`.
- * `resolveTimerDeepLink` lives here rather than in a file of its own because it
- * is a few lines of policy over the resolution above; the log route's decision
- * is big enough to keep its own module.
+ * A query parameter rather than a `data` field because it is the only mechanism both
+ * producers share: a widget button is an `OPEN_URI` intent with nothing but a url.
  */
 
 import type { Child } from '@/types/models';
 
-/** Appends `?child=<id>`, or nothing at all when there is no child to name.
- *
- *  "No child" is a PERMANENT case, not a transitional one: pumping reminders are
- *  parent-side, launcher shortcuts are baked in at prebuild time before any child
- *  exists, and a timer persisted before ownership was stamped has no owner. On top
- *  of that, `diffScheduled` compares identifier, title and body only, so every
- *  reminder already pending from an older build keeps its childless url until its
- *  identifier changes for an unrelated reason. Every reader below degrades to the
- *  current selection instead. */
+/**
+ * "No child" is permanent, not transitional: pumping reminders are parent-side, launcher
+ * shortcuts are baked in at prebuild time, and `diffScheduled` compares identifier, title
+ * and body only, so reminders pending from an older build keep their childless url.
+ */
 export function withChildParam(url: string, childId: string | undefined): string {
   if (!childId) return url;
   return `${url}${url.includes('?') ? '&' : '?'}child=${encodeURIComponent(childId)}`;
 }
 
 /**
- * The `child` parameter of a deep-link url. Only the notification funnel needs
- * this; route components get their params already parsed and decoded from
- * expo-router.
- *
- * Hand-parsed rather than through expo-linking's `parse`, which is a declared
- * dependency this repo has never imported: pulling a native Expo module into a
- * pure `@/lib` module would put it out of vitest's reach (node environment, no
- * native shim), which is the whole reason this decision lives here rather than in
- * the route. React Native's own URL/URLSearchParams support is partial, and these
- * urls are app-generated anyway, an absolute path or our own scheme.
+ * Hand-parsed rather than through expo-linking's `parse`: pulling a native Expo module
+ * into a pure `@/lib` module would put it out of vitest's reach. React Native's own
+ * URL/URLSearchParams support is partial, and these urls are app-generated anyway.
  */
 function childParam(url: string): string | undefined {
   const query = url.split('#')[0].split('?')[1];
@@ -54,9 +35,8 @@ function childParam(url: string): string | undefined {
     try {
       return decodeURIComponent(raw) || undefined;
     } catch {
-      // A malformed escape. Fall back to the raw value rather than throwing: the
-      // lookup below either matches a child or does not, and neither answer may
-      // blow up inside a notification tap.
+      // A malformed escape falls back to the raw value rather than throwing: nothing
+      // here may blow up inside a notification tap.
       return raw || undefined;
     }
   }
@@ -80,21 +60,14 @@ export function resolveDeepLinkChild(child: string | undefined, children: Child[
 }
 
 /**
- * The child a notification tap should select before it navigates, or undefined
- * to leave the selection alone.
+ * The child a notification tap should select before it navigates, or undefined to leave
+ * the selection alone.
  *
- * Only for NAVIGATION-only destinations ('/', '/timers', '/history',
- * '/milestones'): those are plain tabs reading the global selection, with no
- * deep-link route of their own, so the funnel is the only place that can point
- * them at the child the reminder is about. An unknown child is ignored rather
- * than dead-ending, matching how `logDeepLink` already treats a treatment that
- * outlived the alert naming it.
- *
- * Write-adjacent destinations ('/log/<type>', '/timer') are deliberately left
- * out. Their own route resolves the parameter, because it has to refuse an
- * unknown child rather than silently aim a write at whoever is selected, and
- * because a widget button reaches them without passing through this funnel at
- * all: deciding here as well would split one url's behaviour by entry point.
+ * Only for navigation-only destinations, which read the global selection and so have no
+ * other way to reach the child the reminder is about. Write-adjacent destinations
+ * ('/log/<type>', '/timer') resolve the parameter in their own route instead: they have
+ * to refuse an unknown child rather than aim a write at whoever is selected, and a
+ * widget button reaches them without passing through this funnel at all.
  */
 export function childToSelectOnOpen(url: string, children: Child[], selectedChildId: string): string | undefined {
   const path = url.split('?')[0];
@@ -111,13 +84,10 @@ export type TimerDeepLinkAction =
   | { kind: 'start'; selectChildId: string | undefined };
 
 /**
- * The routing decision behind `budkin://timer` (the widget's Timer button).
- *
- * Everything is judged against the child the LINK names, not the one selected:
- * the widget's bitmap can be older than the selection it was rendered from, so
- * the button carries who it was showing. A child the roster no longer holds is
- * refused rather than retargeted, the same line `logDeepLink` draws, because
- * starting a timer writes a real entry against whoever ends up selected.
+ * The routing decision behind `budkin://timer` (the widget's Timer button). Judged
+ * against the child the LINK names, not the one selected: the widget's bitmap can be
+ * older than the selection it was rendered from. A child the roster no longer holds is
+ * refused rather than retargeted, because starting a timer writes a real entry.
  */
 export function resolveTimerDeepLink(params: {
   child: string | undefined;
@@ -129,8 +99,8 @@ export function resolveTimerDeepLink(params: {
   const named = resolveDeepLinkChild(params.child, params.children);
   if (named.kind === 'unknown') return { kind: 'none' };
   const target = named.kind === 'named' ? named.child : params.children.find((c) => c.id === params.selectedChildId);
-  // Timing a child who is still expected would log an activity against a due
-  // date rather than a birth date. Same guard log/[type].tsx mirrors.
+  // Timing a child who is still expected would log against a due date rather than a
+  // birth date. Same guard log/[type].tsx mirrors.
   if (target?.expected) return { kind: 'none' };
   const id = named.kind === 'named' ? named.child.id : undefined;
   return { kind: 'start', selectChildId: id && id !== params.selectedChildId ? id : undefined };

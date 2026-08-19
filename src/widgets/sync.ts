@@ -1,7 +1,7 @@
 /**
- * Keeps the home-screen widget's data snapshot in sync with the app: whenever
- * the relevant store data changes, write a fresh snapshot and ask any on-screen
- * widgets to re-render. No-ops cleanly off Android (pushWidgetUpdate is a stub).
+ * Keeps the home-screen widget's data snapshot in sync with the app: on a relevant
+ * store change, write a fresh snapshot and ask any on-screen widgets to re-render.
+ * No-ops cleanly off Android (pushWidgetUpdate is a stub).
  */
 
 import { useAppStore } from '@/store/useAppStore';
@@ -22,13 +22,11 @@ export function initWidgetSync(): void {
     await writeWidgetSnapshot(snap);
     await pushWidgetUpdate(snap);
   };
-  // Gate on the slices `buildWidgetSnapshot` actually reads, which now include
-  // `rhythmOriginHour`: the snapshot carries the day boundary for the widget to
-  // window against, so changing it in Settings must rebuild. `now` stays OUT
-  // deliberately, even though the builder takes it: the per-second tick replaces
-  // nothing the widget can see (it only anchors the 48h record prune), so it
-  // early-returns here. No snapshot rebuild, no JSON.stringify, and no widget
-  // push on the hot path.
+  // Gate on the slices `buildWidgetSnapshot` actually reads, `rhythmOriginHour`
+  // included: the snapshot carries the day boundary for the widget to window
+  // against. `now` stays OUT deliberately, even though the builder takes it: the
+  // per-second tick replaces nothing the widget can see, so it early-returns here
+  // and the hot path costs no rebuild, no JSON.stringify and no widget push.
   useAppStore.subscribe((state, prev) => {
     if (
       state.children === prev.children &&

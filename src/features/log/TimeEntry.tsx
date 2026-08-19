@@ -1,23 +1,14 @@
 /**
- * The reusable Time-Entry component, the app's signature feature.
+ * The reusable Time-Entry component.
  *
- * Zero or one focused panel at a time. INTERVAL logs open with nothing focused:
- * no pill is preselected and no adjuster is shown until the user taps a pill, so
- * it is always their deliberate choice which time (Start, End, Lasted) they are
- * adjusting. A POINT log has a single "When" time, so there is no such ambiguity
- * and its panel opens straight away. The readout pills (Start -> End, and Lasted)
- * are the always-visible summary AND the selector: tapping a pill focuses that
- * quantity and reveals its single panel; the other quantities' controls stay
- * hidden. Three parallel chip rows became one panel. The derived (computed)
- * quantity is dimmed.
- *
- * Panel order is Quick set strip first, exact TimeAdjuster second. The shortcuts
- * are the intended first stop and the editor is the escape hatch; see
- * QuickSetStrip below for why the reverse order failed.
- * INTERVAL keeps the last two of Start/End/Lasted; POINT (diaper and the other
- * single-moment activities) is a single
- * "When" panel. Focusing a pill only reveals its panel, it does not pin: pinning
- * happens on a real chip/anchor/nudge/type interaction via the store setters.
+ * Zero or one focused panel at a time. INTERVAL logs open with nothing focused,
+ * so it is always the user's deliberate choice which time (Start, End, Lasted)
+ * they are adjusting; a POINT log has one "When" time, no ambiguity, so its panel
+ * opens straight away. The readout pills are the summary AND the selector:
+ * tapping one focuses that quantity and reveals its single panel, and the derived
+ * (computed) quantity is dimmed. Focusing a pill only reveals its panel, it does
+ * not pin: pinning happens on a real chip/anchor/nudge/type interaction via the
+ * store setters.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -52,11 +43,6 @@ const MIN = 60000;
 
 type EditField = 'start' | 'end' | 'lasted' | 'when';
 
-/**
- * A tappable resolved value rendered as an inset pill (matches the chip
- * vocabulary). Fills with the activity color while focused; a derived quantity
- * is dimmed.
- */
 function ValuePill({
   label,
   color,
@@ -80,8 +66,8 @@ function ValuePill({
       accessibilityState={{ selected: active }}
       style={(s) => [
         {
-          // `big` is 8, not 9, so the one-line readout in TimeEntry still fits a
-          // 375pt phone. Two pills' worth of padding is 4 of the 7px that buys.
+          // `big` is 8, not 9: the one-line readout still has to fit a 375pt
+          // phone, and two pills' worth of padding is 4 of the 7px that buys.
           paddingHorizontal: 8,
           paddingVertical: big ? 4 : 2,
           borderRadius: 9,
@@ -108,29 +94,12 @@ function ValuePill({
 }
 
 /**
- * The smart anchors as a single-line, horizontally-scrollable strip, leading its
- * panel directly under the readout pills.
+ * Order is load-bearing: with the strip below the exact editor, the panel handed you a
+ * finished answer at the top, so the task ended before your eye reached the chips and the
+ * anchors went unused.
  *
- * It used to sit BELOW the exact editor, with a dim "Quick set" caption over it
- * (the 2026-07-17 clock-first design). That design named the risk it was taking
- * and the risk landed: the panel handed you a finished answer at the top, so the
- * task ended before your eye ever reached the chips, and the anchors went unused.
- * Hence three things here, all pointing the same way:
- *
- * · Order. Reading order is the strongest discoverability signal, and this is a
- *   task-completion problem more than a discovery one. Only sequence fixes it.
- * · No caption. A small dim header over a shelf is how secondary content gets
- *   marked, which is the wrong signal now. Chips sitting directly under the value
- *   they set need no announcement, and every other chip row in the app has none.
- *   Dropping it also gives the clock back ~20px of the ~49px this reorder costs
- *   it, which is what keeps the old design's below-the-fold win mostly intact.
- * · Full Chip sizing, not the old compact preset. "Deliberately smaller than the
- *   primary controls" is now a lie about the hierarchy.
- *
- * One line tall regardless of anchor count; when the chips overflow, the trailing
- * chip peeks at the right edge as the "swipe for more" cue. Full-size chips make
- * that peek land a little sooner, which is fine: a peek at the TOP of a panel is
- * acted on, where the same peek at the bottom was not.
+ * One line tall regardless of anchor count. When the chips overflow, the trailing one
+ * peeks at the right edge as the "swipe for more" cue.
  */
 function QuickSetStrip({ children }: { children: ReactNode }) {
   return (
@@ -149,15 +118,13 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const te = useAppStore((s) => s.te);
   const now = useAppStore((s) => s.now);
   const entries = useAppStore((s) => s.entries);
-  // Primitive selector, so no new reference per render (zustand v5). The array
-  // is selected raw (the stored reference, never a fresh one) for the same
-  // reason, and scoped below in the render body.
+  // Primitive selectors, and `entries` selected raw: never return a fresh
+  // reference from a zustand v5 selector. Scoping happens in the render body.
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const sheetChildIds = useAppStore((s) => s.sheetChildIds);
-  // Editing a running timer (opened via openTimerEdit): Start, End and Lasted are
-  // all focusable. Editing End or Lasted to a fixed value flips ongoing false so
-  // save() stops the timer and logs it; leaving it ongoing saves details only.
-  // Gating on fromTimerId leaves normal new-entry sheets untouched.
+  // Editing a running timer: setting End or Lasted to a fixed value flips
+  // ongoing false, so save() stops the timer and logs it. Gating on fromTimerId
+  // leaves normal new-entry sheets untouched.
   const timerEdit = useAppStore((s) => s.fromTimerId != null);
   const setTE = useAppStore((s) => s.setTE);
   const setEnded = useAppStore((s) => s.setEnded);
@@ -168,9 +135,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const setStartedAt = useAppStore((s) => s.setStartedAt);
 
   const isInterval = te.shape === 'interval';
-  // Intervals (Start/End/Lasted) open with nothing focused, so the user always
-  // taps to choose WHICH time they mean to adjust. A point log has only one time
-  // ("When"), so there is no ambiguity: open it straight away.
   const [editing, setEditing] = useState<EditField | null>(isInterval ? null : 'when');
 
   const start = teStart(te, now);
@@ -184,12 +148,9 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   // Scoped to the child the SHEET is aimed at, not the global selection:
   // `entries` holds every child's records. This is the one surface where an
   // unscoped read PERSISTS a wrong value rather than only displaying one, since
-  // tapping a suggestion chip or an end anchor writes that timestamp onto the
-  // new entry. Offering a sibling's last feed as this child's anchor would save
-  // it as fact, and re-aiming the sheet at a sibling used to leave exactly that
-  // on screen. With SEVERAL children targeted there is no single right answer,
-  // so `anchorChildId` yields undefined and `entriesForChild` yields nothing,
-  // which drops every anchor chip (see its doc comment).
+  // tapping a suggestion chip or an end anchor writes that timestamp onto the new
+  // entry as fact. With SEVERAL children targeted there is no single right
+  // answer, so `anchorChildId` yields undefined and every anchor chip drops.
   const childEntries = entriesForChild(entries, anchorChildId(sheetChildIds, selectedChildId));
   const lastFeed = lastFeedEndMinAgo(childEntries, now);
   const lastWake = lastWakeMinAgo(childEntries, now);
@@ -200,7 +161,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
   const endActive = isActive(te.order, 'end');
   const startActive = isActive(te.order, 'start');
 
-  // Focus only reveals a panel; the store setters do the pinning on interaction.
   const focus = (f: EditField) => setEditing(f);
 
   // Turning on "Still ongoing" makes End live ("now") and Lasted "running",
@@ -227,37 +187,18 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
 
   return (
     // The 10 is a `gap`, not a marginBottom on the readout, so it exists only
-    // when a panel is actually open. As a margin it was unconditional, and with
-    // nothing focused the card padded 16 above the readout and 26 below it. The
-    // old two-line readout hid that; a one-line card is too short to.
+    // when a panel is actually open.
     <View style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, gap: 10, marginBottom: 16 }}>
-      {/* readout: pills are the summary AND the selector */}
-      {/* ONE line, not two. Start → End leads and the duration (or the day/status
-          caption that stands in for it) is pushed to the trailing edge, because
-          the clocks only ask for about half the card and the rest was dead space
-          with "lasted" stacked underneath it.
-          · The push is a flexBasis-0 spacer, not marginLeft 'auto', because this
-            row must keep its flexWrap escape hatch for a large font scale or a
-            day label in front of the duration ("Yesterday · lasted 35m", which
-            does not fit at 360dp). A zero-base spacer never causes the wrap
-            itself; it just eats the first line's slack. An auto margin would
-            survive the wrap and right-align the duration on its own line, where
-            a plain spacer leaves it left-aligned, i.e. exactly the old two-line
-            layout. Degrade to the thing this replaced, not to something new.
-          · The 8px minimum separation is the SPACER's minWidth, not an outer
-            columnGap, because a columnGap would be charged twice (once each side
-            of the spacer) against the wrap threshold for one visible gap.
-          · Both groups keep their own flexWrap so the pills inside them can break
-            before the outer row has to.
-          The row needs 267px and a 375pt phone gives it 271, which is why the two
-          gaps here (6 and 5) and the `big` pill padding are each a notch tighter
-          than they read: the 7px they save is a whole phone size, measured. At
-          360dp there are only 256px and every value takes the two-line fallback;
-          closing THAT gap means dropping the clock icon or shrinking the clocks,
-          which is a bigger call than this layout. */}
-      {/* The card's gap of 10 against the panels' internal gap of 14: the strip
-          groups with the pills whose value it sets, and the exact editor sits
-          apart. */}
+      {/* ONE line: Start → End leads and the duration is pushed to the trailing
+          edge by a flexBasis-0 spacer, not marginLeft 'auto'. The row must keep
+          its flexWrap escape hatch (a large font scale, or a day label in front
+          of the duration), and an auto margin survives the wrap and right-aligns
+          the duration on its own line, where a zero-base spacer just eats the
+          first line's slack. The 8px minimum separation is that spacer's
+          minWidth, not an outer columnGap, which would be charged twice against
+          the wrap threshold for one visible gap. The row needs 267px and a 375pt
+          phone gives it 271, which is why the two gaps here (6 and 5) and the
+          `big` pill padding are each a notch tighter than they read. */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <Icon name="clock" color={color} size={18} />
         <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', rowGap: 5 }}>
@@ -308,7 +249,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
         </View>
       </View>
 
-      {/* one focused panel */}
       {isInterval && !timerEdit && editing === 'end' && (
         <View style={{ gap: 14 }}>
           <QuickSetStrip>
@@ -344,10 +284,8 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
 
       {isInterval && timerEdit && editing === 'end' && (
         <View style={{ gap: 14 }}>
-          {/* The caption leads the whole panel, not just the clock. It warns that
-              setting an end stops the timer, and a Quick set chip does exactly
-              that, so it has to precede the chips as well as the exact editor.
-              Grouped tight with the strip it qualifies, away from the adjuster. */}
+          {/* The caption leads the whole panel: a Quick set chip stops the timer
+              too, so the warning has to precede the chips, not just the clock. */}
           <View style={{ gap: 8 }}>
             <Txt weight={500} size={12} color={t.dim}>
               {te.ongoing ? 'Set an end to stop the timer and log it.' : 'Saving stops the timer and logs it.'}
@@ -427,8 +365,6 @@ export function TimeEntry({ color }: { type: ActivityType; color: string }) {
         </View>
       )}
 
-      {/* No wrapper: this panel is a lone adjuster, so the card's own gap and
-          padding are the whole spacing story. */}
       {isInterval && !timerEdit && editing === 'lasted' && (
         <TimeAdjuster mode="duration" value={Math.max(1, duration)} now={now} color={color} onChange={setLasted} />
       )}

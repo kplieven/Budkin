@@ -28,7 +28,7 @@ describe('unitLabel', () => {
     expect(unitLabel('head', 'imperial')).toBe('in');
     expect(unitLabel('temperature', 'imperial')).toBe('°F');
     expect(unitLabel('volume', 'imperial')).toBe('fl oz');
-    expect(unitLabel('bmi', 'imperial')).toBe(''); // dimensionless in both systems
+    expect(unitLabel('bmi', 'imperial')).toBe('');
   });
 });
 
@@ -215,12 +215,11 @@ describe('stepVolume (stepper works in display units, stores canonical ml)', () 
     for (let i = 1; i <= 20; i++) {
       ml = stepVolume(ml, 1, 'imperial');
       const shown = toDisplay('volume', ml, 'imperial');
-      expect(shown).toBeCloseTo(i * 0.5, 9); // exactly on the half-ounce grid
+      expect(shown).toBeCloseTo(i * 0.5, 9);
       expect(shown.toFixed(1)).toBe((i * 0.5).toFixed(1)); // and renders that way
     }
     expect(toDisplay('volume', ml, 'imperial')).toBeCloseTo(10, 9);
 
-    // Stepping all the way back down retraces the same halves and hits zero.
     for (let i = 19; i >= 0; i--) {
       ml = stepVolume(ml, -1, 'imperial');
       expect(toDisplay('volume', ml, 'imperial')).toBeCloseTo(i * 0.5, 9);
@@ -236,7 +235,7 @@ describe('stepVolume (stepper works in display units, stores canonical ml)', () 
 
 describe('snapVolume (align an amount onto the nearest step-grid point)', () => {
   it('metric rounds to the nearest 10 ml, in whichever direction is closer', () => {
-    expect(snapVolume(90, 'metric')).toBe(90); // already on the grid
+    expect(snapVolume(90, 'metric')).toBe(90);
     expect(snapVolume(94, 'metric')).toBe(90);
     expect(snapVolume(96, 'metric')).toBe(100);
     expect(snapVolume(95, 'metric')).toBe(100); // the 5 ml midpoint rounds up
@@ -249,17 +248,17 @@ describe('snapVolume (align an amount onto the nearest step-grid point)', () => 
       expect(snapVolume(ml, 'metric')).toBe(ml + 5);
     }
 
-    // Imperial is the interesting half: a quarter-ounce midpoint stored as ml
-    // does not always convert back to exactly .25/.75, so the rule needs float
-    // slack to hold. 5.75 and 9.75 fl oz land a hair LOW on the round-trip and
-    // would round DOWN without it, unlike the other 38 midpoints.
+    // Imperial is the interesting half: a quarter-ounce midpoint stored as ml does
+    // not always convert back to exactly .25/.75, so the rule needs float slack to
+    // hold. 5.75 and 9.75 fl oz land a hair LOW on the round-trip and would round
+    // DOWN without it, unlike the other 38 midpoints.
     for (let k = 0; k < 40; k++) {
       const mid = 0.25 + k * 0.5; // 0.25, 0.75, 1.25, ... between half-oz marks
       const snapped = toDisplay('volume', snapVolume(toMetric('volume', mid, 'imperial'), 'imperial'), 'imperial');
       expect(snapped).toBeCloseTo(mid + 0.25, 9); // always the mark ABOVE
     }
 
-    // The two that used to go the other way, called out explicitly.
+    // The two hair-low midpoints, pinned explicitly.
     for (const mid of [5.75, 9.75]) {
       const snapped = toDisplay('volume', snapVolume(toMetric('volume', mid, 'imperial'), 'imperial'), 'imperial');
       expect(snapped).toBeCloseTo(mid + 0.25, 9);
@@ -277,7 +276,6 @@ describe('snapVolume (align an amount onto the nearest step-grid point)', () => 
   it('is a no-op on a value that already sits on the grid', () => {
     const onGrid = toMetric('volume', 3.5, 'imperial');
     expect(snapVolume(onGrid, 'imperial')).toBeCloseTo(onGrid, 9);
-    // Snapping twice never drifts further.
     expect(snapVolume(snapVolume(90, 'imperial'), 'imperial')).toBe(snapVolume(90, 'imperial'));
   });
 
@@ -288,8 +286,7 @@ describe('snapVolume (align an amount onto the nearest step-grid point)', () => 
   });
 
   it('lands on a point that stepVolume itself would produce', () => {
-    // The two share one grid: stepping away from a snapped value and back
-    // returns to exactly that value.
+    // The two share one grid.
     for (const ml of [15, 30, 45, 60, 75, 90, 250, 295]) {
       for (const system of ['metric', 'imperial'] as const) {
         const snapped = snapVolume(ml, system);
@@ -299,8 +296,8 @@ describe('snapVolume (align an amount onto the nearest step-grid point)', () => 
   });
 
   it('leaves no dead press: after snapping, every step changes the rendered string', () => {
-    // The stepper renders imperial with toFixed(1). Before snapping, 90 ml shows
-    // "3.0" and a minus press also lands on "3.0", so the press looks swallowed.
+    // The stepper renders imperial with toFixed(1). Unsnapped, 90 ml shows "3.0" and
+    // a minus press also lands on "3.0", so the press looks swallowed.
     const render = (ml: number) => toDisplay('volume', ml, 'imperial').toFixed(1);
     for (let ml = 5; ml <= 300; ml += 5) {
       const snapped = snapVolume(ml, 'imperial');

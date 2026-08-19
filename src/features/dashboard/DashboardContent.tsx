@@ -37,18 +37,17 @@ const ICON_FOR: Record<ActivityType, IconName> = {
   bath: 'bath',
   temperature: 'temperature',
   medication: 'medication',
-  // Notes and milestones are never in ALL_ACTIVITIES, so these tiles never
-  // render; present only to satisfy the Record<ActivityType, …> completeness check.
+  // Never rendered: notes and milestones are not in ALL_ACTIVITIES. Present only
+  // to satisfy the Record<ActivityType, …> completeness check.
   note: 'note',
   milestone: 'note',
 };
 
 /**
  * The dashboard body: status strip, live-timer card, and the log-activity grid.
- * Chrome-free so it drops into both the phone Home screen (safe-area scroll +
- * child header) and the desktop shell's main region (sidebar + top bar supply
- * that chrome). `layout` only governs the activity-grid reflow: two-up on phone,
- * auto-fit multi-column on desktop.
+ * Chrome-free so it drops into both the phone Home screen and the desktop shell's
+ * main region, which supply that chrome. `layout` only governs the activity-grid
+ * reflow: two-up on phone, auto-fit multi-column on desktop.
  */
 export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const t = useTheme();
@@ -64,16 +63,11 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const bathRhythms = useAppStore((s) => s.bathRhythms);
   const legacyRhythm = useAppStore((s) => s.legacyRhythm);
   // Raw select (stable reference); the due list is derived in the render body
-  // below, never in the selector, per the zustand v5 rule.
+  // below, never in the selector, per the zustand v5 rule. Same for `children`.
   const treatments = useAppStore((s) => s.treatments);
-  // Sync badges only mean something when mirroring to a server; hidden in local
-  // mode, exactly as on the Timers screen. Primitive selector, stable reference.
+  // Sync badges only mean something when mirroring to a server; hidden in local mode.
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
-  // Primitive selector, so no new reference per render (zustand v5).
   const hasChild = useAppStore((s) => s.children.length > 0);
-  // The roster the timer cards attribute against. Raw select (stable
-  // reference); the naming is derived per card in the render body below, never
-  // in the selector, per the same zustand v5 rule as `treatments` above.
   const children = useAppStore((s) => s.children);
   // Returns a store element, not a derived object, so the reference is stable.
   const selectedChild = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
@@ -81,16 +75,13 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   if (!hasChild) return <NoChildCard />;
   if (selectedChild?.expected) return <ExpectingCard child={selectedChild} />;
 
-  // Phone tiles stay two-up; desktop tiles auto-fit to as many columns as fit.
   const tileStyle: ViewStyle =
     layout === 'desktop'
       ? { flexBasis: 168, minWidth: 168, flexGrow: 1 }
       : { width: '47.8%', flexGrow: 1 };
 
-  // ---- derived status ----
   // Scoped to the selected child: the store's `entries` holds every child's
   // records, so an unscoped read shows a sibling's last feed and diaper here.
-  // Safe below the early returns above, since this is a plain call, not a hook.
   const childEntries = entriesForChild(entries, selectedChild?.id);
   const lastFeedAgo = lastFeedStartMinAgo(childEntries, now);
   const lastFeeding = childEntries
@@ -100,11 +91,9 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
 
   // Scoped like `childEntries`: a sibling's running nap must not land in this
   // child's sleep total. Keyed on `saveAs`, not `activity`, because that is what
-  // the timer will be written as when stopped — a quick timer switched to sleep
-  // is sleep. Same rule the sleep-aware notification scheduler uses.
+  // the timer will be written as when stopped: a quick timer switched to sleep
+  // is sleep.
   const childTimers = timersForChild(timers, selectedChild?.id);
-  // `runningTimer` is that same rule for one kind of timer, so this is exactly
-  // `childTimers.find(saveAs === 'sleep')` with the rule stated in one place.
   const runningSleep = runningTimer(timers, 'sleep', selectedChild?.id);
   const lastSleep = childEntries
     .filter((e): e is Extract<typeof e, { type: 'sleep' }> => e.type === 'sleep' && e.end != null)
@@ -112,17 +101,14 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
 
   const dayStartMs = windowStart(now, originHour);
   // Sleep so far in today's window: logged sleep plus the elapsed part of a nap
-  // that is still running, so the number keeps counting up instead of being
-  // replaced by the timer (`now` ticks every second, so this ticks too).
-  // Everything is apportioned at the window boundary — a sleep or a nap
-  // straddling it counts here only for its in-window part, the rest lands in the
-  // neighbouring day. Matches the Insights Rhythm graph and its totalSleep
-  // trend, which split sleep on the same seam; windowStart rebuilds from
-  // calendar fields so the boundary stays correct across DST.
+  // that is still running, so the number keeps counting up (`now` ticks every
+  // second, so this ticks too). Everything is apportioned at the window boundary:
+  // a sleep straddling it counts here only for its in-window part, the rest lands
+  // in the neighbouring day. windowStart rebuilds from calendar fields, so the
+  // boundary stays correct across DST.
   const todaySleepMin = liveSleepMsInWindow(childEntries, childTimers, dayStartMs, now) / 60000;
-  // "since noon" / "since 7:00" / "since midnight" — names the boundary the
-  // total counts from, which is user-configurable in Settings and is not
-  // midnight by default. fmtDayStartHour is already lowercase for this use.
+  // Names the boundary the total counts from, which is user-configurable in
+  // Settings and is not midnight by default. fmtDayStartHour is already lowercase.
   const daySinceLabel = `since ${fmtDayStartHour(originHour)}`;
 
   const dia = lastDiaper(childEntries);
@@ -136,18 +122,16 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const diaperHint = diaperAgo != null ? `${fmtAgoShort(diaperAgo)} ago` : 'Tap to log';
 
   const startSideLabel = nextStartSide(childEntries) === 'left' ? 'Left' : 'Right';
-  // Today's-wash "checked" state: >=1 bath on today's local date. `now`-keyed, so
-  // it clears itself at local midnight without any reset logic.
+  // >=1 bath on today's local date. `now`-keyed, so it clears itself at local
+  // midnight without any reset logic.
   const washedToday = bathGivenToday(childEntries, now);
   const washDue = washDueState(
     childEntries,
     rhythmForChild(bathRhythms, selectedChild?.id ?? null, legacyRhythm),
     now,
   );
-  // Once a wash is logged today the tile switches to the "done" copy. Otherwise
-  // it reports what is due, and failing that how long until the next one is. A
-  // child with both intervals off has no schedule at all, so it falls back to
-  // the same generic copy the tiles with no state use.
+  // A child with both intervals off has no schedule at all, so the chain falls
+  // through to the same generic copy the tiles with no state use.
   const washHint = washedToday
     ? 'Washed today'
     : washDue.full
@@ -159,9 +143,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
               washDue.upcoming.inDays === 1 ? 'tomorrow' : `in ${washDue.upcoming.inDays} days`
             }`
           : 'Tap to log';
-  // Treatments get the same treatment as washes: a forward-looking "due" hint
-  // and a done check once the day's doses are all logged. `null` means this
-  // child keeps no treatments, so the tile falls back to the generic copy.
+  // Same shape as washes: a forward-looking "due" hint plus a done check once the
+  // day's doses are all logged.
   const treatmentDue = treatmentDueList(treatments, selectedChild?.id, childEntries, now);
   const medHint = treatmentDueHint(treatmentDue);
   // `undefined`, not `false`, when this child keeps no treatments: the tile then has
@@ -189,10 +172,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       sub: lastFeedAgo != null ? `ago · ${fedSide ?? ''}` : 'no feeds',
     },
     {
-      // Always the day's running total, never just the current nap. No "—"
-      // empty state: a real zero is the answer to "how much sleep today", and
-      // fmtDur(0) says "0 min". A running nap is announced on the Sleep grid
-      // tile and the live-timer card, so the sub here stays the boundary label.
+      // Always the day's running total, never just the current nap, and no "—"
+      // empty state: a real zero is the answer to "how much sleep today".
       label: 'Sleep',
       color: t.activity.sleep,
       value: fmtDur(todaySleepMin),
@@ -209,7 +190,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   return (
     <>
       <MilestoneNudge />
-      {/* status strip */}
       <View style={{ flexDirection: 'row', gap: 9, marginBottom: 8 }}>
         {status.map((st) => (
           <View
@@ -241,18 +221,13 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         ))}
       </View>
 
-      {/* live-timer cards + start-timer card: one full-width card each, same
-          card style. Every running timer shows (global list, so a born
-          sibling's timer stays visible even while another child is selected),
-          and each card names the child it belongs to once there are two, so two
-          same-activity timers are told apart here rather than only on the
-          Timers screen. The Start-timer card sits below as the "start another"
-          action. */}
+      {/* One full-width card per running timer, then the start-timer card. The
+          list is global, so a sibling's timer stays visible while another child
+          is selected, and each card names its child once there are two. */}
       <View style={{ gap: 9, marginTop: 4 }}>
         {timers.map((tm) => {
-          // The timer's OWN child, never the selected one: this list is global,
-          // so a sibling's timer is on screen while another child is selected,
-          // which is exactly the case the name is here to disambiguate.
+          // The timer's OWN child, never the selected one: that mismatch is
+          // exactly the case the name is here to disambiguate.
           const who = childAttribution(tm.childId, children);
           return (
             <Pressable
@@ -278,16 +253,12 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             >
               <PulsingDot color={t.activity[tm.saveAs]} />
               <View style={{ flex: 1 }}>
-                {/* Eyebrow row: the "{ACTIVITY} RUNNING · NAME" label with the
-                    per-timer sync badge beside it. The badge's tallest part
-                    (12px icon, 11.5px text) is no taller than the 12px label's
-                    own line box, so this row is 14px with or without it and the
-                    card height does not move. The child rides INSIDE the label
-                    for that reason: an element of its own could move the row.
-                    The label shrinks and truncates ahead of the badge because
-                    the badge is the part that can widen: "Pending sync" is
-                    materially wider than "Synced". In local mode the badge is
-                    gated off and the row is just the label. */}
+                {/* The badge's tallest part (12px icon, 11.5px text) is no taller
+                    than the 12px label's own line box, so this row is 14px with
+                    or without it and the card height does not move. The child
+                    rides INSIDE the label for that reason. The label shrinks and
+                    truncates ahead of the badge, which is the part that can widen
+                    ("Pending sync" is materially wider than "Synced"). */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
                   <Txt unselectable numberOfLines={1} weight={600} size={12} color={t.dim} style={{ flexShrink: 1, textTransform: 'uppercase' }}>
                     {ACTIVITY_LABEL[tm.saveAs]} running{who.drawn}
@@ -298,9 +269,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
                   {fmtDur((now - tm.start) / 60000)}
                 </Txt>
               </View>
-              {/* Right column: the "View" affordance and its chevron on one centred
-                  row. The sync badge sits on the eyebrow row above instead of
-                  stacked under here, so this column stays a single line. */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
                 <Txt unselectable weight={600} size={13.5} color={t.dim}>
                   View
@@ -311,7 +279,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           );
         })}
 
-        {/* Start-timer card */}
         <Pressable
           onPress={() => {
             startQuickTimer();
@@ -351,7 +318,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         </Pressable>
       </View>
 
-      {/* section label */}
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 18, marginBottom: 12, marginHorizontal: 4 }}>
         <Txt weight={700} size={13} color={t.faint} tracking={0.8} style={{ textTransform: 'uppercase' }}>
           Log activity
@@ -367,7 +333,6 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
         </Pressable>
       </View>
 
-      {/* activity grid */}
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
         {ALL_ACTIVITIES.map((a) => (
           <ActivityTile
@@ -377,9 +342,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             icon={ICON_FOR[a]}
             hint={activityHint[a]}
             widthStyle={tileStyle}
-            // Medication routes through the treatment picker (which falls back to the
-            // manual form when the child has no active treatments today); every other
-            // tile opens its log sheet directly.
+            // Medication routes through the treatment picker, which falls back to
+            // the manual form when the child has no active treatments today.
             onPress={() => (a === 'medication' ? openMedicationLog() : openSheet(a))}
             done={a === 'bath' ? washedToday : a === 'medication' ? dosesAllGiven : undefined}
           />
@@ -404,8 +368,7 @@ function ActivityTile({
   hint: string;
   widthStyle: ViewStyle;
   onPress: () => void;
-  /** Marks the tile "done for today" with a check-circle badge and an accent
-   *  border. `undefined` for tiles that have no done state, so only a
+  /** `undefined`, not `false`, for tiles that have no done state, so only a
    *  done-capable tile carries the checked accessibility semantics. */
   done?: boolean;
 }) {

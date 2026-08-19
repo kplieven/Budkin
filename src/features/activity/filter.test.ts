@@ -67,7 +67,7 @@ describe('dayKeyLabel', () => {
   });
 
   it('re-reads the same key against a later now, so a selection ages by itself', () => {
-    // The key is fixed; only `now` moves. A day picked as "Today" must read
+    // The key is fixed and only `now` moves. A day picked as "Today" must read
     // "Yesterday" once the clock passes midnight, not stay stuck on its label.
     const tomorrowNoon = new Date(2026, 5, 23, 12, 0, 0).getTime();
     expect(dayKeyLabel(dayKey(NOW), tomorrowNoon)).toBe('Yesterday');

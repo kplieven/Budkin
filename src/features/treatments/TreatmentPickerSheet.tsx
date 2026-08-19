@@ -12,24 +12,19 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 /**
- * Treatment picker: opened from the Medication tile when the selected child has at
- * least one active treatment covering today (the tile decides via `openMedicationLog`,
- * so this sheet is never shown empty). Tapping a treatment logs a dose from it right
- * away (no form to confirm); "Log manually" opens the plain form instead.
+ * Treatment picker, opened from the Medication tile when the selected child has at
+ * least one active treatment covering today (the tile decides, so this sheet is never
+ * shown empty). Tapping a treatment logs a dose from it right away, with no form to
+ * confirm. `treatmentDueList` floats the rows whose dose is owed now to the top, so
+ * the sheet answers "what do I give now?" before "what is this child on?".
  *
- * A treatment whose dose is owed right now is marked with a "Due" pill and an
- * accent border, and `treatmentDueList` floats those rows to the top, so the sheet
- * answers "what do I give now?" before it answers "what is this child on?".
- *
- * The due list is derived HERE in render (a pure helper over raw-selected
- * `treatments` / `entries`), never from a store selector, per the zustand v5 rule
- * against returning a fresh filtered array.
+ * The due list is derived HERE in render, never from a store selector, per the zustand
+ * v5 rule against returning a fresh filtered array.
  */
 export function TreatmentPickerSheet() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const open = useAppStore((s) => s.treatmentPicker?.open ?? false);
-  // Raw selects (stable references), then derive the filtered list in render.
   const treatments = useAppStore((s) => s.treatments);
   const entries = useAppStore((s) => s.entries);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
@@ -40,9 +35,9 @@ export function TreatmentPickerSheet() {
 
   if (!open) return null;
 
-  // Entries must be child-scoped before the due maths: the store's `entries` is
-  // a flat all-children array, so a sibling's dose of the same medication would
-  // otherwise settle this child's treatment.
+  // Entries must be child-scoped before the due maths: the store's `entries` is a flat
+  // all-children array, so a sibling's dose of the same medication would otherwise
+  // settle this child's treatment.
   const active = treatmentDueList(treatments, selectedChildId, entriesForChild(entries, selectedChildId), now);
 
   const logManually = () => {
@@ -68,8 +63,8 @@ export function TreatmentPickerSheet() {
               key={c.id}
               onPress={() => logMedicationFromTreatment(c.id)}
               accessibilityRole="button"
-              // The due state rides in the label too, so it reaches a screen
-              // reader that never sees the pill.
+              // The due state rides in the label too, so it reaches a screen reader
+              // that never sees the pill.
               accessibilityLabel={isDue ? `Log a dose of ${c.name}, due` : `Log a dose of ${c.name}`}
               style={(s) => [
                 {

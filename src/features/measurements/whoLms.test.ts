@@ -3,13 +3,11 @@ import { describe, it, expect } from 'vitest';
 import { WHO_LMS } from './whoLms';
 import { valueAtZ } from './whoReference';
 
-// Accuracy gate. Each row is [kind, sex, month, SD2neg, median(SD0), SD2] taken
-// from the WHO expanded z-score tables' OWN published SD columns, which are a
-// DIFFERENT set of columns than the L/M/S we embed. Reconstructing them from
-// the embedded LMS (at z = -2, 0, +2) proves the LMS was transcribed correctly;
-// a mis-typed L/M/S row fails here. If a case is off, fix the number in
-// whoLms.ts, do not loosen the tolerance. WHO SD columns are rounded to one
-// decimal, so 0.1 covers rounding.
+// Accuracy gate. Each row is [kind, sex, month, SD2neg, median(SD0), SD2] taken from
+// the WHO tables' OWN published SD columns, which are a DIFFERENT set of columns than
+// the L/M/S we embed, so reconstructing them at z = -2, 0, +2 proves the transcription.
+// If a case is off, fix the number in whoLms.ts, do not loosen the tolerance: WHO SD
+// columns are rounded to one decimal, so 0.1 covers rounding.
 const ORACLE: [keyof typeof WHO_LMS, 'girl' | 'boy', number, number, number, number][] = [
   ['weight', 'girl', 0, 2.4, 3.2, 4.2], ['weight', 'girl', 12, 7, 8.9, 11.5],
   ['weight', 'girl', 24, 9, 11.5, 14.8], ['weight', 'girl', 60, 13.7, 18.2, 24.9],

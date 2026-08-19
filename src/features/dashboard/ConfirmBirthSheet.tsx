@@ -12,9 +12,9 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
 /**
- * One field: the real birth date, prefilled with today. The name already exists
- * from the due-date form, so there is nothing else to ask for. Uses clampBirth
- * (not clampDueDate): this IS a birth date now, so it must not be in the future.
+ * One field: the real birth date, prefilled with today. The name already exists from
+ * the due-date form, so there is nothing else to ask for. Uses clampBirth, not
+ * clampDueDate: this IS a birth date now, so it must not be in the future.
  */
 export function ConfirmBirthSheet() {
   const id = useAppStore((s) => s.confirmBirthFor);

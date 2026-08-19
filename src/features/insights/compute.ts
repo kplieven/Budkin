@@ -9,12 +9,10 @@ export function dayStart(ms: number): number {
 }
 
 /**
- * Start (ms) of the 24h window anchored at `originHour` (0..23, local time)
- * that contains `ms`. originHour 12 is the classic noon-to-noon window (a
- * normal night lands as one contiguous block in the middle); 0 gives calendar
- * days; 19 an evening-anchored window. This is the tab's single day boundary —
- * both the heatmap and the per-window trend bucketing use it, so the graph and
- * the numbers agree.
+ * Start (ms) of the 24h window anchored at `originHour` that contains `ms`. 12 is the
+ * classic noon-to-noon window, where a normal night lands as one contiguous block in the
+ * middle; 0 gives calendar days. The tab's single day boundary, so the heatmap and the
+ * per-window trend bucketing agree.
  */
 export function windowStart(ms: number, originHour: number): number {
   const d = new Date(ms);
@@ -22,7 +20,6 @@ export function windowStart(ms: number, originHour: number): number {
   return ms >= origin ? origin : origin - DAY;
 }
 
-/** Start (local noon) of the noon-to-noon window containing `ms`. */
 export function noonWindowStart(ms: number): number {
   return windowStart(ms, 12);
 }
@@ -31,11 +28,10 @@ export type TrendMetric = 'totalSleep' | 'longestStretch' | 'wakeWindow' | 'feed
 export interface TrendPoint { t: number; value: number }
 
 export interface HeatSegment { x0: number; x1: number; nap: boolean }
-/** A drawable interval in [0,1) origin coordinates (a feeding block). */
+/** A drawable interval in [0,1) origin coordinates. */
 export interface HeatBar { x0: number; x1: number }
 export interface HeatRow {
   offsetFromToday: number;
-  /** sleep intervals (night vs nap) */
   segments: HeatSegment[];
   /** completed feeding intervals, drawn over sleep so feeding wins any overlap */
   feeds: HeatBar[];
@@ -44,14 +40,11 @@ export interface HeatRow {
 }
 
 /**
- * One row per noon-to-noon window, newest last. x is noon-origin in [0,1):
- * 0 = noon, 0.5 = midnight, 1 = next noon — so a night is a single contiguous
- * block centred in the row. The bottom row (offsetFromToday 0) is the current,
- * still-filling window: after today's noon it starts fresh and last night sits
- * one row up. Rows span the oldest in-range data window through today
- * inclusive — interior gap days render as empty rows, nothing older than the
- * data is padded, and [] is returned when no sleep falls in range. Sleeps
- * crossing clock-noon spill into two rows.
+ * One row per window, newest last, x in [0,1) from the origin hour, so a night is a
+ * single contiguous block centred in the row. Rows span the oldest in-range data window
+ * through today inclusive: interior gap days render as empty rows, nothing older than the
+ * data is padded, and [] comes back when no sleep falls in range. Sleeps crossing the
+ * origin spill into two rows.
  */
 export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, originHour = 12): HeatRow[] {
   const todayWin = windowStart(now, originHour);
@@ -80,10 +73,7 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
   }
   if (oldest < 0) return [];
 
-  // Feeding intervals (split across the origin seam like sleep) and diaper points,
-  // bucketed into the same windows as the sleep band. Only rows that already exist
-  // (0..oldest) get markers — the heatmap stays anchored on sleep. An in-progress
-  // feed (end == null) is left out here; it's drawn as the live feeding bar.
+  // Only rows that already exist get markers, so the heatmap stays sleep-anchored.
   const feedsByOffset = new Map<number, HeatBar[]>();
   const diapersByOffset = new Map<number, number[]>();
   for (const e of entries) {
@@ -123,11 +113,8 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
 }
 
 /**
- * Milliseconds of completed sleep falling inside the single window
- * [winStart, winStart + DAY). A sleep straddling either boundary contributes
- * only its overlapping part, so the portion before the window counts to the
- * previous day and the portion after to the next — the same seam the heatmap
- * and the totalSleep trend use. In-progress sleeps (end == null) are ignored.
+ * A sleep straddling either boundary contributes only its overlapping part. In-progress
+ * sleeps are ignored.
  */
 export function sleepMsInWindow(entries: Entry[], winStart: number): number {
   const winEnd = winStart + DAY;
@@ -140,32 +127,17 @@ export function sleepMsInWindow(entries: Entry[], winStart: number): number {
 }
 
 /**
- * `sleepMsInWindow` plus the part of any still-running sleep timer that has
- * already elapsed inside the window — the "sleep so far today" number Home
- * shows. Pass `now` from the store's ticking clock and it counts up live.
+ * `sleepMsInWindow` plus the elapsed part of any running sleep timer, the "sleep so far
+ * today" number Home shows. Pass `now` from the store's ticking clock and it counts live.
  *
- * A running timer is clipped to the window on both sides, exactly like a
- * completed sleep: a nap that began before `winStart` contributes only its
- * in-window part, and a `now` past the window end stops the count at the
- * boundary. A `now` before the timer's start (clock skew, bad persisted data)
- * contributes 0, never a negative.
+ * Counts by `saveAs`, not `activity`: `saveAs` is what the timer will be written as when
+ * stopped, so a quick timer switched to sleep belongs in this total. A `now` before the
+ * start contributes 0, never a negative.
  *
- * A timer counts by `saveAs`, not `activity`: `saveAs` is what the timer will
- * actually be written as when stopped, so a quick timer started as feeding and
- * switched to sleep belongs in this total. Timers are NOT scoped to a child
- * here — pass `timersForChild(...)` output, the same way `entries` must already
- * be `entriesForChild(...)` output. Every running sleep timer in the array
- * contributes, so two overlapping ones double-count. That state is reachable
- * (start two quick timers, set both to save as sleep) but deliberately not
- * defended against here: `sleepMsInWindow` does not deduplicate overlapping
- * completed sleeps either, so the number is the same before and after those
- * timers stop. Filtering by child is what keeps a sibling's nap out.
- *
- * Deliberately a separate function rather than an option on `sleepMsInWindow`:
- * "logged sleep" and "sleep so far, live" are two different questions, and a
- * defaulted argument would hide which one a call site is asking. Note that the
- * totalSleep trend and the heatmap do not go through `sleepMsInWindow` at all —
- * each repeats the boundary split inline.
+ * Timers are NOT scoped to a child here: pass `timersForChild(...)` output, as `entries`
+ * must already be `entriesForChild(...)` output. Two overlapping running timers
+ * double-count, deliberately, because `sleepMsInWindow` does not deduplicate overlapping
+ * completed sleeps either, so the number is the same before and after they stop.
  */
 export function liveSleepMsInWindow(entries: Entry[], timers: Timer[], winStart: number, now: number): number {
   const winEnd = winStart + DAY;
@@ -186,8 +158,8 @@ export function buildDiaperSeries(entries: Entry[], now: number, rangeDays: numb
     if (e.type !== 'diaper' || e.time < cutoff) continue;
     const d = windowStart(e.time, originHour);
     const cur = byDay.get(d) ?? { wet: 0, dirty: 0 };
-    if (e.wet) cur.wet += 1;   // wet and dirty are independent signals —
-    if (e.solid) cur.dirty += 1; // a both-diaper increments each, never their sum
+    if (e.wet) cur.wet += 1;   // independent signals: a both-diaper increments
+    if (e.solid) cur.dirty += 1; // each of them, never their sum
     byDay.set(d, cur);
   }
   return [...byDay.entries()].sort((a, b) => a[0] - b[0]).map(([t, v]) => ({ t, wet: v.wet, dirty: v.dirty }));
@@ -218,9 +190,9 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
   }
 
   if (metric === 'totalSleep') {
-    // Split each sleep at the window boundaries so the part before a boundary
-    // counts to the previous window and the part after to the next — the same
-    // seam the heatmap draws, so the graph and this number agree on a straddler.
+    // Split each sleep at the window boundaries so the part before counts to the previous
+    // window and the part after to the next. The same seam the heatmap draws, so the
+    // graph and this number agree on a straddler.
     const msByWin = new Map<number, number>();
     for (const e of entries) {
       if (e.type !== 'sleep' || e.end == null || e.end < cutoff) continue;
@@ -236,9 +208,8 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
     return [...msByWin.entries()].sort((a, b) => a[0] - b[0]).map(([t, ms]) => ({ t, value: ms / HOUR }));
   }
 
-  // longestStretch and wakeWindow stay bucketed by the window a sleep STARTS in:
-  // a continuous stretch and the awake gaps around it are single things, not
-  // durations to apportion, so splitting them at a boundary would distort them.
+  // Bucketed by the window a sleep STARTS in: a continuous stretch and the awake gaps
+  // around it are single things, not durations to apportion.
   const byWin = new Map<number, { start: number; end: number }[]>();
   for (const e of entries) {
     if (e.type !== 'sleep' || e.end == null || e.end < cutoff) continue;

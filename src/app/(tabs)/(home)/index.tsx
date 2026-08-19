@@ -42,34 +42,29 @@ export default function Home() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
-  // The shared predicate, so this and the desktop pill cannot answer the
-  // question differently. It hands back a boolean and never a reshaped
-  // `connection`: a freshly built reference here is the zustand v5 render loop.
+  // The shared predicate, so this and the desktop pill cannot answer differently.
+  // It hands back a boolean and never a reshaped `connection`: a freshly built
+  // reference here is the zustand v5 render loop.
   const serverMode = useAppStore(selectServerMode);
 
-  // Tap the offline banner to see what is waiting. `atQueue` is false because
-  // this banner belongs to `/` and cannot be rendered over its own destination;
-  // the desktop pill in `TopBar.tsx` is the one that has to answer that.
+  // `atQueue` is false because this banner belongs to `/` and cannot be rendered
+  // over its own destination; the desktop pill is the one that has to answer that.
   const bannerAction = offlineBannerAction({ serverMode, atQueue: false });
   const onBannerPress = useCallback(() => {
     if (bannerAction === 'open-queue') {
       router.navigate(QUEUE_ROUTE);
       return;
     }
-    // Local mode, where the queue screen is deliberately unreachable, so there
-    // is nowhere to send the user. The press keeps the toast and the `refresh()`
-    // it always had, which in local mode amounts to nothing: `refresh` returns
-    // early for a non-server connection, so the toast is the whole of it.
+    // Local mode, where the queue screen is deliberately unreachable, so there is
+    // nowhere to send the user. `refresh` returns early for a non-server
+    // connection, so the toast is the whole of it.
     showToast('Checking connection…');
     void refresh();
   }, [bannerAction, refresh, showToast]);
 
-  // Pull-to-refresh. Native uses the platform RefreshControl. On web that
-  // control is an inert stub, so touch-capable web (phones/tablets) gets a
-  // custom gesture instead; mouse-driven laptops get neither. What they have is
-  // the auto-refresh when the tab regains focus (`_layout.tsx`), and, while
-  // offline, the banner below: it no longer refreshes in place, it opens the
-  // queue screen, whose Retry button re-checks the connection.
+  // Native uses the platform RefreshControl. On web that control is an inert stub,
+  // so touch-capable web gets a custom gesture instead; mouse-driven laptops get
+  // neither, only the auto-refresh when the tab regains focus (`_layout.tsx`).
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -79,27 +74,25 @@ export default function Home() {
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
-  // First-run gate. On web this Home route is what actually serves `/` (it
-  // shadows app/index.tsx, which also resolves to `/`), so the first-run setup
-  // redirect must live here too or a fresh web visitor never lands on it. A
-  // no-op on native, where app/index.tsx redirects before Home ever mounts.
-  // Placed after every hook above so the rules of hooks hold on both branches.
+  // First-run gate. On web this Home route is what actually serves `/` (it shadows
+  // app/index.tsx, which also resolves to `/`), so the redirect must live here too
+  // or a fresh web visitor never lands on it. A no-op on native, where
+  // app/index.tsx redirects before Home ever mounts. Placed after every hook above
+  // so the rules of hooks hold on both branches.
   if (!tutorialSeen) return <Redirect href="/welcome" />;
 
-  // Desktop: the sidebar (child card) and top bar (title, offline pill) own the
-  // chrome, so the main region scrolls just the dashboard body.
+  // Desktop: the sidebar and top bar own the chrome, so the main region scrolls
+  // just the dashboard body.
   if (desktop) {
     return (
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: t.bg }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
           <DashboardContent layout="desktop" />
         </ScrollView>
-        {/* Hidden while expecting: the main region is the countdown card, and a
-            "Recent activity" rail inviting the parent to log activity for an
-            unborn baby is the same dead affordance that DashboardContent and
-            Growth already suppress (ExpectingCard / WaitingForBirth). Scoping
-            entries by child leaves it correctly empty, but empty is not the
-            same as absent. */}
+        {/* Hidden while expecting: a "Recent activity" rail inviting the parent to
+            log activity for an unborn baby is the same dead affordance that
+            DashboardContent and Growth already suppress. Scoping entries by child
+            leaves it correctly empty, but empty is not the same as absent. */}
         {showRail(width) && !child?.expected && <TimelineRail />}
       </View>
     );
@@ -141,9 +134,9 @@ export default function Home() {
               ? `Offline — ${pending} pending, will sync when reconnected`
               : 'Offline — changes will sync when reconnected'}
           </Txt>
-          {/* A chevron where the word "Retry" used to be: the press opens the
-              queue now, and the retry lives on that screen's own button. Local
-              mode keeps the old word, because there the press opens nothing. */}
+          {/* A chevron because the press opens the queue, where the retry button
+              lives. Local mode says "Retry", because there the press opens
+              nothing. */}
           {bannerAction === 'open-queue' ? (
             <Icon name="chevron-right" color="#E2B554" size={16} />
           ) : (
@@ -213,7 +206,7 @@ export default function Home() {
           paddingBottom: 18,
         }}
       >
-        {/* child header (phone only — the desktop sidebar carries the child card) */}
+        {/* child header (phone only, the desktop sidebar carries the child card) */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 4, paddingTop: 6, paddingBottom: 18 }}>
           <Pressable
             onPress={openSwitcher}

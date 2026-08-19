@@ -1,18 +1,13 @@
-/**
- * The notification tap funnel. `childToSelectOnOpen` decides WHICH child a tap
- * selects and is tested against `@/lib/deepLink`; what is tested here is the
- * wiring around it, and specifically the cold-start deferral, which is the one
- * piece of this path that cannot be expressed as a pure function: it depends on
- * the store's hydration lifecycle.
- */
+/** The notification tap funnel. WHICH child a tap selects is tested against
+ *  `@/lib/deepLink`; what is tested here is the wiring, and specifically the
+ *  cold-start deferral onto the store's hydration lifecycle. */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type * as Notifications from 'expo-notifications';
 import type { Child } from '@/types/models';
 
-// In-memory AsyncStorage so the store's data modules load under node, and the
-// secure-store stub the same modules need. Both copied from scheduleSync.test.ts.
+// In-memory AsyncStorage so the store's data modules load under node.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -40,16 +35,12 @@ vi.mock('@/data/secureKv', () => ({
   kvRemove: vi.fn(async () => {}),
 }));
 
-// `@/lib/photoFile` pulls in expo-file-system and react-native's Platform,
-// both native; stub it so the store module (saveChild's deferred-photo path)
-// imports under node.
 vi.mock('@/lib/photoFile', () => ({
   reopenPhotoFile: vi.fn(() => undefined),
   discardPhotoFile: vi.fn(async () => {}),
   sweepPhotoFiles: vi.fn(async () => {}),
 }));
 
-// The module's whole native surface: channels and the two response listeners.
 // `getLastNotificationResponseAsync` answers null so the cold-start branch adds
 // nothing to the warm listener under test.
 vi.mock('expo-notifications', () => ({
@@ -74,14 +65,11 @@ const child = (over: Partial<Child> = {}): Child => ({
 const roster = [child(), child({ id: 'c2', first: 'Wren' })];
 
 /**
- * A fresh store and a fresh registration of the module under test. Imported by
- * its explicit `.android` path: Metro's platform resolution picks that suffix on
- * device, but the node test environment never would.
- *
- * The mock factories above are shared across every setup() call (vitest does not
- * re-evaluate them per `vi.resetModules()`), so the listener is read off the LAST
- * registration rather than the first, and `router.navigate` is reset here rather
- * than trusted to be untouched.
+ * A fresh store and a fresh registration of the module under test, imported by
+ * its explicit `.android` path (Metro picks that suffix on device, node never
+ * would). The mock factories above are shared across every setup() call: vitest
+ * does not re-evaluate them per `vi.resetModules()`, so the listener is read off
+ * the LAST registration and `router.navigate` is reset here.
  */
 async function setup(state: { hydrating: boolean; children: Child[]; selectedChildId: string }) {
   vi.resetModules();
@@ -106,8 +94,7 @@ beforeEach(() => {
 describe('notification tap funnel', () => {
   it('selects the named child before it navigates', async () => {
     const { useAppStore, router, tap } = await setup({ hydrating: false, children: roster, selectedChildId: 'c1' });
-    // Read at the moment of the navigate, not after it: the tab must render the
-    // named child straight away rather than flashing the previous one.
+    // Read at the moment of the navigate: the tab must not flash the previous.
     let selectedWhenNavigated: string | undefined;
     vi.mocked(router.navigate).mockImplementation(() => {
       selectedWhenNavigated = useAppStore.getState().selectedChildId;
@@ -130,30 +117,22 @@ describe('notification tap funnel', () => {
 
   it('defers a cold-start tap until hydration, then selects exactly once', async () => {
     // A tap that launched the app arrives while `hydrate` is still reading
-    // AsyncStorage: the roster is empty, so the named child would read as one we
-    // no longer have, and hydration would overwrite the selection anyway.
+    // AsyncStorage, so the roster is empty and hydration would overwrite it.
     const { useAppStore, router, tap } = await setup({ hydrating: true, children: [], selectedChildId: 'c1' });
 
     tap('/timers?child=c2');
 
     expect(useAppStore.getState().selectedChildId).toBe('c1');
-    // Navigation is NOT deferred with it: the router is handed the url exactly
-    // as before, and the deferred selection lands on the tab it opened.
+    // Navigation is NOT deferred with it: the deferred selection lands on the
+    // tab the url already opened.
     expect(router.navigate).toHaveBeenCalledWith('/timers?child=c2');
 
     useAppStore.setState({ hydrating: false, children: roster });
     expect(useAppStore.getState().selectedChildId).toBe('c2');
 
-    // Exactly once: the subscription must not survive the application. A tap is
-    // a one-shot instruction, so if the listener stayed on, the parent switching
-    // back and any later store write at all would re-apply it and drag them to
-    // the notification's child again, minutes after they tapped it.
-    //
-    // The unsubscribe also runs BEFORE applying, because applying calls
-    // `selectChild`, which writes to the store from inside the notification it
-    // is reacting to. That order is not what this assertion pins (the re-entrant
-    // pass recomputes against the child it just selected and does nothing), it
-    // is there so a future `apply` that is not idempotent cannot recurse.
+    // Exactly once: a subscription that survived would re-apply on any later
+    // store write and drag the parent back to the notification's child. The
+    // unsubscribe runs BEFORE applying, since applying calls `selectChild`.
     useAppStore.getState().selectChild('c1');
     useAppStore.setState({ children: [...roster] });
     expect(useAppStore.getState().selectedChildId).toBe('c1');

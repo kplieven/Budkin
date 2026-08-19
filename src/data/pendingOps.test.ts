@@ -112,9 +112,8 @@ describe('removePendingOp (per-op removal, backs flushPendingOps bookkeeping)', 
   });
 
   it('matches an op that went through a JSON round-trip (a reloaded file)', async () => {
-    // flushPendingOps removes the objects it got from loadPendingOps, i.e.
-    // parsed copies of what addPendingOp serialized. Removal must match those,
-    // not just the reference-identical original.
+    // flushPendingOps removes the objects loadPendingOps gave it, parsed copies of
+    // what addPendingOp serialized, not the reference-identical originals.
     await addPendingOp(updateChildOp('a'));
     const [reloaded] = await loadPendingOps();
     expect(await removePendingOp(reloaded)).toEqual([]);
@@ -129,9 +128,8 @@ describe('removePendingOp (per-op removal, backs flushPendingOps bookkeeping)', 
   });
 
   it('keeps an op appended after the caller last read the file (no clobber)', async () => {
-    // The whole point of per-op removal: it re-reads the file, so an op
-    // appended mid-flush by addPendingOp survives instead of being overwritten
-    // by a stale end-of-run list.
+    // Per-op removal re-reads the file, so an op appended mid-flush survives
+    // instead of being overwritten by a stale end-of-run list.
     await addPendingOp(updateChildOp('a'));
     await addPendingOp(updateChildOp('late'));
     expect(await removePendingOp(updateChildOp('a'))).toEqual([updateChildOp('late')]);

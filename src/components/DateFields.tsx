@@ -4,15 +4,13 @@ import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
 
 /**
- * A DD / MM / YYYY input row. Extracted so the wizard's born and expecting
- * branches and the confirm-birth sheet cannot drift apart.
- *
- * Each input is wrapped in a View that carries the flex sizing, and that is
- * load-bearing: a TextInput left as a DIRECT flex item keeps min-width: auto on
- * react-native-web, which pins it to its intrinsic width (~20 characters) and
- * overflows the row, pushing the year field off screen. Setting minWidth on the
- * TextInput itself does not help, because RNW drops it there. This bug shipped
- * once already. Keeping the workaround in one component is the point.
+ * A DD / MM / YYYY input row, extracted so the wizard's born and expecting
+ * branches and the confirm-birth sheet cannot drift apart. Each input is wrapped
+ * in a View that carries the flex sizing, and that is load-bearing: a TextInput
+ * left as a DIRECT flex item keeps min-width: auto on react-native-web, which
+ * pins it to its intrinsic width (~20 characters) and overflows the row, pushing
+ * the year field off screen. Setting minWidth on the TextInput itself does not
+ * help, because RNW drops it there.
  */
 export function DateFields({
   day,

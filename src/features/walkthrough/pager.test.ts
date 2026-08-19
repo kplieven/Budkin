@@ -45,8 +45,7 @@ describe('dragScrollLeft', () => {
   });
 
   it('never travels more than one page from where the drag began', () => {
-    // The reported bug: a hard swipe used to fly across several slides. Even an
-    // absurd finger travel can only reach the neighbouring slide.
+    // Even an absurd finger travel can only reach the neighbouring slide.
     expect(dragScrollLeft(W, -5000, W, COUNT)).toBe(2 * W);
     expect(dragScrollLeft(W, 5000, W, COUNT)).toBe(0);
   });
@@ -120,8 +119,7 @@ describe('readWheel', () => {
   });
 
   it('turns exactly one page for a long continuous fling', () => {
-    // The reported bug: a trackpad fling emits dozens of deltas and used to skip
-    // several slides at once. One gesture must move one slide.
+    // A trackpad fling emits dozens of deltas, and one gesture must move one slide.
     expect(burst(Array(40).fill(30)).steps).toEqual([1]);
   });
 
@@ -154,8 +152,8 @@ describe('readWheel', () => {
     const stalled = burst([WHEEL_STEP_PX - 1]);
     expect(stalled.steps).toEqual([]);
 
-    // Same amount again, but long after — on its own it is still under the
-    // threshold, so it must not tip the pager over by summing with the old travel.
+    // Same amount again, but long after. On its own it is still under the threshold,
+    // so it must not tip the pager over by summing with the old travel.
     const later = burst([WHEEL_STEP_PX - 1], {
       from: stalled.state,
       at: stalled.state.lastAt + WHEEL_GESTURE_GAP_MS + 1,
@@ -165,8 +163,8 @@ describe('readWheel', () => {
 });
 
 describe('readWheel consumption', () => {
-  // The listeners cover the whole walkthrough region, so preventing the default
-  // on every wheel event there would swallow scrolling the page as well.
+  // The listeners cover the whole walkthrough region, so preventing the default on
+  // every wheel event there would swallow scrolling the page as well.
   it('does not claim vertical travel that has not yet turned a page', () => {
     const { consumed } = readWheel(IDLE_WHEEL_PAGER, { deltaX: 0, deltaY: 4 }, 1000);
     expect(consumed).toBe(false);

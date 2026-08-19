@@ -2,9 +2,8 @@ import { View } from 'react-native';
 
 import { useTheme } from '@/theme/useTheme';
 
-/** Pill-shaped on/off switch face used inside a `Pressable` row that carries
- *  `accessibilityRole="switch"`. Purely visual: it renders `on`, it does not
- *  handle the press itself. */
+/** Purely the switch face: the press and the `accessibilityRole="switch"` belong
+ *  to the `Pressable` row around it. */
 export function Toggle({ on }: { on: boolean }) {
   const t = useTheme();
   return (

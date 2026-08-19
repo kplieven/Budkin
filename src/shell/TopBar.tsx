@@ -15,7 +15,6 @@ import { selectPendingCount, selectServerMode } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-/** Desktop top bar: greeting + screen title, clock, offline pill, theme toggle. */
 export function TopBar() {
   const t = useTheme();
   const pathname = usePathname();
@@ -26,14 +25,14 @@ export function TopBar() {
   const refresh = useAppStore((s) => s.refresh);
   const showToast = useAppStore((s) => s.showToast);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
-  // The shared predicate, so this and Home's banner cannot answer the question
-  // differently. It hands back a boolean and never a reshaped `connection`: a
-  // freshly built reference here is the zustand v5 render loop.
+  // The shared predicate, so this and Home's banner cannot answer differently. It
+  // hands back a boolean and never a reshaped `connection`: a freshly built
+  // reference here is the zustand v5 render loop.
   const serverMode = useAppStore(selectServerMode);
 
   // `DesktopShell` wraps the whole navigator, so this pill rides every route
-  // including the queue screen itself. Sending it there from there is a no-op
-  // that reads as a broken button, hence `atQueue`.
+  // including the queue screen itself, where navigating is a no-op that reads as
+  // a broken button. Hence `atQueue`.
   const pillAction = offlineBannerAction({ serverMode, atQueue: isQueueRoute(pathname) });
 
   const greeting = greetingFor(new Date(now).getHours());
@@ -68,11 +67,10 @@ export function TopBar() {
                 router.navigate(QUEUE_ROUTE);
                 return;
               }
-              // Nowhere to navigate: the queue screen is either already on
-              // screen or, in local mode, deliberately unreachable. The press
-              // keeps the toast and the `refresh()` it always had, which on the
-              // queue screen re-checks the connection and in local mode does
-              // nothing at all (`refresh` returns early off server mode).
+              // Nowhere to navigate: the queue screen is either already on screen
+              // or, in local mode, deliberately unreachable. `refresh()` re-checks
+              // the connection there and does nothing in local mode (it returns
+              // early off server mode).
               showToast('Checking connection…');
               void refresh();
             }}
@@ -99,9 +97,8 @@ export function TopBar() {
             <Txt weight={600} size={12.5} color={t.text}>
               {pending > 0 ? `Offline · ${pending} pending` : 'Offline'}
             </Txt>
-            {/* The same chevron the phone banner grew, and for the same reason:
-                the pill opens a screen now, and nothing else here says so. It
-                is dropped in the two cases where the press opens nothing. */}
+            {/* Nothing else here says the pill opens a screen, so the chevron does.
+                It is dropped in the cases where the press opens nothing. */}
             {pillAction === 'open-queue' && <Icon name="chevron-right" color="#E2B554" size={16} />}
           </Pressable>
         )}

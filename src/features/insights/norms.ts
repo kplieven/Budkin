@@ -9,7 +9,6 @@ export interface Norm {
   unit: string;
   buckets: NormBucket[];
   source: string;
-  /** When present, the source is shown as a tappable link to the guidance. */
   sourceUrl?: string;
   disclaimer: string;
 }
@@ -33,8 +32,8 @@ export const NORMS: Record<TrendMetric | 'wet' | 'dirty', Norm> = {
   wet: { kind: 'floor', unit: '/day', source: 'NHS',
     sourceUrl: 'https://www.nhs.uk/baby/breastfeeding-and-bottle-feeding/breastfeeding-problems/enough-milk/', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 5, lo: 4 }, { maxAgeDays: 3650, lo: 6 }] },
-  // Sleep-consultant rules of thumb — independent guidance, NOT medical
-  // consensus (no European or WHO body defines named "wake windows").
+  // Sleep-consultant rules of thumb: independent guidance, NOT medical consensus
+  // (no European or WHO body defines named "wake windows").
   wakeWindow: { kind: 'ruleOfThumb', unit: 'min', source: 'Common sleep-consultant guidance', disclaimer: DISCLAIMER,
     buckets: [{ maxAgeDays: 30, lo: 45, hi: 60 }, { maxAgeDays: 90, lo: 60, hi: 90 }, { maxAgeDays: 180, lo: 90, hi: 120 }, { maxAgeDays: 365, lo: 120, hi: 180 }] },
   longestStretch: { kind: 'ruleOfThumb', unit: 'h', source: 'Common sleep-consultant guidance', disclaimer: DISCLAIMER,
@@ -50,27 +49,18 @@ function bucketFor(norm: Norm, ageDays: number): NormBucket | null {
 }
 
 /**
- * The highest age `NORMS.wakeWindow` has data for. Past this, there is no
- * band: `bucketFor` deliberately falls back to the last bucket for any older
- * age, which is right for drawing a chart band but wrong for anything that
- * ACTS on the band. Without this ceiling a three-year-old's parent would be
- * nudged toward a nap on 12-month guidance, forever.
- *
- * Lives here rather than with the consumer because it describes the data: an
- * edit to the buckets above has to keep this in step.
+ * The highest age `NORMS.wakeWindow` has data for. `bucketFor` deliberately
+ * falls back to the last bucket for any older age, which is right for drawing a
+ * chart band but wrong for anything that ACTS on it: without this ceiling a
+ * three-year-old's parent would be nudged toward a nap on 12-month guidance,
+ * forever. Lives with the data, so an edit to the buckets keeps it in step.
  */
 export const WAKE_WINDOW_MAX_AGE_DAYS = 365;
 
-/** The wake-window band for a child of `ageDays`, or null outside the range
- *  the source covers. See WAKE_WINDOW_MAX_AGE_DAYS.
- *
- *  `Number.isFinite` guards a NaN/Infinity age (e.g. a corrupt `child.birth`):
- *  NaN fails both comparisons below, so without this it would fall through to
- *  `bucketFor`, whose loop condition `NaN <= b.maxAgeDays` is always false and
- *  therefore returns the LAST bucket rather than null. Unlike other NaN paths
- *  in the nap-reminder feature, that would not poison the caller's fire time
- *  (the anchor is a real number), so it would schedule a real notification for
- *  a child of unknown age. */
+/** Null outside the range the source covers. `Number.isFinite` guards a NaN age from a
+ *  corrupt `child.birth`: NaN fails both comparisons below, so without it we reach
+ *  `bucketFor`, whose `NaN <= b.maxAgeDays` is always false and so returns the LAST
+ *  bucket rather than null, scheduling a nap notification for a child of unknown age. */
 export function wakeWindowBand(ageDays: number): NormBucket | null {
   if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > WAKE_WINDOW_MAX_AGE_DAYS) return null;
   return bucketFor(NORMS.wakeWindow, ageDays);
@@ -81,12 +71,9 @@ export type BandStatus = 'in' | 'below' | 'above';
 /**
  * Where the baby's recent value sits relative to its age band, for the
  * at-a-glance "in typical range" chip. ONLY solid `band` norms qualify: floor
- * and rule-of-thumb norms are lower-confidence and stay unlabelled (returns
- * null). Uses a short rolling median of the last few windows so a single noisy
- * day can't flip the chip; the caller passes points with the partial "today so
- * far" window already dropped, so this only ever judges complete windows.
- * Returns null when it isn't a solid band or there are fewer than two complete
- * windows to judge.
+ * and rule-of-thumb norms are lower-confidence and stay unlabelled. Uses a short
+ * rolling median so a single noisy day can't flip the chip, and the caller drops
+ * the partial "today so far" window, so only complete windows are ever judged.
  */
 export function bandStatus(norm: Norm, birthMs: number, points: { t: number; value: number }[]): BandStatus | null {
   if (norm.kind !== 'band' || points.length < 2) return null;

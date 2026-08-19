@@ -1,7 +1,4 @@
-/**
- * Demo seed data, ported from the design handoff reference. Used in demo mode
- * (no server) so the app is fully explorable. Timestamps are relative to `now`.
- */
+/** Demo seed data, used in demo mode (no server). Timestamps are relative to `now`. */
 
 import { CHILD_COLORS } from '@/lib/color';
 import type { Child, Entry, FeedMethod, FeedType, Measurement, Tag, Timer } from '@/types/models';
@@ -9,11 +6,8 @@ import type { Child, Entry, FeedMethod, FeedType, Measurement, Tag, Timer } from
 const M = 60000;
 const DAY = 86400000;
 
-/**
- * Demo-mode fallback tag list (no server to read `/api/tags/`). Keeps the old
- * hardcoded picker defaults so the tag picker isn't empty in demo mode. No
- * colors — demo chips render without a swatch, which is fine.
- */
+/** Fallback tags for demo mode (no server to read `/api/tags/`). No colors: demo
+ * chips render without a swatch. */
 export const DEMO_TAGS: Tag[] = ['Left side', 'Cluster', 'Spit-up', 'Fussy', 'Sleepy'].map((name) => ({
   name,
 }));
@@ -45,9 +39,8 @@ export function makeSeed(now: number): SeedData {
       { id: 'e5', childId: c1, type: 'sleep', start: now - 300 * M, end: now - 182 * M, nap: true, tags: [] },
       { id: 'e6', childId: c1, type: 'diaper', time: now - 250 * M, wet: true, solid: true, color: 'yellow', tags: [] },
       { id: 'e7', childId: c1, type: 'tummy', start: now - 330 * M, end: now - 322 * M, milestone: 'Lifted head', tags: [] },
-      // A bath rhythm mid-cycle: a full bath four days ago, then three quick
-      // washes, so a full bath reads as due today at the default rhythm of
-      // every three days.
+      // A bath rhythm mid-cycle: a full bath four days ago, then three quick washes,
+      // so a full bath reads as due today at the default rhythm of every three days.
       { id: 'e8', childId: c1, type: 'bath', time: now - 4 * DAY, wash: 'full', tags: [] },
       { id: 'e9', childId: c1, type: 'bath', time: now - 3 * DAY, wash: 'quick', tags: [] },
       { id: 'e10', childId: c1, type: 'bath', time: now - 2 * DAY, wash: 'quick', tags: [] },
@@ -58,7 +51,7 @@ export function makeSeed(now: number): SeedData {
       // A dose given after the warm reading, plus the daily vitamin.
       { id: 'e16', childId: c1, type: 'medication', time: now - 4 * 60 * M, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', notes: 'for the low fever', tags: [] },
       { id: 'e17', childId: c1, type: 'medication', time: now - 12 * 60 * M, name: 'Vitamin D', dosage: 400, dosageUnit: 'IU', tags: [] },
-      // General notes (plain — NO bath tag) live in the dedicated Notes tab.
+      // General notes carry no bath tag and live in the dedicated Notes tab.
       { id: 'e14', childId: c1, type: 'note', time: now - 9 * 60 * M, text: 'Pediatrician follow-up booked for next Tuesday at 10am.', tags: [] },
       { id: 'e15', childId: c1, type: 'note', time: now - 30 * 60 * M, text: 'First real giggle today when we played peekaboo — melted us.', tags: ['Milestone'] },
     ],

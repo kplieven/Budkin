@@ -6,11 +6,9 @@ import { Platform } from 'react-native';
 import { discardPhotoFile, persistPhotoFile, reopenPhotoFile, sweepPhotoFiles } from '@/lib/photoFile';
 import { photoFileName } from '@/lib/photoName';
 
-// The module's only native surface: `expo-file-system`'s `File`/`Directory`/
-// `Paths`, plus `react-native`'s `Platform`. Mocked as plain classes so the
-// real photoFile.ts loads directly under node, per `permission.android.test.ts`
-// (which does the same for `expo-notifications`) and `servers.test.ts` (for
-// `expo-secure-store`). `Paths.document` is a fixed 'file:///doc' directory;
+// The module's only native surface: `expo-file-system`'s `File`/`Directory`/`Paths`,
+// plus `react-native`'s `Platform`. Mocked as plain classes so the real photoFile.ts
+// loads directly under node. `Paths.document` is a fixed 'file:///doc' directory;
 // every URI below is built by joining onto it, exactly as the real classes do.
 const fsMock = vi.hoisted(() => {
   const uriOf = (part: unknown): string => (typeof part === 'string' ? part : (part as { uri: string }).uri);
@@ -57,10 +55,10 @@ const fsMock = vi.hoisted(() => {
     create(options?: unknown): void {
       state.createCalls.push({ uri: this.uri, options });
     }
-    // A real Directory can also be deleted. Given here so a broken `item
-    // instanceof File` guard in sweepPhotoFiles reveals itself as a recorded
-    // deletion, rather than as a thrown-and-swallowed TypeError that happens
-    // to leave `state.deleted` looking untouched either way.
+    // A real Directory can also be deleted. Given here so a broken `item instanceof
+    // File` guard in sweepPhotoFiles reveals itself as a recorded deletion, rather
+    // than as a thrown-and-swallowed TypeError that leaves `state.deleted` looking
+    // untouched either way.
     delete(): void {
       if (state.deleteThrows) throw new Error('delete failed');
       state.deleted.push(this.uri);

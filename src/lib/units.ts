@@ -1,27 +1,21 @@
 import type { MeasurementKind } from '@/types/models';
 
 /**
- * Budkin-local units preference. This is a DISPLAY LENS only: measurement and
- * temperature values are always stored/persisted as canonical metric
- * (kg / cm / °C — Baby Buddy has no units field and stores bare numbers). The
- * imperial system converts on display and converts a typed value back to metric
- * on input. This module is the single source of truth for those conversions and
- * for the unit labels.
+ * A DISPLAY LENS only: values are always stored as canonical metric (kg / cm / °C),
+ * because Baby Buddy has no units field and stores bare numbers.
  */
 export type UnitSystem = 'metric' | 'imperial';
 
-/** The measurable quantities that carry a unit. Temperature and volume are not
- *  growth `MeasurementKind`s (they ride on an Entry) but convert the same way,
- *  so they join the kind union here. */
+/** Temperature and volume are not growth `MeasurementKind`s (they ride on an Entry) but
+ *  convert the same way, so they join the kind union here. */
 export type UnitKind = MeasurementKind | 'temperature' | 'volume';
 
-// Pure ratios (metric per imperial). Temperature is deliberately NOT a ratio —
-// it has an additive offset, handled explicitly below.
-const LB_PER_KG = 2.2046226; // 1 kg = 2.2046226 lb
-const CM_PER_IN = 2.54; // 1 in = 2.54 cm
-const ML_PER_FLOZ = 29.5735; // 1 US fluid ounce = 29.5735 ml
+// Pure ratios, metric per imperial. Temperature is not one: it has an additive offset,
+// handled explicitly below.
+const LB_PER_KG = 2.2046226;
+const CM_PER_IN = 2.54;
+const ML_PER_FLOZ = 29.5735; // US fluid ounce
 
-/** The unit label shown for `kind` in the given system (BMI is dimensionless → ''). */
 export function unitLabel(kind: UnitKind, system: UnitSystem): string {
   if (kind === 'bmi') return '';
   if (system === 'metric') {
@@ -36,7 +30,6 @@ export function unitLabel(kind: UnitKind, system: UnitSystem): string {
   return 'in'; // height, head
 }
 
-/** Convert a canonical-metric value into the given system for display. */
 export function toDisplay(kind: UnitKind, metricValue: number, system: UnitSystem): number {
   if (system === 'metric') return metricValue;
   switch (kind) {
@@ -46,15 +39,14 @@ export function toDisplay(kind: UnitKind, metricValue: number, system: UnitSyste
     case 'head':
       return metricValue / CM_PER_IN;
     case 'temperature':
-      return (metricValue * 9) / 5 + 32; // NOTE the +32 offset (not a pure ratio)
+      return (metricValue * 9) / 5 + 32;
     case 'volume':
       return metricValue / ML_PER_FLOZ;
     case 'bmi':
-      return metricValue; // dimensionless — never converted
+      return metricValue; // dimensionless
   }
 }
 
-/** Convert a value typed in the given system back to canonical metric for storage. */
 export function toMetric(kind: UnitKind, displayValue: number, system: UnitSystem): number {
   if (system === 'metric') return displayValue;
   switch (kind) {
@@ -64,24 +56,20 @@ export function toMetric(kind: UnitKind, displayValue: number, system: UnitSyste
     case 'head':
       return displayValue * CM_PER_IN;
     case 'temperature':
-      return ((displayValue - 32) * 5) / 9; // inverse of the +32 offset
+      return ((displayValue - 32) * 5) / 9;
     case 'volume':
       return displayValue * ML_PER_FLOZ;
     case 'bmi':
-      return displayValue; // dimensionless — never converted
+      return displayValue; // dimensionless
   }
 }
 
 /**
- * A readable display string for a canonical-metric value in the given system.
- * Metric and BMI (dimensionless, never converted) are shown exactly as stored;
- * a converted imperial value is rounded to 1 decimal so it doesn't render as a
- * long binary float. Keep the raw `toDisplay`/`toMetric` for exact math (e.g.
- * round-tripping an input) — this is only for on-screen numbers.
+ * On-screen numbers only: use the raw `toDisplay`/`toMetric` for exact math.
  *
- * Volume is the exception that rounds in BOTH systems. Every other quantity is
- * typed by a human in metric, so the stored number is already short. A volume
- * stepped in fl oz stores the exact conversion (3.5 fl oz is 103.50725 ml), and
+ * Volume rounds in both systems, where everything else rounds only in imperial. Every
+ * other quantity is typed by a human in metric, so the stored number is already short. A
+ * volume stepped in fl oz stores the exact conversion (3.5 fl oz is 103.50725 ml), and
  * flipping the lens back to ml must not surface that raw.
  */
 export function fmtValue(kind: UnitKind, metricValue: number, system: UnitSystem): string {
@@ -92,14 +80,11 @@ export function fmtValue(kind: UnitKind, metricValue: number, system: UnitSystem
 }
 
 /**
- * Resolve the canonical-metric value to persist from a sheet's text input.
- * Returns null for non-numeric input (the caller should cancel the save).
+ * Null for non-numeric input, which the caller treats as "cancel the save".
  *
- * When editing an existing value whose text is UNCHANGED from its display
- * (`fmtValue(original)`), the original metric value is returned untouched —
- * otherwise re-deriving it from the 1-decimal display would nudge the stored
- * canonical value on a no-op edit (e.g. 5.2 kg → shown "11.5" lb → 5.216 kg).
- * A genuinely edited value is converted back to metric.
+ * Text unchanged from its display returns the original metric value untouched:
+ * re-deriving it from the 1-decimal display would nudge the stored canonical value on a
+ * no-op edit, since 5.2 kg shown as "11.5" lb comes back as 5.216 kg.
  */
 export function resolveMetricInput(
   kind: UnitKind,
@@ -116,23 +101,17 @@ export function resolveMetricInput(
 /** One press of the amount stepper, measured in DISPLAY units. */
 export const VOLUME_STEP: Record<UnitSystem, number> = { metric: 10, imperial: 0.5 };
 
-// Float slack when testing whether a value already sits on the step grid.
-// 103.50725 ml round-trips to 3.5000000000000004 fl oz, which must still count
-// as "exactly 3.5" or a press would snap in place instead of moving a step.
+// Float slack for testing whether a value already sits on the step grid. 103.50725 ml
+// round-trips to 3.5000000000000004 fl oz, which must still count as exactly 3.5 or a
+// press would snap in place instead of moving a step.
 const GRID_EPS = 1e-9;
 
 /**
- * Step a canonical-ml amount by one press, in the direction `dir` (+1 / -1).
- *
- * The stepper works in DISPLAY space and converts back to canonical ml on
- * commit: pressing + in imperial adds 0.5 fl oz, not 10 ml. The result is
- * snapped onto the display step grid, so repeated presses land on clean halves
- * (3.0, 3.5, 4.0 fl oz) even from an off-grid start such as the 90 ml pumping
- * default (3.0433 fl oz). Float error cannot accumulate either: every press is
- * recomputed from the stored value rather than added to the previous display
- * number. An off-grid value moves to the next grid point in the pressed
- * direction, so a press always changes the amount. Clamped at zero, matching
- * the old metric-only behaviour.
+ * Works in display space and converts back to canonical ml on commit, so pressing + in
+ * imperial adds 0.5 fl oz, not 10 ml. Snapping to the grid makes repeated presses land on
+ * clean halves even from an off-grid start such as the 90 ml pumping default (3.0433 fl
+ * oz), and recomputing from the stored value each press keeps float error from
+ * accumulating.
  */
 export function stepVolume(metricMl: number, dir: 1 | -1, system: UnitSystem): number {
   const step = VOLUME_STEP[system];
@@ -142,24 +121,15 @@ export function stepVolume(metricMl: number, dir: 1 | -1, system: UnitSystem): n
 }
 
 /**
- * Round a canonical-ml amount onto the NEAREST point of the display step grid,
- * in whichever direction is closer. Same grid as `stepVolume` (10 ml metric,
- * 0.5 fl oz imperial), defined here once so the two cannot drift apart.
+ * The display lens rounds to one decimal, which can hide a press: stored 90 ml is 3.043
+ * fl oz and shows as "3.0", and pressing minus correctly moves it to exactly 3.0 fl oz,
+ * which also shows as "3.0". Snapping the draft on open makes shown and stored agree.
+ * Only the in-memory draft is snapped; persisted entries stay as stored.
  *
- * This exists because the stepper's display lens rounds to one decimal, which
- * can hide a press. Stored 90 ml is 3.043 fl oz and shows as "3.0"; pressing
- * minus correctly moves it to exactly 3.0 fl oz, which ALSO shows as "3.0", so
- * the press looks swallowed. Snapping the draft when a sheet opens (and when
- * the unit system is toggled under an open sheet) makes shown and stored agree,
- * so every press visibly moves the number. Only the in-memory draft is snapped:
- * persisted entries stay exactly as they were stored.
- *
- * An exact midpoint (5 ml, or a quarter ounce) rounds UP, and it takes the same
- * `GRID_EPS` slack as `stepVolume` to actually mean it: the ml round-trip lands
- * a couple of imperial midpoints a hair BELOW their true value (5.75 fl oz is
- * 170.0476…ml, which converts back to 5.749999999999999), so a bare `Math.round`
- * would send those two down while the other 38 went up. The nudge makes the tie
- * rule uniform, and makes the two functions treat float slop identically.
+ * An exact midpoint rounds up, and it takes the same `GRID_EPS` slack as `stepVolume` to
+ * actually mean it: the ml round-trip lands a couple of imperial midpoints a hair below
+ * their true value (5.75 fl oz is 170.0476…ml, back to 5.749999999999999), so a bare
+ * `Math.round` would send those two down while the other 38 went up.
  */
 export function snapVolume(metricMl: number, system: UnitSystem): number {
   const step = VOLUME_STEP[system];

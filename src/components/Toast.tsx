@@ -7,8 +7,6 @@ import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 import { useAppStore } from '@/store/useAppStore';
 
-/** Bottom-center transient toast, driven by the store's `toast` value. May carry
- *  a single tappable action (e.g. "Undo" after a delete). */
 export function Toast() {
   const t = useTheme();
   const insets = useSafeAreaInsets();

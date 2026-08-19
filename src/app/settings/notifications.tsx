@@ -31,16 +31,13 @@ interface ReminderRow {
   label: string;
   hint: string;
   on: boolean;
-  /** Settings this reminder owns, revealed directly beneath it while it is on.
-   *  Rendered inside the same card as an attached sub-row, never as a card of
-   *  its own: a detached one reads as unrelated to the toggle that governs it. */
+  /** Settings this reminder owns, revealed directly beneath it while it is on. */
   sub?: ReactNode;
 }
 
-/** Reminders are grouped by what drives them, which is also how `scheduled.ts`
- *  splits: `Routine` fires off the rhythm of what you log, `Milestones` off
- *  fixed calendar dates derived from the birth date, `App` off the app's own
- *  state rather than the baby's. */
+/** Grouped by what drives them, the same split as `scheduled.ts`: `Routine` off the
+ *  rhythm of what you log, `Milestones` off fixed dates derived from the birth
+ *  date, `App` off the app's own state rather than the baby's. */
 interface ReminderSection {
   label: string;
   rows: ReminderRow[];
@@ -162,9 +159,9 @@ export default function NotificationSettings() {
             onPress={() =>
               void requestReminderPermission().then((g) => {
                 setGranted(g);
-                // Granting touches no store slice, so the scheduleSync
-                // subscriber never sees it: nothing would reconcile until the
-                // next gated write or the next cold launch without this.
+                // Granting touches no store slice, so the scheduleSync subscriber
+                // never sees it: without this nothing would reconcile until the next
+                // gated write or the next cold launch.
                 if (g) reconcileNow();
               })
             }
@@ -188,11 +185,10 @@ export default function NotificationSettings() {
         )
       ) : (
         // Off Android there is no permission to grant and nothing here ever
-        // schedules: `permission.ts`'s stub always reports not-granted, so the
-        // card above would otherwise show permanently with copy that tells a
-        // web (or iOS) user to turn on something they have no way to turn on.
-        // Reached directly by URL off Android too, so this branch has to hold
-        // on its own, not just when navigated to from settings/index.tsx.
+        // schedules: `permission.ts`'s stub always reports not-granted, so the card
+        // above would show permanently, telling a web or iOS user to turn on
+        // something they cannot. The route is reachable by URL off Android, so this
+        // branch has to hold on its own.
         <View style={{ ...group, ...row, marginBottom: 16 }}>
           <View style={{ flex: 1 }}>
             <Txt unselectable weight={600} size={16}>
@@ -229,8 +225,7 @@ export default function NotificationSettings() {
                     accessibilityState={{ checked: r.on }}
                     style={(s) => [
                       row,
-                      // The sub-row carries the divider in its place, so the two
-                      // read as one unit rather than as neighbours.
+                      // The sub-row carries the divider in its place.
                       !showSub && !last && divider,
                       { cursor: 'pointer' },
                       isHovered(s) && { backgroundColor: t.elevated },
@@ -253,8 +248,6 @@ export default function NotificationSettings() {
                         backgroundColor: t.elevated,
                         paddingTop: 13,
                         paddingBottom: 15,
-                        // Indented past the parent row's text, recessed against
-                        // the card: both say "this belongs to the row above".
                         paddingLeft: 28,
                         paddingRight: 16,
                         ...(!last && divider),
@@ -272,9 +265,7 @@ export default function NotificationSettings() {
     </>
   );
 
-  // Mirrors settings/index.tsx: DesktopPage takes only `maxWidth` and
-  // `children` (no title prop), so the heading lives in the mobile branch
-  // just as it does there.
+  // DesktopPage takes no title prop, so the heading lives in the mobile branch.
   if (desktop) return <DesktopPage maxWidth={560}>{body}</DesktopPage>;
 
   return (

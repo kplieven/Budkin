@@ -6,12 +6,8 @@ import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useTheme } from '@/theme/useTheme';
 
-/**
- * The setup wizard's button. Primary is the filled, shadowed call to action,
- * secondary the outlined alternative that sits beneath it. Both wizard screens
- * use this so the steps stay visually identical, and a disabled primary keeps
- * its shape while dropping the shadow and the pointer cursor.
- */
+/** The setup wizard's button, shared by both wizard screens so the steps stay visually
+ *  identical. */
 export function SetupButton({
   label,
   onPress,

@@ -61,9 +61,8 @@ describe('clampDueDate', () => {
   });
 
   it('clamps a due date beyond 300 days to the 300 day ceiling', () => {
-    // Build both the input and the expectation with setDate, not by adding
-    // milliseconds: adding 300 days of ms crosses a DST boundary in most
-    // timezones and lands at 23:00 or 01:00 rather than local midnight, which
+    // setDate, not added milliseconds: 300 days of ms crosses a DST boundary in
+    // most timezones and lands at 23:00 or 01:00 rather than local midnight, which
     // would make this test fail only part of the year.
     const far = new Date();
     far.setHours(0, 0, 0, 0);

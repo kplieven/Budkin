@@ -29,9 +29,8 @@ const tipDate = (ms: number) => new Date(ms).toLocaleDateString(undefined, { yea
 const GOOD = '#3E9E6E';
 const WHO_URL = 'https://www.who.int/tools/child-growth-standards/standards';
 // With the reference on, extend the x-axis past the last measurement by this
-// fraction of the visible span (a full span, so the child's line sits in the
-// left half and the WHO curves fan out across the right), so the bands show
-// well where the child is heading. Still capped at WHO's 60-month limit.
+// fraction of the visible span, so the bands show where the child is heading.
+// Still capped at WHO's 60-month limit.
 const REF_X_HEADROOM = 1;
 
 export default function MetricDetailRoute() {
@@ -55,41 +54,35 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const setRef = useAppStore((s) => s.setGrowthReference);
   const [refInfo, setRefInfo] = useState(false);
 
-  // Reached only via a typed or bookmarked /metric/<kind> URL: Growth's
-  // guarded body means the cards that link here aren't rendered while the
-  // selected child is expected. Mirror log/[type].tsx: refuse to open the
-  // sheet and redirect to Home instead of showing measurement data for a
-  // child who has none yet.
+  // Reachable only via a typed or bookmarked /metric/<kind> URL while the selected
+  // child is expected, since Growth's guarded body never renders the cards that
+  // link here. Refuse rather than show measurement data for a child who has none.
   if (child?.expected) return <Redirect href="/(tabs)" />;
 
   // Scoped to the selected child: `measurements` holds every child's, so an
-  // unscoped read interleaves a sibling's weights into this child's chart and
-  // history list. Growth's card is already scoped, and this screen is one tap
-  // from it. Safe below the early return above, since this is a plain call,
-  // not a hook.
+  // unscoped read interleaves a sibling's weights into this chart. Safe below the
+  // early return above, since this is a plain call, not a hook.
   const childMeasurements = measurementsForChild(measurements, child?.id);
 
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
-  // Stored values are canonical metric. Convert the whole series to the display
-  // unit up front so the hero, delta chip, chart (line + y-axis labels + hover)
-  // and ticks all agree. (These kinds are weight/height/head/bmi — no additive
-  // offset — so a converted delta stays a true difference.)
+  // Stored values are canonical metric. Convert the whole series up front so the
+  // hero, delta chip, chart and ticks all agree. These kinds (weight, height, head,
+  // bmi) have no additive offset, so a converted delta stays a true difference.
   const rawPoints = seriesFor(childMeasurements, kind);
   const points = rawPoints.map((p) => ({ ...p, value: toDisplay(kind, p.value, unitSystem) }));
   const latest = rawPoints.length ? rawPoints[rawPoints.length - 1] : null;
   const change = changeSince(points);
-  // WHO growth-standard percentile reference: available only for a recorded
-  // girl/boy gender whose visible age range overlaps WHO's 0..60 month window,
-  // and drawn only while the toggle is on. When shown, the y-axis widens to keep
-  // the band from clipping, and the x-axis runs a little past the last datum.
+  // WHO percentile reference: available only for a recorded girl/boy gender whose
+  // visible age range overlaps WHO's 0..60 month window, and drawn only while the
+  // toggle is on.
   const tMin = points.length ? points[0].t : 0;
   const tMax = points.length ? points[points.length - 1].t : 0;
   const overlap = !!child && points.length >= 2 && hasWhoAgeOverlap(child.birth, tMin, tMax);
   const isSexed = child?.gender === 'girl' || child?.gender === 'boy';
   const refAvailable = overlap && isSexed && !!child;
-  // Extend the right edge only when the reference is actually drawn; cap it at
-  // WHO's 60-month limit so the curves never run past where the standard ends.
+  // Capped at WHO's 60-month limit so the curves never run past where the
+  // standard ends.
   const refXMax = refAvailable && showRef && child
     ? Math.max(tMax, Math.min(tMax + (tMax - tMin) * REF_X_HEADROOM, child.birth + 60 * MONTH_MS))
     : tMax;

@@ -1,10 +1,7 @@
 /**
- * Persisted running timers, backed by AsyncStorage.
- *
- * Timers are a purely local concept (a stopwatch that hasn't been committed as
- * an entry yet): the Baby Buddy server has no matching record, so `loadFromServer`
- * always returns none. This on-device copy is the only thing that brings running
- * timers back after the app is closed and reopened.
+ * Persisted running timers, backed by AsyncStorage. A timer is a stopwatch not yet
+ * committed as an entry, and this on-device copy is what brings running timers back
+ * after the app is closed and reopened.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -17,9 +14,8 @@ export async function loadTimers(): Promise<Timer[]> {
   try {
     const s = await AsyncStorage.getItem(KEY);
     if (!s) return [];
-    // Older builds persisted a `stagedEnd` field (the removed "Ended earlier?"
-    // staged-end model). Strip it so it doesn't linger as dead data — nothing
-    // reads it anymore, but leaving it round-tripping forever is just noise.
+    // Older builds persisted a `stagedEnd` field; strip it so dead data does not
+    // round-trip forever.
     const parsed = JSON.parse(s) as (Timer & { stagedEnd?: number })[];
     return parsed.map(({ stagedEnd: _stagedEnd, ...t }) => t);
   } catch (e) {

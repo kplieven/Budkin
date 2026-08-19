@@ -14,9 +14,8 @@ describe('versionLabel', () => {
   });
 
   it('says dev when the config carries nothing', () => {
-    // A dev server with no git, or a build whose env var was never set. Saying
-    // "dev" is the point: it reads as obviously unknown rather than quietly
-    // claiming a version this build is not.
+    // A dev server with no git, or a build whose env var was never set. "dev" reads
+    // as obviously unknown rather than claiming a version this build is not.
     expect(versionLabel(undefined)).toBe('Budkin dev');
   });
 

@@ -39,14 +39,13 @@ export default function Timers() {
   // whether its mirror has reached Baby Buddy yet. Hidden in local mode.
   const isServer = useAppStore((s) => s.connection?.mode === 'server');
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
-  // The roster every card attributes against. Raw select (stable reference);
-  // the naming is derived per card in the render body, never in the selector,
-  // which would hand zustand v5 a fresh array every render.
+  // Raw select (stable reference); the naming is derived per card in the render
+  // body, never in the selector, which would hand zustand v5 a fresh array.
   const children = useAppStore((s) => s.children);
 
-  // Pull-to-refresh, mirroring Home: native uses the platform RefreshControl;
-  // touch-capable web gets the custom gesture; a refresh() also pulls + reconciles
-  // server timers, so a timer started on another device shows up here.
+  // Native uses the platform RefreshControl, touch-capable web the custom gesture.
+  // A refresh() also pulls and reconciles server timers, so a timer started on
+  // another device shows up here.
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -58,13 +57,12 @@ export default function Timers() {
   // timer id whose exact-start editor is expanded
   const [exactFor, setExactFor] = useState<string | null>(null);
 
-  // `timers` is a global flat list with no per-child filter, so a running
-  // timer belonging to a born sibling must stay visible and stoppable even
-  // while the selected child is still expected. Only the affordance that
-  // CREATES a new timer for the selected child is guarded below; the list
-  // itself always renders. Because of that, each card names the child it
-  // belongs to once the household has two: without it, two siblings napping
-  // gives two cards that are identical down to their button labels.
+  // `timers` is a global flat list with no per-child filter, so a running timer
+  // belonging to a born sibling stays visible and stoppable even while the
+  // selected child is still expected. Only the affordance that CREATES a timer is
+  // guarded below; the list itself always renders. Each card therefore names its
+  // child once the household has two, or two siblings napping gives two cards
+  // identical down to their button labels.
   const body = (
     <>
       {timers.length === 0 && (
@@ -84,9 +82,9 @@ export default function Timers() {
       <View style={desktop ? { flexDirection: 'row', flexWrap: 'wrap', gap: 14 } : { gap: 14 }}>
         {timers.map((tm) => {
           const color = t.activity[tm.saveAs];
-          // The timer's OWN child, never the selected one. `who.spoken` goes on
-          // the three action labels below, which are otherwise byte-identical
-          // between two cards running the same activity.
+          // The timer's OWN child, never the selected one. `who.spoken` goes on the
+          // three action labels below, otherwise byte-identical between two cards
+          // running the same activity.
           const who = childAttribution(tm.childId, children);
           return (
             <View
@@ -128,16 +126,11 @@ export default function Timers() {
                 <Txt weight={600} size={12.5} color={t.dim}>
                   Started earlier?
                 </Txt>
-                {/* These carry the "m" too: they sit on the same card as the TimeAdjuster
-                    nudges, so a bare label here would disagree with a "+15m" one right below.
-                    Unlike those nudges these chips do not grow, so paddingHorizontal is real
-                    width and it drops 12 → 8 (matched on "Exact…" below, since a wide desktop
-                    card puts all four on one line where the difference would show).
-                    The row wraps by design and "Exact…" already sits on a second line at phone
-                    widths, so it is the label plus these three that has to hold line one. With
-                    "m" at padding 12 that line measures 279px against the 281px a 360dp card
-                    gives it, and 277px on the narrowest desktop card, so it wraps a nudge away.
-                    At 8 it measures 255px, the slack the bare labels used to have. */}
+                {/* These carry the "m" so they agree with the TimeAdjuster nudges on the
+                    same card. Unlike those nudges these chips do not grow, so
+                    paddingHorizontal is real width: at 8 (matched on "Exact…" below) the
+                    label plus these three measures 255px, and holds line one against the
+                    281px a 360dp card gives it. At 12 it is 279px, and a nudge wraps. */}
                 {([
                   ['−15m', -15],
                   ['−5m', -5],
@@ -183,8 +176,6 @@ export default function Timers() {
               </View>
 
               {exactFor === tm.id && (
-                // marginBottom replaces the one TimeAdjuster used to carry itself,
-                // so the gap to the action buttons below is unchanged.
                 <View style={{ marginTop: 12, marginBottom: 12 }}>
                   <TimeAdjuster mode="clock" value={tm.start} now={now} color={color} onChange={(ms) => setTimerStart(tm.id, ms)} />
                 </View>
@@ -303,12 +294,10 @@ export default function Timers() {
     </>
   );
 
-  // Timers is a pushed root route, not a tab, so it needs its own way back on
-  // every width. Settings can skip the chevron on desktop because the sidebar
-  // still highlights it, but Timers is deliberately absent from the sidebar, so
-  // without this the wide layout would be a dead end. The heading is omitted
-  // here on purpose: the desktop top bar already renders "Timers" as the screen
-  // title, so repeating it would read as a duplicate.
+  // Timers is pushed, not a tab, so it needs its own way back on every width:
+  // Settings can skip the chevron on desktop because the sidebar still highlights
+  // it, but Timers is deliberately absent from the sidebar. No heading here, since
+  // the desktop top bar already renders "Timers" as the screen title.
   if (desktop)
     return (
       <DesktopPage maxWidth={760}>

@@ -18,7 +18,6 @@ export interface MilestoneDef {
   maxMonths: number;
 }
 
-/** Category display order. */
 export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
   'Movement',
   'Hands & play',
@@ -27,8 +26,8 @@ export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
   'Feeding & firsts',
 ];
 
-/** The predefined catalog. Age ranges are gentle typical windows, never a
- *  pass/fail bar. Order within a category is roughly developmental. */
+/** Age ranges are gentle typical windows, never a pass/fail bar. Order within a
+ *  category is roughly developmental. */
 export const MILESTONES: MilestoneDef[] = [
   { key: 'lifts-head', title: 'Lifts head', category: 'Movement', minMonths: 1, maxMonths: 3 },
   { key: 'rolls-over', title: 'Rolls over', category: 'Movement', minMonths: 4, maxMonths: 6 },
@@ -63,8 +62,7 @@ export const MILESTONE_BY_KEY: Record<string, MilestoneDef> = Object.fromEntries
   MILESTONES.map((m) => [m.key, m]),
 );
 
-/** Map of catalog key -> the milestone entry that recorded it. On the off chance
- *  of duplicates for one key, the earliest reached time wins. */
+/** On the off chance of duplicates for one key, the earliest reached time wins. */
 export function reachedByKey(entries: Entry[]): Map<string, MilestoneEntry> {
   const map = new Map<string, MilestoneEntry>();
   for (const e of entries) {
@@ -75,8 +73,8 @@ export function reachedByKey(entries: Entry[]): Map<string, MilestoneEntry> {
   return map;
 }
 
-/** Not-yet-reached milestones whose typical range spans the child's current age
- *  (in whole months). Empty when age is unknown. */
+/** Not-yet-reached milestones whose typical range spans the child's age in whole
+ *  months, inclusive at both ends. */
 export function aroundNow(ageMonths: number | null, reached: Map<string, MilestoneEntry>): MilestoneDef[] {
   if (ageMonths == null) return [];
   return MILESTONES.filter(
@@ -84,19 +82,16 @@ export function aroundNow(ageMonths: number | null, reached: Map<string, Milesto
   );
 }
 
-/** Reached-milestone map scoped to one child. `entries` holds every child's
- *  history in BOTH modes (server mode too, since 0.15.0: see `loadFromServer`),
- *  so filter by childId first. The filter is always load-bearing, never a no-op.
- *  Empty when childId is undefined. */
+/** `entries` holds every child's history in BOTH modes, so the childId filter is
+ *  always load-bearing, never a no-op. */
 export function reachedForChild(entries: Entry[], childId: string | undefined): Map<string, MilestoneEntry> {
   if (!childId) return new Map();
   return reachedByKey(entries.filter((e) => e.childId === childId));
 }
 
-/** Not-yet-reached, not-yet-answered milestones whose typical window has fully
- *  passed (age strictly greater than maxMonths), sorted longest-overdue first
- *  (ascending maxMonths). Empty when age is unknown. Hands off cleanly from
- *  aroundNow, which covers minMonths..maxMonths inclusive. */
+/** Window fully passed, so age STRICTLY greater than maxMonths: that hands off
+ *  cleanly from `aroundNow`, which covers minMonths..maxMonths inclusive. Sorted
+ *  longest-overdue first. */
 export function overdueUnlogged(
   ageMonths: number | null,
   reached: Map<string, MilestoneEntry>,
@@ -109,22 +104,15 @@ export function overdueUnlogged(
 }
 
 /**
- * The instant `overdueUnlogged` starts returning this milestone: the first
- * moment `ageMonths` reads strictly greater than the typical window's upper
- * bound.
- *
- * Scheduling reads this rather than adding `maxMonths + 1` CALENDAR months,
- * because `ageMonths` counts in 30.4-day months. Four calendar months after a
- * birth is 120 to 123 days, which `ageMonths` still reports as 3 for the
- * shorter spans — so a calendar-derived reminder could arrive days before the
- * home-screen nudge would show the same milestone, telling a parent to catch up
- * on something the app itself does not yet consider overdue.
+ * Scheduling reads this rather than adding calendar months, because `ageMonths` counts in
+ * 30.4-day months. Four calendar months after a birth is 120 to 123 days, which
+ * `ageMonths` still reports as 3 for the shorter spans, so a calendar-derived reminder
+ * could arrive days before the home-screen nudge shows the same milestone.
  */
 export function catchUpDueAt(birth: number, m: MilestoneDef): number {
   return birth + Math.ceil((m.maxMonths + 1) * APPROX_MONTH_DAYS * 86400000);
 }
 
-/** Group defs by category in MILESTONE_CATEGORIES order, omitting empties. */
 export function groupByCategory(defs: MilestoneDef[]): { category: MilestoneCategory; items: MilestoneDef[] }[] {
   return MILESTONE_CATEGORIES.map((category) => ({
     category,

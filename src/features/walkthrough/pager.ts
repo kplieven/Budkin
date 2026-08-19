@@ -1,44 +1,34 @@
 /**
  * Pure paging decisions for the walkthrough carousel (see {@link ./Walkthrough}).
  * Split out from the component so the gesture thresholds are unit-testable in the
- * node environment, mirroring how `pullToRefresh.ts` holds the geometry behind
- * `useWebPullToRefresh`.
+ * node environment.
  */
 
 /** Travel (px) accumulated within one wheel gesture before it turns a page. */
 export const WHEEL_STEP_PX = 24;
 /**
- * Quiet time (ms) that ends a wheel gesture. A trackpad fling arrives as a long
- * burst of events roughly a frame apart, so anything within this gap counts as
- * the same gesture and cannot turn a second page.
+ * Quiet time (ms) that ends a wheel gesture. A trackpad fling arrives as a long burst of
+ * events roughly a frame apart, so anything within this gap is the same gesture.
  */
 export const WHEEL_GESTURE_GAP_MS = 140;
 
-/**
- * Fraction of a page a finger must travel before releasing commits the turn.
- * Below it the deck eases back to where the drag started.
- */
+/** Fraction of a page a finger must travel before releasing commits the turn. */
 export const DRAG_COMMIT_RATIO = 0.2;
 /** A drag shorter than this (ms) counts as a flick and commits on distance alone. */
 export const FLICK_MS = 250;
 /** Minimum travel (px) for a flick to count, so a tap never turns a page. */
 export const FLICK_MIN_PX = 12;
 
-/**
- * Nearest page for a horizontal scroll offset, clamped to the deck. `pageWidth`
- * is 0 until the pager has been measured, which would otherwise divide by zero.
- */
+/** `pageWidth` is 0 until the pager has been measured, which would divide by zero. */
 export function pageFromOffset(offsetX: number, pageWidth: number, count: number): number {
   if (pageWidth <= 0) return 0;
   return Math.max(0, Math.min(count - 1, Math.round(offsetX / pageWidth)));
 }
 
 /**
- * Where to hold the deck mid-drag, for a finger that has travelled `dx` from a
- * drag that began at `startScroll`. Tracks the finger 1:1 but never further than
- * one page from the slide the drag started on, so the neighbouring slide is the
- * most that can ever come into view. That bound is what makes a hard flick
- * physically unable to skip, rather than something corrected after the fact.
+ * Tracks the finger 1:1 but never further than one page from the slide the drag started
+ * on. That bound is what makes a hard flick physically unable to skip, rather than
+ * something corrected after the fact.
  */
 export function dragScrollLeft(
   startScroll: number,
@@ -54,9 +44,8 @@ export function dragScrollLeft(
 }
 
 /**
- * How far to turn when a drag of `dx` over `elapsedMs` is released: one slide at
- * most, or 0 to ease back. Dragging left (negative `dx`) moves the deck forward,
- * the way the content follows the finger. A short flick commits on distance
+ * One slide at most, or 0 to ease back. Dragging left (negative `dx`) moves the deck
+ * forward, the way the content follows the finger. A short flick commits on distance
  * alone so a quick nudge is not swallowed for falling under the ratio.
  */
 export function stepFromDrag(dx: number, pageWidth: number, elapsedMs: number): -1 | 0 | 1 {
@@ -67,20 +56,14 @@ export function stepFromDrag(dx: number, pageWidth: number, elapsedMs: number): 
   return dx < 0 ? 1 : -1;
 }
 
-/**
- * How far the arrow keys turn the deck: right is forwards, left is back, and
- * every other key is left to the browser (0).
- */
+/** Every key other than the arrows is left to the browser. */
 export function stepFromKey(key: string): -1 | 0 | 1 {
   if (key === 'ArrowRight') return 1;
   if (key === 'ArrowLeft') return -1;
   return 0;
 }
 
-/**
- * Accumulated travel of the wheel gesture in flight. `locked` means this gesture
- * has already turned its page and the rest of its events are being swallowed.
- */
+/** `locked` means this gesture already turned its page; the rest is swallowed. */
 export interface WheelPagerState {
   acc: number;
   lastAt: number;
@@ -90,30 +73,23 @@ export interface WheelPagerState {
 export const IDLE_WHEEL_PAGER: WheelPagerState = { acc: 0, lastAt: -Infinity, locked: false };
 
 /**
- * Fold one wheel event into the gesture, returning how many pages to move: at
- * most one, and only on the event that crosses {@link WHEEL_STEP_PX}. Every
- * later event in the same gesture returns 0, so a hard fling advances exactly
- * one slide instead of skipping several the way CSS scroll-snap does. Reversing
- * the gesture steps back.
+ * At most one page, and only on the event that crosses {@link WHEEL_STEP_PX}, so a hard
+ * fling advances exactly one slide instead of skipping several the way CSS scroll-snap
+ * does.
  *
- * `consumed` says whether the pager took the event, which is what the caller
- * suppresses the browser default on. The listeners cover the whole walkthrough
- * region, so suppressing unconditionally would swallow scrolling the page over
- * all of it. Sideways travel is claimed outright (nothing else wants it, and
- * letting it through invites the browser's swipe-to-go-back); vertical travel is
- * only claimed once it has actually turned a page, plus the tail of that same
- * gesture, so a scroll that never reaches the threshold still belongs to the page.
- *
- * Timestamps are passed in rather than read from the clock so the reducer stays
- * pure and testable.
+ * `consumed` is what the caller suppresses the browser default on. The listeners cover
+ * the whole walkthrough region, so suppressing unconditionally would swallow scrolling
+ * the page over all of it. Sideways travel is claimed outright, since letting it through
+ * invites the browser's swipe-to-go-back; vertical travel is claimed only once it has
+ * actually turned a page, plus the tail of that same gesture.
  */
 export function readWheel(
   state: WheelPagerState,
   e: { deltaX: number; deltaY: number },
   at: number,
 ): { state: WheelPagerState; step: -1 | 0 | 1; consumed: boolean } {
-  // A plain mouse only reports deltaY, so vertical travel has to drive a
-  // horizontal deck; a trackpad's horizontal swipe wins when it is the larger.
+  // A plain mouse only reports deltaY, so vertical travel has to drive a horizontal deck.
+  // A trackpad's horizontal swipe wins when it is the larger.
   const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY);
   const travel = sideways ? e.deltaX : e.deltaY;
   const continuing = at - state.lastAt <= WHEEL_GESTURE_GAP_MS;

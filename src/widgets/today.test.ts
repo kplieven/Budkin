@@ -4,8 +4,7 @@ import { liveSleepMsInWindow, windowStart } from '@/features/insights/compute';
 import type { Entry, Timer } from '@/types/models';
 import { pruneWidgetEntries, widgetToday, WIDGET_LOOKBACK_MS, type WidgetTodaySource } from '@/widgets/today';
 
-// Fixed local timestamps, no fake timers (same style as insights/compute.test.ts).
-// 5 Jul 2026 is well clear of any DST transition.
+// Fixed local timestamps, no fake timers. 5 Jul 2026 is clear of any DST transition.
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 
 const sleep = (start: number, end: number | null, nap = true): Entry => ({
@@ -54,7 +53,6 @@ describe('widgetToday sleep total', () => {
   });
 
   it('is the same number Home computes, via liveSleepMsInWindow itself', () => {
-    // Home: liveSleepMsInWindow(childEntries, childTimers, windowStart(now, originHour), now).
     const entries = [
       sleep(at(2026, 6, 4, 20), at(2026, 6, 5, 6), false), // last night, previous window
       sleep(at(2026, 6, 5, 10), at(2026, 6, 5, 14)), // straddles noon
@@ -166,14 +164,14 @@ describe('widgetToday labels', () => {
   });
 
   it('shows no figure for a child who is not born yet', () => {
-    // An unborn child has no sleep to total, so this is the no-data case, not a
-    // zero. "0 min" would read as a measurement of a baby who does not exist.
+    // No-data, not a zero: "0 min" would read as a measurement of a baby who does
+    // not exist.
     expect(widgetToday(src({ expected: true }), now).sleepValue).toBe('—');
   });
 
   it('marks a running nap on the value, keeping the total as the number', () => {
-    // The row's label stays the category ("Sleep"). Putting "Napping" there next
-    // to a whole-window total would claim the number IS the nap's length.
+    // The row's label stays the category ("Sleep"): putting "Napping" there next to
+    // a whole-window total would claim the number IS the nap's length.
     const t = widgetToday(src({ entries: [sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14))], sleepStart: at(2026, 6, 5, 14, 30) }), now);
     expect(t.sleepMin).toBe(90); // 1h logged + 30 min still running
     expect(t.sleepValue).toBe('1h 30m · napping');
@@ -181,10 +179,9 @@ describe('widgetToday labels', () => {
 });
 
 describe('widgetToday recomputes the window from the SAME snapshot', () => {
-  // The core property of this design: the widget bitmap is frozen and Android's
-  // refresh floor is 30 minutes, so a total baked in at write time would show
-  // yesterday's figures after the boundary passed. Recomputing at render time
-  // makes the rollover self-correcting.
+  // The widget bitmap is frozen and Android's refresh floor is 30 minutes, so a
+  // total baked in at write time would show yesterday's figures after the boundary
+  // passed. Recomputing at render time makes the rollover self-correcting.
   const snapshot = src({
     entries: [
       sleep(at(2026, 6, 5, 9), at(2026, 6, 5, 11)), // previous (Jul 4 noon) window

@@ -1,8 +1,4 @@
-/**
- * Keeps Android's pending reminder set in sync with the store, the scheduled
- * twin of `sync.ts`. On every relevant store change, rebuild the desired set and
- * hand it to the platform reconciler. No-ops cleanly off Android.
- */
+/** Keeps Android's pending reminder set in sync with the store. */
 
 import { reachedForChild } from '@/lib/milestones';
 import { applyScheduled } from '@/notifications/applySchedule';
@@ -15,19 +11,9 @@ let started = false;
 
 type State = ReturnType<typeof useAppStore.getState>;
 
-// `lastSleepEndByChild` and `asleepChildIds` below are genuinely per child, and
-// since 0.15.0 they are genuinely POPULATED per child in server mode too: a load
-// fetches every child's records (see `loadFromServer`), so this walk sees all of
-// them and `selectChild` no longer replaces `entries` on a switch.
-//
-// That closed a real bug rather than only widening coverage. A switch used to
-// drop the previous child's key here entirely, and the next diff read the
-// missing key as "no longer desired" and cancelled that child's already-pending
-// nap reminder.
-//
-// `lastPumpAt` stays a single account-wide scalar, deliberately: pumping is the
-// parent's activity, not a child's, and the reminder is about the parent's
-// interval.
+// `lastSleepEndByChild` and `asleepChildIds` must stay POPULATED for every child:
+// a per-child key that goes missing reads to the next diff as "no longer desired"
+// and cancels that child's pending nap reminder.
 function toInput(s: State, now: number): ScheduleInput {
   let lastPumpAt: number | null = null;
   const lastSleepEndByChild: Record<string, number> = {};
@@ -40,37 +26,19 @@ function toInput(s: State, now: number): ScheduleInput {
     }
     if (e.type === 'sleep') {
       if (e.end != null) {
-        // Ended: starts a wake window.
         const cur = lastSleepEndByChild[e.childId];
         if (cur == null || e.end > cur) lastSleepEndByChild[e.childId] = e.end;
       } else {
-        // Ongoing. Often also has a running Timer (already caught by
-        // `napReminders`' own `timers` check), but not always: editing an
-        // existing entry to "still ongoing" writes `end: null` without
-        // creating a Timer, and a server sleep record with no end maps the
-        // same way. `asleepChildIds` catches the child in either case, so a
-        // stale, still-future `fireAt` from the PREVIOUS ended sleep can't
-        // survive and suggest a nap while the baby is asleep.
+        // Ongoing, and not always with a running Timer: editing an entry to
+        // "still ongoing" writes `end: null` without creating one.
         asleepChildIds[e.childId] = true;
       }
     }
   }
 
-  // Doses for EVERY child's treatments, grouped by the treatment's own child.
-  //
-  // Grouped rather than passed in one call, and that is load-bearing rather
-  // than tidy: `treatmentDoseScalars` attributes a dose to a treatment by
-  // trimmed, case-insensitive NAME, because a `MedicationEntry` carries no
-  // treatment reference that survives sync. One call over every treatment and
-  // every entry would let a dose logged for one child settle a sibling's
-  // identically named regimen, and two children on the same medicine is
-  // ordinary rather than contrived.
-  //
-  // Grouped by `treatment.childId` rather than by walking `s.children`, so that
-  // every treatment the store holds gets a key even if its child is gone. That
-  // keeps `treatmentDoseScalars`' contract intact: a missing key means the
-  // treatment was never considered, which is exactly what `treatmentDoseGiven`
-  // reads it as.
+  // Grouped per child rather than passed in one call: `treatmentDoseScalars`
+  // attributes a dose by trimmed, case-insensitive NAME, so one flat call would
+  // let a dose logged for one child settle a sibling's identically named regimen.
   const treatmentsByChild = new Map<string, Treatment[]>();
   for (const t of s.treatments) {
     const group = treatmentsByChild.get(t.childId);
@@ -102,35 +70,17 @@ function toInput(s: State, now: number): ScheduleInput {
     asleepChildIds,
     treatments: s.treatments,
     treatmentDoses,
-    // Per child, so the catch-up nudge can answer for each of them. One
-    // `reachedForChild` pass per child, where there was one pass in total
-    // before: `toInput` already walks `s.entries` on every reconcile and a
-    // household is one to four children, so this is not worth folding into the
-    // walk above until it measurably costs something.
     reachedMilestoneKeysByChild: Object.fromEntries(
       s.children.map((c) => [c.id, [...reachedForChild(s.entries, c.id).keys()]]),
     ),
-    // Already keyed by child in the store, so it passes straight through.
     answeredMilestoneKeysByChild: s.answeredMilestonePrompts,
   };
 }
 
-// Runs must not overlap. `applyScheduled` reads Android's pending set and
-// then writes to it across several awaits, so two in-flight runs can
-// interleave: a stale run's cancel can land after a fresh run already read
-// the pre-cancel state and concluded there was nothing to do, leaving a
-// reminder cancelled with nothing left to reschedule it. `hydrate()` alone
-// issues many separate set() calls, so this is not an edge case.
-//
-// Coalesce instead of queueing every call: while a run is in flight, keep
-// only the LATEST state that arrived and run once more with it after the
-// current run finishes. Only the last desired set matters, so this also
-// avoids a burst of redundant native round trips during hydration.
-//
-// Module-scoped, not local to initScheduledReminderSync, so `reconcileNow`
-// below shares this exact latch instead of running its own: two independent
-// busy flags could still let a store-driven run and a manual reconcile
-// interleave, which is the exact hazard this latch exists to close.
+// Runs must not overlap. `applyScheduled` reads Android's pending set and then
+// writes to it across several awaits, so a stale run's cancel can land after a
+// fresh run has already read the pre-cancel state, leaving a reminder cancelled
+// with nothing to reschedule it. Module-scoped so `reconcileNow` shares the latch.
 let busy = false;
 let queued: State | null = null;
 function run(s: State): void {
@@ -138,18 +88,9 @@ function run(s: State): void {
     queued = s;
     return;
   }
-  // Built before `busy` flips, so a throw here (a malformed toInput or
-  // desiredScheduled call) never latches `busy` true. Nothing set it, so the
-  // next call is still free to run instead of queueing behind a flag that no
-  // `finally` will ever clear.
-  // One `now` for both, so the dose scalars and the schedule cannot straddle a
-  // local midnight and disagree about what "today" means.
+  // Built before `busy` flips, so a throw cannot latch it true. One `now` for
+  // all three, so nothing here straddles a local midnight.
   const now = Date.now();
-  // The projection is kept, not discarded after building `desired`: the
-  // reconciler's delivered-notification sweep asks it the staleness questions
-  // that only make sense once Android has reported what is actually in the tray.
-  // Same `now` for all three, so the desired set and the sweep cannot straddle a
-  // local midnight and disagree about what "today" means.
   const input = toInput(s, now);
   const desired = desiredScheduled(input, now);
   busy = true;
@@ -163,17 +104,8 @@ function run(s: State): void {
   });
 }
 
-/**
- * Request a reconcile right now, through the same coalescing latch `run`
- * above uses for every store-driven reconcile. For the two call sites that
- * change what Android should hold WITHOUT touching a gated store slice:
- * granting permission from the notifications settings screen, and the app
- * returning to the foreground (see `_layout.tsx`). Mirrors the subscriber's
- * `hydrating` guard below: a reconcile against the pre-hydrate() empty store
- * would read every pending reminder as no longer desired and cancel the
- * user's whole set. Never requests permission itself; `applyScheduled` only
- * checks it.
- */
+/** For the two call sites that change what Android should hold WITHOUT touching
+ *  a gated store slice: granting permission, and returning to the foreground. */
 export function reconcileNow(): void {
   const state = useAppStore.getState();
   if (state.hydrating) return;
@@ -185,34 +117,13 @@ export function initScheduledReminderSync(): void {
   started = true;
 
   useAppStore.subscribe((state, previous) => {
-    // Never reconcile against a store that is still hydrating: `children` and
-    // friends are still at their pre-hydrate() initial values (in particular
-    // `children: []`), so a run here would read every pending reminder as no
-    // longer desired and cancel the user's entire reminder set. It is
-    // restored only once hydrate()'s final set() flips `hydrating` to false,
-    // which the slice comparison below (via the `hydrating` slice) catches.
+    // Never reconcile against a store that is still hydrating: `children` is
+    // still `[]`, so the run would cancel the user's entire reminder set.
     if (state.hydrating) return;
-    // Gate on the slices the desired set derives from, plus `hydrating`
-    // itself: without it, a set() that flips only `hydrating` (the true-to-
-    // false transition hydrate() ends with, when nothing else in this list
-    // also changed) would look like "nothing changed" and be skipped, so the
-    // post-hydration reconcile above would never actually run. The per-second
-    // `now` tick changes nothing here: fire times are absolute, so a
-    // launch-time run plus state-change runs is sufficient and a tick-driven
-    // rebuild would be pure churn.
-    //
-    // `selectedChildId` is deliberately NOT compared here, and its absence is
-    // load-bearing rather than an oversight. Nothing in the desired set reads
-    // the selection as of 0.15.3: treatment reminders cover every child, and the
-    // milestone catch-up nudge loops them. Comparing it would rebuild the whole
-    // set and make a native round trip every time the user switches children,
-    // for a set that cannot have changed.
-    //
-    // Two retired justifications, so nobody restores this by rediscovering
-    // them: `napReminders` once resolved an ownerless sleep timer's owner as
-    // `timer.childId ?? selectedChildId` (a timer belongs to whoever started it
-    // now, see `timerBelongsTo`), and the treatment and milestone rules once
-    // scoped themselves to the selection.
+    // `hydrating` is in this list on purpose: without it, the set() that flips it
+    // false at the end of hydrate() reads as "nothing changed" and the
+    // post-hydration reconcile never runs. `selectedChildId` is deliberately
+    // absent: nothing in the desired set reads the selection.
     if (
       state.hydrating === previous.hydrating &&
       state.children === previous.children &&
@@ -229,11 +140,7 @@ export function initScheduledReminderSync(): void {
       state.treatmentReminders === previous.treatmentReminders &&
       state.treatmentRemindersEnabledAt === previous.treatmentRemindersEnabledAt &&
       state.milestoneCatchUp === previous.milestoneCatchUp &&
-      // Answering the home-screen nudge retires that milestone, which must
-      // cancel its pending notification. Nothing else in this list moves when
-      // it does: `answerMilestonePrompt` writes only this slice, so without it
-      // the alert would survive until the next foreground reconcile and ask
-      // about a milestone the parent has already answered.
+      // Answering the nudge retires a milestone and must cancel its alert.
       state.answeredMilestonePrompts === previous.answeredMilestonePrompts
     ) {
       return;
@@ -241,9 +148,7 @@ export function initScheduledReminderSync(): void {
     run(state);
   });
 
-  // Skip the launch-time run while still hydrating: it would reconcile
-  // against the pre-hydrate() empty state, and the subscriber above already
-  // runs once hydration completes.
+  // Skip the launch-time run while hydrating: the subscriber above covers it.
   const initial = useAppStore.getState();
   if (!initial.hydrating) run(initial);
 }

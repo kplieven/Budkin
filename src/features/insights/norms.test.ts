@@ -52,8 +52,6 @@ describe('wakeWindowBand', () => {
   });
 
   it('returns null past the age the source covers, rather than extrapolating', () => {
-    // bucketFor falls back to the last bucket forever, which is right for
-    // drawing a chart band and wrong for scheduling a nap nudge.
     expect(wakeWindowBand(366)).toBeNull();
     expect(wakeWindowBand(1200)).toBeNull();
   });
@@ -63,10 +61,8 @@ describe('wakeWindowBand', () => {
   });
 
   it('returns null for a non-finite age, rather than falling through to the last bucket', () => {
-    // NaN fails both `ageDays < 0` and `ageDays > WAKE_WINDOW_MAX_AGE_DAYS`, so
-    // without an explicit finite check it reaches `bucketFor`, whose loop
-    // condition `NaN <= b.maxAgeDays` is always false and therefore returns the
-    // LAST bucket instead of null.
+    // NaN fails both range comparisons, so without an explicit finite check it
+    // reaches `bucketFor` and comes back with the LAST bucket instead of null.
     expect(wakeWindowBand(NaN)).toBeNull();
   });
 });

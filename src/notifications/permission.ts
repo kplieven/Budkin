@@ -1,5 +1,5 @@
-// No notification permission model off Android. Shares the .android.ts
-// contract (never rejects) trivially: there is no native call here to fail.
+// No notification permission model off Android. Honours the .android.ts contract
+// (never rejects) trivially.
 export async function requestReminderPermission(): Promise<boolean> {
   return false;
 }

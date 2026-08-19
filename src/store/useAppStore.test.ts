@@ -53,9 +53,8 @@ const h = vi.hoisted(() => ({
   timers: [] as unknown[],
   servers: [] as unknown[],
   pushed: [] as unknown[],
-  /** The `childServerId` argument each `pushEntryToServer` call went out with.
-   *  Separate from `pushed` (which several tests match wholesale) and the thing
-   *  that actually decides which child the server row lands under. */
+  /** The `childServerId` each `pushEntryToServer` call went out with: what decides
+   *  which child the server row lands under. */
   pushedChildServerIds: [] as unknown[],
   updated: [] as unknown[],
   deleted: [] as unknown[],
@@ -76,30 +75,23 @@ const h = vi.hoisted(() => ({
   timerPushed: [] as unknown[],
   timerUpdated: [] as unknown[],
   timerDeleted: [] as unknown[],
-  /** How many `pushTimerToServer` calls should throw before one succeeds. Models
-   *  a server that rejects or drops the create, which is the case that used to
-   *  leave a timer unsynced with nothing scheduled to try again. */
+  /** How many `pushTimerToServer` calls throw before one succeeds: a server that
+   *  drops the create, leaving a timer unsynced with nothing scheduled to retry. */
   timerPushFails: 0,
-  /** How many `pushEntryToServer` calls should throw before one succeeds. The
-   *  entry twin of `timerPushFails`: models a server that refuses the write the
-   *  moment it is made but accepts the identical payload a few seconds later
-   *  (clock skew on the `end == now` timestamp, a locked SQLite file behind a
-   *  concurrent timer DELETE), which is the case that left the entry sitting on
-   *  the write queue until the user pulled to refresh. */
+  /** The entry twin of `timerPushFails`: a server that refuses the write the moment
+   *  it is made but accepts the identical payload seconds later. */
   entryPushFails: 0,
   pendingOps: [] as unknown[],
   pendingPhotos: {} as Record<string, unknown>,
   discardedPhotos: [] as string[],
   sweptKeeps: [] as string[][],
-  /** Makes `reopenPhotoFile` report the file as gone, which models the one
-   *  failure the document directory can still have. */
+  /** Makes `reopenPhotoFile` report the file as gone. */
   photoFileMissing: false,
   adoptTarget: null as string | null,
   pushFails: false,
   childDeleteFails: false,
-  /** serverId -> the slug the fake server currently holds for that child. Seed
-   *  it to opt a test into slug-accurate PATCH behaviour (see
-   *  `updateChildOnServer` below); empty means the old permissive mock. */
+  /** serverId -> the slug the fake server currently holds. Seed it to opt a test
+   *  into slug-accurate PATCH behaviour; empty means the permissive mock. */
   childSlugOnServer: {} as Record<string, string>,
   profile: { username: 'alex', timezone: 'UTC', language: 'en', dashboardRefreshRate: undefined } as unknown,
   profileFails: false,
@@ -109,8 +101,7 @@ const h = vi.hoisted(() => ({
   milestonePrompts: {} as Record<string, string[]>,
   treatments: [] as unknown[],
   bathRhythms: {} as Record<string, unknown>,
-  /** Mirrors the stored entity-origin label (see `loadEntityOrigin`): which
-   *  server (or 'local') the persisted entities belong to. Null models an
+  /** Which server (or 'local') the persisted entities belong to. Null models an
    *  install that predates the key. */
   entityOrigin: null as string | null,
 }));
@@ -176,7 +167,6 @@ vi.mock('@/data/timers', () => ({
   }),
 }));
 
-// The durable entity store (children/entries/measurements/selectedChild/lastFeed).
 // Defaults to "nothing persisted yet" (null); individual tests override via
 // mockResolvedValueOnce to simulate a restart with saved data.
 vi.mock('@/data/entityStore', () => ({
@@ -190,16 +180,15 @@ vi.mock('@/data/entityStore', () => ({
   saveMeasurements: vi.fn(async () => {}),
   saveSelectedChildId: vi.fn(async () => {}),
   saveLastFeed: vi.fn(async () => {}),
-  // Faithful to the real module: the origin's lifecycle is paired with the
-  // data it labels, so clearing the entities clears the label too.
+  // Faithful to the real module: the origin is paired with the data it labels, so
+  // clearing the entities clears the label too.
   clearEntities: vi.fn(async () => {
     h.entityOrigin = null;
   }),
 }));
 
-// REQUIRED: `prefs.ts` imports AsyncStorage; without mocking it here the node
-// test env pulls in the native AsyncStorage module and the suite breaks —
-// mirrors why `@/data/timers` above is fully mocked too.
+// Every AsyncStorage-backed module here is mocked for the same reason: without
+// it the node test env pulls in the native module and the suite breaks.
 vi.mock('@/data/prefs', () => ({
   loadPrefs: vi.fn(async () => h.prefs),
   savePrefs: vi.fn(async () => {}),
@@ -212,10 +201,7 @@ vi.mock('@/data/milestonePrompts', () => ({
   }),
 }));
 
-// Treatments are AsyncStorage-backed (the local-mode store, and the offline cache
-// in front of the server when connected), so this is mocked for the same reason the
-// timers module is: keep the native module out of the node test env. `h.treatments`
-// mirrors the stored list so the persistence subscribe can be observed.
+// `h.treatments` mirrors the stored list so the persistence subscribe can be observed.
 vi.mock('@/data/treatments', () => ({
   loadTreatments: vi.fn(async () => h.treatments),
   saveTreatments: vi.fn(async (c: unknown[]) => {
@@ -226,8 +212,6 @@ vi.mock('@/data/treatments', () => ({
   }),
 }));
 
-// Per-child bath rhythm, AsyncStorage-backed like the modules above, so it is
-// mocked for the same reason: keep the native module out of the node test env.
 vi.mock('@/data/bathRhythm', () => ({
   loadBathRhythms: vi.fn(async () => h.bathRhythms),
   saveBathRhythms: vi.fn(async (m: Record<string, unknown>) => {
@@ -295,11 +279,9 @@ vi.mock('@/data/repository', () => ({
     h.childUpdated.push(child);
     h.childUpdateChange.push(change);
     const nextSlug = String(child?.first ?? '').toLowerCase() + '-slug';
-    // Opt-in faithful slug behaviour, keyed by serverId. Inert unless a test
-    // seeds `childSlugOnServer`, so it changes nothing for the rest of the file.
-    // Baby Buddy addresses children BY slug, so a PATCH carrying a stale one
-    // 404s rather than falling back to matching on id, and a rename MOVES the
-    // slug, which is what makes the next stale request fail.
+    // Baby Buddy addresses children BY slug, so a PATCH carrying a stale one 404s
+    // rather than falling back to the id, and a rename MOVES the slug. Inert
+    // unless a test seeds `childSlugOnServer`.
     const key = String(child?.serverId);
     const currentSlug = h.childSlugOnServer[key];
     if (currentSlug !== undefined) {
@@ -309,8 +291,8 @@ vi.mock('@/data/repository', () => ({
     // The real PATCH response carries the CURRENT slug.
     return { picture: change?.kind === 'set' ? SERVER_PIC : null, slug: nextSlug };
   }),
-  // Takes the whole child now, not a numeric id: the server DELETE is keyed by
-  // slug (see BabybuddyClient.childKey), which only the child carries.
+  // Takes the whole child, not a numeric id: the server DELETE is keyed by slug
+  // (see BabybuddyClient.childKey), which only the child carries.
   deleteChildFromServer: vi.fn(async (_c: unknown, child: unknown) => {
     if (h.childDeleteFails) throw new Error('net');
     h.childDeleted.push(child);
@@ -341,13 +323,10 @@ vi.mock('@/data/repository', () => ({
   serverHasData: vi.fn(async () => false),
 }));
 
-// `@/data/sync`'s real uploader/matcher (Unit J's primitives, from an earlier
-// unit on this branch). Default `uploadUnsynced` is a pure passthrough (no
-// stamping) so it's a no-op for every OTHER test in this file that
-// incidentally triggers `flushUnsynced` via connect/hydrate/refresh/etc (the
-// default seeded child has no serverId, so `flushUnsynced`'s `hasUnsynced`
-// check is true almost everywhere) — only the `adopt`/`flushUnsynced`
-// describe blocks below override this to actually stamp serverIds.
+// A pure passthrough (no stamping), so it is a no-op for every test that only
+// incidentally triggers `flushUnsynced`: the default seeded child has no
+// serverId, so `hasUnsynced` is true almost everywhere. The `adopt` and
+// `flushUnsynced` blocks override it to actually stamp serverIds.
 vi.mock('@/data/sync', () => ({
   uploadUnsynced: vi.fn(async (state: { children: unknown[]; entries: unknown[]; measurements: unknown[] }) => ({
     children: state.children,
@@ -357,25 +336,20 @@ vi.mock('@/data/sync', () => ({
   matchServerChild: vi.fn(() => null),
 }));
 
-// The offline op-log (Unit D). Tests assert against `h.pendingOps` directly
-// (mirroring how `h.pushed`/`h.updated`/etc. track the repository mocks above)
-// rather than asserting on the mock functions themselves.
 vi.mock('@/data/pendingOps', () => ({
   addPendingOp: vi.fn(async (op: unknown) => {
     h.pendingOps.push(op);
     return h.pendingOps;
   }),
-  // Returns a COPY, like the real module (every load is a fresh JSON.parse of
-  // the file). Handing out `h.pendingOps` itself would alias the flush run's
-  // snapshot to the live log, so an op appended mid-run would leak INTO the
-  // running batch, which the real storage-backed module can never do.
+  // Returns a COPY, like the real module. Handing out `h.pendingOps` itself would
+  // alias the flush run's snapshot to the live log, so an op appended mid-run would
+  // leak INTO the running batch, which the real module can never do.
   loadPendingOps: vi.fn(async () => [...h.pendingOps]),
   savePendingOps: vi.fn(async (ops: unknown[]) => {
     h.pendingOps = ops;
   }),
-  // Same first-stringify-match semantics as the real removePendingOp: drop ONE
-  // occurrence by value, keep the rest (including anything appended since the
-  // caller last loaded).
+  // Same first-stringify-match semantics as the real one: drop ONE occurrence by
+  // value, keep the rest (including anything appended since the caller last loaded).
   removePendingOp: vi.fn(async (op: unknown) => {
     const key = JSON.stringify(op);
     const idx = h.pendingOps.findIndex((o) => JSON.stringify(o) === key);
@@ -399,9 +373,8 @@ vi.mock('@/data/pendingPhotos', () => ({
     delete h.pendingPhotos[childId];
     return prev;
   }),
-  // Compare-and-clear, by value: the real one matches `kind` plus a `set`'s
-  // `uri`, because the record makes a round trip through JSON and can never be
-  // the same object the caller consumed.
+  // Compare-and-clear BY VALUE: the record makes a round trip through JSON and can
+  // never be the same object the caller consumed.
   clearPendingPhotoIf: vi.fn(async (childId: string, expected: { kind: string; uri?: string }) => {
     const prev = h.pendingPhotos[childId] as { kind: string; uri?: string } | undefined;
     if (!prev || prev.kind !== expected.kind) return undefined;
@@ -414,9 +387,9 @@ vi.mock('@/data/pendingPhotos', () => ({
   }),
 }));
 
-// The native file layer. Nothing in the node runner can reach the real one, so
-// what these tests pin is the CONTRACT: that a deferred save records the
-// durable URI, and that a push reopens exactly the URI that was recorded.
+// Nothing in the node runner can reach the real native file layer, so what these
+// tests pin is the CONTRACT: a deferred save records the durable URI, and a push
+// reopens exactly the URI that was recorded.
 vi.mock('@/lib/photoFile', () => ({
   reopenPhotoFile: vi.fn((stored: { uri: string; name: string; type: string }) =>
     h.photoFileMissing
@@ -437,9 +410,8 @@ vi.mock('@/lib/photoFile', () => ({
   }),
 }));
 
-// The persisted adopt target (Finding 2): backs the server-switch reset in
-// `adopt` so it survives an app kill between an abandoned `partial` adoption
-// and a later retry/switch — mirrors the AsyncStorage-backed mocks above.
+// Backs the server-switch reset in `adopt`, so it survives an app kill between an
+// abandoned `partial` adoption and a later retry or switch.
 vi.mock('@/data/adoptTarget', () => ({
   loadAdoptTarget: vi.fn(async () => h.adoptTarget),
   saveAdoptTarget: vi.fn(async (url: string) => {
@@ -454,14 +426,10 @@ const NOW = 1_700_000_000_000;
 const M = 60000;
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-// The shared `beforeEach` below seeds child 'c1' with NO serverId on purpose:
-// most of this file exercises the offline-first / not-yet-synced paths (the
-// `@/data/sync` mock comment above explains why), and some tests (e.g.
-// `deleteChild`'s "local-only child" case) assert specifically on that
-// unsynced default. A real server-mode child is always either loaded from the
-// server or pushed to it, so it always carries a serverId; tests whose
-// subject is ordinary synced-child push/update behaviour opt into this
-// constant rather than mutating the shared default.
+// The shared `beforeEach` seeds child 'c1' with NO serverId on purpose: most of this
+// file exercises the not-yet-synced paths, and some tests assert on that unsynced
+// default. Tests about ordinary synced-child push/update opt into this constant
+// instead of mutating the shared default.
 const SYNCED_C1: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
 
 beforeEach(() => {
@@ -577,11 +545,9 @@ beforeEach(() => {
 
 const s = () => useAppStore.getState();
 
-/** Branch-level invariant: whenever a state-producing path (hydrate/refresh/
- *  adopt) leaves `children` non-empty, `selectedChildId` must name one of
- *  them. Regression coverage for a server-space id (`loadFromServer`'s
- *  `selectedChildId`, see repository.ts) being used as a local-space
- *  fallback instead of being resolved through `resolveSelectedChildId`. */
+/** Branch-level invariant: whenever hydrate/refresh/adopt leaves `children` non-empty,
+ *  `selectedChildId` must name one of them. Guards against a server-space id being used
+ *  as a local-space fallback instead of resolved through `resolveSelectedChildId`. */
 function expectSelectionNamesARealChild(): void {
   const { children, selectedChildId } = useAppStore.getState();
   if (children.length > 0) {
@@ -617,10 +583,9 @@ describe('openSheet defaults', () => {
   });
 });
 
-// The feeding draft's three seeds are about ONE child: what their last feed was
-// like, and which breast comes next. Both used to be read unscoped, so with
-// twins the sheet opened on the other one's history and disagreed with the Home
-// tile that sent you there (the tile computes its hint from child-scoped entries).
+// The feeding draft's seeds are about ONE child: what their last feed was like, and
+// which breast comes next. Read unscoped, the sheet opens on a twin's history and
+// disagrees with the Home tile that sent you there.
 describe('the feeding prefill is scoped to the sheet\'s child', () => {
   const mira: Child = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
   const ivo: Child = { id: 'c2', first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
@@ -633,8 +598,7 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 
   it('suggests the start side from THIS child\'s feeds, not a sibling\'s', () => {
-    // Only Ivo has fed, on the left, so HIS next side is the right. Mira has
-    // never fed: hers is the opening default, and his feed must not move it.
+    // Only Ivo has fed. Mira has never fed, so hers is the opening default.
     useAppStore.setState({ entries: [feedOnTheLeft('f2', 'c2')] });
     s().openSheet('feeding');
     expect(s().te.startSide).toBe('left');
@@ -657,13 +621,9 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 
   it('a fallback hydrate hands the persist path an EMPTY map, which is what makes the guard load-bearing', async () => {
-    // Half of the two-restart story, and the half that lives here. `lastFeed`
-    // is a fresh `{}` on a launch that fell back, so the persistence
-    // subscription's reference check fires and this key does get written. The
-    // other half, that writing it cannot destroy the value the read just fell
-    // back to, is `saveLastFeed`'s empty guard (entityStore.test.ts, 'keeps the
-    // pre-map value across repeated launches'). Pinned here so a change to
-    // either side cannot quietly stop the two composing.
+    // `lastFeed` is a fresh `{}` on a launch that fell back, so the persistence
+    // subscription's reference check fires and the key does get written. That the
+    // write cannot destroy the fallen-back value is `saveLastFeed`'s empty guard.
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
       children: [mira],
@@ -683,8 +643,7 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 
   it('openTimerEdit seeds from the TIMER\'s child, not the selection', () => {
-    // Mira is selected and has fed on the left, so HER next side is the right.
-    // The running feeding timer is Ivo's and he has never fed.
+    // Mira is selected and has fed; the running timer is Ivo's and he never has.
     useAppStore.setState({
       entries: [feedOnTheLeft('f1', 'c1')],
       lastFeed: { c1: { feedType: 'solid', method: 'self' } },
@@ -696,8 +655,8 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 
   it('openTimerEdit borrows nobody\'s history for a timer with no owner', () => {
-    // Ownerless timers are no longer adopted by the selection, so there is no
-    // scoped history to read and the suggestion falls back to the default.
+    // Ownerless timers are not adopted by the selection, so there is no scoped
+    // history to read.
     useAppStore.setState({
       entries: [feedOnTheLeft('f1', 'c1')],
       timers: [{ id: 't9', activity: 'feeding', name: 'Feed', start: NOW - 5 * M, saveAs: 'feeding' }],
@@ -725,9 +684,9 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
   it('imperial: a press moves by half a fl oz, and stores canonical ml', () => {
     useAppStore.setState({ unitSystem: 'imperial' });
     s().openSheet('pumping');
-    // The 90 ml seed is 3.0433 fl oz, which is off the half-ounce grid and would
-    // render as "3.0", the same string the first minus press produces. Opening
-    // the sheet snaps the draft to exactly 3.0 fl oz so no press looks dead.
+    // The 90 ml seed is 3.0433 fl oz, off the half-ounce grid, and would render as
+    // "3.0", the same string the first minus press produces. Opening the sheet snaps
+    // the draft to exactly 3.0 fl oz so no press looks dead.
     expect(s().te.amount).toBe(88.7205);
     expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3, 9);
 
@@ -878,7 +837,6 @@ describe('draft amounts snap to the step grid, so no stepper press looks dead', 
     s().openEdit('f1');
     expect(s().te.amount).toBe(3);
 
-    // A unit toggle must not touch it either.
     s().toggleUnitSystem();
     expect(s().te.amount).toBe(3);
   });
@@ -955,7 +913,7 @@ describe('bath tracking', () => {
     expect(s().te.wash).toBe('quick');
   });
   it('save builds a point bath entry and pushes it (to the notes endpoint)', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     s().openSheet('bath');
     s().setWash('full');
     s().save();
@@ -981,7 +939,7 @@ describe('temperature tracking', () => {
   });
 
   it('save builds a point temperature entry (value + trimmed notes) and pushes it', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     s().openSheet('temperature');
     s().setTE({ temperature: 38.2, notes: '  slight fever  ' });
     s().save();
@@ -1029,7 +987,7 @@ describe('medication tracking', () => {
   });
 
   it('save builds a point medication entry (name + amount + unit + trimmed notes) and pushes it', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     s().openSheet('medication');
     s().setTE({ medName: '  Paracetamol  ', medDosage: 2.5, medUnit: 'mL', notes: '  for the fever  ' });
     s().save();
@@ -1137,8 +1095,7 @@ describe('treatments (medication regimens)', () => {
       s().addTreatment(treatment());
       await flush();
       expect(s().treatments[0].serverId).toBeUndefined();
-      // The local write still stands: offline-first never rolls back on a
-      // failed mirror.
+      // The local write still stands: offline-first never rolls back on a failed mirror.
       expect(s().treatments).toHaveLength(1);
     });
 
@@ -1239,10 +1196,8 @@ describe('treatments (medication regimens)', () => {
   it('logMedicationFromTreatment from an interval treatment seeds the draft and opens the confirm sheet (nothing committed yet)', () => {
     useAppStore.setState({ treatments: [treatment()], treatmentPicker: { open: true } });
     s().logMedicationFromTreatment('treatment-1');
-    // Opens the medication sheet in confirm mode and closes the picker.
     expect(s().sheet).toEqual({ type: 'medication', confirm: true });
     expect(s().treatmentPicker).toBeNull();
-    // A point (time-only) draft, seeded from the treatment. Nothing is written until save().
     expect(s().te.shape).toBe('point');
     expect(s().te.medName).toBe('Paracetamol');
     expect(s().te.medDosage).toBe(2.5);
@@ -1300,7 +1255,7 @@ describe('general notes', () => {
   });
 
   it('save builds a point note entry (trimmed body) and pushes it', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     s().openSheet('note');
     s().setTE({ noteText: '  remember the follow-up  ' });
     s().save();
@@ -1320,7 +1275,7 @@ describe('general notes', () => {
     s().setTE({ noteText: '   ' });
     s().save();
     expect(s().entries).toHaveLength(0);
-    expect(s().sheet).not.toBeNull(); // still open — nothing created
+    expect(s().sheet).not.toBeNull();
     await flush();
     expect(h.pushed).toHaveLength(0);
   });
@@ -1367,7 +1322,7 @@ describe('general notes', () => {
 
 describe('save', () => {
   it('feeding builds a correct entry and pushes online', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     s().openSheet('feeding');
     s().setLasted(20);
     s().save();
@@ -1405,8 +1360,8 @@ describe('save', () => {
   });
 
   it('a live interval carries the draft\'s details onto the timer', () => {
-    // Everything typed into the sheet before "Still feeding" must survive; the
-    // timer used to be created bare, silently dropping a just-typed note.
+    // Everything typed into the sheet before "Still feeding" must survive: a timer
+    // created bare silently drops a just-typed note.
     s().openSheet('feeding');
     s().setTE({ feedType: 'breast', method: 'both', startSide: 'right', amount: 3, notes: '  dozy  ' });
     s().toggleTag('Fussy');
@@ -1450,15 +1405,13 @@ describe('save', () => {
       offline: false,
     });
 
-    // Log an entry through the same action the other `save` tests above use.
     s().openSheet('note');
     s().setTE({ noteText: 'hi' });
     s().save();
     await flush();
 
-    // The child was never pushed (no serverId), so there is nothing sensible
-    // to push the entry to yet: it goes to the reconnect queue instead, the
-    // same way an offline save does.
+    // No serverId on the child means nothing sensible to push the entry to yet, so it
+    // goes to the reconnect queue like an offline save.
     expect(h.pushed).toHaveLength(0);
     expect(h.q).toHaveLength(1);
     expect(s().queueCount).toBe(1);
@@ -1467,25 +1420,22 @@ describe('save', () => {
 
 describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
-    useAppStore.setState({ children: [SYNCED_C1] }); // ordinary server-mode push needs a synced child
+    useAppStore.setState({ children: [SYNCED_C1] });
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
     await s().flushQueue();
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
     expect(s().queueCount).toBe(0);
-    // The History marker has to clear here and nowhere else. It reads
-    // `queuedIds` and must keep doing so: `serverId` is not a marker test, since
-    // an entry can hold one for reasons that have nothing to do with the queue.
+    // The History marker reads `queuedIds` and must keep doing so: `serverId` is NOT a
+    // marker test, since an entry can hold one for reasons unrelated to the queue.
     expect(s().queuedIds).toEqual([]);
   });
 
-  // The reported bug: an entry that reached the server through the QUEUE (a
-  // retried save, a reconnect flush) kept `serverId == null` locally, because
-  // this was the one push path that discarded what the server returned. It was
-  // off the queue by then too, so deleting it took `detachEntry`'s "never
-  // synced" branch: local-only removal, no server DELETE, no pending op. The
-  // server kept its copy and the row came back on the next refresh.
+  // The queue is the one push path that can discard what the server returned. An entry
+  // that reached the server with `serverId == null` locally is off the queue by then,
+  // so deleting it takes `detachEntry`'s "never synced" branch: no server DELETE, and
+  // the row comes back on the next refresh.
   it('stamps the serverId it gets back, so a later delete reaches the server', async () => {
     const entry: Entry = { id: 'x', childId: 'c1', type: 'sleep', start: NOW - 30 * M, end: NOW, nap: true, tags: [] };
     useAppStore.setState({ children: [SYNCED_C1], entries: [entry], queueCount: 1, queuedIds: ['x'] });
@@ -1501,8 +1451,7 @@ describe('flushQueue', () => {
   });
 
   it('stamps onto the CURRENT entry list, not the pre-push snapshot', async () => {
-    // A save landing mid-flush must not be dropped by the stamp, the same rule
-    // `flushUnsynced`'s merge follows.
+    // A save landing mid-flush must not be dropped by the stamp.
     const queued: Entry = { id: 'x', childId: 'c1', type: 'sleep', start: NOW - 30 * M, end: NOW, nap: true, tags: [] };
     const later: Entry = { id: 'y', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
     useAppStore.setState({ children: [SYNCED_C1], entries: [queued], queueCount: 1, queuedIds: ['x'] });
@@ -1526,13 +1475,10 @@ describe('flushQueue', () => {
   });
 
   it('pushes an entry once when two flushes overlap', async () => {
-    // `refresh()` fires a flush of its own on every successful re-check and does
-    // NOT await it, so a caller that awaits `flushQueue()` straight after
-    // awaiting `refresh()` (the queue screen's Retry button does exactly that,
-    // because it has to count the queue once the upload is finished) starts a
-    // second flush on top of one already in flight. Both read the same stored
-    // queue, neither has saved yet, and every entry gets POSTed twice: a
-    // duplicate feed on the server that the parent has to go and delete.
+    // `refresh()` fires an un-awaited flush on every successful re-check, so awaiting
+    // `flushQueue()` right after it (the queue screen's Retry button) starts a second
+    // flush on top of one in flight. Both read the same stored queue, neither has saved
+    // yet, and every entry gets POSTed twice.
     useAppStore.setState({ children: [SYNCED_C1] });
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
@@ -1545,9 +1491,8 @@ describe('flushQueue', () => {
   });
 
   it('makes a second caller wait for the flush already running, not return early', async () => {
-    // The awaited call has to resolve AFTER the upload, otherwise the queue
-    // screen counts the queue mid-flush and reports a successful sync as
-    // "Nothing uploaded. 1 entry still waiting."
+    // The awaited call has to resolve AFTER the upload, otherwise the queue screen
+    // counts the queue mid-flush and reports a successful sync as "Nothing uploaded."
     useAppStore.setState({ children: [SYNCED_C1] });
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ queueCount: 1, queuedIds: ['x'] });
@@ -1560,12 +1505,10 @@ describe('flushQueue', () => {
   });
 
   it('drops each entry from the stored queue as soon as its own push succeeds', async () => {
-    // The queue file is what "not on the server yet" means: refresh() merges
-    // it back into `entries` so a still-queued row stays visible. Saving only
-    // once at the end of the run breaks that meaning for the length of the
-    // run, because an entry already accepted by the server sits in the file
-    // until the last push finishes. A refresh landing in that window shows
-    // the server's copy AND the queued copy: the same feed twice in History.
+    // The queue file is what "not on the server yet" means: refresh() merges it back
+    // into `entries` so a still-queued row stays visible. Saving once at the end of the
+    // run breaks that for the length of the run, and a refresh landing in that window
+    // shows the server's copy AND the queued copy.
     useAppStore.setState({ children: [SYNCED_C1] });
     const first = { id: 'x1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
     const second = { id: 'x2', childId: 'c1', type: 'diaper', time: NOW, wet: false, solid: true, color: null, tags: [] };
@@ -1610,10 +1553,8 @@ describe('flushPendingOps', () => {
     tags: [],
   };
 
-  // Ordinary server-mode replay behaviour: the measurement/entry payloads
-  // reference childId 'c1', so replaying their update ops needs 'c1' synced
-  // (the shared `beforeEach` default is deliberately unsynced elsewhere in
-  // this file). `child` above already carries the serverId this block needs.
+  // The measurement/entry payloads reference childId 'c1', so replaying their update
+  // ops needs 'c1' synced; the shared `beforeEach` default is deliberately unsynced.
   beforeEach(() => {
     useAppStore.setState({ children: [child] });
   });
@@ -1625,12 +1566,10 @@ describe('flushPendingOps', () => {
     expect(h.pendingOps).toHaveLength(0);
   });
 
-  // Op payloads are SNAPSHOTS taken at enqueue time and addPendingOp appends
-  // without dedup, so two offline renames of the same child queue two ops that
-  // BOTH carry the original slug. Replaying op1 moves the slug server-side,
-  // which makes op2's snapshot stale before it is ever sent. Trusting the
-  // payload there loses the second rename permanently: it 404s, goes back on
-  // the queue, and 404s again on every later flush, so the op log never drains.
+  // Op payloads are SNAPSHOTS taken at enqueue time and addPendingOp appends without
+  // dedup, so two offline renames queue two ops that BOTH carry the original slug.
+  // Replaying op1 moves the slug server-side, so op2's snapshot is stale before it is
+  // sent: trusting it loses the second rename forever, 404ing on every later flush.
   it('replays a second queued rename against the LIVE slug, not its stale snapshot', async () => {
     h.childSlugOnServer = { '501': 'mira-o' };
     const staleSnapshot = { ...child, slug: 'mira-o' };
@@ -1642,7 +1581,6 @@ describe('flushPendingOps', () => {
 
     await s().flushPendingOps();
 
-    // Both renames landed, so the queue drains and the last one is the winner.
     expect(h.pendingOps).toHaveLength(0);
     expect(h.childUpdated).toHaveLength(2);
     expect((h.childUpdated[1] as Child).slug).toBe('mirabel-slug');
@@ -1650,10 +1588,9 @@ describe('flushPendingOps', () => {
   });
 
   it('re-stamps the slug a replayed rename moved, so a later delete is not keyed by a stale one', async () => {
-    // An offline rename replays here on reconnect. Baby Buddy derives the slug
-    // from the name, so the replay MOVES it server-side; keeping the old one
-    // locally would 404 the next delete, which is how a deleted child came back.
-    // Same re-stamp saveChild's online edit does.
+    // Baby Buddy derives the slug from the name, so the replay MOVES it server-side.
+    // Keeping the old one locally 404s the next delete: that is how a deleted child
+    // comes back.
     h.pendingOps = [{ op: 'update', entity: 'child', payload: { ...child, first: 'Mirabel' } }];
     await s().flushPendingOps();
     expect(s().children[0].slug).toBe('mirabel-slug');
@@ -1694,17 +1631,14 @@ describe('flushPendingOps', () => {
       { op: 'update', entity: 'measurement', payload: measurement },
     ];
     await s().flushPendingOps();
-    expect(h.measUpdated).toEqual([measurement]); // the other op still replayed
-    expect(h.pendingOps).toEqual([{ op: 'update', entity: 'child', payload: child }]); // failed op retained
+    expect(h.measUpdated).toEqual([measurement]);
+    expect(h.pendingOps).toEqual([{ op: 'update', entity: 'child', payload: child }]);
   });
 
   it('replays each op exactly once when two flushes overlap', async () => {
-    // Foregrounding fires the AppState refresh() (whose success schedules a
-    // flush) and the network-state effect (setNetworkOnline, a second one)
-    // within milliseconds, so two concurrent runs are the ordinary case, not
-    // a corner. Unguarded, both read the same stored log before either
-    // removes anything and every op is replayed twice; the loser of a
-    // replayed delete 404s and used to push the op back for a third try.
+    // Foregrounding fires the AppState refresh() (whose success schedules a flush) and
+    // the network-state effect within milliseconds, so two concurrent runs are ordinary.
+    // Unguarded, both read the same stored log before either removes anything.
     h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
     await Promise.all([s().flushPendingOps(), s().flushPendingOps()]);
     expect(h.deleted).toEqual([{ type: 'feeding', id: 1 }]);
@@ -1712,8 +1646,6 @@ describe('flushPendingOps', () => {
   });
 
   it('makes a second caller wait for the flush already running, not return early', async () => {
-    // Same joiner contract as flushQueue: the awaited call resolves once the
-    // running flush has drained, so a caller can trust the log afterwards.
     h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
     void s().flushPendingOps();
     await s().flushPendingOps();
@@ -1722,10 +1654,9 @@ describe('flushPendingOps', () => {
   });
 
   it('keeps an op recorded while a flush is mid-run', async () => {
-    // The old end-of-run savePendingOps(remaining) was last-write-wins: an op
-    // appended by addPendingOp after the run loaded the log was overwritten
-    // by the run's stale survivors list, silently losing an offline edit or
-    // delete. Per-op removal leaves anything it wasn't asked to remove alone.
+    // An end-of-run savePendingOps(remaining) would be last-write-wins: an op appended
+    // after the run loaded the log gets overwritten by the run's stale survivors list,
+    // silently losing an offline edit or delete.
     const appended: PendingOp = { op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 9 };
     h.pendingOps = [{ op: 'update', entity: 'entry', payload: entry }];
     vi.mocked(updateEntryOnServer).mockImplementationOnce(async (_c: unknown, e: unknown) => {
@@ -1739,10 +1670,8 @@ describe('flushPendingOps', () => {
   });
 
   it('drops an op whose target is already gone (404) instead of retrying it forever', async () => {
-    // A 404 means the record was deleted elsewhere (or the replayed delete
-    // already won a race). The old code could not tell that from a transient
-    // failure, so the op went back on the log and 404ed again on every later
-    // flush, immortal. Terminal for updates and deletes alike.
+    // A 404 means the record was deleted elsewhere (or the replayed delete already won
+    // a race). Treated as transient it goes back on the log and 404s forever after.
     vi.mocked(deleteEntryFromServer).mockRejectedValueOnce(new ApiError(404, 'Not found.'));
     h.pendingOps = [{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }];
     await s().flushPendingOps();
@@ -1759,9 +1688,8 @@ describe('flushPendingOps', () => {
   });
 
   it('stops the run on 401, keeping every remaining op and making no further calls', async () => {
-    // A dead token fails every op identically; hammering the server with the
-    // rest of the log helps nobody. The ops stay on file for after reconnect,
-    // and refresh()'s session-expiry handling owns telling the user.
+    // A dead token fails every op identically. The ops stay on file for after
+    // reconnect, and refresh()'s session-expiry handling owns telling the user.
     vi.mocked(updateChildOnServer).mockRejectedValueOnce(new ApiError(401, 'Invalid token for this server.'));
     h.pendingOps = [
       { op: 'update', entity: 'child', payload: child },
@@ -1794,7 +1722,7 @@ describe('flushPendingOps', () => {
 describe('stopTimer', () => {
   it('converts a timer into an entry', async () => {
     useAppStore.setState({
-      children: [SYNCED_C1], // ordinary server-mode push needs a synced child
+      children: [SYNCED_C1],
       timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }],
     });
     s().stopTimer('t1');
@@ -1804,13 +1732,10 @@ describe('stopTimer', () => {
     expect(h.pushed).toHaveLength(1);
   });
 
-  // The reported bug: stopping a timer while genuinely online ("Saved as sleep",
-  // not "queued offline") left the entry on the write queue, with the History
-  // row marked "waiting to upload", until the user pulled to refresh.
-  // `commitWrite` made the rejected push DURABLE (`enqueueEntry`) but nothing
-  // DRAINED the queue — `flushQueue` only runs from hydrate, refresh, and the
-  // offline/network transitions. Same gap `scheduleUnsyncedTimerFlush` already
-  // closes for timer creates.
+  // Stopping a timer while genuinely online can leave the entry on the write queue, its
+  // History row marked "waiting to upload", until the user pulls to refresh: `commitWrite`
+  // makes the rejected push DURABLE (`enqueueEntry`) but nothing DRAINS the queue, since
+  // `flushQueue` only runs from hydrate, refresh, and the offline/network transitions.
   it('retries a rejected entry push with no manual refresh', async () => {
     vi.useFakeTimers();
     try {
@@ -1826,7 +1751,6 @@ describe('stopTimer', () => {
 
       s().stopTimer('t1');
       await vi.advanceTimersByTimeAsync(0);
-      // The push threw, so the entry is queued and the row reads as waiting.
       expect(h.pushed).toHaveLength(0);
       expect(h.q).toHaveLength(1);
       expect(s().queuedIds).toHaveLength(1);
@@ -1856,8 +1780,6 @@ describe('stopTimer', () => {
 
       s().stopTimer('t1');
       await vi.advanceTimersByTimeAsync(120000);
-      // Still durable and still marked, but the chain is not spinning forever:
-      // refresh/foreground/reconnect take it from here.
       expect(h.q).toHaveLength(1);
       expect(s().queuedIds).toHaveLength(1);
     } finally {
@@ -1882,23 +1804,21 @@ describe('timer childId attribution', () => {
     const timer = s().timers[0];
     expect(timer.childId).toBe('c1');
 
-    // switch child, then stop: the entry must go to the timer's child
     useAppStore.setState({ selectedChildId: 'c2' });
     s().stopTimer(timer.id);
     expect(s().entries[0].childId).toBe('c1');
   });
 
   it('a timer with no childId (e.g. a pre-fix widget-started nap) is never attributed to an expecting child when stopped', () => {
-    // Exactly the case `stampTimerOwners` declines to migrate, so this fallback
-    // chain is what is left to resolve it: still stoppable, still never logged
-    // against a child who has not been born.
+    // Exactly the case `stampTimerOwners` declines to migrate, so this fallback chain
+    // is what resolves it: still stoppable, never logged against an unborn child.
     useAppStore.setState({
       connection: { mode: 'local' },
       children: [
         { id: 'c1', first: 'A', last: '', birth: NOW - 90 * 86400000, color: '#fff' },
         { id: 'c2', first: 'B', last: '', birth: NOW + 30 * 86400000, color: '#fff', expected: true },
       ],
-      selectedChildId: 'c2', // the expecting child is the one currently selected
+      selectedChildId: 'c2',
       timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' }], // no childId
       entries: [],
     });
@@ -1906,8 +1826,8 @@ describe('timer childId attribution', () => {
     s().stopTimer('t1');
 
     expect(s().entries).toHaveLength(1);
-    expect(s().entries[0].childId).not.toBe('c2'); // never the unborn baby
-    expect(s().entries[0].childId).toBe('c1'); // falls back to the born child on file
+    expect(s().entries[0].childId).not.toBe('c2');
+    expect(s().entries[0].childId).toBe('c1');
   });
 });
 
@@ -1928,11 +1848,8 @@ describe('timer server sync', () => {
     expect(s().timers.find((t) => t.id === id)?.serverId).toBe(555);
   });
 
-  // A create that doesn't land is the case that sent the user to pull-to-refresh:
-  // `mirrorTimerCreate` swallowed the failure and nothing retried it, so the
-  // timer sat unsynced until a refresh/foreground/reconnect happened to run
-  // `flushUnsynced`. These two cover the failure being the server's, and the
-  // failure being a child that wasn't on the server yet.
+  // `mirrorTimerCreate` swallows the failure, so without this retry the timer sits
+  // unsynced until a refresh, foreground or reconnect happens to run `flushUnsynced`.
   it('retries a create the server rejected, with no manual refresh', async () => {
     vi.useFakeTimers();
     try {
@@ -1941,7 +1858,6 @@ describe('timer server sync', () => {
       s().startQuickTimer();
       const id = s().timers[0].id;
       await vi.advanceTimersByTimeAsync(0);
-      // first POST threw, so nothing is stamped yet
       expect(s().timers.find((t) => t.id === id)?.serverId).toBeUndefined();
 
       await vi.advanceTimersByTimeAsync(5000);
@@ -1983,7 +1899,7 @@ describe('timer server sync', () => {
     useAppStore.setState({ connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', timers: [], entries: [] });
     s().startQuickTimer();
     const id = s().timers[0].id;
-    s().stopTimer(id); // stop before the POST resolves — serverId not stamped yet
+    s().stopTimer(id); // stop before the POST resolves: serverId not stamped yet
     await flush();
     expect(h.timerDeleted).toContain(555);
   });
@@ -2043,9 +1959,8 @@ describe('timer server sync', () => {
   });
 
   // `loadFromServer` reports a failed /api/timers/ fetch as `timers: null`
-  // ("unknown"), distinct from `[]` ("known none"). Reconciling null as [] is
-  // what used to kill a running mirrored timer on the device that started it,
-  // over one transient failure of that single endpoint.
+  // ("unknown"), distinct from `[]` ("known none"). Reconciling null as [] kills a
+  // running mirrored timer over one transient failure of that single endpoint.
   it('refresh keeps a running synced timer when the timers fetch failed (timers: null)', async () => {
     useAppStore.setState({
       connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1',
@@ -2057,9 +1972,7 @@ describe('timer server sync', () => {
       timers: null,
     });
     await s().refresh();
-    // The refresh itself succeeded (a timers-only failure is not "offline")...
     expect(s().offline).toBe(false);
-    // ...and the running timer survived: null skips reconciliation entirely.
     expect(s().timers.some((t) => t.serverId === 5)).toBe(true);
   });
 
@@ -2087,9 +2000,8 @@ describe('timer server sync', () => {
     });
     await s().connect('http://x', 't');
     expect(s().connected).toBe(true);
-    // `connect` spreads `...data` into state, so a null must be caught before
-    // it lands. Assert on id only: the post-connect flushUnsynced may already
-    // have stamped a serverId on the kept timer.
+    // `connect` spreads `...data` into state, so a null must be caught before it lands.
+    // Assert on id only: the post-connect flushUnsynced may already have stamped one.
     expect(s().timers).toHaveLength(1);
     expect(s().timers[0]).toMatchObject({ id: 't-local' });
   });
@@ -2099,16 +2011,15 @@ describe('timer server sync', () => {
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [syncedChild], entries: [], measurements: [], selectedChildId: 'c1',
       lastFeed: {},
-      // `loadFromServer` has no local state to translate with, so the timer's
-      // child FK arrives as the SERVER id (mirrors repository.ts's
-      // `childByServerId` construction), not the local id 'c1'.
+      // `loadFromServer` has no local state to translate with, so the timer's child FK
+      // arrives as the SERVER id, not the local id 'c1'.
       timers: [{ id: 'tsrv9', serverId: 9, childId: String(syncedChild.serverId), activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
     });
 
     await s().refresh();
 
     const timer = s().timers.find((t) => t.serverId === 9);
-    expect(timer?.childId).toBe('c1'); // remapped from the server id to the local id
+    expect(timer?.childId).toBe('c1');
   });
 
   it('stopping a server-loaded timer writes an entry under the LOCAL child id, not the server id', async () => {
@@ -2123,9 +2034,8 @@ describe('timer server sync', () => {
 
     s().stopTimer(timer!.id);
 
-    // If the childId had been left as the server id, this entry would
-    // reference a child that does not exist locally: the exact orphaning
-    // this branch's remapping exists to prevent, arriving via a timer.
+    // Left as the server id, this entry would reference a child that does not exist
+    // locally: the orphaning the remapping exists to prevent.
     expect(s().entries[0].childId).toBe('c1');
   });
 
@@ -2141,10 +2051,9 @@ describe('timer server sync', () => {
   });
 
   it('flushUnsynced leaves an ownerless timer unpushed rather than filing it under the selection', async () => {
-    // The last read site that used to adopt. A timer hydrate could not
-    // attribute (nothing selected at the time, or an expecting child selected)
-    // must not be created server-side under whoever is selected now: the server
-    // row would be the misattribution, and deleting it needs another round trip.
+    // A timer hydrate could not attribute (nothing selected then, or an expecting child
+    // selected) must not be created server-side under whoever is selected now: the
+    // server row would be the misattribution, and deleting it needs another round trip.
     useAppStore.setState({
       connection: server, offline: false, children: [syncedChild], selectedChildId: 'c1', measurements: [],
       timers: [{ id: 't-legacy', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: NOW }],
@@ -2198,9 +2107,6 @@ describe('timer persistence across restarts', () => {
     });
     await s().hydrate();
     await flush(); // the null-guard now lives in the background refresh; let it run
-    // The load as a whole succeeded (a timers-only failure is not "offline"),
-    // and null skipped reconciliation: the running timer was not treated as
-    // "stopped elsewhere" over one transient /api/timers/ failure.
     expect(s().offline).toBe(false);
     expect(s().timers).toEqual(saved);
   });
@@ -2230,11 +2136,8 @@ describe('timer persistence across restarts', () => {
   });
 });
 
-// The retired adoption rule used to let every read site treat a timer with no
-// `childId` as the selected child's. Every timer source stamps one now, so the
-// only ownerless timers left are ones persisted by an older build; hydrate gives
-// them an owner once, on load, and the persistence subscription writes the
-// stamped list back.
+// Every timer source stamps a `childId`, so the only ownerless timers left are ones
+// persisted by an older build. Hydrate gives them an owner once, on load.
 describe('hydrate migrates ownerless timers', () => {
   const ownerless = (id = 't1'): Timer => ({ id, activity: 'sleep', name: 'Sleep', start: NOW - 30 * M, saveAs: 'sleep' });
   const born = (id: string): Child => ({ id, first: id, last: '', birth: NOW - 90 * 86400000, color: '#fff' });
@@ -2271,8 +2174,8 @@ describe('hydrate migrates ownerless timers', () => {
   });
 
   it('leaves an owned timer exactly as it was, including a non-selected child\'s', () => {
-    // Idempotent, and never a re-point: a sibling's running nap belongs to the
-    // sibling however long the app sat closed.
+    // Never a re-point: a sibling's running nap belongs to the sibling however long
+    // the app sat closed.
     const mine: Timer = { ...ownerless('t1'), childId: 'c1' };
     const sibling: Timer = { ...ownerless('t2'), childId: 'c2' };
     h.timers = [mine, sibling];
@@ -2285,10 +2188,8 @@ describe('hydrate migrates ownerless timers', () => {
   });
 
   it('refuses to hand a timer to an expecting child, and never drops it', async () => {
-    // Same refusal `stopTimer` makes: an expecting child's `birth` is a due
-    // date, so nothing can be logged against them. Leaving the timer unstamped
-    // keeps the migration lossless; `stopTimer`'s own fallback chain still
-    // resolves it if the user stops it before the selection moves.
+    // An expecting child's `birth` is a due date, so nothing can be logged against them.
+    // Unstamped keeps the migration lossless; `stopTimer`'s fallback chain resolves it.
     const expecting: Child = { id: 'due', first: 'Bean', last: '', birth: NOW + 30 * 86400000, color: '#fff', expected: true };
     h.timers = [ownerless()];
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'local' });
@@ -2310,8 +2211,8 @@ describe('hydrate migrates ownerless timers', () => {
   });
 
   it('has no roster to stamp against with no connection, and leaves timers alone', async () => {
-    // The no-connection branch reads no entity store at all, so there is no
-    // child list and no selection to attribute a timer to.
+    // The no-connection branch reads no entity store at all, so there is no child
+    // list and no selection to attribute a timer to.
     h.timers = [ownerless()];
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
 
@@ -2370,27 +2271,24 @@ describe('mergeUnsynced', () => {
   });
 
   it('keeps a record created mid-fetch even once its push has stamped a serverId', () => {
-    // The drop: the answer went out before this record existed, and its own
-    // push stamped a serverId before the apply ran, so `serverId == null` no
-    // longer recognises it as unsynced. Absent from the pre-fetch snapshot is
-    // what proves it is newer than the answer.
+    // The answer went out before this record existed, and its own push stamped a
+    // serverId before the apply ran, so `serverId == null` no longer recognises it as
+    // unsynced. Absence from the pre-fetch snapshot is what proves it is newer.
     const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('mid', 9), mkChild('s1', 1)], [mkChild('s1', 1)]);
     expect(merged.map((c) => c.id)).toEqual(['mid', 's1']);
   });
 
   it('still drops a record deleted server-side, which the snapshot DID contain', () => {
-    // The other half of the same question, and why "keep every local the answer
-    // omits" would be wrong: this record existed before the fetch and the
-    // answer no longer lists it, so it was genuinely deleted elsewhere and must
-    // not be resurrected on every refresh forever.
+    // Why "keep every local the answer omits" would be wrong: this record existed
+    // before the fetch and the answer no longer lists it, so it was genuinely deleted
+    // elsewhere and must not be resurrected on every refresh.
     const merged = mergeUnsynced([mkChild('s1', 1)], [mkChild('gone', 7), mkChild('s1', 1)], [mkChild('gone', 7), mkChild('s1', 1)]);
     expect(merged.map((c) => c.id)).toEqual(['s1']);
   });
 
   it('behaves exactly as before when no snapshot is passed', () => {
-    // `connect` and `adopt` have no pre-fetch snapshot. An absent one must mean
-    // "cannot tell", not "every local record is new", or those callers would
-    // start resurrecting server-side deletions.
+    // `connect` and `adopt` have no pre-fetch snapshot. An absent one must mean "cannot
+    // tell", not "every local record is new", or they would resurrect server deletions.
     const local = [mkChild('synced', 7), mkChild('offline')];
     expect(mergeUnsynced([mkChild('s1', 1)], local).map((c) => c.id)).toEqual(['offline', 's1']);
   });
@@ -2401,10 +2299,8 @@ describe('mergeUnsynced', () => {
 });
 
 describe('mergeHeldBackEntries', () => {
-  // `heldBack` defaults to false: mirrors an ordinary entry, which never
-  // carries the flag. Tests that need a withheld entry pass `true` explicitly.
-  // This is now a STORED fact (see `commitWrite`), never inferred from the
-  // owning child's `expected` state or a timestamp comparison.
+  // `heldBack` is a STORED fact (see `commitWrite`), never inferred from the owning
+  // child's `expected` state or a timestamp comparison. It defaults to false.
   const mkEntry = (id: string, childId: string, heldBack = false): Entry => ({
     id,
     childId,
@@ -2453,9 +2349,8 @@ describe('queued entries survive killing the app', () => {
     color: null,
     tags: [],
   });
-  // A child returned by `loadFromServer` was, by definition, loaded from the
-  // server, so it always carries a serverId (a serverId-less child here would
-  // be a fixture bug, not a real state the app can be in).
+  // A child returned by `loadFromServer` always carries a serverId: a serverId-less
+  // one here would be a fixture bug, not a state the app can be in.
   const mira = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
 
   it('restores a queued entry into `entries` on hydrate when the server is reachable', async () => {
@@ -2472,11 +2367,9 @@ describe('queued entries survive killing the app', () => {
       measurements: [],
     });
     await s().hydrate();
-    // Cache-first: the queued entry is already visible straight off hydrate,
-    // still counted as queued (nothing has flushed yet).
+    // Cache-first: visible straight off hydrate, nothing flushed yet.
     expect(s().entries.map((e) => e.id)).toEqual(['e1']);
     expect(s().queueCount).toBe(1);
-    // The background refresh then merges the server entries in around it.
     await flush();
     expect(s().entries.map((e) => e.id)).toEqual(['e1', 'srv-1']);
   });
@@ -2486,22 +2379,17 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await s().hydrate();
-    await flush(); // the unreachable verdict now comes from the background refresh
+    await flush();
     expect(s().offline).toBe(true);
     expect(s().entries).toEqual([queuedEntry('e2')]);
     expect(s().queueCount).toBe(1);
   });
 
   it('restores an entity-store-only entry (never queued) when the server is unreachable at launch, without wiping the durable store', async () => {
-    // Regression: the network-unreachable catch branch used to build `entries`
-    // from the write queue alone and never read the entity store at all. Before
-    // expecting children, every local entry in server mode also lived on the
-    // queue, so that was harmless; an expecting child's entries (or any entry
-    // whose owner has since been confirmed born, see isHeldBackEntry) are the
-    // first whose only home is the entity store. Setting `entries` to a
-    // queue-only list gives `entries` a new reference, and the persistence
-    // subscription then writes that (queue-only) list straight over the
-    // durable store, permanently losing anything the queue didn't have.
+    // An expecting child's entries live ONLY in the entity store, never on the write
+    // queue. Building `entries` from the queue alone in the unreachable branch gives
+    // `entries` a new reference, and the persistence subscription then writes that
+    // queue-only list straight over the durable store, losing the rest for good.
     const storedOnly: Entry = { id: 'storedOnly', childId: 'c1', tags: [], type: 'note', time: NOW, text: 'entity-store only' };
     h.q = []; // nothing on the retry queue: this is NOT the queued-entry case above
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
@@ -2516,30 +2404,24 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
-    await flush(); // the unreachable verdict now comes from the background refresh
+    await flush();
 
     expect(s().offline).toBe(true);
     expect(s().entries.find((e) => e.id === 'storedOnly')).toBeDefined();
-    // Still durable: the persistence subscription's write reflects it too,
-    // rather than overwriting the entity store with a copy that dropped it.
     expect(vi.mocked(saveEntries).mock.calls.at(-1)?.[0]).toContainEqual(storedOnly);
   });
 
   it('Finding 3: children and measurements also survive hydrate when the server is unreachable at cold start (not just entries)', async () => {
-    // Regression: the network-unreachable catch branch restored `entries`
-    // from the entity store (fixed above) but restored neither `children`
-    // nor `measurements`, leaving them at whatever they were before hydrate()
-    // ran, empty on a real cold start. Home then renders the no-child card,
-    // and if the parent re-adds the baby, `saveChild` sets `children:
-    // [newChild]`, which the persistence subscription writes straight over
-    // the durable store, erasing the expecting child (and orphaning its
-    // notes) that was sitting right there in `loadEntities()`.
+    // Left empty on a cold start, Home renders the no-child card, and re-adding the
+    // baby makes `saveChild` set `children: [newChild]`, which the persistence
+    // subscription writes over the durable store, erasing the expecting child (and
+    // orphaning its notes) that `loadEntities()` had all along.
     const expectingChild: Child = { id: 'localDue', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
     const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
     const meas: Measurement = { id: 'measDue', childId: 'localDue', kind: 'weight', value: 3.2, date: NOW };
     h.q = [];
-    // Simulate a genuine fresh cold start: nothing yet in memory (the shared
-    // beforeEach seeds a non-empty `children` for other tests' convenience).
+    // A genuine fresh cold start: nothing yet in memory (the shared beforeEach
+    // seeds a non-empty `children` for other tests' convenience).
     useAppStore.setState({ children: [], entries: [], measurements: [] });
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
@@ -2553,24 +2435,18 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
-    await flush(); // the unreachable verdict now comes from the background refresh
+    await flush();
 
     expect(s().offline).toBe(true);
     expect(s().children.find((c) => c.id === 'localDue')).toBeDefined();
     expect(s().measurements.find((m) => m.id === 'measDue')).toBeDefined();
-    // Durable too: the persistence subscription's write must reflect the
-    // restored child, not overwrite the entity store with an empty array.
     expect(vi.mocked(saveChildren).mock.calls.at(-1)?.[0]).toContainEqual(expectingChild);
   });
 
   it('Fix 2: selectedChildId and lastFeed also survive hydrate when the server is unreachable at cold start', async () => {
-    // Regression: the previous fix (Finding 3, above) restored `children`,
-    // `entries` and `measurements` in this branch but not `selectedChildId`
-    // or `lastFeed`. With `children` now non-empty but `selectedChildId`
-    // stuck at '', `DashboardContent`'s `hasChild` reads true while
-    // `selectedChild` is undefined, so `selectedChild?.expected` is false and
-    // it falls through to the activity tiles for an unborn baby, which is the
-    // exact junk-data path hiding the tiles is meant to prevent.
+    // With `children` restored but `selectedChildId` stuck at '', `DashboardContent`'s
+    // `hasChild` reads true while `selectedChild` is undefined, so `expected` is false
+    // and it falls through to the activity tiles for an unborn baby.
     const expectingChild: Child = { id: 'localDue', first: 'Sky', last: '', birth: NOW + 30 * 86400000, color: '#eee', expected: true };
     const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
     h.q = [];
@@ -2587,13 +2463,12 @@ describe('queued entries survive killing the app', () => {
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
 
     await s().hydrate();
-    await flush(); // the unreachable verdict now comes from the background refresh
+    await flush();
 
     expect(s().offline).toBe(true);
     expect(s().selectedChildId).toBe('localDue');
-    // What DashboardContent actually branches on: with selection restored,
-    // the selected child resolves and is seen as expecting, not undefined
-    // falling through to the activity tiles.
+    // What DashboardContent actually branches on: the selected child resolves and
+    // is seen as expecting, not undefined falling through to the activity tiles.
     const selectedChild = s().children.find((c) => c.id === s().selectedChildId);
     expect(selectedChild).toBeDefined();
     expect(selectedChild?.expected).toBe(true);
@@ -2621,8 +2496,8 @@ describe('queued entries survive killing the app', () => {
     expect(h.q).toHaveLength(0);
     expect(s().entries).toHaveLength(1);
 
-    // the next refresh sees the entry server-side (in server shape/id) — the
-    // full `...data` replace in refresh() swaps the local copy for it.
+    // The next refresh sees it server-side: refresh()'s full `...data` replace
+    // swaps the local copy for the server one.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [mira],
       entries: [{ id: 'diaper-9', serverId: 9, childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
@@ -2637,15 +2512,10 @@ describe('queued entries survive killing the app', () => {
   });
 
   it('keeps a still-queued entry visible across a successful refresh', async () => {
-    // hydrate() merges the write queue back into `entries` so an offline
-    // create stays on screen; refresh() did not, so the first successful
-    // re-check replaced `entries` with server data alone and the row
-    // disappeared. The entry is not lost (it is still in the queue file, and
-    // the queue screen still lists it), but History stops showing it until
-    // some later load returns it from the server. The case that matters most
-    // is the entry that cannot flush at all, which is the one this test uses:
-    // it stays queued forever, so without the merge it is invisible forever,
-    // and it is exactly the row the "waiting to upload" clock exists for.
+    // refresh() must merge the write queue back into `entries` the way hydrate() does,
+    // or the first successful re-check replaces `entries` with server data alone and
+    // the row disappears from History. This entry never flushes, so without the merge
+    // it is invisible forever, and it is the row "waiting to upload" exists for.
     h.pushFails = true;
     h.q = [queuedEntry('e3')];
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
@@ -2707,9 +2577,8 @@ describe('offline-created children/measurements survive a cold hydrate (server m
   });
 
   it('keeps selectedChildId pointing at a local-only child when the server reload omits it', async () => {
-    // Regression: hydrate used to take `data.selectedChildId` unconditionally,
-    // so a cold start right after selecting an offline-only child would
-    // silently deselect it back to whatever the server preferred.
+    // Taking `data.selectedChildId` unconditionally silently deselects an offline-only
+    // child on the next cold start, back to whatever the server preferred.
     const localChild: Child = { id: 'localY', first: 'Persisted', last: 'Local', birth: NOW, color: '#abc' };
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
@@ -2729,7 +2598,7 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       measurements: [],
     });
     await s().hydrate();
-    await flush(); // let the background refresh finish its merge
+    await flush();
     expect(s().children.map((c) => c.id)).toEqual(['localY', 'c1']);
     expect(s().selectedChildId).toBe('localY');
     expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
@@ -2758,10 +2627,9 @@ describe('offline-created children/measurements survive a cold hydrate (server m
     expect(s().measurements.map((m) => m.id)).toEqual(['localN']);
   });
 
-  // Scope guard: entries must keep using the queue-only merge
-  // (mergeQueuedEntries), NOT mergeUnsynced — a serverId==null entry that was
-  // persisted but never queued (e.g. it already flushed) must NOT reappear via
-  // loadEntities, or a flushed entry would show up twice (brief's scope note).
+  // Entries use the queue-only merge (mergeQueuedEntries), NOT mergeUnsynced: a
+  // serverId==null entry that was persisted but never queued (it already flushed)
+  // must not reappear via loadEntities, or a flushed entry shows up twice.
   it('does NOT merge a persisted serverId==null entry that is not in the queue', async () => {
     const persistedEntry: Entry = {
       id: 'persisted-e',
@@ -2791,18 +2659,15 @@ describe('offline-created children/measurements survive a cold hydrate (server m
       measurements: [],
     });
     await s().hydrate();
-    await flush(); // let the background refresh finish its merge
+    await flush();
     expect(s().entries.map((e) => e.id)).not.toContain('persisted-e');
   });
 });
 
-// F6: cold start used to block the splash on the complete server load (and
-// `request()` had no timeout underneath it), so away from the home LAN, where
-// the server address black-holes rather than refusing, every cold start sat
-// on the splash until the platform socket gave up. Cache-first instead:
-// hydrate populates state from the durable entity store and finishes
-// immediately, then hands the fetch-reconcile-merge to a background
-// `refresh()`, which already owns the 401 and unreachable outcomes.
+// Blocking the splash on the complete server load strands every cold start away from
+// the home LAN, where the server address black-holes rather than refusing. Cache-first
+// instead: hydrate populates state from the durable entity store and finishes
+// immediately, handing the fetch-reconcile-merge to a background `refresh()`.
 describe('cache-first hydrate (server mode)', () => {
   const storedChild: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
   const storedEntry: Entry = { id: 'stored-1', childId: 'c1', type: 'note', time: NOW - 60 * M, text: 'from the entity store', tags: [] };
@@ -2824,7 +2689,6 @@ describe('cache-first hydrate (server mode)', () => {
 
     await s().hydrate();
 
-    // hydrate resolved while the server load is still hanging: the UI can render.
     expect(s().hydrating).toBe(false);
     expect(s().connected).toBe(true);
     expect(s().offline).toBe(false); // nothing failed yet: refresh decides offline, not hydrate
@@ -2833,24 +2697,17 @@ describe('cache-first hydrate (server mode)', () => {
     expect(s().selectedChildId).toBe('c1');
     expect(s().lastFeed).toEqual({ c1: { feedType: 'formula', method: 'bottle' } });
 
-    // The background refresh was fired and nominated the persisted selection:
-    // children were populated from the entity store BEFORE the refresh read
-    // them, so the selection survives cache-first. Since 0.15.0 this id no
-    // longer decides WHICH children are fetched (all of them are), only which
-    // one the answer nominates, but the ordering still matters: a refresh that
-    // read an empty child list would nominate the server's first child and
-    // silently move the selection off the persisted one.
+    // The background refresh nominated the persisted selection: children were populated
+    // from the entity store BEFORE the refresh read them. Ordering matters even though
+    // the id no longer decides WHICH children are fetched: a refresh that read an empty
+    // child list nominates the server's first child and moves the selection off.
     await flush();
     expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[1]).toBe(501);
 
-    // Let the hanging load settle (refreshInFlight is module state: a test
-    // that leaves it pending would wedge every later refresh in this file)
-    // and check the refresh pipeline merged the server answer over the cache.
-    // Every per-type request answered (`incompleteSlices` names no slice at
-    // all), so this is a WHOLE answer and the cached note it does not contain
-    // was genuinely deleted server-side: it must not survive. The degraded twin
-    // of this case is the test below, where the same shrunken list must NOT be
-    // believed.
+    // Let the hanging load settle (refreshInFlight is module state: a test that leaves
+    // it pending wedges every later refresh in this file). Every per-type request
+    // answered (`incompleteSlices` names no slice), so this is a WHOLE answer and the
+    // cached note it omits was genuinely deleted server-side: it must not survive.
     resolveLoad({
       treatments: [],
       children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
@@ -2868,13 +2725,10 @@ describe('cache-first hydrate (server mode)', () => {
   });
 
   it('keeps the cached entries when the background refresh came back INCOMPLETE', async () => {
-    // The twin of the case above, and the live data-loss one: the cold start
-    // opens on the cached note, the background refresh's notes request times
-    // out, and its answer arrives without the note. Believing it drops the note
-    // from state, and the persistence subscription then removes the month chunk
-    // that held it, so the next cold start has nothing to open on either. The
-    // diaper is in a slice that DID answer, so it lands as usual: only the
-    // emptied slices are held back from the answer.
+    // The cold start opens on the cached note, the background refresh's notes
+    // request times out, and its answer arrives without the note. Believing it
+    // drops the note from state, and the persistence subscription then removes
+    // the month chunk that held it.
     useAppStore.setState({ hydrating: true, connection: null, connected: false, children: [], entries: [], selectedChildId: '' });
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
@@ -2918,12 +2772,9 @@ describe('cache-first hydrate (server mode)', () => {
 
     await s().hydrate();
 
-    // hydrate itself never sees the 401: it resolved on the cached view.
     expect(s().hydrating).toBe(false);
     expect(s().connected).toBe(true);
 
-    // The refresh it fired lands the 401 a moment later: connection cleared,
-    // reconnect flow takes over (the same UX a warm-session 401 already has).
     await flush();
     expect(s().connection).toBeNull();
     expect(s().connected).toBe(false);
@@ -2931,8 +2782,8 @@ describe('cache-first hydrate (server mode)', () => {
   });
 
   it('a fresh-connect cold start with an empty entity store still opens immediately', async () => {
-    // The accepted trade: nothing cached yet means a briefly empty dashboard
-    // while the first refresh runs, never a splash held hostage by the fetch.
+    // The accepted trade: nothing cached yet means a briefly empty dashboard while
+    // the first refresh runs, never a splash held hostage by the fetch.
     let rejectLoad!: (e: unknown) => void;
     useAppStore.setState({ hydrating: true, connection: null, connected: false });
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
@@ -2945,8 +2796,7 @@ describe('cache-first hydrate (server mode)', () => {
     expect(s().children).toEqual([]);
     expect(s().entries).toEqual([]);
 
-    // Settle the hanging load (refreshInFlight is module state, see above);
-    // an unreachable answer keeps this test's subject the empty cold open.
+    // Settle the hanging load (refreshInFlight is module state, see above).
     rejectLoad(new Error('network'));
     await flush();
     expect(s().offline).toBe(true);
@@ -2960,8 +2810,8 @@ describe('new timers are added to the bottom of the list', () => {
     useAppStore.setState({ timers: [existing('t-old')] });
     s().startQuickTimer();
     expect(s().timers).toHaveLength(2);
-    expect(s().timers[0].id).toBe('t-old'); // existing timer stays on top
-    expect(s().timers[1].id).not.toBe('t-old'); // new timer is last
+    expect(s().timers[0].id).toBe('t-old');
+    expect(s().timers[1].id).not.toBe('t-old');
   });
 
   it('a live-interval save appends the running timer after existing ones', () => {
@@ -2971,7 +2821,7 @@ describe('new timers are added to the bottom of the list', () => {
     s().save();
     expect(s().timers).toHaveLength(2);
     expect(s().timers[0].id).toBe('t-old');
-    expect(s().timers[1].saveAs).toBe('feeding'); // newest at the bottom
+    expect(s().timers[1].saveAs).toBe('feeding');
   });
 });
 
@@ -2983,10 +2833,9 @@ describe('edit / delete entry', () => {
       ],
     });
 
-  // Ordinary server-mode edit/delete behaviour needs 'c1' synced: updating an
-  // entry (and re-creating one via undoDelete) is gated on the owning
-  // child's serverId, unlike deleting/offline-editing which key off the
-  // entry's own serverId and so don't care.
+  // Ordinary server-mode edit/delete needs 'c1' synced: updating an entry (and
+  // re-creating one via undoDelete) is gated on the owning child's serverId, unlike
+  // deleting and offline-editing, which key off the entry's own.
   beforeEach(() => {
     useAppStore.setState({ children: [SYNCED_C1] });
   });
@@ -3004,7 +2853,7 @@ describe('edit / delete entry', () => {
     expect(e.id).toBe('feeding-1');
     expect(e.method).toBe('right');
     expect(e.start).toBe(NOW - 30 * M);
-    expect(e.end).toBe(NOW - 10 * M); // absolute time preserved (no drift)
+    expect(e.end).toBe(NOW - 10 * M);
     expect(s().editingId).toBeNull();
     await flush();
     expect(h.updated).toHaveLength(1);
@@ -3034,7 +2883,7 @@ describe('edit / delete entry', () => {
     s().setTE({ method: 'right' });
     s().save();
     await flush();
-    expect(h.updated).toHaveLength(0); // no direct server call while offline
+    expect(h.updated).toHaveLength(0);
     expect(h.pendingOps).toHaveLength(1);
     expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'entry' });
     expect((h.pendingOps[0] as { payload: Entry }).payload.id).toBe('feeding-1');
@@ -3054,9 +2903,9 @@ describe('edit / delete entry', () => {
     seedFeeding();
     useAppStore.setState({ offline: true });
     s().deleteEntry('feeding-1');
-    expect(s().entries).toHaveLength(0); // still removed locally
+    expect(s().entries).toHaveLength(0);
     await flush();
-    expect(h.deleted).toHaveLength(0); // no direct server call while offline
+    expect(h.deleted).toHaveLength(0);
     expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'entry', entryType: 'feeding', serverId: 1 }]);
   });
 
@@ -3067,14 +2916,14 @@ describe('edit / delete entry', () => {
     expect(s().toast).toBe('Deleted');
     expect(s().toastAction?.label).toBe('Undo');
     await flush();
-    expect(h.deleted).toHaveLength(1); // the delete reached the server
+    expect(h.deleted).toHaveLength(1);
 
     s().undoDelete();
     expect(s().entries).toHaveLength(1);
     expect(s().entries[0].id).toBe('feeding-1');
     expect(s().toast).toBeNull();
     await flush();
-    expect(h.pushed).toHaveLength(1); // re-created server-side
+    expect(h.pushed).toHaveLength(1);
   });
 
   it('undoDelete restores locally without a server round-trip for an offline delete', async () => {
@@ -3083,12 +2932,12 @@ describe('edit / delete entry', () => {
     s().deleteEntry('feeding-1');
     expect(s().entries).toHaveLength(0);
     await flush();
-    expect(h.deleted).toHaveLength(0); // offline: the server was never touched
+    expect(h.deleted).toHaveLength(0);
 
     s().undoDelete();
     expect(s().entries).toHaveLength(1);
     await flush();
-    expect(h.pushed).toHaveLength(0); // nothing to re-create
+    expect(h.pushed).toHaveLength(0);
   });
 
   it('undoDelete cancels the queued offline pending-delete op so it does not replay on reconnect', async () => {
@@ -3102,17 +2951,15 @@ describe('edit / delete entry', () => {
     s().undoDelete();
     expect(s().entries).toHaveLength(1);
     await flush();
-    // The queued delete op must be removed, or a later flushPendingOps would
-    // delete the just-restored entry from the server anyway.
+    // Or a later flushPendingOps deletes the just-restored entry from the server.
     expect(h.pendingOps).toHaveLength(0);
   });
 });
 
 describe('editing a record keeps it with the child it belongs to', () => {
-  // A record belongs to whoever it was about, not to whoever happens to be
-  // selected while it is edited. Editing stamped the SELECTED child onto it,
-  // and since the edit path also PATCHes `child:`, that moved the server row
-  // to the sibling too.
+  // A record belongs to whoever it was about, not to whoever happens to be selected
+  // while it is edited. Stamping the selected child onto it also PATCHes `child:`,
+  // which moves the server row to the sibling too.
   const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
   const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
   const miraFeed: Entry = { id: 'f1', serverId: 11, childId: 'localMira', tags: [], type: 'feeding', start: NOW - 30 * M, end: NOW - 10 * M, feedType: 'breast', method: 'left', amount: null };
@@ -3162,9 +3009,8 @@ describe('editing a record keeps it with the child it belongs to', () => {
 });
 
 describe('the log sheet owns the child it is logging for', () => {
-  // The draft used to read the GLOBAL selection at save time, so anything that
-  // moved the selection under an open sheet re-aimed the draft. Once the sheet
-  // carries its own target, the selection moving underneath is irrelevant.
+  // The sheet carries its own target, so the global selection moving underneath an
+  // open draft is irrelevant. Reading the selection at save time re-aims the draft.
   const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
   const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
 
@@ -3178,9 +3024,8 @@ describe('the log sheet owns the child it is logging for', () => {
   });
 
   it('a fresh draft files against the sheet target, not a selection that moved under it', () => {
-    // A warm notification tap for a sibling moves the selection with no action
-    // on the switcher, and the sheet is a root overlay that survives the
-    // navigation, so the draft really does stay open over the new selection.
+    // A warm notification tap for a sibling moves the selection with no action on the
+    // switcher, and the sheet is a root overlay that survives the navigation.
     s().openSheet('diaper');
     useAppStore.setState({ selectedChildId: 'c2' });
     s().save();
@@ -3239,8 +3084,8 @@ describe('the log sheet owns the child it is logging for', () => {
   });
 
   it('expandMedicationLog keeps the target, since it replaces `sheet` wholesale', () => {
-    // `sheet` is never spread, so a target living on it would silently reset
-    // here. This is why the target is its own top-level field.
+    // `sheet` is never spread, so a target living on it would silently reset here.
+    // That is why the target is its own top-level field.
     s().openSheet('medication');
     s().setSheetChildren(['c2']);
     s().expandMedicationLog();
@@ -3248,8 +3093,8 @@ describe('the log sheet owns the child it is logging for', () => {
   });
 
   it('a sheet opened without a seeded target still falls back to the selection', () => {
-    // Nothing in the app opens a sheet this way, but `sheetChildIds` is state
-    // and an empty list has to keep meaning "whoever the old rule picked".
+    // Nothing in the app opens a sheet this way, but an empty `sheetChildIds` has to
+    // keep meaning "whoever the old rule picked".
     useAppStore.setState({ sheet: { type: 'diaper' }, sheetChildIds: [], te: { shape: 'point', tags: [], agoMin: 0 } });
     s().save();
     expect(s().entries[0].childId).toBe('c1');
@@ -3257,9 +3102,9 @@ describe('the log sheet owns the child it is logging for', () => {
 });
 
 describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
-  // `wash` is the one child-scoped SEED the sheet computes at open (from that
-  // child's own rhythm and bath history), so re-aiming has to move it: leaving
-  // it behind offers Mira's suggestion as Ivo's, and the sheet saves it.
+  // `wash` is the one child-scoped SEED the sheet computes at open (from that child's
+  // own rhythm and bath history), so re-aiming has to move it: left behind, it offers
+  // Mira's suggestion as Ivo's and the sheet saves it.
   const mira: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
   const ivo: Child = { id: 'c2', serverId: 502, first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
   // Bathed fully an hour ago, so the full-bath clock is reset and only a quick
@@ -3287,8 +3132,7 @@ describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
   });
 
   it('never overwrites a wash the parent already chose', () => {
-    // A suggestion must not overrule a decision. Both children suggest `full`
-    // here, so only the guard can keep the chosen `quick`.
+    // Both children suggest `full` here, so only the guard can keep the chosen `quick`.
     useAppStore.setState({ entries: [] });
     s().openSheet('bath');
     expect(s().te.wash).toBe('full');
@@ -3298,8 +3142,7 @@ describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
   });
 
   it('never re-seeds an EDIT, whose wash is the record\'s own', () => {
-    // Re-aiming an edit moves the record; it must not also rewrite what the
-    // record says happened.
+    // Re-aiming an edit moves the record; it must not rewrite what the record says.
     useAppStore.setState({ entries: [{ ...miraBath, wash: 'quick' }] });
     s().openEdit('b1');
     expect(s().te.wash).toBe('quick');
@@ -3318,10 +3161,8 @@ describe('re-aiming a bath sheet re-seeds the suggested wash', () => {
 describe('re-aiming a feeding sheet re-seeds what that child was last fed', () => {
   const mira: Child = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 200 * 86400000, color: '#fff' };
   const ivo: Child = { id: 'c2', first: 'Ivo', last: 'O', birth: NOW - 200 * 86400000, color: '#eee' };
-  // Two genuinely different feeders, so all three seeds disagree and no
-  // coincidence can pass this: Mira takes the breast (last on the left, so her
-  // next is the right, and her method alternates to 'right'), Ivo takes a
-  // bottle (no side at all, so his start side is the opening default).
+  // Two genuinely different feeders, so all three seeds disagree and no coincidence can
+  // pass: Mira takes the breast (last on the left), Ivo a bottle (no side at all).
   const miraFeed: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
   const ivoFeed: Entry = { id: 'f2', childId: 'c2', type: 'feeding', start: NOW - 90 * M, end: NOW - 70 * M, feedType: 'formula', method: 'bottle', amount: 120, tags: [] };
 
@@ -3365,8 +3206,7 @@ describe('re-aiming a feeding sheet re-seeds what that child was last fed', () =
   });
 
   it('still follows for the seeds the parent has NOT touched', () => {
-    // Per field, not all-or-nothing: one deliberate choice must not freeze the
-    // other two on the previous child's history.
+    // Per field, not all-or-nothing: one deliberate choice must not freeze the rest.
     s().openSheet('feeding');
     s().setTE({ feedType: 'solid' });
     s().setSheetChildren(['c2']);
@@ -3381,11 +3221,9 @@ describe('re-aiming a feeding sheet re-seeds what that child was last fed', () =
   });
 
   it('never re-seeds a timer-edit sheet, whose values are the timer\'s own', () => {
-    // `tm.feedType`/`tm.method` are choices the parent made when they started
-    // the timer, and nothing flags them as edited, so a re-seed would silently
-    // overwrite them. The picker hides itself on a timer-edit sheet
-    // (`canRetarget` in LogSheet), which makes this unreachable through the UI;
-    // this is the store holding the same rule.
+    // `tm.feedType`/`tm.method` are choices the parent made when they started the timer,
+    // and nothing flags them as edited, so a re-seed would silently overwrite them. The
+    // picker hides on a timer-edit sheet; the store holds the same rule anyway.
     useAppStore.setState({
       timers: [{ id: 't9', childId: 'c1', activity: 'feeding', name: 'Feed', start: NOW - 5 * M, saveAs: 'feeding', feedType: 'solid', method: 'self' }],
     });
@@ -3436,8 +3274,8 @@ describe('logging for more than one child at once', () => {
   });
 
   it('toggleSheetChild refuses a child the picker could never have offered', () => {
-    // An expecting child added as a target would fan out invisibly: no chip
-    // would show it, so nothing could take it back off again.
+    // An expecting child added as a target would fan out invisibly: no chip would
+    // show it, so nothing could take it back off again.
     useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
     s().openSheet('diaper');
     s().toggleSheetChild('c2');
@@ -3457,8 +3295,7 @@ describe('logging for more than one child at once', () => {
   });
 
   it('gives each entry its OWN id', () => {
-    // Both entries used to land with the SAME id, and everything id-keyed then
-    // hit both. See where `built` is assembled in `save()`.
+    // Sharing one id makes everything id-keyed (edit, delete, undo) hit both.
     bothDiapers();
     const ids = s().entries.map((e) => e.id);
     expect(new Set(ids).size).toBe(2);
@@ -3481,7 +3318,7 @@ describe('logging for more than one child at once', () => {
     useAppStore.setState({ offline: true });
     bothDiapers();
     await flush();
-    // One batched call, not one per child. See `enqueueEntries` for the
+    // One batched call, not one per child: see `enqueueEntries` for the
     // load-modify-save race that turns the difference into a lost entry.
     expect(vi.mocked(enqueueEntries)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(enqueueEntry)).not.toHaveBeenCalled();
@@ -3491,9 +3328,6 @@ describe('logging for more than one child at once', () => {
   });
 
   it('writes ONE lastFeed draft, filed under every child it was logged for', () => {
-    // One draft, one write. It lands under both targets because "what was this
-    // child's last feed like" is now true of each of them, and leaving the
-    // sibling's entry stale is the leak the map exists to close.
     s().openSheet('feeding');
     s().toggleSheetChild('c2');
     s().setTE({ feedType: 'formula', method: 'bottle' });
@@ -3554,8 +3388,7 @@ describe('logging for more than one child at once', () => {
   });
 
   it('refuses to fan out an activity off the allow-list', () => {
-    // Belt and braces behind the UI gate: duplicating a pumping session would
-    // double-count the milk in every aggregate built on it.
+    // Duplicating a pumping session double-counts the milk in every aggregate.
     s().openSheet('pumping');
     useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
     s().save();
@@ -3564,10 +3397,9 @@ describe('logging for more than one child at once', () => {
   });
 
   it('routes a mixed batch per child: a withheld sibling stays local', async () => {
-    // `commitWrites` routes each entry on its OWN child, so a batch genuinely
-    // takes several paths at once. The target is set directly rather than
-    // through the picker, which refuses an expecting child: the subject here is
-    // what the write path does with such a batch, however one arose.
+    // `commitWrites` routes each entry on its OWN child, so a batch genuinely takes
+    // several paths at once. The target is set directly rather than through the picker,
+    // which refuses an expecting child: the subject here is the write path.
     useAppStore.setState({ children: [mira, { ...ivo, serverId: undefined, expected: true }] });
     s().openSheet('diaper');
     useAppStore.setState({ sheetChildIds: ['c1', 'c2'] });
@@ -3581,12 +3413,10 @@ describe('logging for more than one child at once', () => {
 });
 
 describe('editing a still-queued entry rewrites its queued copy', () => {
-  // The offline write queue file is what `flushQueue` pushes, and it never
-  // consults `entries`. An edit that only updated the in-memory copy left the
-  // stale pre-edit version sitting on the file: the reconnect flush POSTed
-  // that stale copy, and the next refresh() then dropped the local edit
-  // (serverId null, not held back) in favor of the server's row, silently
-  // reverting the user's correction.
+  // The offline write queue file is what `flushQueue` pushes, and it never consults
+  // `entries`. An edit that only updates the in-memory copy leaves the stale pre-edit
+  // version on file: the reconnect flush POSTs that, and the next refresh() drops the
+  // local edit for the server's row.
 
   it('save() rewrites the queued copy in place, same position, and re-mirrors the queue', async () => {
     useAppStore.setState({ offline: true });
@@ -3596,9 +3426,8 @@ describe('editing a still-queued entry rewrites its queued copy', () => {
     await flush();
     expect(h.q).toHaveLength(1);
     const id = (h.q[0] as Entry).id;
-    // A second write queued behind it, so "in place" is observable as
-    // position: a remove-and-append rewrite would move the edit to the back
-    // and reorder the reconnect upload.
+    // A second write queued behind it makes "in place" observable as position: a
+    // remove-and-append rewrite would move the edit to the back of the upload.
     const later: Entry = { id: 'q-later', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
     h.q = [...h.q, later];
 
@@ -3610,8 +3439,8 @@ describe('editing a still-queued entry rewrites its queued copy', () => {
     expect(h.q).toHaveLength(2);
     expect(h.q[0]).toMatchObject({ id, type: 'note', text: 'first words' });
     expect((h.q[1] as Entry).id).toBe('q-later');
-    // The mirror is refreshed from the rewritten file, so History's queued
-    // markers and the banner count stay truthful.
+    // Refreshed from the rewritten file, so History's markers and the banner
+    // count stay truthful.
     expect(s().queuedIds).toEqual([id, 'q-later']);
     expect(s().queueCount).toBe(2);
   });
@@ -3656,7 +3485,7 @@ describe('editing a still-queued entry rewrites its queued copy', () => {
     expect(h.q).toEqual([other]);
     expect(s().queuedIds).toEqual(['q-other']);
     expect(s().queueCount).toBe(1);
-    expect(h.updated).toHaveLength(1); // the ordinary online update still went out
+    expect(h.updated).toHaveLength(1);
   });
 
   it('editMilestone on a queued milestone rewrites the queued copy too', async () => {
@@ -3675,11 +3504,10 @@ describe('editing a still-queued entry rewrites its queued copy', () => {
 });
 
 describe('"Still ongoing" on a logged entry converts it into a live timer', () => {
-  // A finished entry the user marks as still running is not an entry any more.
-  // It used to be patched to `end: null`, which is not a timer at all and which
-  // the API client pushes as a ZERO-LENGTH record (`end: entry.end ?? start`),
-  // so the next refresh overwrote the local copy with a nonsense one. The entry
-  // must be removed and replaced by a running timer instead.
+  // A finished entry the user marks as still running is not an entry any more, so it
+  // must be removed and replaced by a running timer. Patching it to `end: null` is not a
+  // timer at all: the API client pushes that as a ZERO-LENGTH record (`end: entry.end ??
+  // start`) that the next refresh copies back over the local one.
   const sleepEntry = (over: Partial<Extract<Entry, { type: 'sleep' }>> = {}): Entry => ({
     id: 'sleep-1',
     serverId: 7,
@@ -3708,7 +3536,7 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
     expect(s().entries).toHaveLength(0); // no `end: null` entry left behind
     expect(s().timers).toHaveLength(1);
     expect(s().timers[0].saveAs).toBe('sleep');
-    expect(s().timers[0].start).toBe(NOW - 90 * M); // the original start, exactly
+    expect(s().timers[0].start).toBe(NOW - 90 * M);
     expect(s().sheet).toBeNull();
     expect(s().editingId).toBeNull();
   });
@@ -3770,21 +3598,21 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
     expect(s().toastAction?.label).toBe('Undo');
 
     s().toastAction?.run();
-    expect(s().timers).toHaveLength(0); // the timer is gone
-    expect(s().entries.map((e) => e.id)).toEqual(['sleep-1', 'other']); // restored in place
+    expect(s().timers).toHaveLength(0);
+    expect(s().entries.map((e) => e.id)).toEqual(['sleep-1', 'other']);
     await flush();
-    expect(h.pushed).toHaveLength(1); // the server copy is re-created
-    expect(h.timerDeleted).toEqual([555]); // and the server timer is discarded
+    expect(h.pushed).toHaveLength(1);
+    expect(h.timerDeleted).toEqual([555]);
   });
 
   it('keeps the entry\'s original start when only the END was nudged in the same sheet session', () => {
-    // `openEdit` leaves the start DERIVED (end − lasted), so nudging the end
+    // `openEdit` leaves the start DERIVED (end minus lasted), so nudging the end
     // silently slides it. The recorded start is the only exact answer.
     useAppStore.setState({ entries: [sleepEntry()] });
     s().openEdit('sleep-1');
     s().setEndedAbs(NOW - 5 * M); // user fiddles with the end first
     s().setOngoing();
-    expect(s().te.startAbs).toBe(NOW - 90 * M); // the sheet shows the true start too
+    expect(s().te.startAbs).toBe(NOW - 90 * M);
     s().save();
     expect(s().timers[0].start).toBe(NOW - 90 * M);
   });
@@ -3854,7 +3682,7 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
 
     convert(id);
     await flush();
-    expect(h.q).toHaveLength(0); // pulled off the queue
+    expect(h.q).toHaveLength(0);
     expect(s().queueCount).toBe(0);
 
     // ...and a reconnect flush must not re-create it alongside the timer.
@@ -3880,12 +3708,12 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
     s().toastAction?.run();
     await flush();
     expect(s().entries).toHaveLength(1);
-    expect(h.q).toHaveLength(1); // still unsent, exactly as it was
+    expect(h.q).toHaveLength(1);
   });
 
   it('cleans up the orphan when the entry\'s create POST lands after the conversion', async () => {
-    // commitWrite's push is fire-and-forget: converting before it resolves
-    // leaves serverId null, so no delete goes out at conversion time.
+    // commitWrite's push is fire-and-forget: converting before it resolves leaves
+    // serverId null, so no delete goes out at conversion time.
     s().openSheet('sleep');
     s().setLasted(30);
     s().save(); // POST in flight, serverId not stamped yet
@@ -3894,7 +3722,7 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
 
     convert(id);
     await flush();
-    expect(h.deleted).toEqual([{ type: 'sleep', id: 999 }]); // orphan removed
+    expect(h.deleted).toEqual([{ type: 'sleep', id: 999 }]);
     expect(s().entries).toHaveLength(0);
   });
 
@@ -3908,9 +3736,8 @@ describe('"Still ongoing" on a logged entry converts it into a live timer', () =
 });
 
 describe('measurements', () => {
-  // Ordinary server-mode measurement create/update needs 'c1' synced; the
-  // offline tests below key off the measurement's own serverId instead, so
-  // they don't care either way.
+  // Ordinary server-mode measurement create/update needs 'c1' synced; the offline
+  // tests below key off the measurement's own serverId instead.
   beforeEach(() => {
     useAppStore.setState({ children: [SYNCED_C1] });
   });
@@ -3949,7 +3776,7 @@ describe('measurements', () => {
     s().openEditMeasurement('weight-1');
     s().saveMeasurement(6.0, NOW);
     await flush();
-    expect(h.measUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.measUpdated).toHaveLength(0);
     expect(h.pendingOps).toHaveLength(1);
     expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'measurement' });
     expect((h.pendingOps[0] as { payload: Measurement }).payload.id).toBe('weight-1');
@@ -3961,9 +3788,9 @@ describe('measurements', () => {
       measurements: [{ id: 'weight-1', serverId: 1, childId: 'c1', kind: 'weight', value: 5.0, date: NOW }],
     });
     s().deleteMeasurement('weight-1');
-    expect(s().measurements).toHaveLength(0); // still removed locally
+    expect(s().measurements).toHaveLength(0);
     await flush();
-    expect(h.measDeleted).toHaveLength(0); // no direct server call while offline
+    expect(h.measDeleted).toHaveLength(0);
     expect(h.pendingOps).toEqual([{ op: 'delete', entity: 'measurement', kind: 'weight', serverId: 1 }]);
   });
 });
@@ -4014,25 +3841,22 @@ describe('children', () => {
     const localId = created.id;
     await flush();
     expect(h.childPushed).toHaveLength(1);
-    // the local id is NOT rewritten to the server id, and selection keeps
-    // following it: entries/measurements reference this id, and rewriting it
-    // would orphan them (the bug this whole design exists to prevent).
+    // The local id is NOT rewritten to the server id: entries and measurements
+    // reference it, and rewriting it orphans them.
     expect(s().children[1].id).toBe(localId);
     expect(s().selectedChildId).toBe(localId);
-    // serverId is stamped instead (like entries/measurements) so server-child
-    // ops (update / delete / sync) recognise it before the next refresh.
+    // serverId is stamped instead, so update/delete/sync recognise it before the
+    // next refresh.
     expect(s().children[1].serverId).toBe(777);
-    // The slug is stamped from the same create response. Baby Buddy keys the
-    // child endpoints by slug, so without this a child created this session
-    // could not be renamed or deleted until the next refresh filled it in.
+    // Baby Buddy keys the child endpoints by slug, so without stamping it from the
+    // create response a child made this session cannot be renamed or deleted.
     expect(s().children[1].slug).toBe(SERVER_SLUG);
   });
 
   it('a child created online can immediately be deleted on the server (no resurrection)', async () => {
-    // Regression: saveChild must stamp serverId AND slug on create, else
-    // deleteChild would only remove the child locally (serverId gate) or address
-    // it by an id Baby Buddy 404s on (slug lookup), and either way it would
-    // reappear on the next refresh.
+    // saveChild must stamp serverId AND slug on create, else deleteChild either removes
+    // the child locally only (serverId gate) or addresses it by an id Baby Buddy 404s
+    // on, and it reappears on the next refresh.
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW });
     await flush();
@@ -4047,10 +3871,8 @@ describe('children', () => {
   });
 
   it('renaming a child re-stamps the slug, which Baby Buddy moves with the name', async () => {
-    // The slug is derived from the name server-side, so a rename changes it
-    // (confirmed against a live server). Holding the OLD slug would 404 the
-    // next rename or delete, resurrecting the child: the reported bug, one
-    // rename removed.
+    // The slug is derived from the name server-side, so a rename changes it. Holding
+    // the OLD slug 404s the next rename or delete, resurrecting the child.
     useAppStore.setState({
       children: [{ id: 'c1', serverId: 5, first: 'Mira', last: 'D', birth: NOW, color: '#fff', slug: 'mira-d' }],
       selectedChildId: 'c1',
@@ -4063,8 +3885,8 @@ describe('children', () => {
   });
 
   it('saveChild picks a tint no sibling wears, not one keyed to the list length', async () => {
-    // The shape deleting the middle of three children leaves behind. Picking by
-    // `children.length` here would hand out CHILD_COLORS[2] a second time.
+    // The shape deleting the middle of three children leaves behind: picking by
+    // `children.length` would hand out CHILD_COLORS[2] a second time.
     useAppStore.setState({
       children: [
         { id: 'c1', first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[0] },
@@ -4139,7 +3961,7 @@ describe('children', () => {
       const created = s().children[s().children.length - 1];
       expect(created.gender).toBe('boy');
       // The note references the child by SERVER id, so nothing is written until
-      // pushChildToServer resolves with one (777 in the repository mock).
+      // pushChildToServer resolves with one.
       await flush();
       expect(h.genderWritten).toEqual([{ childServerId: 777, gender: 'boy' }]);
     });
@@ -4167,7 +3989,6 @@ describe('children', () => {
       s().openEditChild('c1');
       s().saveChild({ first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, gender: 'boy' });
       await flush();
-      // Offline: one child-update op carrying the gender, no direct write.
       expect(h.genderWritten).toHaveLength(0);
       expect(h.pendingOps).toContainEqual({
         op: 'update',
@@ -4186,7 +4007,6 @@ describe('children', () => {
       ];
       h.genderWriteFails = true;
       await s().flushPendingOps();
-      // A retryable failure leaves the op on the log: nothing removes it.
       expect(h.pendingOps).toHaveLength(1);
     });
   });
@@ -4199,9 +4019,9 @@ describe('children', () => {
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'Updated', birth: NOW - 100 * 86400000 });
 
-    expect(s().children[0].last).toBe('Updated'); // still applied locally
+    expect(s().children[0].last).toBe('Updated');
     await flush();
-    expect(h.childUpdated).toHaveLength(0); // no direct server call while offline
+    expect(h.childUpdated).toHaveLength(0);
     expect(h.pendingOps).toHaveLength(1);
     expect(h.pendingOps[0]).toMatchObject({ op: 'update', entity: 'child' });
     expect((h.pendingOps[0] as { payload: Child }).payload.id).toBe('c1');
@@ -4234,10 +4054,10 @@ describe('children', () => {
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
 
-    expect(s().children[1].picture).toBe('file:///tmp/pick.jpg'); // optimistic local URI
+    expect(s().children[1].picture).toBe('file:///tmp/pick.jpg');
     await flush();
     expect(h.childPushChange[0]).toEqual({ kind: 'set', photo });
-    expect(s().children[1].picture).toBe(SERVER_PIC); // swapped to durable URL
+    expect(s().children[1].picture).toBe(SERVER_PIC);
   });
 
   it('saveChild edit with a photo swaps the local URI for the server URL', async () => {
@@ -4271,12 +4091,9 @@ describe('children', () => {
     expect(h.childUpdateChange[0]).toEqual({ kind: 'none' });
   });
 
-  // The reported symptom of the native photo bug: the upload failed, the sheet
-  // closed on an "Updated" toast, and nothing ever said otherwise, because the
-  // rejection went into a bare `.catch(() => {})`. An online edit is not queued
-  // anywhere (only an OFFLINE one records a pending op), so a failure here really
-  // is lost work and has to be said out loud. Mirrors deleteChild's
-  // "Could not delete X".
+  // An online edit is not queued anywhere (only an OFFLINE one records a pending op),
+  // so a failure here is lost work. Swallowing the rejection leaves the sheet closed
+  // on an "Updated" toast that is not true.
   it('a failed child update says so instead of leaving the success toast standing', async () => {
     useAppStore.setState({ children: [SYNCED_C1], toast: null });
     vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
@@ -4288,10 +4105,9 @@ describe('children', () => {
     expect(s().toast).toBe('Could not save Mira');
   });
 
-  // The create twin of the case above. The local child itself survives a failed
-  // POST and the next flush retries it, but a photo picked in the same save does
-  // not ride that retry (`buildUploadDeps` pushes children with no PhotoChange),
-  // so the failure still costs something and still has to be said.
+  // The create twin of the case above. The local child survives a failed POST and the
+  // next flush retries it, but a photo picked in the same save does not ride that retry
+  // (`buildUploadDeps` pushes children with no PhotoChange), so the failure costs.
   it('a failed child create says so instead of leaving the success toast standing', async () => {
     vi.mocked(pushChildToServer).mockRejectedValueOnce(new Error('net'));
     s().openAddChild();
@@ -4303,11 +4119,10 @@ describe('children', () => {
   });
 
   it('a photo PATCH that stores nothing leaves the local URI standing on the response', async () => {
-    // A 200 carrying `picture: null` for a photo we just uploaded means the
-    // server did not store it. Trusting it destroys the one copy we still have.
-    // Only the response is guarded: `reconcileChildren` takes the server's
-    // `picture` wholesale, so the next refresh blanks it anyway. Worth having
-    // regardless, since it keeps the avatar until then instead of at once.
+    // A 200 carrying `picture: null` for a photo we just uploaded means the server did
+    // not store it, and trusting it destroys the one copy we still have. Only the
+    // response is guarded: `reconcileChildren` takes the server's `picture` wholesale,
+    // so the next refresh blanks it, but the avatar survives until then.
     vi.mocked(updateChildOnServer).mockResolvedValueOnce({ picture: null, slug: SERVER_SLUG });
     const photo = { uri: 'file:///tmp/e.jpg', name: 'e.jpg', type: 'image/jpeg', durable: true };
     s().openEditChild('c1');
@@ -4355,8 +4170,8 @@ describe('children', () => {
 });
 
 describe('deleteChild', () => {
-  // A server-backed child in the new model carries a numeric `serverId` (the
-  // stable local `id` is server-independent). Mirror that: `serverId = Number(id)`.
+  // A server-backed child carries a numeric `serverId` (the stable local `id` is
+  // server-independent). Mirror that: `serverId = Number(id)`.
   const serverChild = (id: string, first: string) => ({
     id,
     serverId: Number(id),
@@ -4394,10 +4209,8 @@ describe('deleteChild', () => {
   });
 
   /** Point the shared `loadFromServer` mock at a server view that still holds
-   *  `survivors`. The default mock reports an EMPTY server, which
-   *  `reconcileChildren` correctly reads as "every child was deleted
-   *  server-side" and drops, which is not the situation these tests are about. Needed
-   *  now that a successful delete refetches (see the re-point tests below). */
+   *  `survivors`. The default mock reports an EMPTY server, which `reconcileChildren`
+   *  reads as "every child was deleted server-side" and drops. */
   const serverViewOf = (...survivors: ReturnType<typeof serverChild>[]) =>
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       children: survivors.map((c) => ({ ...c, id: String(c.serverId) })),
@@ -4422,10 +4235,10 @@ describe('deleteChild', () => {
     serverViewOf(serverChild('6', 'Nova'));
     void s().deleteChild('5');
     expect(s().children.map((c) => c.id)).toEqual(['6']);
-    expect(s().selectedChildId).toBe('6'); // re-pointed to the surviving child
-    expect(s().entries).toHaveLength(0); // deleted child's entries purged
-    expect(s().measurements).toHaveLength(0); // measurements purged
-    expect(s().timers).toHaveLength(0); // running timers cleared
+    expect(s().selectedChildId).toBe('6');
+    expect(s().entries).toHaveLength(0);
+    expect(s().measurements).toHaveLength(0);
+    expect(s().timers).toHaveLength(0);
     expect(s().insightsLoaded).toBe(false);
     expect(s().insightsEntries).toEqual([]);
     expect(s().insightsError).toBe(false);
@@ -4456,17 +4269,16 @@ describe('deleteChild', () => {
     });
     void s().deleteChild('6');
     expect(s().children.map((c) => c.id)).toEqual(['5']);
-    expect(s().selectedChildId).toBe('5'); // unchanged
-    expect(s().entries).toHaveLength(1); // selected child's data untouched
-    expect(s().timers).toHaveLength(1); // and their running timer keeps running
+    expect(s().selectedChildId).toBe('5');
+    expect(s().entries).toHaveLength(1);
+    expect(s().timers).toHaveLength(1);
     await flush();
     expect(h.childDeleted).toEqual([expect.objectContaining({ serverId: 6 })]);
   });
 
   it("deleting the selected child leaves a sibling's timer running", async () => {
-    // The wipe used to be unconditional inside the re-point branch, so deleting
-    // one child stopped every child's timers. A timer belongs to whoever started
-    // it, and the sibling is still here.
+    // A timer belongs to whoever started it: an unconditional wipe in the re-point
+    // branch stops every child's timers.
     useAppStore.setState({
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',
@@ -4481,9 +4293,8 @@ describe('deleteChild', () => {
   });
 
   it("deleting a NON-selected child stops that child's orphaned timers", async () => {
-    // The second bug this filter fixes: the purge used to run only when the
-    // deleted child was the selected one, so a non-selected child's timers ran
-    // on forever with no owner and no surface to stop them from.
+    // Purging only when the deleted child was the SELECTED one leaves a non-selected
+    // child's timers running forever, with no owner and no surface to stop them from.
     useAppStore.setState({
       children: [serverChild('5', 'Mira'), serverChild('6', 'Nova')],
       selectedChildId: '5',
@@ -4497,9 +4308,8 @@ describe('deleteChild', () => {
   });
 
   it('keeps a still-unstamped timer, which belongs to no deleted child', () => {
-    // `t.childId !== id` is true for `undefined`, deliberately: a timer hydrate
-    // could not attribute is not evidence that it was the deleted child's, and
-    // `stopTimer` can still resolve it.
+    // `t.childId !== id` is true for `undefined`, deliberately: a timer hydrate could
+    // not attribute is not evidence that it was the deleted child's.
     const legacy: Timer = { id: 't-legacy', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
     useAppStore.setState({
       connection: { mode: 'local' },
@@ -4537,12 +4347,9 @@ describe('deleteChild', () => {
     expect(h.childDeleted).toHaveLength(0);
   });
 
-  // refresh() only bails on the simulateOffline override, not the real offline
-  // flag, so an ungated refetch here would fire a doomed fetch while offline.
-  // Today's server-backed offline delete is UI-blocked, but a local-only child
-  // deleted offline reaches this line, and relaxing that UI block is a named
-  // follow-up: without the gate, a delete that merely MIGHT be resurrected
-  // later becomes one that is resurrected immediately.
+  // refresh() only bails on the simulateOffline override, not the real offline flag, so
+  // an ungated refetch fires a doomed fetch while offline. A local-only child deleted
+  // offline reaches this line: without the gate its delete is resurrected immediately.
   it('deleting while offline never fires the post-delete refetch', async () => {
     vi.mocked(loadFromServer).mockClear();
     useAppStore.setState({
@@ -4557,13 +4364,12 @@ describe('deleteChild', () => {
     void s().deleteChild('local1');
     await flush();
 
-    expect(s().selectedChildId).toBe('6'); // still re-points
+    expect(s().selectedChildId).toBe('6');
     expect(loadFromServer).not.toHaveBeenCalled();
   });
 
-  // The reported symptom: the child vanished, a success toast appeared, and the
-  // child came back on the next refresh. The DELETE had 404'd all along and the
-  // error was swallowed by a fire-and-forget `.catch(() => {})`.
+  // The reported symptom: the child vanished, a success toast appeared, and the child
+  // came back on the next refresh, the 404'd DELETE swallowed by a fire-and-forget catch.
   it('a failed server delete restores the child instead of claiming success', async () => {
     h.childDeleteFails = true;
     useAppStore.setState({
@@ -4575,19 +4381,18 @@ describe('deleteChild', () => {
 
     await s().deleteChild('5');
 
-    expect(s().children.map((c) => c.id)).toEqual(['5', '6']); // back, in its old slot
-    expect(s().selectedChildId).toBe('5'); // selection restored too
+    expect(s().children.map((c) => c.id)).toEqual(['5', '6']);
+    expect(s().selectedChildId).toBe('5');
     expect(s().entries.map((e) => e.id)).toEqual(['feeding-1']);
     expect(s().measurements).toHaveLength(1);
-    expect(s().toast).not.toBe('Mira deleted'); // never claims a delete that did not happen
+    expect(s().toast).not.toBe('Mira deleted');
     expect(s().toast).toBe('Could not delete Mira');
   });
 
   it("purges the deleted child's treatments, and only theirs", async () => {
-    // Treatments were the one record list the purge missed. They persist
-    // through their own store, so a deleted child's medication regimens
-    // survived on disk forever and `treatmentReminders` kept scheduling doses
-    // for a child the app no longer had.
+    // Treatments persist through their own store, so a deleted child's regimens
+    // survive on disk and `treatmentReminders` keeps scheduling doses for a child
+    // the app no longer has.
     const treatment = (id: string, childId: string): Treatment => ({
       id,
       childId,
@@ -4612,9 +4417,8 @@ describe('deleteChild', () => {
   });
 
   it("a failed server delete restores the child's treatments too", async () => {
-    // The purge made this necessary: a treatment lives only on this device
-    // until it syncs, so putting the child back without their regimens would
-    // lose them for good.
+    // A treatment lives only on this device until it syncs, so putting the child
+    // back without their regimens loses them for good.
     h.childDeleteFails = true;
     const treatment: Treatment = {
       id: 't-mira',
@@ -4641,8 +4445,8 @@ describe('deleteChild', () => {
   });
 
   it('a failed server delete keeps entries written during the round trip', async () => {
-    // The restore merges rather than snapping state back wholesale, so a write
-    // that landed while the DELETE was in flight is not lost.
+    // The restore merges rather than snapping state back wholesale, so a write that
+    // landed while the DELETE was in flight is not lost.
     h.childDeleteFails = true;
     useAppStore.setState({
       children: [serverChild('5', 'Mira')],
@@ -4657,10 +4461,10 @@ describe('deleteChild', () => {
     expect(s().entries.map((e) => e.id).sort()).toEqual(['feeding-1', 'feeding-mid']);
   });
 
-  // Item 1 scoped every history surface to the selected child and put the
-  // refetch inside selectChild. deleteChild re-points the selection WITHOUT
-  // going through selectChild, so without this the surviving child's History,
-  // Growth and dashboard strip would sit empty until something else refreshed.
+  // Every history surface is scoped to the selected child and refetched inside
+  // selectChild. deleteChild re-points the selection WITHOUT going through selectChild,
+  // so the surviving child's History and Growth would sit empty until something else
+  // refreshed.
   it('re-pointing after a delete loads the surviving child, and only after the DELETE lands', async () => {
     vi.mocked(loadFromServer).mockClear();
     useAppStore.setState({
@@ -4670,8 +4474,8 @@ describe('deleteChild', () => {
     serverViewOf(serverChild('6', 'Nova'));
 
     void s().deleteChild('5');
-    // Ordering: nothing may be fetched while the DELETE is in flight, or
-    // reconcileChildren would re-add the child being deleted.
+    // Nothing may be fetched while the DELETE is in flight, or reconcileChildren
+    // would re-add the child being deleted.
     expect(loadFromServer).not.toHaveBeenCalled();
 
     await flush();
@@ -4694,12 +4498,10 @@ describe('deleteChild', () => {
     expect(loadFromServer).not.toHaveBeenCalled();
   });
 
-  // reconcileChildren re-adds a child it cannot match locally under the
-  // SERVER-derived id (String(serverId)), not the local one. So a refresh that
-  // completes while the DELETE is in flight puts the child back as '5', and a
-  // rollback guard that only looks for the local id 'c1' would splice a SECOND
-  // copy in beside it: same serverId, two ids, and every later rename or delete
-  // acts on whichever one the UI happens to hand over.
+  // reconcileChildren re-adds a child it cannot match locally under the SERVER-derived
+  // id (String(serverId)), not the local one. A refresh completing while the DELETE is
+  // in flight puts the child back as '5', and a rollback guard looking only for the
+  // local id 'c1' splices a SECOND copy in beside it: same serverId, two ids.
   it('a failed server delete does not duplicate a child a mid-flight refresh already restored', async () => {
     h.childDeleteFails = true;
     useAppStore.setState({
@@ -4717,10 +4519,9 @@ describe('deleteChild', () => {
     expect(s().children.map((c) => c.serverId).sort()).toEqual([5, 6]);
   });
 
-  // deleteChild wipes the running timers when the deleted child was selected,
-  // and the persistence subscription writes that empty array straight to the
-  // device. A server-backed timer would come back on the next refresh, but one
-  // started offline (serverId == null) exists nowhere else and is gone for good.
+  // deleteChild wipes the running timers when the deleted child was selected, and the
+  // persistence subscription writes that empty array straight to the device. A
+  // server-backed timer comes back on the next refresh; one started offline does not.
   it('a failed server delete restores the running timers it cleared', async () => {
     h.childDeleteFails = true;
     const localTimer = timer('t-local', '5');
@@ -4773,7 +4574,7 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
     await s().enterLocal();
     expect(s().connection).toEqual({ mode: 'local' });
     expect(s().connected).toBe(true);
-    expect(s().children).toEqual([]); // no demo seed
+    expect(s().children).toEqual([]);
     expect(s().entries).toEqual([]);
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'local' });
   });
@@ -4789,7 +4590,7 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
       legacyLastFeed: null,
     });
     await s().enterLocal();
-    expect(s().children).toEqual([savedChild]); // restored, not the demo seed
+    expect(s().children).toEqual([savedChild]);
     expect(s().selectedChildId).toBe('p1');
     expect(s().lastFeed).toEqual({ p1: { feedType: 'formula', method: 'bottle' } });
   });
@@ -4832,9 +4633,8 @@ describe('local mode: durable entityStore (empty start, no fake seed)', () => {
     expect(clearEntities).toHaveBeenCalled();
   });
 
-  // Finding 1 (merge blocker): without this, offline edit/delete ops queued
-  // against one server's serverIds would survive a disconnect and replay
-  // against whatever record holds those numeric ids on the NEXT server.
+  // Without this, offline edit/delete ops queued against one server's serverIds survive
+  // a disconnect and replay against whatever holds those ids on the NEXT server.
   it('disconnect clears pendingOps so a stale op cannot replay against a different server', () => {
     s().disconnect();
     expect(clearPendingOps).toHaveBeenCalled();
@@ -4882,9 +4682,8 @@ describe('refresh / reconnect', () => {
   });
 
   it('keeps an existing child avatar tint across a refresh, end to end', async () => {
-    // The unit case lives with `reconcileChildren`; this is the whole path,
-    // store to store. A deliberately non-first tint, so a re-derived one would
-    // come back as CHILD_COLORS[0] and fail rather than coincide.
+    // A deliberately non-first tint, so a re-derived one comes back as
+    // CHILD_COLORS[0] and fails rather than coincides.
     useAppStore.setState({
       children: [{ id: 'localA', serverId: 501, first: 'Mira', last: 'O', birth: NOW, color: CHILD_COLORS[3] }],
       selectedChildId: 'localA',
@@ -4919,15 +4718,14 @@ describe('refresh / reconnect', () => {
     });
     useAppStore.setState({ selectedChildId: 'c1' });
     await s().refresh();
-    expect(s().selectedChildId).toBe('c1'); // not reset to the server's first child
+    expect(s().selectedChildId).toBe('c1');
   });
 
   it('flushes queued writes after reconnecting', async () => {
     h.q = [{ id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }];
     useAppStore.setState({ offline: true, queueCount: 1 });
-    // refresh() replaces `children` wholesale with the server's list (merged
-    // with any still-unsynced locals), so the synced child the queued flush
-    // needs has to come back from loadFromServer, not from local setState.
+    // refresh() replaces `children` wholesale with the server's list, so the synced
+    // child the queued flush needs has to come back from loadFromServer.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [SYNCED_C1],
       entries: [],
@@ -4980,8 +4778,7 @@ describe('refresh / reconnect', () => {
     expect(s().profileError).toBe(false);
     expect(s().profileLoading).toBe(false);
 
-    // A later loadProfile (e.g. after reconnecting) can refetch since
-    // profileLoaded no longer blocks it.
+    // A later loadProfile can refetch since profileLoaded no longer blocks it.
     useAppStore.setState({ connection: { mode: 'server', serverUrl: 'http://x', token: 't2' } });
     await s().loadProfile();
     expect(loadProfileFromServer).toHaveBeenCalled();
@@ -4989,9 +4786,8 @@ describe('refresh / reconnect', () => {
   });
 
   it('keeps selectedChildId pointing at an offline-created child still visible after refresh (regression)', async () => {
-    // Bug: refresh() used to check the server's child list only, so an
-    // offline-created child (kept visible via mergeUnsynced) that's currently
-    // selected would get silently deselected back to the server's first child.
+    // Checking the server's child list only silently deselects an offline-created
+    // child (kept visible via mergeUnsynced) back to the server's first.
     const localChild: Child = { id: 'localZ', first: 'Off', last: 'line', birth: NOW, color: '#abc' };
     useAppStore.setState({ children: [...s().children, localChild], selectedChildId: 'localZ' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
@@ -5003,7 +4799,7 @@ describe('refresh / reconnect', () => {
       measurements: [],
     });
     await s().refresh();
-    expect(s().selectedChildId).toBe('localZ'); // not reset to the server's first child
+    expect(s().selectedChildId).toBe('localZ');
     expect(s().children.map((c) => c.id)).toContain('localZ');
   });
 
@@ -5038,12 +4834,9 @@ describe('refresh / reconnect', () => {
   });
 
   it('an entry created before its child was pushed still resolves to that child after a refresh', async () => {
-    // Server mode, online. Create a child locally, log an entry against it,
-    // let the child push (stamping serverId without rewriting id), then
-    // refresh with a stubbed loadFromServer that echoes the pushed child back
-    // (matched by serverId) plus the entry that referenced its local id. The
-    // entry must still point at a child that exists. This is the regression
-    // test for the whole orphaning class the id-rewrite bug caused.
+    // The whole orphaning class the id-rewrite bug caused: a child pushed after an
+    // entry was logged against it must still own that entry once the server echoes
+    // both back under server ids.
     useAppStore.setState({ children: [], entries: [], selectedChildId: '' });
 
     s().saveChild({ first: 'Ada', last: '', birth: NOW - 30 * 86400000 });
@@ -5061,9 +4854,8 @@ describe('refresh / reconnect', () => {
       entries: [...st.entries, { id: 'e1', childId: localId, type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
     }));
 
-    // A real server load never knows the local id: it writes the SERVER child
-    // id verbatim (see `listFeedings` et al in src/api/client.ts), same as
-    // `selectedChildId` below.
+    // A real server load never knows the local id: it writes the SERVER child id
+    // verbatim, same as `selectedChildId` below.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [{ id: 'e1', childId: '777', type: 'note', time: NOW, text: 'hi', tags: [] } as Entry],
@@ -5076,35 +4868,26 @@ describe('refresh / reconnect', () => {
 
     const entry = s().entries.find((e) => e.id === 'e1');
     const owner = s().children.find((c) => c.id === entry?.childId);
-    expect(owner).toBeDefined(); // the entry is not orphaned
+    expect(owner).toBeDefined();
     expect(owner?.id).toBe(localId);
-    expect(entry?.childId).toBe(localId); // the server id was remapped to the local id
+    expect(entry?.childId).toBe(localId);
   });
 
-  // Coverage gap: entries (above) and timers each have an integration-level
-  // test proving `refresh` wires remapChildIds's REMAPPED collection into
-  // its `set()`, not `data.measurements`/`data.entries`/`data.timers`
-  // verbatim. Measurements previously only had a direct unit test of the
-  // `remapChildIds` helper (below): that exercises the helper in isolation
-  // and would not catch a copy-paste slip in `refresh`'s (or `hydrate`'s /
-  // `adopt`'s) own measurements block, e.g. wiring `data.measurements`
-  // straight into `set()` instead of `remappedMeasurements`.
+  // The `remapChildIds` unit test below exercises the helper in isolation and would not
+  // catch a copy-paste slip in refresh's (or hydrate's / adopt's) own measurements
+  // block, e.g. wiring `data.measurements` into `set()` instead of the remapped list.
   it('a measurement created before its child was pushed still resolves to that child after a refresh', async () => {
     useAppStore.setState({ children: [], measurements: [], selectedChildId: '' });
 
     s().saveChild({ first: 'Ada', last: '', birth: NOW - 30 * 86400000 });
     const localId = s().children[0].id;
 
-    // Let the push settle so serverId is stamped.
     await flush();
 
     const pushedChild = s().children.find((c) => c.id === localId);
-    expect(pushedChild?.id).toBe(localId); // id must NOT have been rewritten
+    expect(pushedChild?.id).toBe(localId);
     expect(pushedChild?.serverId).toBe(777);
 
-    // A real server load never knows the local id: it writes the SERVER
-    // child id verbatim (see `listMeasurements` in src/api/client.ts), same
-    // as the entries/timers case above.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '777', serverId: 777, first: 'Ada', last: '', birth: NOW - 30 * 86400000 }],
       entries: [],
@@ -5117,9 +4900,9 @@ describe('refresh / reconnect', () => {
 
     const measurement = s().measurements.find((m) => m.id === 'm1');
     const owner = s().children.find((c) => c.id === measurement?.childId);
-    expect(owner).toBeDefined(); // the measurement is not orphaned
+    expect(owner).toBeDefined();
     expect(owner?.id).toBe(localId);
-    expect(measurement?.childId).toBe(localId); // the server id was remapped to the local id
+    expect(measurement?.childId).toBe(localId);
   });
 
   it('remapChildIds rewrites a server-sourced childId to the matching local child id, leaving unresolved ones as-is', () => {
@@ -5158,18 +4941,15 @@ describe('refresh / reconnect', () => {
 
     const sel = s().selectedChildId;
     expect(s().children.some((c) => c.id === sel)).toBe(true);
-    expect(sel).toBe(localId); // selection follows the stable id, not the server id
+    expect(sel).toBe(localId);
   });
 });
 
-// P2: a partial server load used to delete history from disk. Every per-type
-// list call in `loadFromServer` degrades to [] when it fails, so one timed-out
-// /api/notes/ arrived here as a positive "this child has no notes" answer:
-// `applyServerLoad` replaced `entries` wholesale, the persistence subscription
-// wrote the shrunken list, and `saveEntries` multiRemoved the month chunks it
-// had just emptied. The load now names the record slices it emptied per child
-// (`LoadResult.incompleteSlices`) and this pipeline keeps the rows it already
-// holds for those, exactly as a null `timers` keeps the on-device timers.
+// Every per-type list call in `loadFromServer` degrades to [] when it fails, so
+// one timed-out /api/notes/ arrives as a positive "this child has no notes"
+// answer: `entries` is replaced wholesale and `saveEntries` multiRemoves the
+// month chunks it just emptied. The load names the slices it emptied per child
+// (`LoadResult.incompleteSlices`) and this pipeline keeps the rows it holds.
 describe('a partial server load never deletes history', () => {
   const marchNote: Entry = { id: 'note-march', serverId: 9, childId: 'c1', type: 'note', time: NOW - 40 * 86400000, text: 'bath, all fine', tags: [] };
   const serverMira = { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 };
@@ -5198,9 +4978,8 @@ describe('a partial server load never deletes history', () => {
     await s().refresh();
 
     expect(s().entries.map((e) => e.id)).toEqual(['note-march']);
-    // And durably so: `saveEntries` removes a month chunk precisely when the
-    // list it is handed no longer has that month's entries, so no write may
-    // ever go out without this one.
+    // And durably so: `saveEntries` removes a month chunk precisely when the list
+    // it is handed no longer has that month's entries.
     for (const [written] of vi.mocked(saveEntries).mock.calls) expect(written).toContainEqual(marchNote);
   });
 
@@ -5224,9 +5003,8 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('clears the slices that DID answer, even while another slice is frozen', async () => {
-    // Per slice, not per child: the notes request failed, so its rows are kept,
-    // but the feeding that answered and came back absent was really deleted and
-    // must go. A per-child guard freezes the whole history and misses this.
+    // Per slice, not per child: the notes request failed so its rows are kept, but the
+    // feeding that answered and came back absent was really deleted and must go.
     const feed: Entry = { id: 'feed-old', serverId: 12, childId: 'c1', type: 'feeding', start: NOW - 40 * 86400000, end: NOW - 40 * 86400000 + 20 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
     seedLoaded();
     useAppStore.setState({ entries: [marchNote, feed] });
@@ -5246,12 +5024,9 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('takes a degraded slice AS-IS when the device holds no rows for it', async () => {
-    // Nothing on disk for that slice means nothing an empty answer can delete,
-    // so there is nothing to protect and the answer is taken. Through this
-    // pipeline that is the per-slice granularity doing the work, not the
-    // holds-nothing arm: the feeding is in a slice that answered, so nothing
-    // would filter it either way. The arm itself is pinned as a unit test
-    // below, where an answer can carry rows in a degraded slice.
+    // Nothing on disk for that slice means nothing an empty answer can delete, so the
+    // answer is taken. Through this pipeline it is the per-slice granularity doing the
+    // work; the holds-nothing arm itself is pinned as a unit test below.
     const feed: Entry = { id: 'feed-new', serverId: 13, childId: '501', type: 'feeding', start: NOW - 60 * M, end: NOW - 40 * M, feedType: 'breast', method: 'left', amount: null, tags: [] };
     useAppStore.setState({ children: [SYNCED_C1], selectedChildId: 'c1', entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
@@ -5270,11 +5045,9 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('a permanently failing endpoint does not freeze the slices that keep answering', async () => {
-    // The blocker case: /api/medication/ 500s on this instance every single
-    // time. Its rows are kept across refresh after refresh, but everything else
-    // stays live, so a note written on another device still lands and a note
-    // deleted there still goes. A per-child guard would freeze this child's
-    // whole history for as long as that one endpoint stays broken.
+    // /api/medication/ 500s on this instance every single time. Its rows are kept
+    // across refresh after refresh, but everything else stays live: a per-child guard
+    // would freeze this child's whole history while that one endpoint stays broken.
     const dose: Entry = { id: 'med-1', serverId: 21, childId: 'c1', type: 'medication', time: NOW - 40 * 86400000, name: 'Paracetamol', dosage: 2.5, dosageUnit: 'mL', tags: [] };
     useAppStore.setState({ children: [SYNCED_C1], selectedChildId: 'c1', entries: [dose, marchNote] });
     const degradedMedication = {
@@ -5320,10 +5093,9 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('keeps an entry in a degraded slice logged WHILE that fetch was in flight', async () => {
-    // The rows carried over come from the state read before the fetch, so the
-    // queue (read after it) is still the only home of an entry logged in
-    // between. A note, so it lands in the same slice the failure emptied and
-    // cannot survive merely by being in an untouched one.
+    // The rows carried over come from the state read before the fetch, so the queue
+    // (read after it) is the only home of an entry logged in between. A note, so it
+    // lands in the same slice the failure emptied rather than an untouched one.
     const midFlight: Entry = { id: 'mid-1', childId: 'c1', type: 'note', time: NOW, text: 'logged mid-request', tags: [] };
     seedLoaded();
     h.q = [midFlight];
@@ -5343,9 +5115,9 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('carries the child\'s measurements and treatments over too', async () => {
-    // Same degrade, same floor: the measurement fan-out and the treatment
-    // request sit behind the same catch. Measurements name the failing KIND,
-    // so the height that answered still clears while the weight is kept.
+    // The measurement fan-out and the treatment request sit behind the same catch.
+    // Measurements name the failing KIND, so the height that answered still clears
+    // while the weight is kept.
     const weight: Measurement = { id: 'm-1', serverId: 4, childId: 'c1', kind: 'weight', value: 5.2, date: NOW - 40 * 86400000 };
     const height: Measurement = { id: 'm-2', serverId: 5, childId: 'c1', kind: 'height', value: 58, date: NOW - 40 * 86400000 };
     const vitamin: Treatment = { id: 'tr-1', serverId: 6, childId: 'c1', name: 'Vitamin D', scheduleMode: 'timesOfDay', timesOfDay: ['morning'], fromDate: NOW - 40 * 86400000, active: true };
@@ -5367,22 +5139,18 @@ describe('a partial server load never deletes history', () => {
     expect(s().treatments).toEqual([vitamin]);
   });
 
-  // The two arms of `carryOverIncomplete`'s contract that today's producer
-  // cannot reach: it empties a slice completely whenever that slice degrades,
-  // so no answer it builds ever carries a row in a degraded slice. A load that
-  // fails one PAGE of a slice, or covers more than one child, would, and the
-  // guard has to be right before that lands rather than after.
+  // The two arms of `carryOverIncomplete`'s contract that today's producer cannot
+  // reach: it empties a slice completely whenever that slice degrades, so no answer it
+  // builds ever carries a row in a degraded slice. A load that fails one PAGE would.
   describe('carryOverIncomplete (the guard itself)', () => {
     const row = (id: string, childId: string, type: string) => ({ id, childId, type });
     const degraded = (childId: string, ...slices: string[]) =>
       new Map([[childId, new Set(slices)]]) as ReadonlyMap<string, ReadonlySet<LoadSlice>>;
 
     it('keeps the rows held for a degraded slice INSTEAD of the ones the answer still offered', () => {
-      // Not a union: a row the device does not have was either created
-      // elsewhere (it lands on the next whole answer, one refresh late) or is
-      // the partial half of a broken read. Unioning would also mean a row
-      // deleted in Baby Buddy's own UI never leaves, for as long as that slice
-      // stays broken.
+      // Not a union: a row the device does not have was either created elsewhere (it
+      // lands on the next whole answer, one refresh late) or is the partial half of a
+      // broken read. Unioning would also mean a row deleted server-side never leaves.
       const held = [row('n-1', 'c1', 'note'), row('n-2', 'c1', 'note')];
       const answer = [row('n-3', 'c1', 'note'), row('f-1', 'c1', 'feeding')];
 
@@ -5392,11 +5160,9 @@ describe('a partial server load never deletes history', () => {
     });
 
     it('takes the answer as-is for a degraded slice it holds nothing for', () => {
-      // Nothing on disk to lose, so the rows the server did return are strictly
-      // better than none. Only reachable with an answer that carries rows in a
-      // degraded slice, which is why it is pinned here and not through the
-      // store: a producer that fails one page of several would build one, and
-      // discarding those rows is what would blank a first connect for real.
+      // Nothing on disk to lose, so the rows the server did return are strictly better
+      // than none. Only reachable with an answer that carries rows in a degraded slice,
+      // which is why it is pinned here and not through the store.
       const answer = [row('n-3', 'c1', 'note')];
 
       const out = carryOverIncomplete(answer, [], degraded('c1', 'note'), (r) => r.type as LoadSlice);
@@ -5414,11 +5180,9 @@ describe('a partial server load never deletes history', () => {
   });
 
   it('a FIRST connect to a server with one broken endpoint still opens on the rows it did return', async () => {
-    // The worst way to get this wrong: a device with nothing stored yet, and a
-    // server whose /api/medication/ 500s on every load. Guarding the whole
-    // CHILD on that one broken endpoint, as a per-child signal must, shows a
-    // blank history and blank measurements and keeps showing them on every
-    // later refresh. Naming the slice that failed is what fixes it.
+    // A device with nothing stored yet, and a server whose /api/medication/ 500s on
+    // every load. Guarding the whole CHILD on that one broken endpoint, as a per-child
+    // signal must, shows a blank history and keeps showing it on every later refresh.
     useAppStore.setState({ connection: null, connected: false, children: [], entries: [], measurements: [], selectedChildId: '' });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [serverMira],
@@ -5437,22 +5201,17 @@ describe('a partial server load never deletes history', () => {
   });
 });
 
-// F8: connect() used to take the server load wholesale (`...data`), re-keying
-// every child to its server-derived id. After a session expiry (refresh's
-// 401 branch clears the connection; the entity store still holds the old
-// children under local ids + serverIds), reconnecting through connect()
-// destroyed the local-id mapping: the persistence subscription wrote the
-// server-shaped list over the entity store, and a queued entry referencing
-// an adopt-origin LOCAL child id could never resolve (`childServerIdFor`
-// misses), so it sat in the queue failing forever. Local-only running timers
-// and unsynced measurements were dropped the same wholesale way. connect()
-// now routes through the same `applyServerLoad` pipeline as refresh().
+// Taking the server load wholesale (`...data`) re-keys every child to its
+// server-derived id. After a session expiry, where the entity store still holds
+// the old children under local ids plus serverIds, that destroys the local-id
+// mapping: a queued entry referencing an adopt-origin LOCAL child id can never
+// resolve and sits in the queue failing forever. connect() routes through the
+// same `applyServerLoad` pipeline as refresh() instead.
 describe('connect() reconciles the server load with local data (session-expiry reconnect)', () => {
   it('a post-expiry reconnect keeps local child ids from the entity store, so a queued entry still resolves and flushes', async () => {
-    // Post-401 cold-start shape: no connection, memory empty, the entity
-    // store still holding the adopt-origin child under its LOCAL id, and a
-    // queued entry referencing that id. The stored data came from THIS
-    // server (the origin matches), which is what licenses the merge.
+    // Post-401 cold-start shape: no connection, memory empty, the entity store still
+    // holding the adopt-origin child under its LOCAL id, and a queued entry referencing
+    // that id. The stored data came from THIS server, which is what licenses the merge.
     h.entityOrigin = 'http://x';
     const queued: Entry = { id: 'qx', childId: 'child1712-abc', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
     h.q = [queued];
@@ -5492,9 +5251,8 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(s().children.map((c) => c.id)).toEqual(['child1712-abc']);
     expect(s().selectedChildId).toBe('child1712-abc');
     expectSelectionNamesARealChild();
-    // The queued entry stayed visible AND flushed: its local childId resolved
-    // to serverId 501 through the kept child. The old wholesale replace left
-    // `childServerIdFor` missing forever, so nothing ever pushed.
+    // The queued entry stayed visible AND flushed: its local childId resolved to
+    // serverId 501 through the kept child.
     expect(s().entries.map((e) => e.id)).toContain('qx');
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
@@ -5503,11 +5261,9 @@ describe('connect() reconciles the server load with local data (session-expiry r
   });
 
   it('a post-expiry reconnect carries the pre-map feeding fallback out of the entity store', async () => {
-    // hydrate's no-connection branch reads no entity store, so on a cold start
-    // parked at the reconnect screen this is the only place the legacy value
-    // can reach state. Without it the derive-on-read migration has a hole:
-    // the sheet would open on the built-in default rather than the value the
-    // pre-map build left behind.
+    // hydrate's no-connection branch reads no entity store, so on a cold start parked
+    // at the reconnect screen this is the only place the legacy value can reach state.
+    // Without it the sheet opens on the built-in default, not the pre-map value.
     h.entityOrigin = 'http://x';
     useAppStore.setState({
       connection: null,
@@ -5553,9 +5309,8 @@ describe('connect() reconciles the server load with local data (session-expiry r
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
       entries: [],
-      // A real empty answer, NOT null: F7's null-guard never fires here, and
-      // the old wholesale spread dropped the running timer on exactly this
-      // shape.
+      // A real empty answer, NOT null: the null-guard never fires here, and a
+      // wholesale spread drops the running timer on exactly this shape.
       timers: [],
       selectedChildId: 'c1',
       lastFeed: {},
@@ -5565,8 +5320,8 @@ describe('connect() reconciles the server load with local data (session-expiry r
     await s().connect('http://x', 't2');
     await flush();
 
-    // Assert on id only: the post-connect flushUnsynced may already have
-    // stamped a serverId on the kept timer (its child is synced).
+    // Assert on id only: the post-connect flushUnsynced may already have stamped a
+    // serverId on the kept timer (its child is synced).
     expect(s().timers).toHaveLength(1);
     expect(s().timers[0]).toMatchObject({ id: 't-local' });
   });
@@ -5601,18 +5356,15 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(s().timers.map((t) => t.id)).toEqual(['tsrv3']);
     expect(s().lastFeed).toEqual({ '7': { feedType: 'formula', method: 'bottle' } });
     expectSelectionNamesARealChild();
-    // connect stamps the origin, so the entity store's new contents are
-    // labeled with the server they came from (and a pre-origin install
-    // self-heals here: its NEXT expiry-reconnect gets the merge).
+    // connect stamps the origin, so the entity store's new contents are labeled with
+    // the server they came from.
     expect(h.entityOrigin).toBe('http://x');
   });
 
   it('connecting to a DIFFERENT server than the stored data came from takes the server load wholesale (no cross-server merge)', async () => {
-    // Same post-expiry shape as the merge test above, but the stored data
-    // belongs to another server. Numeric server ids collide across servers
-    // (child 501 exists on both), so a merge here would graft one family's
-    // local records onto another family's children; the origin gate must
-    // force the pre-reconcile wholesale behavior instead.
+    // Same post-expiry shape as the merge test above, but the stored data belongs to
+    // another server. Numeric server ids collide across servers (child 501 exists on
+    // both), so a merge here grafts one family's local records onto another's children.
     h.entityOrigin = 'https://old.lan';
     const queued: Entry = { id: 'qx', childId: 'child1712-abc', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
     h.q = [queued];
@@ -5652,8 +5404,7 @@ describe('connect() reconciles the server load with local data (session-expiry r
     expect(s().children.map((c) => c.id)).toEqual(['501']);
     expect(s().selectedChildId).toBe('501');
     expectSelectionNamesARealChild();
-    // The other family's queued entry must NOT flush into this server's
-    // children; it stays queued (visible in the queue view) instead.
+    // The other family's queued entry must NOT flush into this server's children.
     expect(h.pushed).toHaveLength(0);
     expect(h.q).toHaveLength(1);
     // The data now stored belongs to the new server: origin re-stamped.
@@ -5661,10 +5412,9 @@ describe('connect() reconciles the server load with local data (session-expiry r
   });
 
   it('in-memory children from another origin are not merged either (the gate sits ahead of both local sides)', async () => {
-    // Warm shape: a 401 cleared the connection but left server A's children
-    // in memory, serverIds and all. Connecting to server B, whose child list
-    // reuses the same numeric id, must not keep A's local id (that is the
-    // cross-server serverId collision graft).
+    // Warm shape: a 401 cleared the connection but left server A's children in memory,
+    // serverIds and all. Connecting to server B, whose child list reuses the same
+    // numeric id, must not keep A's local id.
     h.entityOrigin = 'https://old.lan';
     useAppStore.setState({
       connection: null,
@@ -5699,13 +5449,10 @@ describe('connect() reconciles the server load with local data (session-expiry r
 
 describe('selectedChildId fallback resolves in local id space (regression: a server-space id used as a local-space fallback)', () => {
   it('refresh: a sibling deleted server-side re-points selectedChildId at a REMAINING local child, not a bare server id', async () => {
-    // Repro from the branch review: two children created in Budkin
-    // (childAAA/serverId 1, childBBB/serverId 2). The other parent deletes
-    // childBBB in Baby Buddy's web UI, and Budkin refreshes with childBBB
-    // still selected. `loadFromServer` (repository.ts) sets its own
-    // `selectedChildId` to `children[0]?.id`, which is a SERVER id string:
-    // that must be resolved back into local id space (via
-    // `resolveSelectedChildId`), not compared against local ids directly.
+    // The other parent deletes childBBB in Baby Buddy's web UI while Budkin still has
+    // it selected. `loadFromServer` sets its own `selectedChildId` to `children[0]?.id`,
+    // a SERVER id string: it must be resolved back into local id space via
+    // `resolveSelectedChildId`, not compared against local ids directly.
     const childAAA: Child = { id: 'childAAA', serverId: 1, first: 'A', last: '', birth: NOW, color: '#fff' };
     const childBBB: Child = { id: 'childBBB', serverId: 2, first: 'B', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState({ children: [childAAA, childBBB], selectedChildId: 'childBBB' });
@@ -5759,9 +5506,8 @@ describe('selectedChildId fallback resolves in local id space (regression: a ser
     useAppStore.setState({
       connection: { mode: 'local' },
       children: [localChild],
-      // A selection naming no local child at all (e.g. left over from a
-      // deleted child) forces adopt's post-upload reconciliation into its
-      // fallback branch.
+      // A selection naming no local child at all forces adopt's post-upload
+      // reconciliation into its fallback branch.
       selectedChildId: 'stale-not-a-real-child',
     });
     vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
@@ -5870,12 +5616,10 @@ describe('history is scoped to the selected child', () => {
   });
 
   it("refresh with an expecting child selected does not surface a sibling's entries", async () => {
-    // The reported bug: for an expected child, the history shown was the
-    // previous child's. An expecting child has no serverId, so loadFromServer
-    // still falls back to the server's first child (Mira) and her records DO
-    // land in the flat `entries` array. What must not happen is those records
-    // being shown under the expecting child, which is what every history
-    // surface reads via `entriesForChild`.
+    // An expecting child has no serverId, so loadFromServer falls back to the server's
+    // first child (Mira) and her records DO land in the flat `entries` array. What must
+    // not happen is those records showing under the expecting child, which is what
+    // every history surface reads via `entriesForChild`.
     useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localBean', entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: serverChildren,
@@ -5891,15 +5635,12 @@ describe('history is scoped to the selected child', () => {
     expect(s().selectedChildId).toBe('localBean');
     // The store still holds the sibling's record, remapped into local id space.
     expect(s().entries.find((e) => e.id === 'f1')?.childId).toBe('localMira');
-    // But nothing is shown for the expecting child.
     expect(entriesForChild(s().entries, s().selectedChildId)).toEqual([]);
-    // ...while the sibling's own history is intact.
     expect(entriesForChild(s().entries, 'localMira').map((e) => e.id)).toEqual(['f1']);
   });
 
   it("switching to a sibling never shows the other child's records", async () => {
-    // The same bug with no expecting child involved: the demo seed owns all
-    // entries under c1, so selecting c2 used to render c1's history verbatim.
+    // The same rule with no expecting child involved.
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localTheo', entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: serverChildren,
@@ -5923,11 +5664,8 @@ describe('switching child is purely local (server mode)', () => {
   const theoFeed: Entry = { id: 'tf1', childId: 'localTheo', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
 
   it('draws the sibling from records already in memory, with no refetch', async () => {
-    // This used to fire a refresh, because a load held only the child it fetched
-    // and the sibling would otherwise show "Nothing logged yet". Now every
-    // child's records are resident, so the switch is a local UI action and
-    // costing 13 requests per tap of the switcher to redraw what is already on
-    // screen would be pure waste.
+    // Every child's records are resident, so the switch is a local UI action: 13
+    // requests per tap of the switcher to redraw what is already on screen is waste.
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [theoFeed] });
     vi.mocked(loadFromServer).mockClear();
 
@@ -5955,8 +5693,8 @@ describe('switching child is purely local (server mode)', () => {
   });
 
   it('selects an expecting child without reaching for the network', async () => {
-    // An expecting child has no serverId and no server records at all. The
-    // display filter is what keeps a sibling's records off their screen.
+    // An expecting child has no serverId and no server records at all. The display
+    // filter is what keeps a sibling's records off their screen.
     useAppStore.setState({ children: [mira, expecting], selectedChildId: 'localMira', entries: [] });
     vi.mocked(loadFromServer).mockClear();
 
@@ -5999,11 +5737,9 @@ describe('server mode holds every child, not just the selected one', () => {
   const theoFeed: Entry = { id: 'tf1', childId: '2', tags: [], type: 'feeding', start: NOW - 3600000, end: NOW - 3000000, feedType: 'breast', method: 'left', amount: null };
 
   it("keeps the sibling's records through a refresh instead of deleting them", async () => {
-    // The bug Item A exists for. A single-child load answered for the selection
-    // alone, and `applyServerLoad` replaces `entries` wholesale, so every
-    // refresh dropped the sibling's rows from state; the persistence
-    // subscription then deleted the month chunks that emptied, losing the
-    // history from disk as well.
+    // A single-child load answers for the selection alone, and `applyServerLoad`
+    // replaces `entries` wholesale, so every refresh drops the sibling's rows from
+    // state and the persistence subscription deletes the month chunks that emptied.
     useAppStore.setState({ children: [mira, theo], selectedChildId: 'localMira', entries: [] });
     vi.mocked(loadFromServer).mockResolvedValueOnce({
       treatments: [],
@@ -6045,9 +5781,8 @@ describe('server mode holds every child, not just the selected one', () => {
   });
 
   it("freezes only the child whose slice degraded, and applies the sibling's answer", async () => {
-    // `incompleteSlices` is per (child, slice), so one child's timed-out request
-    // must not hold back the other's rows, and must not let the empty answer for
-    // its own slice through either.
+    // `incompleteSlices` is per (child, slice): one child's timed-out request must not
+    // hold back the other's rows, nor let the empty answer for its own slice through.
     const miraOldNap: Entry = { id: 'mn0', childId: 'localMira', tags: [], type: 'sleep', start: NOW - 86400000, end: NOW - 82800000, nap: true };
     const theoOldFeed: Entry = { id: 'tf0', childId: 'localTheo', tags: [], type: 'feeding', start: NOW - 86400000, end: NOW - 82800000, feedType: 'breast', method: 'left', amount: null };
     useAppStore.setState({
@@ -6078,13 +5813,10 @@ describe('server mode holds every child, not just the selected one', () => {
 });
 
 describe("editing a sibling's row from the History household view", () => {
-  // The household view puts a row on screen whose child is NOT the selected one,
-  // and tapping it opens the ordinary editor. The edit path PATCHes `child:`
-  // along with everything else, so seeding the sheet from the SELECTION rather
-  // than the record would move the server row to the wrong child. This is a
-  // pre-existing guarantee (`openEdit` seeds from the record, `save()` falls
-  // back to `existing?.childId`), pinned here because the household view is the
-  // first surface that routinely exercises it.
+  // The household view puts a row on screen whose child is NOT the selected one, and
+  // tapping it opens the ordinary editor. The edit path PATCHes `child:` along with
+  // everything else, so seeding the sheet from the SELECTION rather than the record
+  // would move the server row to the wrong child.
   const mira: Child = { id: 'localMira', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' };
   const theo: Child = { id: 'localTheo', serverId: 2, first: 'Theo', last: '', birth: NOW - 90 * 86400000, color: '#eee' };
   const theoNap: Entry = { id: 'tn1', childId: 'localTheo', tags: [], type: 'sleep', start: NOW - 7200000, end: NOW - 5400000, nap: true };
@@ -6109,8 +5841,6 @@ describe("editing a sibling's row from the History household view", () => {
   });
 
   it('leaves the global selection where it was', async () => {
-    // Editing a sibling's row is not a way to switch child: the user goes back
-    // to the list still on whoever they were on.
     s().openEdit('tn1');
     await s().save();
 
@@ -6129,23 +5859,19 @@ describe('a measurement saved DURING a refresh survives it', () => {
   const serverChildren = [{ id: '1', serverId: 1, first: 'Mira', last: '', birth: NOW - 200 * 86400000, color: '#fff' }];
 
   it('keeps it even though its push stamped a serverId before the apply', async () => {
-    // The race, in order: the fetch goes out; the user saves a weight; its push
-    // resolves and stamps a serverId on the in-memory row; the answer lands.
-    // The answer predates the measurement so does not list it, and the stamp
-    // means `serverId == null` no longer recognises it as unsynced, so it used
-    // to be dropped from state and then from the entity store.
+    // The race: the fetch goes out, the user saves a weight, its push stamps a
+    // serverId on the in-memory row, then the answer lands. The answer predates
+    // the measurement, and the stamp means `serverId == null` no longer
+    // recognises it as unsynced, so it used to be dropped.
     let resolveLoad!: (data: unknown) => void;
     useAppStore.setState({ children: [mira], selectedChildId: 'localMira', measurements: [] });
     vi.mocked(loadFromServer).mockImplementationOnce(() => new Promise((res) => (resolveLoad = res)) as never);
 
     const refreshing = s().refresh();
     // `refresh` reads on-device timers before it fetches, so let that await
-    // settle: until it does, `loadFromServer` has not been called and there is
-    // no `resolveLoad` yet. (Leaving the promise pending would also wedge
-    // `refreshInFlight` for every later test in this file.)
+    // settle: until it does there is no `resolveLoad` yet.
     await flush();
-    // Saved while the request is in flight, then stamped, exactly as the real
-    // push does on resolve.
+    // Saved while the request is in flight, then stamped as the real push does.
     useAppStore.setState({
       measurements: [{ id: 'm-mid', serverId: 77, childId: 'localMira', kind: 'weight', value: 5.2, date: NOW }],
     });
@@ -6167,10 +5893,9 @@ describe('a measurement saved DURING a refresh survives it', () => {
   });
 
   it('still lets a measurement deleted server-side go', async () => {
-    // The guard must not become "keep everything the answer omits": a
-    // measurement that existed BEFORE the fetch and is absent from the answer
-    // was deleted elsewhere, and resurrecting it would make deletion
-    // impossible.
+    // The guard must not become "keep everything the answer omits": a row that
+    // predates the fetch and is absent from the answer was deleted elsewhere,
+    // and resurrecting it would make deletion impossible.
     useAppStore.setState({
       children: [mira],
       selectedChildId: 'localMira',
@@ -6197,26 +5922,26 @@ describe('refresh timer reconcile (widget writes timers out-of-band)', () => {
   const sleepTimer: Timer = { id: 't1', activity: 'sleep', name: 'Sleep', start: NOW, saveAs: 'sleep' };
 
   it('picks up a widget-started timer the in-memory list does not have', async () => {
-    useAppStore.setState({ timers: [] });   // app thinks no timers running
+    useAppStore.setState({ timers: [] });
     h.timers = [sleepTimer];                // widget wrote storage while app was warm
     await useAppStore.getState().refresh();
     expect(useAppStore.getState().timers).toEqual([sleepTimer]);
   });
 
   it('drops a timer the widget has stopped (absent from storage)', async () => {
-    useAppStore.setState({ timers: [sleepTimer] });  // app still holds the running timer
-    h.timers = [];                                   // widget stopped it → storage empty
+    useAppStore.setState({ timers: [sleepTimer] });
+    h.timers = [];                                   // widget stopped it, storage empty
     await useAppStore.getState().refresh();
     expect(useAppStore.getState().timers).toEqual([]);
   });
 
   it('reconciles timers from storage even when the server is unreachable', async () => {
     useAppStore.setState({ timers: [sleepTimer] }); // persist mock writes this to storage too
-    h.timers = [];                                  // widget stopped it out-of-band
+    h.timers = [];
     vi.mocked(loadFromServer).mockRejectedValueOnce(new Error('network'));
     await useAppStore.getState().refresh();
     expect(useAppStore.getState().offline).toBe(true);
-    expect(useAppStore.getState().timers).toEqual([]); // still cleared despite being offline
+    expect(useAppStore.getState().timers).toEqual([]);
   });
 });
 
@@ -6369,7 +6094,7 @@ describe('setTimerStart', () => {
     });
     s().setTimerStart('t1', NOW - 37 * M);
     expect(s().timers[0].start).toBe(NOW - 37 * M);
-    s().setTimerStart('t1', Date.now() + 60 * M); // future → clamped
+    s().setTimerStart('t1', Date.now() + 60 * M);
     expect(s().timers[0].start).toBeLessThanOrEqual(Date.now());
   });
 });
@@ -6377,7 +6102,7 @@ describe('setTimerStart', () => {
 describe('time-entry: keep last two selected', () => {
   it('pinning Start derives Lasted (start+end both set)', () => {
     s().openSheet('feeding'); // active {end, lasted}, derived start
-    s().setStartedAt(NOW - 40 * M); // now active {start, end}, derived lasted
+    s().setStartedAt(NOW - 40 * M);
     expect(s().te.order?.[2]).toBe('lasted');
     expect(teStart(s().te, NOW)).toBe(NOW - 40 * M);
     expect(teEnd(s().te, NOW)).toBe(NOW);
@@ -6395,10 +6120,10 @@ describe('time-entry: keep last two selected', () => {
     s().openSheet('feeding');
     s().setStartedAt(NOW - 40 * M);
     s().setEndedAbs(NOW - 10 * M); // active {end, start}, derived lasted = 30
-    s().setStartedAt(NOW - 47 * M); // fine-tune start; end must not move
+    s().setStartedAt(NOW - 47 * M);
     expect(teEnd(s().te, NOW)).toBe(NOW - 10 * M);
     expect(teStart(s().te, NOW)).toBe(NOW - 47 * M);
-    expect(s().te.order?.[2]).toBe('lasted'); // lasted re-derives (37 min)
+    expect(s().te.order?.[2]).toBe('lasted');
   });
 
   it('an Ended chip after setEndedAbs clears the absolute pin', () => {
@@ -6412,23 +6137,23 @@ describe('time-entry: keep last two selected', () => {
   it('with lasted+end active, nudging start moves only start and re-derives lasted', () => {
     s().openSheet('feeding');
     s().setLasted(20); // active {lasted, end@now}, start derived (= now-20)
-    s().setStartedAt(NOW - 50 * M); // nudge start earlier — must overrule lasted
-    expect(teStart(s().te, NOW)).toBe(NOW - 50 * M); // start moved
-    expect(teEnd(s().te, NOW)).toBe(NOW); // end stayed put (frozen)
-    expect(teDurationMin(s().te, NOW)).toBe(50); // duration recomputed as end − start
-    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected → derived
+    s().setStartedAt(NOW - 50 * M);
+    expect(teStart(s().te, NOW)).toBe(NOW - 50 * M);
+    expect(teEnd(s().te, NOW)).toBe(NOW);
+    expect(teDurationMin(s().te, NOW)).toBe(50);
+    expect(s().te.order?.[2]).toBe('lasted');
     expect(isActive(s().te.order, 'lasted')).toBe(false);
   });
 
   it('with lasted+start active, nudging end moves only end and re-derives lasted', () => {
     s().openSheet('feeding');
-    s().setStartedAt(NOW - 60 * M); // pin start (freezes end, lasted → derived)
+    s().setStartedAt(NOW - 60 * M); // pin start (freezes end, lasted becomes derived)
     s().setLasted(30); // active {lasted, start}, end derived (= now-30)
-    s().setEndedAbs(NOW - 5 * M); // nudge end later — must overrule lasted
-    expect(teEnd(s().te, NOW)).toBe(NOW - 5 * M); // end moved
-    expect(teStart(s().te, NOW)).toBe(NOW - 60 * M); // start stayed put (frozen)
-    expect(teDurationMin(s().te, NOW)).toBe(55); // duration recomputed
-    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected → derived
+    s().setEndedAbs(NOW - 5 * M);
+    expect(teEnd(s().te, NOW)).toBe(NOW - 5 * M);
+    expect(teStart(s().te, NOW)).toBe(NOW - 60 * M);
+    expect(teDurationMin(s().te, NOW)).toBe(55);
+    expect(s().te.order?.[2]).toBe('lasted');
   });
 });
 
@@ -6441,23 +6166,22 @@ describe('edit a running timer', () => {
     expect(s().sheet?.type).toBe('sleep');
     expect(s().fromTimerId).toBe('t1');
     expect(s().te.startAbs).toBe(NOW - 40 * M);
-    // the timer is running, so TimeEntry must render its ongoing view (editable
-    // start + live "now" end), not dead end/lasted pills
+    // a running timer must render the ongoing view (editable start, live "now"
+    // end), not dead end/lasted pills
     expect(s().te.ongoing).toBe(true);
   });
 
   it('pressing the sheet\'s save button (save()) on a timer-edit keeps the timer running instead of stopping it', () => {
-    // Regression guard for the original bug: editing a running timer used to
-    // route through save()'s normal "consume into an entry" path because
-    // openTimerEdit sets ongoing:false. save() must now detect fromTimerId
-    // and delegate to saveTimerDetails instead.
+    // Regression: editing a running timer used to fall into save()'s normal
+    // "consume into an entry" path, because openTimerEdit sets ongoing:false.
+    // save() must detect fromTimerId and delegate to saveTimerDetails.
     useAppStore.setState({
       timers: [{ id: 't1', activity: 'sleep', name: 'Sleep', start: NOW - 40 * M, saveAs: 'sleep' }],
     });
     s().openTimerEdit('t1');
     s().save();
-    expect(s().timers).toHaveLength(1); // still running, not consumed
-    expect(s().entries).toHaveLength(0); // no entry created
+    expect(s().timers).toHaveLength(1);
+    expect(s().entries).toHaveLength(0);
     expect(s().sheet).toBeNull();
     expect(s().fromTimerId).toBeNull();
   });
@@ -6480,11 +6204,11 @@ describe('edit a running timer', () => {
     s().openTimerEdit('t1');
     s().setEndedAbs(NOW - 5 * M); // pin an earlier end; flips ongoing:false
     s().save();
-    expect(s().timers).toHaveLength(0); // source timer consumed
+    expect(s().timers).toHaveLength(0);
     expect(s().entries).toHaveLength(1);
     const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
     expect(e.start).toBe(NOW - 40 * M); // original timer start preserved
-    expect(e.end).toBe(NOW - 5 * M); // logged at the pinned end
+    expect(e.end).toBe(NOW - 5 * M);
     expect(s().fromTimerId).toBeNull();
   });
 
@@ -6494,10 +6218,10 @@ describe('edit a running timer', () => {
     });
     s().openTimerEdit('t1');
     s().setEndedAbs(NOW - 5 * M);
-    s().setOngoing(); // "Still running" — back to live
+    s().setOngoing(); // "Still running": back to live
     s().save();
-    expect(s().timers).toHaveLength(1); // still running (saveTimerDetails path)
-    expect(s().entries).toHaveLength(0); // no entry created
+    expect(s().timers).toHaveLength(1);
+    expect(s().entries).toHaveLength(0);
     expect(s().timers[0].start).toBe(NOW - 40 * M);
     expect(s().sheet).toBeNull();
     expect(s().fromTimerId).toBeNull();
@@ -6510,12 +6234,12 @@ describe('edit a running timer', () => {
     s().openTimerEdit('t1');
     s().setEnded(0); // "Now" chip: end at now, clears endAbs, flips ongoing:false
     s().save();
-    expect(s().timers).toHaveLength(0); // timer consumed
+    expect(s().timers).toHaveLength(0);
     expect(s().entries).toHaveLength(1);
     const e = s().entries[0] as Extract<Entry, { type: 'sleep' }>;
     expect(e.start).toBe(NOW - 40 * M); // original timer start preserved
-    expect(e.end).toBe(NOW); // ended at now (store now === NOW in tests)
-    expect(s().te.endAbs).toBeUndefined(); // Now clears the absolute pin
+    expect(e.end).toBe(NOW);
+    expect(s().te.endAbs).toBeUndefined();
     expect(s().fromTimerId).toBeNull();
   });
 });
@@ -6592,12 +6316,9 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     s().openTimerEdit('t1');
     s().setTE({ notes: '  spit up a little  ' });
     s().saveTimerDetails();
-    // persisted on the still-running timer (trimmed), not lost
     expect(s().timers[0].notes).toBe('spit up a little');
-    // reopening the editor shows it again
     s().openTimerEdit('t1');
     expect(s().te.notes).toBe('spit up a little');
-    // and it survives the final stop into the entry
     s().saveTimerDetails();
     s().stopTimer('t1');
     const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
@@ -6664,12 +6385,12 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     s().openTimerEdit('t5');
     s().setTE({ milestone: 'lifted head' });
     s().saveTimerDetails();
-    expect(s().timers).toHaveLength(1); // still running
+    expect(s().timers).toHaveLength(1);
     expect(s().entries).toHaveLength(0);
-    // the toast asserts a save happened — so something must actually be persisted
+    // the toast claims a save happened, so something must actually be persisted
     expect(s().timers[0].milestone).toBe('lifted head');
     expect(s().toast).toBe('Details saved');
-    s().openTimerEdit('t5'); // reopen reflects it
+    s().openTimerEdit('t5');
     expect(s().te.milestone).toBe('lifted head');
     s().stopTimer('t5');
     const e = s().entries[0] as Extract<Entry, { type: 'tummy' }>;
@@ -6677,29 +6398,29 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
   });
 
   it('persists an edited start time onto the running timer', () => {
-    useAppStore.setState({ timers: [feedingTimer('t6')] }); // start NOW - 12m
+    useAppStore.setState({ timers: [feedingTimer('t6')] });
     s().openTimerEdit('t6');
-    s().setStartedAt(NOW - 40 * M); // user re-anchors the start earlier
+    s().setStartedAt(NOW - 40 * M);
     s().saveTimerDetails();
     expect(s().timers).toHaveLength(1);
     expect(s().timers[0].start).toBe(NOW - 40 * M);
-    s().openTimerEdit('t6'); // reopen reflects the new start
+    s().openTimerEdit('t6');
     expect(s().te.startAbs).toBe(NOW - 40 * M);
   });
 
   it('tapping "Now" while editing a running timer resets and persists its start (ongoing stays true)', () => {
-    useAppStore.setState({ timers: [feedingTimer('t6b')] }); // start NOW - 12m
+    useAppStore.setState({ timers: [feedingTimer('t6b')] });
     s().openTimerEdit('t6b');
-    s().setStartedAt(NOW, 'now'); // user taps the "Now" chip
+    s().setStartedAt(NOW, 'now'); // the "Now" chip
     expect(s().te.startAnchor).toBe('now');
-    expect(s().te.ongoing).toBe(true); // setStartedAt must not disturb ongoing
+    expect(s().te.ongoing).toBe(true);
     s().saveTimerDetails();
-    expect(s().timers).toHaveLength(1); // still running, not stopped
+    expect(s().timers).toHaveLength(1);
     expect(s().timers[0].start).toBe(NOW);
   });
 
   it('leaves the start unchanged when it was not edited', () => {
-    useAppStore.setState({ timers: [feedingTimer('t7')] }); // start NOW - 12m
+    useAppStore.setState({ timers: [feedingTimer('t7')] });
     s().openTimerEdit('t7');
     s().setTE({ amount: 30 });
     s().saveTimerDetails();
@@ -6709,8 +6430,8 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
   it('setTimerLasted keeps the fixed start and derives the end (start + X)', () => {
     useAppStore.setState({ timers: [feedingTimer('t9')] }); // start NOW - 12m
     s().openTimerEdit('t9');
-    s().setTimerLasted(45); // "oh, it lasted about 45 min"
-    expect(s().te.ongoing).toBe(false); // marked finished
+    s().setTimerLasted(45);
+    expect(s().te.ongoing).toBe(false);
     expect(s().te.startAbs).toBe(NOW - 12 * M); // start NOT rewritten
     expect(s().te.durationMin).toBe(45);
     expect(s().te.order?.[2]).toBe('end'); // end is the derived point
@@ -6720,20 +6441,20 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     useAppStore.setState({ timers: [feedingTimer('t9c')] }); // real start NOW - 12m
     s().openTimerEdit('t9c');
     s().setTimerLasted(45); // active {lasted, start}, end derived (= start + 45)
-    s().setEndedAbs(NOW - 2 * M); // fine-tune the end — must overrule the lasted estimate
-    expect(teStart(s().te, NOW)).toBe(NOW - 12 * M); // real elapsed start untouched
-    expect(teEnd(s().te, NOW)).toBe(NOW - 2 * M); // only the end moved
-    expect(teDurationMin(s().te, NOW)).toBe(10); // duration re-derives (end − start)
-    expect(s().te.order?.[2]).toBe('lasted'); // lasted deselected
+    s().setEndedAbs(NOW - 2 * M); // fine-tuning the end must overrule the lasted estimate
+    expect(teStart(s().te, NOW)).toBe(NOW - 12 * M);
+    expect(teEnd(s().te, NOW)).toBe(NOW - 2 * M);
+    expect(teDurationMin(s().te, NOW)).toBe(10);
+    expect(s().te.order?.[2]).toBe('lasted');
   });
 
   it('Save with a chosen length stops the timer into a fixed-start entry', () => {
-    useAppStore.setState({ timers: [feedingTimer('t9b')] }); // start NOW - 12m
+    useAppStore.setState({ timers: [feedingTimer('t9b')] });
     s().openTimerEdit('t9b');
     s().setTE({ amount: 60, method: 'both', startSide: 'right' });
     s().setTimerLasted(45);
     s().save();
-    expect(s().timers).toHaveLength(0); // timer stopped
+    expect(s().timers).toHaveLength(0);
     const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
     expect(e.type).toBe('feeding');
     expect(e.start).toBe(NOW - 12 * M); // fixed start preserved
@@ -6745,11 +6466,10 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
   });
 
   it('stopping via "lasted X" files the entry against the timer\'s child, not the selection', async () => {
-    // The Timers tab deliberately lists every child's timers with no per-child
-    // filter, so tapping a sibling's running timer while another child is
-    // selected is the obvious thing to do. `stopTimer` gets this right; save()'s
-    // timer-stop path did not, because `existing` is null for a brand-new entry
-    // and the owner had nowhere to come from but the selection.
+    // The Timers tab lists every child's timers with no per-child filter, so
+    // stopping a sibling's timer while another child is selected is routine.
+    // save()'s timer-stop path used to file it under the selection, because
+    // `existing` is null for a brand-new entry.
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
       offline: false,
@@ -6766,23 +6486,22 @@ describe('saveTimerDetails: persisting edits to a running timer', () => {
     s().setTimerLasted(20);
     s().save();
 
-    expect(s().timers).toHaveLength(0); // the timer was stopped
+    expect(s().timers).toHaveLength(0);
     expect(s().entries[0].childId).toBe('localMira');
     await flush();
-    // And the server row lands under Mira: `commitWrite` resolves the child
-    // server id from the ENTRY, so a wrong owner here creates the record under
-    // the wrong child, which no local fix can take back.
+    // `commitWrite` resolves the child server id from the ENTRY, so a wrong
+    // owner creates the record under the wrong child, which no local fix undoes.
     expect(h.pushedChildServerIds).toEqual([11]);
   });
 
   it('"Still running" after a length keeps the timer live on save', () => {
-    useAppStore.setState({ timers: [feedingTimer('t9c')] }); // start NOW - 12m
+    useAppStore.setState({ timers: [feedingTimer('t9c')] });
     s().openTimerEdit('t9c');
-    s().setTimerLasted(30); // considered stopping...
-    s().setOngoing(); // ...then tapped "Still running" to keep it going
+    s().setTimerLasted(30);
+    s().setOngoing();
     expect(s().te.ongoing).toBe(true);
     s().save();
-    expect(s().timers).toHaveLength(1); // still running, not stopped
+    expect(s().timers).toHaveLength(1);
     expect(s().entries).toHaveLength(0);
     expect(s().timers[0].start).toBe(NOW - 12 * M);
   });
@@ -6806,7 +6525,7 @@ describe('saved servers', () => {
     useAppStore.setState({ savedServers: [], connected: false });
     await s().connect('https://a.lan', 'tok');
     expect(s().savedServers.map((x) => x.serverUrl)).toContain('https://a.lan');
-    expect(h.servers).toHaveLength(1); // persisted
+    expect(h.servers).toHaveLength(1);
   });
 
   it('forgetServer removes a server, persists, and toasts', () => {
@@ -6837,7 +6556,7 @@ describe('saved servers', () => {
     await s().connect('https://bad.lan', 'tok');
     expect(s().connectError).toBeTruthy();
     expect(s().savedServers).toEqual([]);
-    expect(h.servers).toEqual([]); // persistServers never called
+    expect(h.servers).toEqual([]);
   });
 });
 
@@ -6855,7 +6574,7 @@ describe('insights slice', () => {
     await useAppStore.getState().loadInsights();
     const s = useAppStore.getState();
     expect(s.insightsLoaded).toBe(true);
-    expect(s.insightsEntries.map((e) => e.id)).toEqual(['s1']); // c2's entry excluded
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['s1']);
   });
 
   it('selectChild resets the insights cache', () => {
@@ -6870,7 +6589,7 @@ describe('insights slice', () => {
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
       selectedChildId: 'c1',
-      children: [SYNCED_C1], // serverId 501: loadInsights must request the SERVER id
+      children: [SYNCED_C1], // serverId 501
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
     vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
@@ -6879,7 +6598,7 @@ describe('insights slice', () => {
     await useAppStore.getState().loadInsights();
     expect(loadInsightsHistory).toHaveBeenCalledWith(
       { mode: 'server', serverUrl: 'x', token: 'y' },
-      '501', // the child's SERVER id, not its local id 'c1'
+      '501', // the SERVER id, not the local id 'c1'
       expect.any(Number),
     );
     const s = useAppStore.getState();
@@ -6887,9 +6606,8 @@ describe('insights slice', () => {
     expect(s.insightsLoaded).toBe(true);
   });
 
-  // Regression: a Budkin-local id (e.g. 'child' + Date.now(), see saveChild)
-  // must never reach the server. `/api/sleep/?child=...` and its siblings
-  // (repository.ts's `loadInsightsHistory`) need the numeric server id.
+  // Regression: a Budkin-local id ('child' + Date.now()) must never reach the
+  // server. `/api/sleep/?child=...` and its siblings need the numeric server id.
   it('loadInsights requests the SERVER id, not Budkin\'s local id, for a locally-created (already-synced) child', async () => {
     useAppStore.setState({
       connection: { mode: 'server', serverUrl: 'x', token: 'y' } as any,
@@ -6906,11 +6624,10 @@ describe('insights slice', () => {
     );
   });
 
-  // Regression companion: a child that has never been pushed has no server
-  // id at all. Before the fix this still hit the API with the local id,
-  // which `pageAll`'s per-page `.catch(() => [])` silently swallowed,
-  // leaving Insights permanently empty with no error surfaced. Skipping the
-  // fetch is the correct outcome here, not an error.
+  // A child that has never been pushed has no server id at all. This used to
+  // hit the API with the local id, which `pageAll`'s per-page `.catch(() => [])`
+  // swallowed, leaving Insights permanently empty with no error surfaced.
+  // Skipping the fetch is the correct outcome here, not an error.
   it('loadInsights skips the fetch (no error) for a child that has never been pushed to the server', async () => {
     vi.mocked(loadInsightsHistory).mockClear();
     useAppStore.setState({
@@ -6938,18 +6655,16 @@ describe('insights slice', () => {
       ],
       insightsLoaded: false, insightsLoading: false, insightsEntries: [], insightsError: false,
     });
-    // First call: a manually-controlled deferred so we can switch children
-    // while the 90-day fetch is still in flight.
+    // A deferred first call, so the child can switch while the fetch is in flight.
     let resolveC1!: (v: Entry[]) => void;
     vi.mocked(loadInsightsHistory).mockImplementationOnce(
       () => new Promise<Entry[]>((r) => { resolveC1 = r; }),
     );
     const inFlight = useAppStore.getState().loadInsights(); // c1 fetch starts
-    // selectChild also refetches the child's records now (see 'switching child
-    // refetches...'), so give that fetch a server view matching this test's own
-    // fixture. The shared default mock reports an EMPTY server, which
-    // reconcileChildren correctly reads as "both children deleted server-side"
-    // and drops them, which is not the situation under test here.
+    // selectChild also refetches the child's records, so that fetch needs a
+    // server view matching this fixture. The shared default mock reports an
+    // EMPTY server, which reconcileChildren correctly reads as "both children
+    // deleted server-side" and drops them.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [
         { id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW },
@@ -6967,9 +6682,7 @@ describe('insights slice', () => {
     await flush(); // let the re-triggered c2 load settle (default mock resolves [])
 
     const st = useAppStore.getState();
-    // c1's stale entries must NOT be stored under c2...
     expect(st.insightsEntries.map((e) => e.id)).not.toContain('a1');
-    // ...and a fresh load for c2 must have been kicked off, keyed by c2's SERVER id.
     expect(loadInsightsHistory).toHaveBeenCalledTimes(2);
     expect(vi.mocked(loadInsightsHistory).mock.calls[1][1]).toBe('502');
     expect(st.insightsEntries).toEqual([]); // c2's (empty) result
@@ -6990,8 +6703,8 @@ describe('insights slice', () => {
     expect(useAppStore.getState().insightsLoading).toBe(false);
     expect(useAppStore.getState().insightsLoaded).toBe(false);
 
-    // Retry: the CenteredState error view resets insightsLoading before
-    // calling loadInsights again — mirror that here.
+    // The error view resets insightsLoading before calling loadInsights again,
+    // so mirror that here.
     vi.mocked(loadInsightsHistory).mockResolvedValueOnce([
       { id: 'r2', type: 'sleep', childId: 'c1', start: 1, end: 2, nap: false, tags: [] } as any,
     ]);
@@ -7034,8 +6747,8 @@ describe('insights slice', () => {
     vi.mocked(loadInsightsHistory).mockRejectedValueOnce(new Error('network'));
     await useAppStore.getState().reloadInsights();
     const s = useAppStore.getState();
-    expect(s.insightsEntries.map((e) => e.id)).toEqual(['keep']); // charts intact
-    expect(s.insightsError).toBe(false); // good screen not replaced by the error state
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['keep']);
+    expect(s.insightsError).toBe(false); // a good screen is not replaced by the error state
     expect(s.insightsLoading).toBe(false);
     expect(s.insightsLoaded).toBe(true);
   });
@@ -7062,7 +6775,7 @@ describe('insights slice', () => {
     resolveC1([{ id: 'c1stale', type: 'sleep', childId: 'c1', start: 9, end: 10, nap: false, tags: [] } as any]);
     await inFlight;
     const st = useAppStore.getState();
-    expect(st.insightsEntries.map((e) => e.id)).toEqual(['c2keep']); // untouched, c1's result dropped
+    expect(st.insightsEntries.map((e) => e.id)).toEqual(['c2keep']);
     expect(st.insightsLoading).toBe(false);
   });
 
@@ -7079,7 +6792,7 @@ describe('insights slice', () => {
     });
     await useAppStore.getState().reloadInsights();
     const s = useAppStore.getState();
-    expect(s.insightsEntries.map((e) => e.id)).toEqual(['l1']); // c2 excluded
+    expect(s.insightsEntries.map((e) => e.id)).toEqual(['l1']);
     expect(s.insightsLoaded).toBe(true);
   });
 
@@ -7268,10 +6981,8 @@ describe('reminder preference persistence', () => {
     expect(s().pumpingEnabledAt).toBeNull();
   });
 
-  // Regression guard: a persisted `false` is meaningful and must survive
-  // hydration. A truthiness check (`if (prefs.dueDateReminders)`) would treat
-  // a stored `false` as "nothing persisted" and silently resurrect the
-  // default `true`. This test fails under that regression.
+  // A persisted `false` must survive hydration: a truthiness check reads it as
+  // "nothing persisted" and silently resurrects the default `true`.
   it('hydrate restores a persisted false, not the default true (truthiness regression guard)', async () => {
     h.prefs = { dueDateReminders: false };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
@@ -7280,9 +6991,8 @@ describe('reminder preference persistence', () => {
     expect(s().dueDateReminders).toBe(false);
   });
 
-  // pumpingEnabledAt's own guard is `!== undefined` rather than `!= null`,
-  // because a persisted explicit `null` (pumping was turned off) must
-  // overwrite a stale non-null value already in memory.
+  // pumpingEnabledAt's guard is `!== undefined`, not `!= null`: a persisted
+  // explicit `null` must overwrite a stale non-null value already in memory.
   it('hydrate restores a persisted null pumpingEnabledAt over a stale in-memory value', async () => {
     h.prefs = { pumpingEnabledAt: null };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
@@ -7356,9 +7066,8 @@ describe('reminder preference persistence', () => {
     expect(s().treatmentRemindersEnabledAt).toBe(1234);
   });
 
-  // treatmentRemindersEnabledAt's own guard is `!== undefined` rather than
-  // `!= null`, because a persisted explicit `null` (treatments were turned
-  // off) must overwrite a stale non-null value already in memory.
+  // Same `!== undefined` guard as pumpingEnabledAt: a persisted explicit `null`
+  // must overwrite a stale non-null value already in memory.
   it('hydrate restores a persisted null treatmentRemindersEnabledAt over a stale in-memory value', async () => {
     h.prefs = { treatmentRemindersEnabledAt: null };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
@@ -7422,10 +7131,6 @@ describe('rhythm-layer persistence', () => {
 });
 
 describe('bath rhythm persistence', () => {
-  // `AsyncStorage.setItem('budkin.prefs.v1', ...)` in the task brief becomes
-  // `h.prefs = {...}` here: `@/data/prefs` is mocked file-wide (see the
-  // "REQUIRED" comment above), so `loadPrefs()` reads `h.prefs`, never real
-  // AsyncStorage, exactly like every other hydrate test in this file.
   it('seeds a child rhythm from the legacy pref, plus one day', async () => {
     h.prefs = { smallWashesPerBig: 5 };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
@@ -7483,7 +7188,7 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     expect(s().profileError).toBe(true);
     expect(s().profileLoading).toBe(false);
     expect(s().profileLoaded).toBe(false);
-    expect(warn).toHaveBeenCalled(); // diagnostic log fired for the failed /api/profile/
+    expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
@@ -7500,7 +7205,7 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
       () => new Promise<Profile | null>((r) => { resolve = r; }),
     );
     const first = s().loadProfile();
-    const second = s().loadProfile(); // fires while the first is still in flight
+    const second = s().loadProfile();
     resolve({ username: 'alex' });
     await Promise.all([first, second]);
     expect(vi.mocked(loadProfileFromServer)).toHaveBeenCalledTimes(1);
@@ -7520,7 +7225,6 @@ describe('loadProfile (lazy fetch of read-only Baby Buddy server settings)', () 
     });
     resolve({ username: 'server-a-user' });
     await p;
-    // server A's profile must NOT repopulate server B's settings
     expect(s().profile).toBeNull();
     expect(s().profileLoaded).toBe(false);
   });
@@ -7600,7 +7304,7 @@ describe('loadTags (lazy, cached server tag list for the picker)', () => {
     useAppStore.setState({ tags: [{ name: 'Cached' }] });
     h.tagsFails = true;
     await expect(s().loadTags()).resolves.toBeUndefined();
-    expect(s().tags).toEqual([{ name: 'Cached' }]); // not wiped
+    expect(s().tags).toEqual([{ name: 'Cached' }]);
     expect(s().tagsLoading).toBe(false);
     expect(s().tagsLoaded).toBe(false); // can retry on the next open
   });
@@ -7619,7 +7323,6 @@ describe('loadTags (lazy, cached server tag list for the picker)', () => {
     });
     resolve([{ name: 'ServerA-only' }]);
     await p;
-    // server A's tags must NOT repopulate server B's picker
     expect(s().tags).toEqual([]);
     expect(s().tagsLoaded).toBe(false);
   });
@@ -7671,7 +7374,6 @@ describe('visibleTags (union of server + selected, minus structural)', () => {
   it('unions server tags with entry-only tags and drops HIDDEN_TAGS', () => {
     const out = visibleTags(server, ['Cluster', 'right']);
     expect(out.map((t) => t.name)).toEqual(['Fussy', 'Sleepy', 'Cluster']);
-    // structural 'left' (server) and 'right' (selected) never surface
     expect(out.map((t) => t.name)).not.toContain('left');
     expect(out.map((t) => t.name)).not.toContain('right');
   });
@@ -7692,7 +7394,7 @@ describe('visibleTags (union of server + selected, minus structural)', () => {
     s().setTE({ feedType: 'breast', method: 'both', startSide: 'left' });
     s().save();
     const e = s().entries[0] as Extract<Entry, { type: 'feeding' }>;
-    expect(e.tags).toContain('left'); // structural side marker survives on the entry
+    expect(e.tags).toContain('left');
     const chips = visibleTags(server, e.tags).map((t) => t.name);
     expect(chips).not.toContain('left');
     expect(chips).not.toContain('right');
@@ -7709,10 +7411,9 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     vi.mocked(saveConnection).mockClear();
     vi.mocked(serverHasData).mockResolvedValue(false);
     vi.mocked(matchServerChild).mockReturnValue(null);
-    // Full-success stamping default for this block: any serverId==null record
-    // gets stamped, mirroring uploadUnsynced's real "everything pushed"
-    // outcome. Individual tests override with mockImplementationOnce for the
-    // partial-upload / server-switch scenarios.
+    // Full-success default for this block: every serverId==null record gets
+    // stamped. Individual tests override it for the partial-upload and
+    // server-switch scenarios.
     vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
       children: state.children.map((c) => (c.serverId == null ? { ...c, serverId: 501 } : c)),
       entries: state.entries.map((e) => (e.serverId == null ? { ...e, serverId: 601 } : e)),
@@ -7729,31 +7430,30 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(result).toEqual({ status: 'done' });
     expect(serverHasData).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
-    expect(uploaded.children).toEqual([localChild]); // the not-yet-synced local child was uploaded
+    expect(uploaded.children).toEqual([localChild]);
     expect(s().connection).toEqual({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(s().connected).toBe(true);
     expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
-    // The adopted (uploaded + reconciled) entities now belong to this server:
-    // the origin is stamped alongside the connection, licensing a later
-    // post-expiry reconnect through connect() to reconcile them.
+    // The adopted entities now belong to this server: the origin is stamped
+    // alongside the connection, licensing a later reconnect through connect()
+    // to reconcile them.
     expect(h.entityOrigin).toBe('https://new.lan');
-    // Full success clears the persisted adopt target (Finding 2) — a later
-    // adopt against a different server has nothing stale to reset.
+    // Full success clears the persisted adopt target, so a later adopt against
+    // a different server has nothing stale to reset.
     expect(clearAdoptTarget).toHaveBeenCalled();
   });
 
-  // The window: BottomSheet's scrim is a plain Pressable wired to onClose with
-  // no `busy` gate, so the adopt sheet can be dismissed mid-flight. adopt keeps
-  // awaiting its post-upload GET and the user is back on a fully interactive
-  // app, child editor included. These two pin that a write landing in that gap
-  // survives, the same way refresh's snapshots protect one.
+  // The adopt sheet can be dismissed mid-flight (its scrim has no `busy` gate),
+  // so adopt is still awaiting its post-upload GET while the user is back in a
+  // fully interactive app. These two pin that a write landing in that gap
+  // survives.
   it('keeps a child edit made DURING the post-upload reload', async () => {
     const localChild: Child = { id: 'localF', first: 'Fay', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localF' });
     vi.mocked(loadFromServer).mockImplementationOnce(async () => {
-      // Dismiss-and-edit, in the gap: the answer below was assembled before
-      // this rename, so believing it wholesale would silently undo it.
+      // The answer below was assembled before this rename, so believing it
+      // wholesale would silently undo it.
       useAppStore.setState({
         children: [{ ...localChild, serverId: 501, first: 'Fayette' }],
       });
@@ -7802,8 +7502,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     const localChild: Child = { id: 'localF', first: 'Fay', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localF' });
     // The post-success reload: the server now knows this child (serverId 501,
-    // matching the describe block's default `uploadUnsynced` stamp), returned
-    // under its own server-derived id/fields.
+    // the block's default stamp), returned under its own server-derived id.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '501', serverId: 501, first: 'Fay', last: '', birth: NOW }],
       entries: [], timers: [], selectedChildId: '501',
@@ -7817,19 +7516,15 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     // the server's numeric id is not substituted in.
     expect(s().children.map((c) => c.id)).toEqual(['localF']);
     expect(s().children[0].serverId).toBe(501);
-    // selectedChildId still points at a child that exists in the resulting list.
     expect(s().selectedChildId).toBe('localF');
     expect(s().children.some((c) => c.id === s().selectedChildId)).toBe(true);
   });
 
   it('does not drop a child added while its post-upload reload is in flight', async () => {
-    // adopt hand-rolls `applyServerLoad`'s merge, and it used to snapshot its
-    // local side BEFORE the reload the same way `refresh` did, so anything
-    // written during that request was dropped wholesale. It is given no
-    // pre-fetch snapshot to diff against, so this covers the never-pushed
-    // create only, and NOT a mid-GET edit to a child the answer already knows
-    // about; see the note at the read itself for why that residual is
-    // accepted rather than plumbed.
+    // adopt hand-rolls `applyServerLoad`'s merge and used to snapshot its local
+    // side BEFORE the reload, dropping anything written during that request.
+    // With no pre-fetch snapshot to diff against this covers the never-pushed
+    // create only, not a mid-GET edit to a child the answer already knows.
     const localChild: Child = { id: 'localA', first: 'Ann', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localA' });
     let resolveLoad!: (v: any) => void;
@@ -7852,11 +7547,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
   });
 
   it('keeps every child\'s feeding prefill through the post-adopt reload', async () => {
-    // adopt has its own open-coded copy of `applyServerLoad`'s set(), so the
-    // "explicit key AFTER the ...data spread" rule has to be pinned at both
-    // sites. Taking the reload wholesale would replace the whole map with the
-    // server-keyed single entry: the sibling's prefill gone, and the survivor
-    // filed under a server id nothing reads.
+    // adopt has its own copy of `applyServerLoad`'s set(), so the "explicit key
+    // AFTER the ...data spread" rule has to be pinned at both sites. Taking the
+    // reload wholesale replaces the whole map with the server-keyed single
+    // entry: the sibling's prefill gone, the survivor filed under a server id
+    // nothing reads.
     const mira: Child = { id: 'localM', first: 'Mira', last: '', birth: NOW, color: '#fff' };
     const ivo: Child = { id: 'localI', first: 'Ivo', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState({
@@ -7910,10 +7605,8 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
   });
 
   it('keeps the child\'s entries when the post-adopt reload came back INCOMPLETE', async () => {
-    // Same duplicated-site hazard as `timers: null` right above: adopt hand
-    // rolls its own copy of `applyServerLoad`'s set(). Here the reload's notes
-    // request degraded to [], so the answer is a floor, and taking it wholesale
-    // would delete the history this adopt had just uploaded.
+    // The reload's notes request degraded to [], so the answer is a floor:
+    // taking it wholesale would delete the history this adopt just uploaded.
     const localChild: Child = { id: 'localP', first: 'Pia', last: '', birth: NOW, color: '#fff' };
     const uploaded: Entry = { id: 'e-up', serverId: 601, childId: 'localP', type: 'note', time: NOW - 40 * 86400000, text: 'first bath', tags: [] };
     useAppStore.setState({ children: [localChild], selectedChildId: 'localP', entries: [uploaded] });
@@ -7939,7 +7632,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
 
     expect(result).toEqual({ status: 'done' });
     expect(s().savedServers.map((x) => x.serverUrl)).toContain('https://adopted.lan');
-    expect(h.servers).toHaveLength(1); // persisted, mirroring connect()
+    expect(h.servers).toHaveLength(1);
   });
 
   it('does NOT upsert savedServers on a guard/partial/error outcome (only on done)', async () => {
@@ -7984,8 +7677,8 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     const result = await s().adopt('https://new.lan', 'tok', { uploadAnyway: true });
 
     expect(matchServerChild).toHaveBeenCalledWith(localChild, [serverChild]);
-    // Attached to the existing server child (not duplicated) BEFORE uploading
-    // — uploadUnsynced then sees serverId already set and skips it.
+    // Attached to the existing server child (not duplicated) BEFORE uploading,
+    // so uploadUnsynced sees serverId already set and skips it.
     const uploaded = vi.mocked(uploadUnsynced).mock.calls[0][0];
     expect(uploaded.children.find((c) => c.id === 'localB')?.serverId).toBe(900);
     expect(result).toEqual({ status: 'done' });
@@ -8021,9 +7714,8 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     const childA: Child = { id: 'localD', first: 'Dee', last: '', birth: NOW, color: '#fff' };
     const childB: Child = { id: 'localE', first: 'Eve', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [childA, childB] });
-    // Server A: only childA's push succeeds -> the overall result is
-    // `partial`, so the persisted adopt target stays pointed at server A (an
-    // "abandoned" adoption in local mode).
+    // Server A: only childA's push succeeds, so the result is `partial` and the
+    // persisted adopt target stays pointed at server A (an abandoned adoption).
     vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
       children: state.children.map((c) => (c.id === 'localD' ? { ...c, serverId: 111 } : c)),
       entries: state.entries,
@@ -8034,11 +7726,10 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(first).toEqual({ status: 'partial' });
     expect(s().children.find((c) => c.id === 'localD')?.serverId).toBe(111);
 
-    // Simulate the app being killed and relaunched between the abandoned
-    // attempt and this retry: the ONLY thing carrying the prior target
-    // forward is durable storage (there is no module-memory fallback left),
-    // so stub `loadAdoptTarget` directly rather than relying on the previous
-    // call's `saveAdoptTarget` having landed in the same in-memory mock.
+    // Simulate the app being killed between the abandoned attempt and this
+    // retry: durable storage is the only thing carrying the prior target
+    // forward, so stub `loadAdoptTarget` rather than relying on the previous
+    // call's `saveAdoptTarget` landing in the same in-memory mock.
     vi.mocked(loadAdoptTarget).mockResolvedValueOnce('https://server-a.lan');
 
     // Adopting a DIFFERENT server must clear the stale serverId from A BEFORE
@@ -8071,17 +7762,15 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
       expected: true,
     };
     useAppStore.setState({ children: [bornChild, expectingChild], selectedChildId: 'localDue' });
-    // Mirror uploadUnsynced's real contract for this test: an expecting child
-    // is deliberately skipped and never gets a serverId (see src/data/sync.ts),
-    // unlike this block's default mock which stamps every serverId==null record.
+    // Mirror uploadUnsynced's real contract: an expecting child is deliberately
+    // skipped and never gets a serverId, unlike this block's default mock.
     vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
       children: state.children.map((c) => (c.serverId == null && !c.expected ? { ...c, serverId: 501 } : c)),
       entries: state.entries,
       measurements: state.measurements,
     }));
-    // Post-success reload: the server only knows about the born (now-synced)
-    // child. The expecting child was never uploaded, so it's absent here too,
-    // exactly the case that must not wipe it from `children`.
+    // The expecting child was never uploaded, so it is absent from the reload
+    // too, exactly the case that must not wipe it from `children`.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
@@ -8113,23 +7802,19 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
       color: '#eee',
       expected: true,
     };
-    // `heldBack: true` mirrors what `commitWrite` would have stamped at
-    // write time (the note's owner had no `serverId` and was `expected`).
-    // This is now a stored fact, not something re-derived from `expected` or
-    // a timestamp at merge time.
+    // `heldBack: true` is what `commitWrite` stamps at write time when the
+    // owner has no `serverId` and is `expected`. It is a stored fact, not
+    // something re-derived at merge time.
     const note: Entry = { id: 'noteDue', childId: 'localDue', tags: [], type: 'note', time: NOW, text: 'Scan: 20 weeks, all clear', heldBack: true };
     useAppStore.setState({ children: [bornChild, expectingChild], entries: [note], selectedChildId: 'localBorn' });
-    // Mirror uploadUnsynced's real contract: the note's parent (the expecting
-    // child) never gets a serverId, so uploadUnsynced skips pushing the note
-    // too (no server child to attach it to) and leaves it serverId==null,
-    // exactly the case Fix 1(a) must exclude from `stillUnsynced`.
+    // The note's parent never gets a serverId, so the note is skipped too (no
+    // server child to attach it to) and stays serverId==null: the case that
+    // must be excluded from `stillUnsynced`.
     vi.mocked(uploadUnsynced).mockImplementationOnce(async (state) => ({
       children: state.children.map((c) => (c.serverId == null && !c.expected ? { ...c, serverId: 501 } : c)),
       entries: state.entries,
       measurements: state.measurements,
     }));
-    // Post-success reload: the server only knows about the born child and has
-    // no entries at all (the note was never uploaded).
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '501', serverId: 501, first: 'Amy', last: '', birth: NOW }],
       entries: [],
@@ -8141,8 +7826,7 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
 
     const result = await s().adopt('https://new.lan', 'tok');
 
-    // The held-back note must NOT read as failed/leftover work: this is the
-    // "Connect Baby Buddy" dead end one level down from the children fix.
+    // The held-back note must NOT read as failed or leftover work.
     expect(result).toEqual({ status: 'done' });
     const stillThere = s().entries.find((e) => e.id === 'noteDue');
     expect(stillThere).toBeDefined();
@@ -8150,14 +7834,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
   });
 
   it('Fix 3: clears heldBack once a previously-withheld note is actually pushed, even on a partial outcome', async () => {
-    // `localBorn` was expecting when this note was written (commitWrite
-    // stamped heldBack: true then), and has SINCE been confirmed born
-    // (expected: false already), but in local mode nothing ever pushes it,
-    // so the note still carries heldBack: true with no serverId right up
-    // until this adopt(). `localStuck` deliberately fails to push, so the
-    // overall result is `partial` and the set() right after uploadUnsynced
-    // (the one this fix touches) is the FINAL state, not papered over by the
-    // post-success reconciliation reload.
+    // `localBorn` was expecting when this note was written and has since been
+    // confirmed born, but in local mode nothing ever pushed it, so the note
+    // still carries heldBack: true with no serverId. `localStuck` deliberately
+    // fails to push, so the result is `partial` and the set() right after
+    // uploadUnsynced is the FINAL state, not papered over by a reload.
     const bornChild: Child = { id: 'localBorn', first: 'Amy', last: '', birth: NOW, color: '#fff' };
     const stuckChild: Child = { id: 'localStuck', first: 'Stuck', last: '', birth: NOW, color: '#eee' };
     const note: Entry = { id: 'noteWasDue', childId: 'localBorn', tags: [], type: 'note', time: NOW, text: 'now-born note', heldBack: true };
@@ -8173,11 +7854,9 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(result).toEqual({ status: 'partial' });
     const pushedNote = s().entries.find((e) => e.id === 'noteWasDue');
     expect(pushedNote?.serverId).toBe(601);
-    // Self-consistent with the field's own doc comment: heldBack must be
-    // cleared in the same update that stamps a real serverId, mirroring
-    // flushUnsynced. isHeldBackEntry also guards on serverId == null today,
-    // so nothing downstream depends on this yet, but the stored fact itself
-    // must not contradict its own contract.
+    // heldBack must be cleared in the same update that stamps a real serverId,
+    // mirroring flushUnsynced. Nothing downstream depends on it yet, but the
+    // stored fact must not contradict its own contract.
     expect(pushedNote?.heldBack).not.toBe(true);
   });
 });
@@ -8199,10 +7878,8 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     await s().flushUnsynced();
 
     expect(uploadUnsynced).toHaveBeenCalled();
-    // entries: [] here because nothing in `entries` is held-back (see
-    // `isHeldBackEntry`): an ordinary entry still flows through queue.ts's
-    // flushQueue only; a held-back one (see the describe block below) would
-    // appear here instead.
+    // entries: [] because nothing here is held-back: an ordinary entry flows
+    // through queue.ts's flushQueue only.
     expect(vi.mocked(uploadUnsynced).mock.calls[0][0].entries).toEqual([]);
     expect(s().children.find((c) => c.id === 'localF')?.serverId).toBe(501);
   });
@@ -8219,12 +7896,10 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
   });
 
   it('stamps a held-back entry (logged against an expecting child) once its owner is synced', async () => {
-    // Mirrors saveChild's create push having already stamped the child's
-    // serverId (e.g. via confirmBirth): the entry itself never went through
-    // the write queue (see commitWrite's `expected` guard), so this is its
-    // only path to the server. See `isHeldBackEntry`. `heldBack: true`
-    // mirrors what `commitWrite` stamped at write time (while the owner was
-    // still expected); the flag outlives the child's later confirmBirth.
+    // The child's serverId is already stamped (via confirmBirth), but the entry
+    // never went through the write queue (commitWrite's `expected` guard), so
+    // this is its only path to the server. The heldBack flag outlives the
+    // child's later confirmBirth.
     const bornChild: Child = { id: 'localP', serverId: 900, first: 'Nova', last: '', birth: NOW - 60 * M, color: '#fff' };
     const heldBack: Entry = { id: 'noteP', childId: 'localP', tags: [], type: 'note', time: NOW - 120 * M, text: 'pre-birth note', heldBack: true };
     useAppStore.setState({ children: [bornChild], entries: [heldBack] });
@@ -8273,9 +7948,9 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     expect(uploadUnsynced).not.toHaveBeenCalled();
   });
 
-  // Finding 3: two concurrent reconnect triggers (e.g. setNetworkOnline(true)
-  // + a foreground refresh()) both calling flushUnsynced must not both POST
-  // the same serverId==null child — that would duplicate it on the server.
+  // Two concurrent reconnect triggers (setNetworkOnline(true) plus a foreground
+  // refresh()) must not both POST the same serverId==null child: that
+  // duplicates it on the server.
   it('guards against overlapping flushes: a second call while one is in flight is a no-op', async () => {
     const localChild: Child = { id: 'localJ', first: 'J', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild] });
@@ -8288,7 +7963,7 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     );
 
     const first = s().flushUnsynced();
-    const second = s().flushUnsynced(); // fires while `first` is still awaiting uploadUnsynced
+    const second = s().flushUnsynced();
 
     expect(uploadUnsynced).toHaveBeenCalledTimes(1);
     resolveUpload({ children: [{ ...localChild, serverId: 501 }], entries: [], measurements: [] });
@@ -8299,9 +7974,8 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     expect(s().children.find((c) => c.id === 'localJ')?.serverId).toBe(501);
   });
 
-  // Finding 3 (functional merge): the wholesale `set({ children: result.children,
-  // ... })` off the pre-await snapshot would clobber a create that lands
-  // during the await; the functional merge-by-id must preserve it instead.
+  // A wholesale `set({ children: result.children })` off the pre-await snapshot
+  // clobbers a create that lands during the await; merging by id preserves it.
   it('a create landing during the in-flight upload is not dropped by the functional merge', async () => {
     const localChild: Child = { id: 'localK', first: 'K', last: '', birth: NOW, color: '#fff' };
     useAppStore.setState({ children: [localChild] });
@@ -8314,8 +7988,8 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     );
 
     const pending = s().flushUnsynced();
-    // A concurrent create lands mid-flush (e.g. via saveChild) — simulated
-    // directly on state rather than driving the whole saveChild flow.
+    // A concurrent create lands mid-flush, simulated directly on state rather
+    // than driving the whole saveChild flow.
     const newChild: Child = { id: 'localL', first: 'L', last: '', birth: NOW, color: '#eee' };
     useAppStore.setState((st) => ({ children: [...st.children, newChild] }));
 
@@ -8326,8 +8000,6 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     expect(s().children.find((c) => c.id === 'localK')?.serverId).toBe(501);
   });
 
-  // End-to-end offline-measurement parity: a measurement created while offline
-  // stays local (serverId==null) and syncs on reconnect via flushUnsynced.
   it('an offline-created measurement persists (serverId==null) and gets stamped on reconnect', async () => {
     useAppStore.setState({
       offline: true,
@@ -8337,13 +8009,11 @@ describe('flushUnsynced (reconnect flush of offline-created children/measurement
     s().openMeasurement('weight');
     s().saveMeasurement(6.2, NOW);
     await flush();
-    // Offline: no server push, no serverId — the create is pending on-device.
     expect(h.measPushed).toHaveLength(0);
     const created = s().measurements.find((m) => m.value === 6.2);
     expect(created).toBeDefined();
     expect(created?.serverId).toBeUndefined();
 
-    // Reconnect and flush.
     useAppStore.setState({ offline: false });
     await s().flushUnsynced();
 
@@ -8454,7 +8124,7 @@ describe('answerMilestonePrompt', () => {
     useAppStore.setState({ selectedChildId: 'c1', answeredMilestonePrompts: {} });
     s().answerMilestonePrompt('waves-bye');
     expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye']);
-    s().answerMilestonePrompt('waves-bye'); // one prompt per milestone: no duplicate
+    s().answerMilestonePrompt('waves-bye');
     expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye']);
     s().answerMilestonePrompt('first-word');
     expect(s().answeredMilestonePrompts.c1).toEqual(['waves-bye', 'first-word']);
@@ -8537,7 +8207,7 @@ describe('expecting children', () => {
 
     const kid = useAppStore.getState().children[0];
     expect(kid.serverId).toBeUndefined(); // still unsynced, so the reconnect flush picks it up
-    expect(kid.expected).toBe(false); // and no longer held back
+    expect(kid.expected).toBe(false);
   });
 
   it('confirmBirth on an unknown id is a no-op', () => {
@@ -8577,11 +8247,10 @@ describe('expecting children', () => {
   });
 
   it('server mode online: a note written against an expecting child is neither pushed nor queued', async () => {
-    // Queueing it would let it flush silently through `flushQueue`, which
-    // never stamps a local serverId on an entry: only `flushUnsynced`'s
-    // held-back push (once confirmBirth gives the child one) does that (see
-    // commitWrite's `expected` guard and `isHeldBackEntry`). So it must stay
-    // off the queue entirely, the same way a local-mode write does.
+    // Queueing it would let it flush silently through `flushQueue`, which never
+    // stamps a local serverId on an entry. Only `flushUnsynced`'s held-back
+    // push does that, once confirmBirth gives the child a serverId, so the
+    // entry must stay off the queue entirely.
     useAppStore.setState({
       children: [],
       selectedChildId: '',
@@ -8624,15 +8293,13 @@ describe('expecting children', () => {
     // not the stale due date.
     expect(h.childPushed[0]).toMatchObject({ expected: false, birth: actual });
     const kid = useAppStore.getState().children[0];
-    // the local id is NOT rewritten to the server id, and selection keeps
-    // following it: entries/measurements reference this id, and rewriting it
-    // would orphan them (the bug this whole design exists to prevent).
+    // The local id is NOT rewritten to the server id: entries and measurements
+    // reference it, and rewriting it would orphan them.
     expect(kid.id).toBe(localId);
     expect(useAppStore.getState().selectedChildId).toBe(localId);
-    // serverId is stamped instead (like saveChild's create push) so
-    // server-child ops (update / delete / sync) recognise it before the next
-    // refresh. The slug comes from the same response, and is what the child
-    // endpoints are actually keyed by.
+    // serverId is stamped instead, so server-child ops recognise it before the
+    // next refresh. The slug comes from the same response, and is what the
+    // child endpoints are actually keyed by.
     expect(kid.serverId).toBe(777);
     expect(kid.slug).toBe(SERVER_SLUG);
   });
@@ -8662,10 +8329,9 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
     color: '#eee',
     expected: true,
   };
-  // `heldBack: true` mirrors what `commitWrite` stamps at write time for any
-  // entry logged against a child with no `serverId` (an expecting child, see
-  // `Child.expected`). A stored fact, not something re-derived later from
-  // `expected` or a timestamp comparison.
+  // `heldBack: true` is what `commitWrite` stamps at write time for an entry
+  // logged against a child with no `serverId`. A stored fact, not something
+  // re-derived later from `expected` or a timestamp comparison.
   const note: Entry = {
     id: 'noteDue',
     childId: 'localDue',
@@ -8678,10 +8344,8 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
   const bornOnServer = { id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
 
   it('a note written for an expecting child survives refresh() in server mode', async () => {
-    // The note was written while the child was expecting and is already in
-    // memory (mirrors adopt() having just merged it back in); the server
-    // reload naturally omits both the expecting child and its note, since
-    // neither was ever pushed.
+    // Neither the expecting child nor its note was ever pushed, so the server
+    // reload naturally omits both.
     useAppStore.setState({
       children: [...s().children, expectingChild],
       entries: [note],
@@ -8703,11 +8367,9 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
   });
 
   it('a note written for an expecting child survives hydrate() in server mode (app restart), when it is in the entity store but not on the queue and not on the server', async () => {
-    // Cold restart: the note lives only in the durable entity store (it was
-    // never queued: commitWrite returns early for local-mode writes, and the
-    // note was written before the child's owner ever adopted a server). The
-    // write queue itself stays empty for this test (h.q defaults to []),
-    // which is what distinguishes this from the ordinary queued-entry case.
+    // Cold restart: the note lives only in the durable entity store, never on
+    // the queue. h.q staying empty is what distinguishes this from the
+    // ordinary queued-entry case.
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
       children: [expectingChild],
@@ -8735,22 +8397,17 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
   });
 
   it('a note written for an expecting child survives confirmBirth() then refresh() in server mode (expected clearing must not orphan it from protection)', async () => {
-    // The note is written while the child is still expecting (mirrors the two
-    // tests above): it lives only in memory/entity-store, never on the server
-    // or the queue. confirmBirth then clears `expected` and stamps a
-    // serverId. The note's `heldBack` flag was stamped once, at write time,
-    // and confirmBirth flipping `expected` does not touch it, so the note
-    // stays protected regardless of how the child's birth compares to the
-    // note's own timestamp (see Finding 1: `clampBirth` returns local
-    // midnight, which routinely lands BEFORE a same-day note, not after).
+    // confirmBirth clears `expected` and stamps a serverId, but the note's
+    // `heldBack` flag was stamped once at write time and is not touched, so
+    // the note stays protected regardless of how the child's birth compares to
+    // the note's own timestamp.
     useAppStore.setState({
       children: [...s().children, expectingChild],
       entries: [note],
     });
     const localId = expectingChild.id;
-    // Realistic: `clampBirth` (src/lib/birthDate.ts) can only ever produce
-    // local midnight of some day, never a future timestamp. Local midnight
-    // of "now" is EARLIER than the note's own `time` (NOW), not later.
+    // `clampBirth` can only ever produce local midnight of some day, which is
+    // EARLIER than the note's own `time` (NOW), not later.
     const midnightOfNow = new Date(NOW);
     midnightOfNow.setHours(0, 0, 0, 0);
     const actualBirth = midnightOfNow.getTime();
@@ -8762,8 +8419,7 @@ describe('held-back entries survive refresh/hydrate (regression for the blocking
     expect(born?.expected).toBe(false);
     expect(born?.serverId).toBe(777);
 
-    // The server now knows the child (by the serverId confirmBirth just
-    // stamped) but not yet the note: nothing has pushed it there.
+    // The server knows the child but not the note: nothing has pushed it there.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '777', serverId: 777, first: 'Sky', last: '', birth: actualBirth }],
       entries: [],
@@ -8801,9 +8457,8 @@ describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
     const noteId = useAppStore.getState().entries[0].id;
     expect(useAppStore.getState().entries[0].heldBack).toBe(true);
 
-    // Edit it (fix a typo): this is save()'s EDIT branch, which rebuilds a
-    // brand-new entry object per activity type rather than calling
-    // commitWrite. Before the fix it carried across only `serverId`.
+    // save()'s EDIT branch rebuilds a brand-new entry object per activity type
+    // rather than calling commitWrite, and used to carry across only `serverId`.
     useAppStore.getState().openEdit(noteId);
     useAppStore.getState().setTE({ noteText: 'Scan: 20 weeks, all clear (typo fixed)' });
     useAppStore.getState().save();
@@ -8814,10 +8469,10 @@ describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
     expect(edited?.type === 'note' ? edited.text : undefined).toBe('Scan: 20 weeks, all clear (typo fixed)');
     expect(edited?.heldBack).toBe(true);
 
-    // A refresh with server data that (correctly) has never heard of this
-    // note must not let it fall out of `entries`: `flushUnsynced` no longer
-    // owns it if heldBack was dropped, and the persistence subscription would
-    // write the shortened array straight over durable storage.
+    // A refresh whose server data has never heard of this note must not let it
+    // fall out of `entries`: with heldBack dropped, `flushUnsynced` no longer
+    // owns it and the persistence subscription writes the shortened array
+    // straight over durable storage.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [],
       entries: [],
@@ -8836,10 +8491,9 @@ describe('Fix 1: editing a held-back entry must not drop heldBack', () => {
 
 describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inferred)', () => {
   it('Finding 1a (ordinary path): a note written earlier the same day survives confirmBirth with a realistic midnight-today birth, then refresh()', async () => {
-    // Reproduces the failure as it actually happens: `clampBirth` (see
-    // src/lib/birthDate.ts) returns LOCAL MIDNIGHT, and `ConfirmBirthSheet`
-    // prefills with today, so a same-day note's own timestamp is routinely
-    // AFTER the birth that later gets recorded for it, not before.
+    // `clampBirth` returns LOCAL MIDNIGHT and the confirm sheet prefills with
+    // today, so a same-day note's timestamp routinely lands AFTER the birth
+    // that later gets recorded for it, not before.
     useAppStore.setState({
       children: [],
       selectedChildId: '',
@@ -8850,7 +8504,7 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     const dueId = useAppStore.getState().children[0].id;
     useAppStore.setState({ selectedChildId: dueId });
 
-    // The 08:30 note, written while the child is still expecting.
+    // Written while the child is still expecting.
     useAppStore.getState().openSheet('note');
     useAppStore.getState().setTE({ noteText: 'Kicking a lot today' });
     useAppStore.getState().save();
@@ -8867,8 +8521,8 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     useAppStore.getState().confirmBirth(dueId, actualBirth);
     await flush();
 
-    // Baby Buddy has no record of the note (it was never pushed): a refresh
-    // must not let the server's blank slate silently drop it.
+    // The note was never pushed, so a refresh must not let the server's blank
+    // slate silently drop it.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [{ id: '777', serverId: 777, first: 'Rowan', last: '', birth: actualBirth }],
       entries: [],
@@ -8884,9 +8538,8 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
   });
 
   it('Finding 1b (overdue pregnancy): a note written after an already-past due date survives refresh() while the child is still expecting', async () => {
-    // `clampDueDate` deliberately lets a past date through (an already
-    // overdue pregnancy keeps its real due date). An overdue pregnancy is
-    // common, not exceptional.
+    // `clampDueDate` deliberately lets a past date through: an already overdue
+    // pregnancy keeps its real due date.
     useAppStore.setState({
       children: [],
       selectedChildId: '',
@@ -8925,17 +8578,15 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
       childId: 'c1',
       tags: [],
       type: 'note',
-      time: NOW - 60 * M, // before the recorded birth, the old timestamp-based check's blind spot
+      time: NOW - 60 * M, // before the recorded birth: the old timestamp check's blind spot
       text: 'early log',
     };
     h.q = [queuedEntry]; // an ordinary offline write, sitting on the retry queue
     useAppStore.setState({ children: [bornSynced], entries: [queuedEntry] });
-    // Simulate uploadUnsynced ALSO pushing whatever entries it's handed, so a
-    // double-push is directly observable via `h.pushed` (which
-    // `pushEntryToServer`, used by `flushQueue`, already tracks). Persistent
-    // (not `Once`): post-fix, `flushUnsynced` never even calls `uploadUnsynced`
-    // here (nothing is held back), so a `mockImplementationOnce` would go
-    // unconsumed and leak into a later, unrelated test.
+    // Make uploadUnsynced ALSO push whatever entries it is handed, so a
+    // double-push shows up in `h.pushed`. Persistent rather than `Once`:
+    // `flushUnsynced` never calls `uploadUnsynced` here (nothing is held back),
+    // so a `Once` mock would go unconsumed and leak into a later test.
     vi.mocked(uploadUnsynced).mockImplementation(async (state) => {
       for (const e of state.entries) {
         if (e.serverId == null) h.pushed.push(e);
@@ -8951,8 +8602,8 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
     await s().flushUnsynced();
 
     expect(h.pushed.filter((e: any) => e.id === 'q1')).toHaveLength(1);
-    // Restore the file's baseline passthrough default so this test's
-    // side-effecting mock can't affect any test that runs after it.
+    // Restore the baseline passthrough so this test's side-effecting mock
+    // cannot affect anything that runs after it.
     vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
       children: state.children,
       entries: state.entries,
@@ -8963,10 +8614,9 @@ describe('Finding 1 & 2 reproductions (heldBack must be a stored fact, never inf
 
 describe('heldBack migration (entries written before the field existed)', () => {
   beforeEach(() => {
-    // Explicit, neutral passthrough: this describe's `hydrate()` calls
-    // legitimately trigger `flushUnsynced` -> `uploadUnsynced` (a backfilled
-    // entry makes `hasUnsynced` true), so pin the mock rather than depend on
-    // whatever a previous describe block happened to leave it as.
+    // These `hydrate()` calls legitimately reach `uploadUnsynced` (a backfilled
+    // entry makes `hasUnsynced` true), so pin a neutral passthrough rather than
+    // inherit whatever a previous describe block left behind.
     vi.mocked(uploadUnsynced).mockImplementation(async (state) => ({
       children: state.children,
       entries: state.entries,
@@ -9002,8 +8652,8 @@ describe('heldBack migration (entries written before the field existed)', () => 
     const backfilled = s().entries.find((e) => e.id === 'legacyNote');
     expect(backfilled?.heldBack).toBe(true);
 
-    // Prove it actually protects the note across a LATER refresh too, not
-    // just the load that backfilled it.
+    // It must protect the note across a LATER refresh too, not just the load
+    // that backfilled it.
     vi.mocked(loadFromServer).mockResolvedValueOnce({ treatments: [],
       children: [],
       entries: [],
@@ -9085,11 +8735,10 @@ describe('reconcileChildren', () => {
   });
 
   it('does not reissue a matched sibling tint to a new child the server listed FIRST', () => {
-    // Baby Buddy orders /api/children/ by name, not by creation, so a second
-    // child added through its web UI whose name sorts first arrives AHEAD of
-    // the child this device already knows, which almost always wears
-    // CHILD_COLORS[0]. Seeding the tint search only with never-pushed locals
-    // made the answer depend on that ordering.
+    // Baby Buddy orders /api/children/ by name, not by creation, so a new child
+    // whose name sorts first arrives AHEAD of the one this device already knows
+    // (which almost always wears CHILD_COLORS[0]). Seeding the tint search only
+    // with never-pushed locals made the answer depend on that ordering.
     const local = [kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] })];
     const server = [kid({ id: '502', serverId: 502 }), kid({ id: '501', serverId: 501 })];
     const out = reconcileChildren(server, local);
@@ -9100,8 +8749,8 @@ describe('reconcileChildren', () => {
   });
 
   it('gives every child a distinct tint whatever order the server lists them in', () => {
-    // The property, stated directly: one matched local, one never-pushed local
-    // and two new arrivals interleaved so the matched one comes after a new one.
+    // One matched local, one never-pushed local, and two new arrivals
+    // interleaved so the matched one comes after a new one.
     const local = [
       kid({ id: 'cA', serverId: 501, color: CHILD_COLORS[0] }),
       kid({ id: 'cB', color: CHILD_COLORS[1] }),
@@ -9140,8 +8789,7 @@ describe('reconcileChildren', () => {
   });
 
   it('drops a local child whose serverId is no longer on the server', () => {
-    // Deleted from Baby Buddy elsewhere. The server is authoritative for
-    // children it knows about, which is today's behaviour and must not change.
+    // The server is authoritative for children it knows about.
     const out = reconcileChildren([], [kid({ id: 'child1752', serverId: 501 })]);
     expect(out).toEqual([]);
   });
@@ -9161,8 +8809,7 @@ describe('reconcileChildren', () => {
 
   // The third argument is the caller's PRE-FETCH snapshot: what the local list
   // held when the request went out. Anything that differs from it changed while
-  // the fetch was in flight, so the answer in hand predates it. See the
-  // function's doc comment.
+  // the fetch was in flight, so the answer in hand predates it.
   describe('with a pre-fetch snapshot', () => {
     it('still takes the server copy for a child that did not change during the fetch', () => {
       const before = [kid({ id: 'c1', serverId: 501, first: 'Ada' })];
@@ -9176,8 +8823,7 @@ describe('reconcileChildren', () => {
 
     it('takes the server copy when the local record was rebuilt but holds the same values', () => {
       // Reference equality is not the test: a map() that rebuilds every child
-      // without changing a field is not an edit, and treating it as one would
-      // ignore a real server-side change.
+      // without changing a field is not an edit.
       const before = [kid({ id: 'c1', serverId: 501, first: 'Ada' })];
       const local = [{ ...before[0] }];
       const out = reconcileChildren([kid({ id: '501', serverId: 501, first: 'Adaline' })], local, before);
@@ -9203,8 +8849,8 @@ describe('reconcileChildren', () => {
     it('keeps a child created during the fetch even when the answer has never seen it', () => {
       // The push landed mid-fetch and stamped a serverId, but the GET went out
       // before the POST, so the answer cannot list it. Absent from the answer
-      // used to mean "deleted server-side"; absent from the SNAPSHOT means
-      // brand new, and outranks it.
+      // means "deleted server-side"; absent from the SNAPSHOT means brand new,
+      // and outranks it.
       const before = [kid({ id: 'c1', serverId: 501 })];
       const local = [kid({ id: 'c1', serverId: 501 }), kid({ id: 'new1', serverId: 777, first: 'Nova' })];
       const out = reconcileChildren([kid({ id: '501', serverId: 501 })], local, before);
@@ -9219,11 +8865,10 @@ describe('reconcileChildren', () => {
 
     it('re-adds a child deleted DURING the fetch under its old local id and tint', () => {
       // `deleteChild` removed it while the GET was in flight, so the answer
-      // still lists it and puts it back (as it always has: the delete's own
-      // failure path is written around that). What must not change is the id
-      // it comes back under: a queued entry written against that child still
-      // carries the LOCAL one, and `childServerIdFor` could never resolve a
-      // server-derived one again.
+      // still lists it and puts it back. What matters is the id it returns
+      // under: a queued entry written against that child still carries the
+      // LOCAL one, and `childServerIdFor` could never resolve a server-derived
+      // one again.
       const before = [kid({ id: 'c1', serverId: 501, color: '#ABCDEF' })];
       const out = reconcileChildren([kid({ id: '501', serverId: 501 })], [], before);
       expect(out.map((c) => c.id)).toEqual(['c1']);
@@ -9289,8 +8934,8 @@ describe('nap-window persistence', () => {
   });
 
   it('hydrate applies a persisted midnight boundary, which a truthy guard would drop', async () => {
-    // The whole point of the `!= null` guard: 0 is a legitimate wall-clock
-    // value, so `if (prefs.napWindowStartMin)` would silently reset it to 07:00.
+    // 0 is a legitimate wall-clock value, so a truthy guard would silently
+    // reset it to 07:00.
     h.prefs = { napWindowStartMin: 0, napWindowEndMin: 720 };
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
     await s().hydrate();
@@ -9343,7 +8988,7 @@ describe('nap classification', () => {
 
   it('openSheet classifies on the draft START, not on now', () => {
     // 07:30 now, so the 90-minute draft started at 06:00, before the window
-    // opens. The old rule looked at `now` (07:30) and called this a nap.
+    // opens. The old rule looked at `now` and called this a nap.
     useAppStore.setState({ now: at(7, 30) });
     s().openSheet('sleep');
     expect(s().te.nap).toBe(false);
@@ -9351,8 +8996,8 @@ describe('nap classification', () => {
 
   it('openSheet follows a custom window', () => {
     // Window 10:00-13:00. At 11:00 the 90-minute draft starts at 09:30, before
-    // the window opens, so it is night sleep under this setting even though the
-    // default 07:00 window would have called it a nap.
+    // the window opens, so it is night sleep even though the default 07:00
+    // window would have called it a nap.
     useAppStore.setState({ now: at(11), napWindowStartMin: 600, napWindowEndMin: 780 });
     s().openSheet('sleep');
     expect(s().te.nap).toBe(false);
@@ -9473,18 +9118,13 @@ describe('nap classification', () => {
 });
 
 
-// ---------------------------------------------------------------------------
-// REGRESSION SUITE for "updating a child's photo on Android does nothing".
-// Returning from the OS image picker fires AppState 'active', which
-// `src/app/_layout.tsx` turns into a `refresh()`. That refresh resolves into
-// `applyServerLoad` -> `reconcileChildren`, which used to rebuild every matched
-// child as `{ ...serverChild, id: local.id, color: local.color }`: every other
-// field, `picture` included, came from an answer the server composed BEFORE the
-// save went out, so a refresh landing in that window silently reverted the edit
-// (and a child created in it disappeared outright). These tests pin the
-// interleavings that used to lose the write; each one asserted the loss before
-// the fix and asserts the survival now.
-// ---------------------------------------------------------------------------
+// "Updating a child's photo on Android does nothing": returning from the OS
+// image picker fires AppState 'active', which becomes a `refresh()`. That
+// refresh resolved into `reconcileChildren`, which rebuilt every matched child
+// as `{ ...serverChild, id: local.id, color: local.color }`, so `picture` came
+// from an answer composed BEFORE the save went out and a refresh landing in
+// that window silently reverted the edit (a child created in it disappeared
+// outright). These tests pin the interleavings that used to lose the write.
 describe('a refresh in flight during a child edit must not overwrite the edit (photo bug)', () => {
   const BIRTH = NOW - 90 * 86400000;
   const LOCAL: Child = {
@@ -9499,8 +9139,7 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
   };
   const PHOTO = { uri: 'file:///cache/pick.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
 
-  /** What the server answers a GET issued BEFORE the photo PATCH landed: the
-   *  child as it was, with no picture. */
+  // What the server answers a GET issued BEFORE the photo PATCH landed.
   const staleLoad = (over: Partial<Child> = {}) => ({
     children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: BIRTH, slug: 'mira-o', picture: null, ...over }],
     entries: [],
@@ -9519,11 +9158,10 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     return { promise, resolve };
   }
 
-  // Earlier tests in this file queue `...Once` mock answers that their own path
-  // never consumes, and a leftover REJECTED load would flip `offline` here and
-  // send the save down the offline branch instead. Reset the two mocks these
-  // tests steer and reinstall faithful implementations, so the interleaving
-  // under test is the only variable.
+  // Earlier tests queue `...Once` mock answers their own path never consumes,
+  // and a leftover REJECTED load would flip `offline` here and send the save
+  // down the offline branch. Reset and reinstall the two mocks these tests
+  // steer, so the interleaving under test is the only variable.
   beforeEach(() => {
     vi.mocked(loadFromServer).mockReset();
     vi.mocked(loadFromServer).mockImplementation(async () => staleLoad() as any);
@@ -9560,7 +9198,7 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: PHOTO } });
     expect(s().children[0].picture).toBe(PHOTO.uri); // optimistic local URI
 
-    await flush(); // the PATCH answers with the durable URL
+    await flush();
     expect(s().children[0].picture).toBe(SERVER_PIC);
 
     load.resolve(staleLoad()); // the in-flight GET finally answers
@@ -9585,11 +9223,11 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     load.resolve(staleLoad());
     await refreshP;
     await flush();
-    expect(s().children[0].picture).toBe(PHOTO.uri); // still the optimistic URI
+    expect(s().children[0].picture).toBe(PHOTO.uri);
 
     patch.resolve({ picture: SERVER_PIC, slug: 'mira-o' });
     await flush();
-    expect(s().children[0].picture).toBe(SERVER_PIC); // swapped for the durable URL
+    expect(s().children[0].picture).toBe(SERVER_PIC);
   });
 
   it('a refresh landing first AND a PATCH that stores nothing keep the local file URI', async () => {
@@ -9609,9 +9247,8 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     expect(s().children[0].picture).toBe(PHOTO.uri);
 
     // A 200 that carries no picture on a `set`: `res.picture ?? c.picture`
-    // falls back to the CURRENT value, which is now the picked file rather
-    // than the blank the refresh used to leave behind. The device's only copy
-    // of the photo is kept instead of being thrown away.
+    // falls back to the CURRENT value, the picked file rather than the blank
+    // the refresh used to leave behind, so the device's only copy is kept.
     patch.resolve({ picture: null, slug: 'mira-o' });
     await flush();
     expect(s().children[0].picture).toBe(PHOTO.uri);
@@ -9675,11 +9312,9 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
 
   it('a child CREATED in the same window survives, keeps its stamps and stays selected', async () => {
     // `refresh` used to snapshot `s.children` before its fetch and hand that
-    // stale list to `applyServerLoad` as the local side, so a child created
-    // after the snapshot was in neither the server answer nor any merge. It
-    // now reads the local side at APPLY time and keeps anything the pre-fetch
-    // snapshot did not contain. Kept locals are prepended, where the
-    // never-pushed ones have always gone.
+    // stale list over as the local side, so a child created after the snapshot
+    // was in neither the server answer nor any merge. It now reads the local
+    // side at APPLY time and keeps anything the pre-fetch snapshot lacked.
     const load = deferred<any>();
     vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
     const refreshP = s().refresh();
@@ -9695,22 +9330,17 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     await flush();
 
     expect(s().children.map((c) => c.first)).toEqual(['Nova', 'Mira']);
-    // The create's own re-stamp is part of the local record by apply time, so
-    // preserving that record preserves the stamps rather than stranding a
-    // child the server already knows about.
     const nova = s().children.find((c) => c.id === novaId);
     expect(nova?.serverId).toBe(777);
     expect(nova?.slug).toBe(SERVER_SLUG);
-    // Surviving unselected would be half a fix: Home renders the selection,
-    // and `saveChild` auto-selects what it just created.
+    // Surviving unselected would be half a fix: Home renders the selection, and
+    // `saveChild` auto-selects what it just created.
     expect(s().selectedChildId).toBe(novaId);
   });
 
   it('an edit saved OFFLINE in the same window is not reverted in view either', async () => {
-    // Entries logged mid-refresh survive: `applyServerLoad` re-reads the write
-    // queue after the fetch and merges it back (`mergeQueuedEntries`). The
-    // child equivalent is the pre-fetch snapshot diff below: the edit is
-    // durably recorded as a pending op AND stays on screen until it replays.
+    // The child equivalent of `mergeQueuedEntries`: the edit is durably
+    // recorded as a pending op AND stays on screen until it replays.
     const load = deferred<any>();
     vi.mocked(loadFromServer).mockReturnValueOnce(load.promise as any);
     const refreshP = s().refresh();
@@ -9720,7 +9350,7 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     s().openEditChild('c1');
     s().saveChild({ first: 'Queued', last: 'Offline', birth: BIRTH });
     await flush();
-    expect(h.pendingOps).toHaveLength(1); // the offline edit IS durably recorded
+    expect(h.pendingOps).toHaveLength(1);
 
     useAppStore.setState({ offline: false });
     load.resolve(staleLoad());
@@ -9792,18 +9422,15 @@ describe('a refresh in flight during a child edit must not overwrite the edit (p
     await refreshP;
     await flush();
 
-    expect(s().children.find((c) => c.id === 'c1')?.first).toBe('Renamed'); // the local edit
-    expect(s().children.find((c) => c.id === 'c2')?.first).toBe('Samuel'); // the server's
+    expect(s().children.find((c) => c.id === 'c1')?.first).toBe('Renamed');
+    expect(s().children.find((c) => c.id === 'c2')?.first).toBe('Samuel');
     expect(s().children.find((c) => c.id === 'c2')?.color).toBe('#0f0'); // still local
   });
 });
 
-// The offline half of the photo story: an edit saved while `offline` records
-// `{op:'update', entity:'child'}`, and the photo it carries is recorded
-// alongside it in `pendingPhotos` so the replay can upload it. What this suite
-// pins is that the record is written, that the picture is applied immediately
-// (the file is durable, so there is something real behind the optimistic
-// write), and that a photo that could NOT be made durable still says so.
+// An edit saved while `offline` records `{op:'update', entity:'child'}`, and
+// the photo it carries is recorded alongside it in `pendingPhotos` so the
+// replay can upload it.
 describe('a photo picked while offline is recorded for the replay', () => {
   const BIRTH = NOW - 90 * 86400000;
   const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
@@ -9908,13 +9535,10 @@ describe('a photo picked while offline is recorded for the replay', () => {
 
   it('records for a child the server has never seen, even ONLINE', async () => {
     // `BabybuddyClient.updateChild` returns before doing anything when
-    // `serverId == null`, so this edit is a server no-op with a full
-    // connection. Its photo is deferred exactly like an offline one, and
-    // gating the record on `serverId != null` would strand it.
-    //
-    // The default `updateChildOnServer` mock is more permissive than the real
-    // client (it answers regardless of serverId), so this one call opts into
-    // the faithful "no server row" answer to exercise that no-op.
+    // `serverId == null`, so this edit is a server no-op even on a full
+    // connection: its photo is deferred like an offline one. The default mock
+    // answers regardless of serverId, so this call opts into the faithful
+    // "no server row" answer.
     vi.mocked(updateChildOnServer).mockResolvedValueOnce(undefined);
     offlineChild();
     useAppStore.setState((st) => ({
@@ -9930,9 +9554,9 @@ describe('a photo picked while offline is recorded for the replay', () => {
   });
 
   it('removing a photo from a never-pushed child CLEARS the pending set rather than queueing a removal', async () => {
-    // The bug this prevents: pick offline, then remove offline, and a stale
-    // `set` record would upload the photo the user just deleted. A create
-    // carries no photo anyway, so there is nothing to tell the server.
+    // Pick offline, then remove offline: a stale `set` record would upload the
+    // photo the user just deleted. A create carries no photo anyway, so there
+    // is nothing to tell the server.
     offlineChild();
     useAppStore.setState((st) => ({ children: [{ ...st.children[0], serverId: undefined, slug: undefined }] }));
     s().openEditChild('c1');
@@ -9992,7 +9616,6 @@ describe('the op replay uploads the photo recorded with it', () => {
   });
 
   it('stamps the picture even when the response carries no slug', async () => {
-    // The `change.kind !== 'none'` half of the set() guard is what covers this.
     // The old guard only fired on a slug, so a response without one left the
     // child pointing at a local file path the server had just replaced.
     offlineEdit({ kind: 'set', photo });
@@ -10044,12 +9667,12 @@ describe('the op replay uploads the photo recorded with it', () => {
 
     expect(h.pendingPhotos.c1).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
     expect(h.discardedPhotos).toEqual([]);
-    expect(h.pendingOps).toHaveLength(1); // the op is kept too
+    expect(h.pendingOps).toHaveLength(1);
   });
 
   it('drops the record when the child is gone server-side (404)', async () => {
-    // Terminal for the op, and terminal for the photo: nothing will ever accept
-    // it. Leaving the record would keep the file forever.
+    // Terminal for the op and for the photo: nothing will ever accept it, and
+    // leaving the record would keep the file forever.
     offlineEdit({ kind: 'set', photo });
     await flush();
     useAppStore.setState({ offline: false });
@@ -10102,7 +9725,7 @@ describe('a photo picked while creating a child is recorded when the push is def
     expect(s().toast).toBe('Saved');
     expect(created().picture).toBe(photo.uri);
     expect(h.pendingPhotos[created().id]).toEqual({ kind: 'set', uri: photo.uri, name: 'pick.jpg', type: 'image/jpeg' });
-    expect(h.childPushed).toHaveLength(0); // held back, as it always was
+    expect(h.childPushed).toHaveLength(0); // held back
   });
 
   it('records nothing for an online create, whose POST carries the photo', () => {
@@ -10121,7 +9744,7 @@ describe('a photo picked while creating a child is recorded when the push is def
     await flush();
     expect(s().toast).toBe('Saved · photo not saved');
     expect(created().picture).toBeNull();
-    expect(created().first).toBe('Nova'); // the child itself is still created
+    expect(created().first).toBe('Nova');
     expect(h.pendingPhotos).toEqual({});
   });
 
@@ -10140,9 +9763,9 @@ describe('a deferred push carries the recorded photo', () => {
   const photo = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
 
   it('uploadUnsynced’s pushChild sends it, and settles the record', async () => {
-    // `@/data/sync` is mocked in this file, so reach the real dep the store
-    // handed it rather than the uploader's behaviour, which Task 3 covers.
-    // `mockClear` first: `mock.calls` accumulates across tests in this file.
+    // `@/data/sync` is mocked here, so reach for the real dep the store handed
+    // it rather than the uploader's own behaviour. `mockClear` first:
+    // `mock.calls` accumulates across tests in this file.
     useAppStore.setState({ offline: true, toast: null });
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo } });
@@ -10255,7 +9878,7 @@ describe('pending photos do not outlive what they belong to', () => {
 
     await s().deleteChild('c1');
 
-    expect(s().children).toHaveLength(1); // restored
+    expect(s().children).toHaveLength(1);
     expect(h.pendingPhotos.c1).toBeDefined();
     expect(h.discardedPhotos).toEqual([]);
   });
@@ -10277,9 +9900,8 @@ describe('pending photos do not outlive what they belong to', () => {
   });
 
   it('settles the pending photo for a local-only child deleted offline (it is really gone)', async () => {
-    // No serverId: never pushed, so there is no server row and nothing a
-    // later refresh could resurrect. Unlike the server-backed offline case
-    // above, this delete is final.
+    // No serverId: never pushed, so there is nothing a later refresh could
+    // resurrect. Unlike the server-backed offline case above, this is final.
     useAppStore.setState({
       offline: true,
       children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff' }],
@@ -10340,9 +9962,8 @@ describe('pending photos do not outlive what they belong to', () => {
   });
 
   it('hydrate with no saved connection still sweeps, keeping only pending records', async () => {
-    // No entity store is read on this branch, so there is no roster: the keep
-    // set can only come from pending records, and that is exactly the point
-    // (a record recorded before ever connecting must not be swept away).
+    // No entity store is read on this branch, so the keep set can only come
+    // from pending records: one recorded before ever connecting must survive.
     vi.mocked(loadConnection).mockResolvedValueOnce(null);
     h.pendingPhotos.c1 = { kind: 'set', uri: 'file:///doc/childPhotos/waiting.jpg', name: 'p.jpg', type: 'image/jpeg' };
 
@@ -10353,9 +9974,8 @@ describe('pending photos do not outlive what they belong to', () => {
   });
 
   it('hydrate in server mode sweeps too, not just the local-mode branch', async () => {
-    // A narrow assertion on purpose: this branch also kicks off a background
-    // refresh(), and the point here is only that the sweep call on THIS exit
-    // is not missing, not what refresh() goes on to do.
+    // Narrow on purpose: this branch also kicks off a background refresh(), and
+    // the point is only that the sweep on THIS exit is not missing.
     vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
     vi.mocked(loadEntities).mockResolvedValueOnce({
       children: [{ id: 'c1', first: 'Mira', last: 'O', birth: BIRTH, color: '#fff', picture: 'file:///doc/childPhotos/shown.jpg' }],
@@ -10375,9 +9995,8 @@ describe('pending photos do not outlive what they belong to', () => {
 
   it('enterLocal drops the records the server session left, and sweeps what that frees', async () => {
     // Reachable by a 401 session expiry followed by choosing local mode. The
-    // child list is replaced here, so a record keyed by a server-session child
-    // is owed to nobody: nothing consumes it, and the sweep reads it as a
-    // reason to keep its file forever.
+    // child list is replaced, so a record keyed by a server-session child is
+    // owed to nobody, yet the sweep reads it as a reason to keep its file.
     vi.mocked(loadEntities).mockResolvedValueOnce({
       children: [{ id: 'L1', first: 'Ada', last: 'O', birth: BIRTH, color: '#fff', picture: 'file:///doc/childPhotos/local.jpg' }],
       entries: [],
@@ -10446,10 +10065,9 @@ describe('pending photos do not outlive what they belong to', () => {
   });
 });
 
-// Finding 1 of the whole-feature review. Every consumer of a pending record
-// reads it, awaits a network round trip, then clears: an unconditional clear
-// destroys a photo recorded during that window, which is the one thing this
-// store exists to prevent.
+// Every consumer of a pending record reads it, awaits a network round trip,
+// then clears: an unconditional clear destroys a photo recorded during that
+// window, the one thing this store exists to prevent.
 describe('a photo re-picked while a push is in flight survives that push', () => {
   const BIRTH = NOW - 90 * 86400000;
   const first = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
@@ -10476,12 +10094,11 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
   };
 
   it('uploadUnsynced’s pushChild leaves the newer record alone, file and all', async () => {
-    // No offline transition needed: a child created offline still has
-    // `serverId == null` once the connection is back, so a re-pick is deferred
-    // (there is no server row to PATCH) and records a SECOND time while the
-    // create's POST is in flight. Clearing unconditionally on that POST's
-    // success drops the newer record and discards its file, so the newer photo
-    // is gone from disk, from the record and from the screen, with no toast.
+    // A child created offline still has `serverId == null` once the connection
+    // is back, so a re-pick is deferred (no server row to PATCH) and records a
+    // SECOND time while the create's POST is in flight. Clearing
+    // unconditionally on that POST's success drops the newer record and
+    // discards its file, with no toast to say so.
     useAppStore.setState({ offline: true, toast: null });
     s().openAddChild();
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo: first } });
@@ -10498,7 +10115,7 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
     await flush(); // the record is read and the POST is out
 
     // The re-pick. `updateChildOnServer` answers as the real client does for a
-    // child with no server row (see the "even ONLINE" test above): nothing.
+    // child with no server row: nothing.
     vi.mocked(updateChildOnServer).mockResolvedValueOnce(undefined);
     s().openEditChild(created.id);
     s().saveChild({ first: 'Nova', last: 'O', birth: NOW, photo: { kind: 'set', photo: second } });
@@ -10522,9 +10139,8 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
     vi.mocked(updateChildOnServer).mockReturnValueOnce(patch.promise as any);
     const flushing = s().flushPendingOps();
     await flush();
-    // Offline again mid-request, and a re-pick. Written straight into the map:
-    // reaching it through `saveChild` would mean flipping the connection state
-    // underneath the flush that is being tested.
+    // A re-pick, written straight into the map: reaching it through `saveChild`
+    // would flip the connection state underneath the flush being tested.
     h.pendingPhotos.c1 = rec(second.uri);
 
     patch.resolve({ picture: SERVER_PIC, slug: 'mira-o' });
@@ -10532,7 +10148,7 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
 
     expect(h.pendingPhotos.c1).toEqual(rec(second.uri));
     expect(h.discardedPhotos).toEqual([]);
-    expect(h.pendingOps).toHaveLength(0); // the op itself still replayed and went
+    expect(h.pendingOps).toHaveLength(0);
   });
 
   it('a replay that carried no photo does not clear one recorded during it', async () => {
@@ -10556,9 +10172,9 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
   });
 
   it('but a terminal 404 still clears whatever is there, newer or not', async () => {
-    // Deliberately NOT compare-and-clear. The child is gone server-side and
-    // the op goes with it, so no push will ever carry this child's photo
-    // again, and a record left behind holds its file forever.
+    // Deliberately NOT compare-and-clear: the child is gone server-side and the
+    // op goes with it, so no push will ever carry this child's photo again and
+    // a record left behind holds its file forever.
     syncedOfflineChild();
     s().openEditChild('c1');
     s().saveChild({ first: 'Mira', last: 'O', birth: BIRTH, photo: { kind: 'set', photo: first } });
@@ -10599,10 +10215,9 @@ describe('a photo re-picked while a push is in flight survives that push', () =>
   });
 });
 
-// Finding 2 of the whole-feature review. An online save uploads the photo on
-// its own PATCH, so any record this child was still carrying names a photo it
-// no longer owes, and a queued op that outlived a retryable failure would
-// replay it over the newer one.
+// An online save uploads the photo on its own PATCH, so any record this child
+// was still carrying names a photo it no longer owes, and a queued op that
+// outlived a retryable failure would replay it over the newer one.
 describe('an online save clears the record its own upload supersedes', () => {
   const BIRTH = NOW - 90 * 86400000;
   const first = { uri: 'file:///doc/childPhotos/photo-1.jpg', name: 'pick.jpg', type: 'image/jpeg', durable: true };
@@ -10619,9 +10234,8 @@ describe('an online save clears the record its own upload supersedes', () => {
     });
   };
 
-  /** An offline photo edit whose replay then fails retryably: a self-hosted
-   *  500, or unreachable while the phone still reports network. Both the op
-   *  and the record survive, which is the state the bug needs. */
+  // An offline photo edit whose replay then fails retryably. Both the op and
+  // the record survive, which is the state the bug needs.
   const offlineEditThenFailedFlush = async () => {
     useAppStore.setState({ offline: true });
     syncedChild();
@@ -10681,9 +10295,8 @@ describe('an online save clears the record its own upload supersedes', () => {
   });
 
   it('records nothing when the online PATCH fails, so no orphan is left behind', async () => {
-    // Recording here would be the wrong fix for this finding: an online edit is
-    // queued nowhere, so nothing would ever consume that record, and the launch
-    // sweep would protect its file forever.
+    // An online edit is queued nowhere, so a record written here would never be
+    // consumed and the launch sweep would protect its file forever.
     syncedChild();
     vi.mocked(updateChildOnServer).mockRejectedValueOnce(new Error('net'));
 

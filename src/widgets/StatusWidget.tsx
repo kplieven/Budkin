@@ -4,9 +4,6 @@
 // `use no memo` opts out of the React Compiler; `now` is passed in (not read in
 // render) to keep the render pure.
 //
-// Layout: a header + a flex:1 status list (fills the upper area) + a 2x2 button
-// grid pinned to the bottom, so it fills a portrait cell at any height.
-//
 // Nothing drawn here reaches a screen reader: the tree is rasterised to a bitmap
 // first. The only five strings that survive are the root's accessibilityLabel
 // and the four buttons', and they all come from `statusLabels`.
@@ -34,11 +31,10 @@ const DIAPER: Hex = '#6FC0A6';
 const PRIMARY: Hex = '#EC9A66';
 
 /**
- * The scheme these buttons deep-link into, read from the running app rather
- * than hardcoded. The development variant ships its own (`budkindev`, see
- * app.config.js) so that with both variants installed, a widget button cannot
- * open the other app. `scheme` is typed `string | string[]`; the array form
- * lists alternates, and the first is the canonical one.
+ * Read from the running app rather than hardcoded: the development variant ships
+ * its own (`budkindev`), so with both variants installed a widget button cannot
+ * open the other app. `scheme` is typed `string | string[]`; the array form lists
+ * alternates, and the first is the canonical one.
  */
 const SCHEME = (() => {
   const s = Constants.expoConfig?.scheme;
@@ -47,13 +43,11 @@ const SCHEME = (() => {
 })();
 
 /**
- * A button's deep link, naming the child whose stats it sits under. The bitmap
- * is frozen and Android's refresh floor is 30 minutes, so the selection can have
- * moved on since it was drawn; without the child, a tap would log against
- * whoever is selected NOW while the widget still shows someone else. The route
- * refuses rather than retargets when that child is gone, see
- * `resolveLogDeepLink`. An empty snapshot names nobody and keeps the old
- * behaviour of running against the current selection.
+ * A button's deep link, naming the child whose stats it sits under. The bitmap is
+ * frozen and Android's refresh floor is 30 minutes, so the selection can have moved
+ * on since it was drawn; without the child, a tap would log against whoever is
+ * selected NOW while the widget still shows someone else. The route refuses rather
+ * than retargets when that child is gone, see `resolveLogDeepLink`.
  */
 function buttonUri(path: string, s: WidgetSnapshot | null): string {
   return withChildParam(`${SCHEME}://${path}`, s?.selectedChildId);
@@ -63,7 +57,7 @@ function buttonUri(path: string, s: WidgetSnapshot | null): string {
  * What a stat row draws when it has no value. Also what `widgetToday` puts in
  * `sleepValue` for the two cases that are not a real zero (no snapshot, unborn
  * child), which is why the sleep row is compared against it below rather than
- * having that rule restated here; `today.test.ts` pins both ends.
+ * restating that rule here.
  */
 const NO_VALUE = '—';
 
@@ -96,8 +90,8 @@ function IconButton({
     <FlexWidget
       clickAction="OPEN_URI"
       clickActionData={{ uri }}
-      // Harvested only because this element also carries a `clickAction`; see
-      // `statusLabels`. The drawn label below reaches no screen reader at all.
+      // Harvested only because this element also carries a `clickAction`. The
+      // drawn label below reaches no screen reader at all.
       accessibilityLabel={accessibilityLabel}
       style={{
         flex: 1,
@@ -121,25 +115,17 @@ export function StatusWidget({ snapshot, now }: { snapshot: WidgetSnapshot | nul
   const age = s?.birth != null ? ageOrDueLabel(s.birth, s.expected, now) : '';
   // The whole day window, computed HERE from the snapshot's raw records against
   // the live `now`, so the boundary rollover self-corrects on the next refresh
-  // instead of showing yesterday's totals off a frozen bitmap. All of the
-  // arithmetic and both strings come from the pure module, which is the only part
-  // of this widget a test can reach.
+  // instead of showing yesterday's totals off a frozen bitmap.
   //
-  // The Sleep row is always the day total, live nap included, matching Home: the
-  // old "current nap only while napping" discarded every logged sleep, the exact
-  // bug Home already fixed. The napping signal moved into the value ("2h · napping")
-  // rather than flipping this row's label, because "Napping 2h" claims to be the
-  // nap's length when the number is the whole window. The summary line below names
-  // the boundary the figures count from.
+  // The Sleep row is always the day total, live nap included, matching Home. The
+  // napping signal rides in the value ("2h · napping") rather than flipping the
+  // row's label, because "Napping 2h" claims to be the nap's length when the
+  // number is the whole window.
   const today = widgetToday(s, now);
-  // The minute counts, taken once. Both readings of each figure hang off the
-  // same integer: the row below draws it compactly, the label speaks it in full.
+  // Both readings of each figure hang off the same integer: the row below draws it
+  // compactly, the label speaks it in full.
   const fedMin = agoMinutes(s?.lastFeedStart, now);
   const diaperMin = agoMinutes(s?.lastDiaper, now);
-  // Every string a screen reader can reach, plus the header's side line, which
-  // the tile draws and says differently. All of it is built from the very values
-  // drawn below, so the two can never disagree. The tile is a bitmap by the time
-  // Android sees it, so without these it announces nothing at all.
   const labels = statusLabels({
     childName: s?.childName,
     childCount: s?.childCount,

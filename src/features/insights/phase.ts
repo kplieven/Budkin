@@ -1,15 +1,14 @@
 const DAY = 86400000;
 
 /**
- * A gentle, expected-phase explainer for the Sleep section. This gives *meaning*
+ * A gentle, expected-phase explainer for the Sleep section: it gives *meaning*
  * to what the heatmap already shows rather than adding another number.
  *
- * v1 covers only the ~4-month sleep change, and only from the baby's AGE — not
- * from any pattern-matching on the logs — so it can never false-positive on a
- * normal noisy week. Sleep fragmenting around now is a real, permanent shift in
- * sleep architecture, but it is framed as a common, expected phase (not a
- * guarantee, and not a regression to fix), matching the reassurance the rest of
- * the tab aims for.
+ * v1 covers only the ~4-month sleep change, and only from the baby's AGE, never
+ * from pattern-matching on the logs, so it can never false-positive on a normal
+ * noisy week. Sleep fragmenting around now is a real, permanent shift in sleep
+ * architecture, but it is framed as a common, expected phase, not a guarantee
+ * and not a regression to fix.
  */
 
 export interface PhaseNote { key: string; title: string; body: string }

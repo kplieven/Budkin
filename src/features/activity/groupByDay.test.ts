@@ -51,8 +51,7 @@ describe('groupByDay', () => {
 
   it('labels every group, across more days than Today/Yesterday cover', () => {
     // Buckets are keyed by calendar day but LABELLED by dayGroupLabel, so a long
-    // history has to keep the two in step: one group per day, each carrying that
-    // day's own label, days descending.
+    // history has to keep the two in step.
     const days = [0, 1, 2, 3, 10, 40, 400];
     const groups = groupByDay(
       // Shuffled input: the grouping owns the ordering, not the caller.
@@ -68,9 +67,8 @@ describe('groupByDay', () => {
   });
 
   it('puts a future-dated entry in its own group, ahead of today', () => {
-    // Reachable from the UI: the time panels let an entry be logged ahead of the
-    // clock. It is a calendar day of its own, and sorts newest-first like any
-    // other.
+    // Reachable from the UI: the time panels let an entry be logged ahead of the clock.
+    // It is a calendar day of its own, and sorts newest-first like any other.
     const tomorrow = NOW + DAY;
     const groups = groupByDay([feed('today', NOW - 10 * M), feed('ahead', tomorrow)], NOW);
 
@@ -102,8 +100,8 @@ describe('running timers on the timeline', () => {
   });
 
   it('interleaves a running timer with entries by start time, not pinned to the top', () => {
-    // The timer started an hour ago, so a feed logged ten minutes ago outranks
-    // it even though the timer is the one still running.
+    // The timer started an hour ago, so a feed logged ten minutes ago outranks it even
+    // though the timer is the one still running.
     const groups = groupByDay(
       [feed('newer', NOW - 10 * M), timer('running', NOW - 60 * M), feed('older', NOW - 120 * M)],
       NOW,
@@ -120,8 +118,8 @@ describe('running timers on the timeline', () => {
   });
 
   it('keeps a caller that passes only entries typed as entries (the Notes tab)', () => {
-    // groupByDay is generic, so widening it to accept timers must not force
-    // entry-only callers to re-narrow their rows.
+    // groupByDay is generic, so widening it to accept timers must not force entry-only
+    // callers to re-narrow their rows.
     const groups = groupByDay([feed('a', NOW)], NOW);
     const first: Entry = groups[0].items[0];
     expect(first.id).toBe('a');

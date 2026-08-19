@@ -46,9 +46,8 @@ describe('pendingPhotos persistence', () => {
   });
 
   it('overwrites a child rather than accumulating, and hands back what it replaced', async () => {
-    // Re-picking a photo offline replaces the pending one. Returning the old
-    // record is what lets the caller delete the file it pointed at instead of
-    // leaving it for the sweep.
+    // Returning the replaced record is what lets the caller delete the file it
+    // pointed at instead of leaving it for the sweep.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     const prev = await setPendingPhoto('c1', set('file:///doc/b.jpg'));
     expect(prev).toEqual(set('file:///doc/a.jpg'));
@@ -72,8 +71,6 @@ describe('pendingPhotos persistence', () => {
   });
 
   it('clears conditionally when the record is still the one that was consumed', async () => {
-    // The consumer read this record, awaited a round trip, and is now clearing
-    // it. Nothing else wrote in between, so it goes.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     expect(await clearPendingPhotoIf('c1', set('file:///doc/a.jpg'))).toEqual(set('file:///doc/a.jpg'));
     expect(await loadPendingPhotos()).toEqual({});
@@ -86,9 +83,8 @@ describe('pendingPhotos persistence', () => {
   });
 
   it('leaves a record written DURING the round trip alone', async () => {
-    // The whole point: the photo re-picked while the upload was in flight was
-    // never sent, so clearing it here would delete it, file and all, with
-    // nothing left to upload it.
+    // A photo re-picked while the upload was in flight was never sent, so clearing
+    // it here would delete it, file and all, with nothing left to upload it.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     await setPendingPhoto('c1', set('file:///doc/b.jpg'));
     expect(await clearPendingPhotoIf('c1', set('file:///doc/a.jpg'))).toBeUndefined();
@@ -125,12 +121,10 @@ describe('pendingPhotos persistence', () => {
   });
 
   it('serializes mutations, so one landing during another is not clobbered', async () => {
-    // Both mutators are read-modify-write over one stored map, and both are
-    // fired without being awaited. Two interleaving would each write back the
-    // map they read, and the second to finish would drop the first one's
-    // change. A re-read at the start of each call, which is all
-    // `removePendingOp` does, cannot fix that: both callers re-read, and both
-    // read the same map. Only ordering them does.
+    // Both mutators are read-modify-write over one stored map, fired without being
+    // awaited. Interleaved, each writes back the map it read and the second to
+    // finish drops the first one's change. Re-reading at the start of each call
+    // cannot fix that: both callers re-read the same map. Only ordering them does.
     await setPendingPhoto('c1', set('file:///doc/a.jpg'));
     await Promise.all([setPendingPhoto('c2', set('file:///doc/b.jpg')), clearPendingPhoto('c1')]);
     const map = await loadPendingPhotos();

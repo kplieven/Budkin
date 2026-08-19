@@ -8,11 +8,9 @@ import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-/**
- * Shown in place of the dashboard when there is no child to log against. Reached
- * by skipping the first-run add-baby step, by answering "not yet" to it, or by
- * deleting the last child. Opens the same create sheet the child switcher uses.
- */
+/** Shown in place of the dashboard when there is no child to log against: the
+ *  first-run add-baby step was skipped or answered "not yet", or the last child was
+ *  deleted. */
 export function NoChildCard() {
   const t = useTheme();
   const openAddChild = useAppStore((s) => s.openAddChild);

@@ -1,14 +1,10 @@
 /**
- * Persisted medication regimens ("treatments"), backed by AsyncStorage.
- *
- * This on-device copy is what brings a child's treatments back after the app is
- * closed and reopened, mirroring src/data/timers.ts. In local mode it is the
- * only copy; when connected it is the OFFLINE CACHE in front of the server,
- * which stores each treatment as a `treatment`-tagged note (see `treatmentToNoteBody` in
- * src/api/client.ts) because Baby Buddy has no regimen resource of its own.
- *
- * Nothing here talks to the network: the store owns the mirror. Treatments are user
- * data, so they survive disconnect() (unlike the synced entity store).
+ * Persisted medication regimens ("treatments"), backed by AsyncStorage. In local
+ * mode this is the only copy; connected, it is the OFFLINE CACHE in front of the
+ * server, which stores each treatment as a `treatment`-tagged note (see
+ * `treatmentToNoteBody` in src/api/client.ts) because Baby Buddy has no regimen
+ * resource of its own. Treatments are user data, so they survive disconnect(),
+ * unlike the synced entity store.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';

@@ -15,27 +15,23 @@ import { isTimer, type TimelineItem } from './groupByDay';
 import { timelineRowLabel } from './queuedMarker';
 
 const RAIL_W = 26;   // width of the spine column
-// Width of the clock column. Sized for the widest thing it holds, which is not a
-// clock but an ongoing row's elapsed pill ("11h30m" plus its padding). Shared by
-// every row so the spine runs straight down the list instead of jogging sideways
-// at each running one.
+// Sized for the widest thing the column holds, which is not a clock but an ongoing row's
+// elapsed pill. Shared by every row so the spine runs straight down the list.
 const TIME_W = 62;
 const NODE_TOP = 15; // vertical offset of the node/capsule from the entry top
 const DOT = 12;      // point-event marker diameter
 const CAP_W = 8;     // duration-capsule width
 const HALO = 16;     // breathing glow diameter at an ongoing capsule's head
 const CONTENT_H = 30; // content row height (== icon chip), used to center it on the marker
-// The row's color wash bleeds edge-to-edge; ROW_PAD insets the content back off
-// the screen edges (History drops its container's horizontal padding to let the
-// wash reach them, and its day labels/header re-add a matching inset). ROW_GAP is
-// the breathing room between rows — the spine connector is extended by ROW_GAP so
-// the timeline stays continuous across the gap.
+// The row's color wash bleeds edge-to-edge, so ROW_PAD insets the content back off the
+// screen edges. History drops its container's horizontal padding to let the wash reach
+// them, and re-adds a matching inset on its day labels. The spine connector is extended
+// by ROW_GAP so the timeline stays continuous across the gap.
 const ROW_PAD = 18;
 const ROW_GAP = 8;
 
-// Duration -> capsule height, proportional but CAPPED: a marker saturates at
-// CAP_MIN so a long night sleep reads as "long" without ballooning the row (and
-// leaving a wall of whitespace). The minimum keeps a short event's capsule tall
+// Proportional but capped: a marker saturates at CAP_MIN so a long night sleep reads as
+// "long" without ballooning the row. The minimum keeps a short event's capsule tall
 // enough to separate its start and end clock labels.
 const MIN_BAR = 28, MAX_BAR = 72, CAP_MIN = 210;
 function barHeight(min: number): number {
@@ -44,18 +40,11 @@ function barHeight(min: number): number {
 }
 
 /**
- * The glow that breathes at the head of an ongoing capsule. Drawn behind the
- * capsule, so what shows is a ring around the head: the list is newest-first, so
- * the head is `now`, the one edge of the marker that is still growing.
- *
- * Same 800ms reversing loop as PulsingDot, so a running row here reads as the
- * same "live" as the running-timer card on the dashboard and the Timers tab.
- * The loop runs TOWARDS full opacity rather than away from it: Reanimated snaps
- * a timing straight to its target value under the system reduce-motion setting,
- * so this way the halo comes to rest visible instead of nearly gone.
- *
- * Its own component, as PulsingDot is, so the animation hooks only exist for the
- * rows that are actually running rather than once per row in the list.
+ * Drawn behind the capsule so what shows is a ring around its head. The loop runs
+ * TOWARDS full opacity rather than away from it: Reanimated snaps a timing straight to
+ * its target under the system reduce-motion setting, so this way the halo comes to rest
+ * visible instead of nearly gone. Its own component, as PulsingDot is, so the animation
+ * hooks only exist for rows actually running.
  */
 function OngoingHalo({ color, top }: { color: string; top: number }) {
   const opacity = useSharedValue(0.35);
@@ -83,48 +72,20 @@ function OngoingHalo({ color, top }: { color: string; top: number }) {
 }
 
 /**
- * One event on the History timeline: a continuous spine on the left with a
- * marker (a dot for point events like diapers, a duration capsule for intervals
- * like sleep/feeds). The list runs newest-first, so an interval's newer edge
- * (its end) sits at the capsule head and its start at the foot — the gap between
- * the two clock labels reads as the event's real span. `isFirst`/`isLast` trim
- * the spine so it doesn't overhang a day group.
+ * One event on the History timeline: a spine on the left with a marker, a dot for point
+ * events and a duration capsule for intervals. The list runs newest-first, so an
+ * interval's end sits at the capsule head and its start at the foot, and the gap between
+ * the two clock labels reads as the event's real span. A running timer is the same
+ * ongoing shape an interval with no end already takes, so both key off `ongoing`.
  *
- * A running timer is one of these too: it is exactly the ongoing shape the row
- * already draws for an interval with no end, so its capsule grows to `now`.
- * `saveAs` stands in for `type` and drives the icon, colour and label.
+ * `queued` and `child` are decided by the caller rather than read from the store here, so
+ * History and the desktop rail cannot disagree, and so the rules stay testable.
+ * Absent `child` means draw no chip.
  *
- * An ongoing row says so three ways, all keyed off `ongoing` and so shared by a
- * running timer and an entry that has no end yet (both really are still going,
- * and the capsule already grows to `now` for both):
- *
- * - Its capsule is full colour. It used to be 45% alpha, which read as "faded,
- *   less important" rather than "live".
- * - A halo breathes at the capsule head. See OngoingHalo.
- * - The empty end-clock slot holds an elapsed pill instead. Tinted like the
- *   row's icon chip so it breaks the column's rhythm of right-aligned times and
- *   cannot be scanned as one.
- *
- * `queued` says the row is still sitting on the offline write queue and has not
- * reached the server. The caller decides that (see
- * `src/features/activity/queuedMarker.ts`) rather than this component reading
- * the store, so History and the desktop rail cannot end up disagreeing, and so
- * the rule stays testable: `vitest.config.ts` never loads a `.tsx`.
- *
- * `child` names whose row this is, as a tinted chip, and is likewise decided by
- * the caller (`childAttribution`) rather than looked up here. OPTIONAL, and
- * absent means "draw no chip": History passes one only while its household view
- * is on, and the desktop rail passes none at all, being single-child by design
- * where a name would be noise. A required prop would be a `tsc` error at that
- * call site, which is the point of the `queued?: boolean` precedent it follows.
- *
- * The chip sits INSIDE the existing single content line, and must keep doing so.
- * Row height here is a pure function of duration (`barHeight` and `minHeight`
- * below), which is what lets the spine run straight and the clock labels sit at
- * a capsule's head and foot; anything content-derived that could wrap would move
- * it. So the chip is bounded (`maxWidth`, one line) rather than free to grow,
- * and it never shrinks: the detail text beside it absorbs a narrow screen
- * instead, since the chip is the information the household view exists to add.
+ * Row height is a pure function of duration, which is what lets the spine run straight
+ * and the clock labels sit at a capsule's head and foot. Anything content-derived that
+ * could wrap would move it, so the child chip is bounded and never shrinks, and the
+ * detail text beside it absorbs a narrow screen instead.
  */
 export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = false, child }: {
   item: TimelineItem; now: number; onPress: () => void; isFirst: boolean; isLast: boolean; queued?: boolean;
@@ -152,8 +113,6 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
         item.type === 'milestone'
       ? item.time
       : item.start;
-  // A running timer has no end by definition, so `ongoing` below turns true for
-  // it through the very same rule an unfinished entry follows.
   const endTs = timer
     ? null
     : item.type === 'diaper' ||
@@ -167,17 +126,13 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
   const ongoing = !isPoint && endTs == null;
 
   const durMin = isPoint ? 0 : ((endTs ?? now) - start) / 60000;
-  // Rounded once here for the elapsed pill and the accessibility label. Neither
-  // fmtAgoShort nor barHeight's caller rounds, and the raw float would render as
-  // "12.716666666m".
+  // fmtAgoShort does not round, and the raw float renders as "12.716666666m".
   const elapsedMin = Math.round(durMin);
   const bh = isPoint ? DOT : barHeight(durMin);
   const minHeight = Math.max(58, NODE_TOP + bh + 16);
-  // Point events are a single dot with no start/end labels bracketing it, so
-  // center the marker cluster (clock, dot, content) in the row — otherwise the
-  // full-height color wash leaves a lopsided gap below the content. Duration
-  // capsules stay anchored at NODE_TOP so their start/end clock labels sit at
-  // the capsule's head and foot.
+  // Point events have no start/end labels bracketing the dot, so the marker is centred in
+  // the row or the full-height wash leaves a lopsided gap below the content. Capsules
+  // stay anchored at NODE_TOP so their clock labels line up.
   const nodeTop = isPoint ? (minHeight - bh) / 2 : NODE_TOP;
   const nodeBottom = nodeTop + bh;
   const detail = detailFor(item);
@@ -186,10 +141,8 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      // An ongoing row carries its elapsed time in the label so a screen reader
-      // gets what the pill shows, a queued row says so, and an attributed row
-      // names its child, so nothing the row draws is left unannounced. The
-      // spoken form comes from the same `childAttribution` call as the chip.
+      // Nothing the row draws may go unannounced, and the chip's name comes from the same
+      // `childAttribution` call that drew it.
       accessibilityLabel={timelineRowLabel({
         activity: ACTIVITY_LABEL[type],
         ongoing,
@@ -199,10 +152,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
         child: child?.spoken,
       })}
       style={(s) => [
-        // A faint full-bleed wash in the entry's own activity color, spanning the
-        // whole row (width and height). Kept very light so the timeline spine and
-        // text stay legible over it in both themes. ROW_PAD holds the content off
-        // the edges the wash bleeds to; ROW_GAP spaces the rows apart.
+        // Full-bleed wash, kept light so the spine and text stay legible in both themes.
         {
           flexDirection: 'row',
           minHeight,
@@ -214,8 +164,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
         isHovered(s) && { opacity: 0.85 },
       ]}
     >
-      {/* clock column: newest-first, so the end sits at the capsule head and the
-          start at its foot. Point events show their single time at the head. */}
+      {/* clock column */}
       <View style={{ width: TIME_W, paddingRight: 8 }}>
         {isPoint ? (
           <View style={{ position: 'absolute', right: 8, top: nodeTop, height: DOT, justifyContent: 'center' }}>
@@ -230,12 +179,9 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
                 {fmtClock(endTs)}
               </Txt>
             ) : (
-              // No end to show, so the slot holds how long it has been running
-              // instead. alignSelf right-aligns it on the start clock below it.
-              // TIME_W is sized so even the widest label ("11h30m", the shape a
-              // night-long timer takes before fmtAgoShort switches to days) fits
-              // inside the row's ROW_PAD inset; a wider one would spill left
-              // over that inset rather than be clipped.
+              // No end to show, so the slot holds how long it has been running. A label
+              // wider than TIME_W spills left over the ROW_PAD inset rather than being
+              // clipped, which is what sizes that constant.
               <View
                 style={{
                   alignSelf: 'flex-end',
@@ -277,40 +223,27 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
         )}
       </View>
 
-      {/* content: icon + label │ detail on ONE line, vertically centered on the
-          marker (its center is nodeTop + bh/2 for both dot and capsule). */}
+      {/* content: one line, vertically centered on the marker */}
       <View style={{ flex: 1, paddingLeft: 4, paddingTop: nodeTop + bh / 2 - CONTENT_H / 2, paddingBottom: 14 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <View style={{ width: CONTENT_H, height: CONTENT_H, borderRadius: 9, backgroundColor: hexA(color, 0.16), alignItems: 'center', justifyContent: 'center' }}>
             <Icon name={type as IconName} color={color} size={17} />
           </View>
-          {/* numberOfLines so the line can never wrap: a wrapped label would
-              change a row height that must stay a pure function of duration.
+          {/* numberOfLines so the line can never wrap: a wrapped label would change a row
+              height that must stay a pure function of duration.
 
-              `flexShrink: 0` looks redundant and is not. On web a Text lands in
-              this row as a flex item with no `flex-shrink` of its own, so it
-              takes CSS's initial value of 1 and shrinks; a View would not, since
-              react-native-web's View base style sets `flex-shrink: 0` (which is
-              why the chip below, the icon chip above and this row itself need no
-              such line). Adding the chip pushed this line past a 390px screen,
-              and shrink is distributed in proportion to content width, so the
-              label competed with the detail beside it and came out as "Diap…"
-              and "Fe…" while the detail still had room to give. The label
-              vocabulary is fixed and short (`ACTIVITY_LABEL`), so it holds its
-              width and the detail, the least important thing on the line,
-              absorbs a narrow screen on its own. Verified in a browser: the
-              computed `flex-shrink` is 1 without this and 0 with it. */}
+              `flexShrink: 0` looks redundant and is not. On web a Text lands here as a
+              flex item with no `flex-shrink` of its own, so it takes CSS's initial value
+              of 1 and shrinks, where a View would not (react-native-web's View base style
+              sets `flex-shrink: 0`, which is why the chips need no such line). Without it
+              the label came out as "Diap…" on a 390px screen. */}
           <Txt weight={700} size={16} tracking={-0.2} numberOfLines={1} style={{ flexShrink: 0 }}>
             {ACTIVITY_LABEL[type]}
           </Txt>
-          {/* Whose row this is. Drawn in the child's own avatar tint (`t.dim`
-              when the list carries none), so two siblings' rows are told apart
-              by colour as well as by name. Deliberately not shrinkable and
-              capped instead: it is the one thing the household view adds, so a
-              long name ellipsizes inside its own chip rather than the chip
-              collapsing. Announced through the row's accessibilityLabel above,
-              never on its own: a second focusable element per row would double
-              the swipes needed to cross the timeline. */}
+          {/* In the child's own avatar tint, so two siblings are told apart by colour as
+              well as by name. Capped rather than shrinkable, so a long name ellipsizes
+              inside its chip instead of the chip collapsing. Never focusable on its own:
+              that would double the swipes needed to cross the timeline. */}
           {child?.name ? (
             <View
               style={{
@@ -335,10 +268,9 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
               </Txt>
             </>
           ) : null}
-          {/* Still waiting to upload. A small faint clock and no words: the line
-              is already icon chip + label + rule + detail, and the state is
-              carried for screen readers by the row's accessibilityLabel above.
-              Last in the row so it stays put while the detail text shrinks. */}
+          {/* Still waiting to upload. No words, since the row's accessibilityLabel
+              carries the state. Last in the row so it stays put while the detail
+              text shrinks. */}
           {queued ? (
             <View style={{ flexShrink: 0 }}>
               <Icon name="clock" color={t.faint} size={13} />

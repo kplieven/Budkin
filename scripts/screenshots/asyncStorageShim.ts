@@ -1,11 +1,8 @@
 /**
- * In-memory stand-in for `@react-native-async-storage/async-storage`, aliased
- * over the real module by `scripts/screenshots/vite.config.ts`.
- *
- * It exists so `buildFixture.ts` can run the app's OWN persistence functions
- * (saveEntries and friends) outside a browser and then read back exactly the
- * key-value pairs they produced. Only the methods the data layer actually calls
- * are implemented; anything else would be dead weight.
+ * In-memory stand-in for `@react-native-async-storage/async-storage`, aliased over
+ * the real module by `vite.config.ts`. It lets `buildFixture.ts` run the app's OWN
+ * persistence functions outside a browser and read back exactly the key-value pairs
+ * they produced. Only the methods the data layer actually calls are implemented.
  */
 
 const store = new Map<string, string>();

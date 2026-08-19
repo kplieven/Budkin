@@ -1,8 +1,7 @@
 /**
  * Persisted adopt target: the server URL of the most recent (possibly still
- * in-progress/partial) `adopt` call in `useAppStore`. Backed by AsyncStorage
- * (not just module memory) so a `partial` adopt's server-switch reset logic
- * survives an app kill — see `adopt` in `useAppStore.ts`.
+ * in-progress) `adopt` call in `useAppStore`. Backed by AsyncStorage rather than
+ * module memory so a `partial` adopt's server-switch reset survives an app kill.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';

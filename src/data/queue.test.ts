@@ -35,11 +35,10 @@ beforeEach(() => {
 
 describe('queue writes are serialized', () => {
   it('keeps both of two concurrent enqueues', async () => {
-    // The push-failure path fires one enqueue per entry from N correlated
-    // `.catch` handlers, so this is the shape a two-child save takes whenever
-    // Baby Buddy answers 401 or 500 (which never sets `offline`, so the batched
-    // path is not reached). Unchained, both handlers read the same pre-push
-    // queue and the second save clobbers the first.
+    // The push-failure path fires one enqueue per entry from N correlated `.catch`
+    // handlers: the shape a two-child save takes when Baby Buddy answers 401 or 500
+    // (neither sets `offline`, so the batched path is not reached). Unchained, both
+    // handlers read the same pre-push queue and the second save clobbers the first.
     await Promise.all([enqueueEntry(note('a', 'twin one')), enqueueEntry(note('b', 'twin two'))]);
     expect((await loadQueue()).map((e) => e.id)).toEqual(['a', 'b']);
   });
@@ -63,9 +62,8 @@ describe('queue writes are serialized', () => {
 
   it('survives a throwing write without wedging the chain', async () => {
     // `loadQueue` CASTS whatever the file parsed to and never validates it, so a
-    // corrupted queue makes the mutator itself throw (here: `.find` on a string).
-    // A chain that only followed the success path would leave every later write
-    // waiting on a promise nobody ever resolves.
+    // corrupted queue makes the mutator itself throw (here: `.find` on a string). A
+    // chain following only the success path would wedge every later write.
     mem.store.set('budkin.queue.v1', JSON.stringify('not an array'));
     await expect(removeQueuedEntry('a')).rejects.toThrow();
 
@@ -83,16 +81,15 @@ describe('enqueueEntries', () => {
     const queue = await enqueueEntries([note('b', 'twin one'), note('c', 'twin two')]);
 
     expect(queue.map((e) => e.id)).toEqual(['a', 'b', 'c']);
-    // One write for the batch, which is the whole point: `enqueueEntry` is an
-    // unguarded load-modify-save, so N un-awaited calls read the same pre-push
-    // queue and the last save clobbers the rest.
+    // One write for the batch: `enqueueEntry` is an unguarded load-modify-save, so
+    // N un-awaited calls read the same pre-push queue and the last save wins.
     expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
     expect(await loadQueue()).toEqual(queue);
   });
 
   it('keeps every entry of a batch written in one pass', async () => {
-    // The offline twin save: one entry per child, all handed over together.
-    // Written one at a time without awaiting, one of them silently vanishes.
+    // The offline twin save: one entry per child, handed over together. Written one
+    // at a time without awaiting, one of them silently vanishes.
     await enqueueEntries([note('a', 'twin one'), note('b', 'twin two')]);
     expect((await loadQueue()).map((e) => e.id)).toEqual(['a', 'b']);
   });

@@ -1,25 +1,17 @@
-/**
- * Pure shaping + reconcile logic for per-timer Android notifications. No native
- * calls and no I/O, so it is trivially unit-testable. The store subscriber
- * (`sync.ts`) turns `state.timers` plus `state.children` into the desired
- * notification set here, diffs it against what was last posted, and dispatches
- * the post/dismiss work to the platform-split module.
- */
+/** Shaping and reconcile logic for per-timer Android notifications. Unlike the
+ *  scheduled reminders, these are diffed against an in-memory `prev`. */
 
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { withChildParam } from '@/lib/deepLink';
 import type { Child, Timer } from '@/types/models';
 
-/** Android channel id, shared by the channel *creation* (register.android) and the
- *  channel-aware *trigger* (postNotification.android) so a typo can't silently
- *  route notifications to a noisy fallback channel. */
+/** Shared by the channel creation and the channel-aware trigger, so a typo cannot
+ *  silently route notifications to a noisy fallback channel. */
 export const TIMER_CHANNEL_ID = 'timers';
 
-/** Android channel id for SCHEDULED reminders (due date, stale timers, age
- *  milestones, pumping). Separate from TIMER_CHANNEL_ID on purpose: that one is
- *  LOW importance because a running timer is a persistent status, and reusing it
- *  would make every reminder here silent. It also lets a user mute reminders in
- *  Android settings without losing the timer display. */
+/** Separate from TIMER_CHANNEL_ID on purpose: that one is LOW importance, so
+ *  reusing it would make every reminder silent. Separate channels also let a user
+ *  mute reminders in Android settings without losing the timer display. */
 export const REMINDER_CHANNEL_ID = 'reminders';
 
 export interface TimerNotification {
@@ -30,35 +22,29 @@ export interface TimerNotification {
   data: { url: string; timerId: string };
 }
 
-/** "14:45" — local 24-hour clock (nl-BE), timezone-agnostic in tests via local Date input. */
+/** "14:45", local 24-hour clock. */
 export function formatClock(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 /** Shapes a notification from a name the caller has ALREADY resolved. Only the
- *  headless widget task uses this: it runs with a snapshot holding one child's
- *  name and no roster to look the timer's own child up in. Everything with a
- *  roster goes through `buildTimerNotification`, which resolves the name itself
- *  and so cannot title a timer with the wrong child. */
+ *  headless widget task needs this: it runs with a snapshot holding one child's
+ *  name and no roster. */
 export function buildNamedTimerNotification(timer: Timer, childName: string): TimerNotification {
   const label = ACTIVITY_LABEL[timer.saveAs];
   return {
     identifier: timer.id,
     title: childName ? `${childName} · ${label}` : label,
     body: `Started ${formatClock(timer.start)}`,
-    // The tap names the timer's OWN child, taken from `childId` rather than from
-    // the name above: the headless widget caller resolves that name from a
-    // one-child snapshot, so it is the id that is trustworthy in both callers. An
-    // unattributable timer names nobody and lands on the current selection.
+    // From `childId`, not the name above: the widget caller resolves that name
+    // from a one-child snapshot, so only the id is trustworthy in both callers.
     data: { url: withChildParam('/timers', timer.childId), timerId: timer.id },
   };
 }
 
-/** Titles a timer with ITS OWN child, matched strictly on `timer.childId`. That
- *  is the rule `staleReminders` uses, and for the same reason: the selected child
- *  is deliberately NOT a fallback, so a running timer keeps its name when the
- *  user switches child. A timer no child matches gets the bare label. */
+/** Matched strictly on `timer.childId`. The selected child is deliberately NOT a
+ *  fallback, so a running timer keeps its name when the user switches child. */
 export function buildTimerNotification(timer: Timer, children: Child[]): TimerNotification {
   const child = children.find((c) => c.id === timer.childId);
   return buildNamedTimerNotification(timer, child?.first ?? '');

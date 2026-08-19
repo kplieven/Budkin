@@ -24,9 +24,9 @@ describe('photoFileName', () => {
   });
 
   it('rejects an extension that is not plainly alphanumeric, rather than building a path from it', () => {
-    // The source name comes from the picker, not from us. An extension is only
-    // ever appended to a path we construct, so anything that is not a short
-    // run of letters and digits is refused rather than sanitised.
+    // The source name comes from the picker, not from us, and the extension is
+    // appended to a path we construct, so anything that is not a short run of
+    // letters and digits is refused rather than sanitised.
     expect(photoFileName('evil.../../etc/passwd', 1754179200000)).toBe('photo-1754179200000.jpg');
     expect(photoFileName('x.jp g', 1754179200000)).toBe('photo-1754179200000.jpg');
   });

@@ -2,11 +2,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 
 import type { TrendPoint } from '@/features/insights/compute';
 
-/**
- * Minimal progression line for the Growth overview cards. No axes, ticks or
- * labels: just the curve and a dot on the latest point. Renders nothing until
- * there are at least two points and a measured width.
- */
+/** Minimal progression line for the Growth overview cards: no axes, ticks or labels,
+ *  just the curve and a dot on the latest point. */
 export function Sparkline({ points, color, width, height = 30 }: {
   points: TrendPoint[]; color: string; width: number; height?: number;
 }) {

@@ -1,6 +1,6 @@
 /**
- * Time / duration formatters, ported verbatim from the design handoff reference.
- * All "now"-relative helpers take `now` (ms) explicitly so they stay pure.
+ * Time and duration formatters. All "now"-relative helpers take `now` (ms)
+ * explicitly so they stay pure.
  */
 
 /** 24-hour clock, "14:47" / "09:05" */
@@ -34,13 +34,9 @@ export function fmtAgo(ms: number, now: number): string {
 }
 
 /**
- * Compact form for stat values and anchors: "5m" / "1h18m".
- *
- * Floors at zero exactly as `fmtDur` does, because a negative elapsed is
- * reachable and "-1m" is never the right thing to show: an ongoing entry can
- * carry a start the user set ahead of the clock, and History reads a
- * minute-quantized `now` that sits behind real time, so a timer begun this
- * minute is briefly "in the future" as far as the arithmetic is concerned.
+ * Compact form for stat values and anchors: "5m" / "1h18m". Floors at zero because a
+ * negative elapsed is reachable: an ongoing entry can carry a start the user set ahead of
+ * the clock, and History reads a minute-quantized `now` that sits behind real time.
  */
 export function fmtAgoShort(min: number): string {
   min = Math.max(0, min);
@@ -53,11 +49,8 @@ export function fmtAgoShort(min: number): string {
   return `${Math.floor(min / 1440)}d`;
 }
 
-/**
- * Base copy for the Quick set anchor chips, shared across the time panels so the
- * wording stays identical everywhere (e.g. "Diaper" reads the same in the start,
- * end, and point-event panels).
- */
+/** Base copy for the Quick set anchor chips, shared so the start, end and point-event
+ *  panels word them identically. */
 export const ANCHOR_LABEL = {
   feedEnded: 'Feed ended',
   woke: 'Woke',
@@ -66,22 +59,17 @@ export const ANCHOR_LABEL = {
   sleepStarted: 'Sleep started',
 } as const;
 
-/**
- * Compose a compact Quick set chip label. With an "ago" value it appends the
- * short duration in parentheses: anchorLabel('Feed ended', 120) -> "Feed ended (2h)".
- * Without one it returns the base unchanged: anchorLabel('Woke') -> "Woke".
- */
+/** anchorLabel('Feed ended', 120) -> "Feed ended (2h)", anchorLabel('Woke') -> "Woke". */
 export function anchorLabel(base: string, agoMin?: number): string {
   return agoMin == null ? base : `${base} (${fmtAgoShort(agoMin)})`;
 }
 
-/** "12 days old" / "8 weeks old" / "3 months old" */
-/** Days in the approximate month `ageStr` and `ageMonths` count in. Exported
- *  because scheduling has to hit the exact instant `ageMonths` ticks over (see
- *  `catchUpDueAt` in src/lib/milestones.ts), which it cannot do from a calendar
- *  month. */
+/** Days in the approximate month `ageStr` and `ageMonths` count in. Exported because
+ *  scheduling has to hit the exact instant `ageMonths` ticks over (`catchUpDueAt` in
+ *  src/lib/milestones.ts), which it cannot do from a calendar month. */
 export const APPROX_MONTH_DAYS = 30.4;
 
+/** "12 days old" / "8 weeks old" / "3 months old" */
 export function ageStr(birth: number, now: number): string {
   const days = Math.floor((now - birth) / 86400000);
   if (days < 14) return `${days} days old`;
@@ -96,10 +84,8 @@ export function ageMonths(birth: number, now: number): number {
   return Math.max(0, Math.floor((now - birth) / 86400000 / APPROX_MONTH_DAYS));
 }
 
-/** Age for a born child, a countdown for an expected one. Takes primitives
- *  rather than a Child so the Android widget, which cannot import store types,
- *  shares exactly this logic. Never counts up past the due date: a parent
- *  staring at their home screen does not need "8 days overdue". */
+/** Takes primitives rather than a Child so the Android widget, which cannot import store
+ *  types, shares this logic. Never counts up past the due date. */
 export function ageOrDueLabel(birth: number, expected: boolean, now: number): string {
   if (!expected) return ageStr(birth, now);
   const days = Math.ceil((birth - now) / 86400000);
@@ -117,36 +103,20 @@ export function relDayLabel(ms: number, now: number): string {
   return 'Yesterday';
 }
 
-/**
- * Stable identity for a LOCAL calendar day, as `YYYY-MM-DD`.
- *
- * Not the day's label: labels are relative to `now` ("Today"), so they cannot
- * key a selection that has to survive the clock rolling past midnight. Zero
- * padding also makes the keys sort chronologically as plain strings.
- *
- * Lives here beside `dayGroupLabel` rather than with the timeline filters that
- * first needed it, because `groupByDay` buckets by it too and importing it from
- * `features/activity/filter` would close an import cycle (filter already reads
- * `groupByDay`).
- */
+/** Stable identity for a LOCAL calendar day. Not the label, which is relative to `now`
+ *  and so cannot key a selection that must survive the clock passing midnight. */
 export function dayKey(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**
- * Day-group label for the timeline: "Today" / "Yesterday" / DD/MM/YYYY (nl-BE).
+ * "Today" / "Yesterday" / DD/MM/YYYY (nl-BE). "Yesterday" is the previous CALENDAR day,
+ * never a rolling 48-hour window, which at 01:00 would label a 29h-old entry the same as
+ * one from yesterday evening.
  *
- * "Yesterday" is the previous CALENDAR day, not a rolling 48-hour window. The
- * window version called anything under 48h old yesterday, so at 01:00 an entry
- * from 20:00 the day before yesterday (29h) claimed the same label as one from
- * yesterday evening — and `groupByDay`, which bucketed by this label back then,
- * merged two calendar days into one group. Stepping a Date back one day also
- * handles month and year rollover for free.
- *
- * Cheap it is not: three Date allocations and up to four `toDateString` calls.
- * Call it once per day GROUP (as `groupByDay` and `dayOptions` do), never once
- * per item.
+ * Three Date allocations and up to four `toDateString` calls, so call it once per day
+ * GROUP, never once per item.
  */
 export function dayGroupLabel(ms: number, now: number): string {
   const d = new Date(ms);

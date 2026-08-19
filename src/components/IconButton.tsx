@@ -6,7 +6,7 @@ import { useTheme } from '@/theme/useTheme';
 
 interface IconButtonProps {
   name: IconName;
-  /** Accessible name — required because the icon alone conveys nothing to AT. */
+  /** Required: the icon alone conveys nothing to assistive tech. */
   accessibilityLabel: string;
   onPress?: () => void;
   color?: string;
@@ -14,7 +14,6 @@ interface IconButtonProps {
   style?: ViewStyle;
 }
 
-/** 40×40 rounded square icon button (settings, close, back). */
 export function IconButton({ name, accessibilityLabel, onPress, color, size = 22, style }: IconButtonProps) {
   const t = useTheme();
   return (

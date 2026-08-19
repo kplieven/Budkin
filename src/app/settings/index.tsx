@@ -34,14 +34,12 @@ import { useTheme } from '@/theme/useTheme';
 /**
  * One endpoint of the nap window as a type-able 24-hour clock field, the same
  * digits-first shorthand as the log sheet's time editor ("7" is 07:00, "730" is
- * 07:30). A picker over a day's worth of times is a lot of travel for a value
- * that changes about twice a childhood, and typing also reaches the minute,
- * which a half-hour grid never could.
+ * 07:30).
  *
- * Draft-then-commit, not commit-per-keystroke: the field holds its own text
- * while focused (null means "not editing, show the stored value") and only
- * writes on blur or submit. Unparseable text is discarded silently and the
- * stored value comes back, so a half-typed "1" can never land as 01:00.
+ * Draft-then-commit, not commit-per-keystroke: the field holds its own text while
+ * focused and only writes on blur or submit. Unparseable text is discarded
+ * silently and the stored value comes back, so a half-typed "1" can never land
+ * as 01:00.
  */
 function ClockField({
   label,
@@ -63,9 +61,8 @@ function ClockField({
     if (min != null) onCommit(min);
   };
 
-  // The sizing View around the TextInput is load-bearing on react-native-web:
-  // a TextInput left as a direct flex item keeps min-width: auto and is pinned
-  // to its intrinsic width, overflowing the row. Same workaround as DateFields.
+  // The sizing View around the TextInput is load-bearing on react-native-web: a
+  // TextInput left as a direct flex item keeps min-width: auto and overflows the row.
   return (
     <View style={{ flex: 1, minWidth: 0, gap: 4 }}>
       <Txt weight={600} size={11.5} color={t.faint} tracking={0.2}>
@@ -103,16 +100,12 @@ function ClockField({
 }
 
 /**
- * A whole-number setting as a type-able field with − / + on either side. One
- * chip per allowed value stops scaling long before the range does, and it also
- * makes the range look like a rule when it is only a sanity bound, so the count
- * is typed and the buttons are there for the one-step nudge.
+ * A whole-number setting as a type-able field with − / + on either side.
  *
  * Same draft-then-commit as ClockField, and here it is load-bearing rather than
- * tidy: the store's clamp turns NaN into the DEFAULT, not into the previous
- * value, so committing per keystroke would reset a user's 5 to 3 and persist it
- * the moment they cleared the field to type a new number. Empty or unparseable
- * text is discarded instead and the stored value comes back.
+ * tidy: the store's clamp turns NaN into the DEFAULT, not into the previous value,
+ * so committing per keystroke would reset a user's 5 to 3 and persist it the moment
+ * they cleared the field to type a new number.
  */
 function CountField({
   label,
@@ -143,8 +136,8 @@ function CountField({
     onCommit(Math.min(max, Math.max(min, Math.round(n))));
   };
 
-  // Stepping abandons any half-typed draft and moves from the stored value, so
-  // the two ways of editing can never compose into something out of range.
+  // Stepping abandons any half-typed draft and moves from the stored value, so the
+  // two ways of editing can never compose into something out of range.
   const step = (delta: -1 | 1) => {
     setText(null);
     const next = Math.min(max, Math.max(min, value + delta));
@@ -182,9 +175,7 @@ function CountField({
             −
           </Txt>
         </Pressable>
-        {/* The sizing View around the TextInput is load-bearing on
-            react-native-web, same as in ClockField: a bare flex-item TextInput
-            keeps min-width: auto and overflows the row. */}
+        {/* Sizing View for the same react-native-web reason as in ClockField. */}
         <View style={{ flex: 1, minWidth: 0 }}>
           <TextInput
             value={text ?? display}
@@ -231,22 +222,11 @@ function CountField({
   );
 }
 
-/**
- * Sentence-case a display label. fmtDayStartHour is a lowercase primitive so it
- * can be dropped mid-sentence elsewhere, but the "Day starts at" pills stand
- * alone, so they capitalize here. A no-op for labels like "7:00".
- */
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * "every N days" phrasing for one rhythm axis, to sit after "Full bath" or
- * "quick wash": 0 reads as "off" (0 is the OFF switch, per
- * `BATH_INTERVAL_MIN`'s doc comment in selectors.ts, not a degenerate "every 0
- * days" that would contradict the helper text explaining the same rule), 1 is
- * the singular "every day", and everything else is "every N days".
- */
+/** 0 is the OFF switch for a rhythm axis, not a degenerate "every 0 days". */
 function bathCadencePhrase(days: number): string {
   if (days === 0) return 'off';
   return days === 1 ? 'every day' : `every ${days} days`;
@@ -283,9 +263,6 @@ export default function Settings() {
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openTreatmentEditor = useAppStore((s) => s.openTreatmentEditor);
 
-  // Whether the "Reconnect / change server" confirm is open. Screen-local on
-  // purpose: no other screen opens it, so it needs none of the store plumbing
-  // the `_layout.tsx` sheets have.
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
   useEffect(() => {
@@ -307,12 +284,9 @@ export default function Settings() {
         ? `Connected · token ••••${connection.token.slice(-4)}`
         : 'Not connected';
 
-  // Read-only display of the connected user's Baby Buddy general settings
-  // (from /api/profile/). The whole group is shown ONLY when the server actually
-  // returned some settings: /api/profile/ 500s on some instances (e.g. a user
-  // without a Settings row), so rather than surface a scary error we simply omit
-  // the group — the fetch failure is logged in the store's loadProfile. Demo mode
-  // has no server, so it's hidden there too. Present fields render; missing ones dash.
+  // Read-only, from /api/profile/. Shown ONLY when the server actually returned
+  // some settings: /api/profile/ 500s on some instances (e.g. a user without a
+  // Settings row), so the group is omitted rather than surfacing a scary error.
   const profileRows = [
     { label: 'Username', value: profile?.username || '—' },
     { label: 'Timezone', value: profile?.timezone || '—' },
@@ -323,10 +297,9 @@ export default function Settings() {
     connection?.mode !== 'local' &&
     !!(profile?.username || profile?.timezone || profile?.language || profile?.dashboardRefreshRate);
 
-  // Treatments are per-child, so scope the management list to the selected child.
-  // Filtered in the render body (never inside a useAppStore selector) so a fresh
-  // array can't drive the zustand v5 re-render loop. Both active and paused treatments
-  // are shown here (this is where you manage them); the log picker filters.
+  // Filtered in the render body, never inside a useAppStore selector, so a fresh
+  // array can't drive the zustand v5 re-render loop. Both active and paused
+  // treatments show here (this is where you manage them); the log picker filters.
   const selectedChild = children.find((c) => c.id === selectedChildId);
   const childTreatments = treatments.filter((c) => c.childId === selectedChildId);
 
@@ -429,11 +402,9 @@ export default function Settings() {
           );
         })}
 
-        {/* Nap window. A sleep is pre-set to Nap when it STARTS inside this
-            window and to Night sleep otherwise; the log sheet always offers a
-            manual override. Start inclusive, end exclusive, and a start later
-            than the end wraps midnight, so an "inverted" pair still means
-            something rather than matching nothing. */}
+        {/* A sleep is pre-set to Nap when it STARTS inside this window. Start
+            inclusive, end exclusive, and a start later than the end wraps
+            midnight, so an "inverted" pair still means something. */}
         <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}>
           <View>
             <Txt weight={600} size={16}>
@@ -463,8 +434,6 @@ export default function Settings() {
           </Txt>
         </View>
 
-        {/* Day boundary: the hour the 24h "day" starts at. Drives the Insights
-            Rhythm graph + its trends and Home's daily sleep total. Persisted. */}
         <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
           <View>
             <Txt weight={600} size={16}>
@@ -550,8 +519,7 @@ export default function Settings() {
       )}
 
       {/* Scheduled reminders only fire on Android (permission.ts's stub is a
-          permanent no off it), so the row is hidden rather than linking to a
-          screen that can never do anything there. */}
+          permanent no off it), so elsewhere the row would link to a dead screen. */}
       {Platform.OS === 'android' && (
         <>
           <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
@@ -622,10 +590,9 @@ export default function Settings() {
           </View>
           <View style={{ width: 9, height: 9, borderRadius: 99, backgroundColor: '#5FB39B' }} />
         </View>
-        {/* Only in server mode: in local mode nothing is ever queued for upload,
-            so the row would advertise a screen with permanently nothing on it.
-            The ROUTE still renders in local mode with its own empty state, so a
-            typed /settings/queue does not dead-end. */}
+        {/* Only in server mode: local mode never queues anything. The ROUTE still
+            renders there with its own empty state, so a typed /settings/queue
+            does not dead-end. */}
         {selectServerMode({ connection }) && (
           <Pressable
             onPress={() => router.navigate('/settings/queue')}
@@ -641,9 +608,9 @@ export default function Settings() {
               <Txt unselectable weight={600} size={16}>
                 Offline queue
               </Txt>
-              {/* `queueCount` and not `selectPendingCount`: this row points at a
-                  screen that shows the write queue alone, and the banners'
-                  pending figure counts unsynced measurements on top of it. */}
+              {/* `queueCount`, not `selectPendingCount`: this row points at a screen
+                  showing the write queue alone, and the banners' pending figure
+                  counts unsynced measurements on top of it. */}
               <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
                 {queueCount === 0 ? 'Nothing waiting to upload' : `${entryCountLabel(queueCount)} waiting to upload`}
               </Txt>
@@ -668,10 +635,9 @@ export default function Settings() {
             </View>
           </Pressable>
         )}
-        {/* Opens a confirm instead of disconnecting on the spot: disconnect()
-            clears the write queue and the offline op-log, which exist nowhere
-            else, so the loss has to be stated (with counts, see
-            ConfirmDisconnectSheet) before it can happen. */}
+        {/* Confirms instead of disconnecting on the spot: disconnect() clears the
+            write queue and the offline op-log, which exist nowhere else, so the
+            loss has to be stated with counts before it can happen. */}
         {connection?.mode !== 'local' && (
           <Pressable
             onPress={() => setConfirmDisconnect(true)}
@@ -702,11 +668,8 @@ export default function Settings() {
         </Pressable>
       </View>
 
-      {/* Which build this is. Last thing on the screen, dimmed and centred, so
-          it reads as a footer rather than as a setting. It exists because
-          nothing else in the app can answer the question: a stale install and a
-          container left on an old image are both completely invisible
-          otherwise, and both have cost real time. See src/lib/appVersion.ts. */}
+      {/* Which build this is. Nothing else in the app can answer that, and a stale
+          install or a container left on an old image are otherwise invisible. */}
       <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 18, marginBottom: 4 }}>
         {versionLabel(Constants.expoConfig?.extra?.version)}
       </Txt>
@@ -714,11 +677,9 @@ export default function Settings() {
   );
 
   // A sibling of the scroll container, never part of `body`: BottomSheet
-  // absolute-fills its parent, and inside the ScrollView that parent is the
-  // scroll CONTENT, so the sheet would land wherever the user last scrolled
-  // to instead of over the screen. Mounted conditionally so its exit
-  // animation runs. On confirm this runs the exact sequence the row itself
-  // used to run.
+  // absolute-fills its parent, and inside the ScrollView that parent is the scroll
+  // CONTENT, so the sheet would land wherever the user last scrolled to instead of
+  // over the screen. Mounted conditionally so its exit animation runs.
   const confirmSheet = confirmDisconnect ? (
     <ConfirmDisconnectSheet
       onConfirm={() => {

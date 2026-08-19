@@ -26,9 +26,9 @@ describe('withChildParam', () => {
   });
 
   it('leaves the url alone when there is no child to name', () => {
-    // The permanent case, not a transitional one: pumping reminders are
-    // parent-side, launcher shortcuts are built before any child exists, and a
-    // timer persisted before ownership was stamped has no owner to name.
+    // Permanent, not transitional: pumping reminders are parent-side, launcher
+    // shortcuts are built before any child exists, and a timer persisted before
+    // ownership was stamped has no owner to name.
     expect(withChildParam('/timers', undefined)).toBe('/timers');
     expect(withChildParam('/timers', '')).toBe('/timers');
   });
@@ -44,31 +44,29 @@ describe('childToSelectOnOpen', () => {
   });
 
   it('selects nobody when the reminder names whoever is already selected', () => {
-    // The common case: tapping the selected child's own nap nudge must not cost
-    // a store write, a refetch and an insights reset.
+    // Tapping the selected child's own nap nudge must not cost a store write, a
+    // refetch and an insights reset.
     expect(childToSelectOnOpen('/timers?child=c1', roster, 'c1')).toBeUndefined();
   });
 
   it('selects nobody when the url names no child at all', () => {
-    // Reminders scheduled by an older build keep their childless url for weeks:
-    // neither diff compares `data`, so nothing reschedules them. This path is
-    // permanent.
+    // Permanent: reminders scheduled by an older build keep their childless url,
+    // and neither diff compares `data`, so nothing reschedules them.
     expect(childToSelectOnOpen('/timers', roster, 'c1')).toBeUndefined();
     expect(childToSelectOnOpen('/', roster, 'c1')).toBeUndefined();
   });
 
   it('selects nobody when the named child no longer exists', () => {
-    // A pending reminder outlives the child it names. Navigation-only
-    // destinations just proceed against the current selection rather than
-    // dead-ending.
+    // A pending reminder outlives the child it names. Navigation-only destinations
+    // proceed against the current selection rather than dead-ending.
     expect(childToSelectOnOpen('/history?child=gone', roster, 'c1')).toBeUndefined();
   });
 
   it('leaves write-adjacent destinations to their own route', () => {
-    // `/log/<type>` and `/timer` resolve the parameter themselves, because they
-    // have to REFUSE an unknown child rather than write against the wrong one.
-    // Selecting for them here would also split behaviour by entry point: a
-    // widget button never passes through this funnel.
+    // `/log/<type>` and `/timer` resolve the parameter themselves, because they have
+    // to REFUSE an unknown child rather than write against the wrong one. Selecting
+    // here would also split behaviour by entry point: a widget button never passes
+    // through this funnel.
     expect(childToSelectOnOpen('/log/feeding?child=c2', roster, 'c1')).toBeUndefined();
     expect(childToSelectOnOpen('/log/medication?treatment=t1&child=c2', roster, 'c1')).toBeUndefined();
     expect(childToSelectOnOpen('/timer?child=c2', roster, 'c1')).toBeUndefined();
@@ -92,8 +90,8 @@ describe('resolveTimerDeepLink', () => {
   });
 
   it('selects the child the widget button names before starting', () => {
-    // The widget's bitmap can be older than the selection it was rendered from,
-    // so the button carries the child it is showing stats for.
+    // The widget's bitmap can be older than the selection it was rendered from, so
+    // the button carries the child it is showing stats for.
     expect(resolveTimerDeepLink({ ...base, child: 'c2' })).toEqual({ kind: 'start', selectChildId: 'c2' });
   });
 
@@ -102,14 +100,14 @@ describe('resolveTimerDeepLink', () => {
   });
 
   it('refuses when the named child no longer exists', () => {
-    // Write-adjacent: starting a timer against the wrong child files a real
-    // entry against them. Refuse rather than retarget.
+    // Write-adjacent: starting a timer against the wrong child files a real entry
+    // against them, so refuse rather than retarget.
     expect(resolveTimerDeepLink({ ...base, child: 'gone' })).toEqual({ kind: 'none' });
   });
 
   it('refuses when the named child is still expected, whoever is selected', () => {
-    // Judged on the LINK's child, not the selection: a timer started for an
-    // expecting child would log an activity against a due date.
+    // Judged on the LINK's child: a timer started for an expecting child would log
+    // an activity against a due date.
     const expecting = child({ id: 'c3', first: 'Bean', expected: true });
     expect(resolveTimerDeepLink({ ...base, children: [...roster, expecting], child: 'c3' })).toEqual({ kind: 'none' });
   });

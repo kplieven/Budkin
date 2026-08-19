@@ -3,9 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { detailFor } from '@/features/activity/detail';
 import type { Entry, FeedMethod, FeedType, Timer } from '@/types/models';
 
-// `detailFor` reads only the units preference off the store, non-reactively.
-// Mock that single read rather than standing up the whole store harness.
-// Both `vi.hoisted` and `vi.mock` are lifted above the imports above.
+// `detailFor` reads only the units preference off the store, non-reactively, so mock
+// that single read rather than standing up the whole store harness.
 const h = vi.hoisted(() => ({ unitSystem: 'metric' as 'metric' | 'imperial' }));
 vi.mock('@/store/useAppStore', () => ({
   useAppStore: { getState: () => ({ unitSystem: h.unitSystem }) },
@@ -40,8 +39,8 @@ describe('detailFor: feeding amount is dual-purpose', () => {
   });
 
   it('names a breast feed at the breast by its intake level', () => {
-    // `amount` here is the intake level, not millilitres. Formatting it as a
-    // measurement would render a level 2 as "0.1 fl oz".
+    // `amount` here is the intake level, not millilitres. Formatting it as a measurement
+    // would render a level 2 as "0.1 fl oz".
     for (const method of ['left', 'right', 'both'] as FeedMethod[]) {
       h.unitSystem = 'imperial';
       const imperial = detailFor(feed('breast', method, 2));
@@ -63,9 +62,9 @@ describe('detailFor: feeding amount is dual-purpose', () => {
   });
 
   it('still words an entry left on the old 1 to 10 scale', () => {
-    // Local-only history was never migrated, so a wider score can still show up
-    // here. It must name a level rather than render a bare number or blank, and
-    // a score above 3 (which can only be legacy) reads by thirds.
+    // Local-only history was never migrated, so a wider score can still show up here.
+    // It must name a level rather than render a bare number, and a score above 3 (which
+    // can only be legacy) reads by thirds.
     h.unitSystem = 'metric';
     expect(detailFor(feed('breast', 'left', 5)).split(' · ')).toContain('Some');
     expect(detailFor(feed('breast', 'left', 7)).split(' · ')).toContain('Some');
@@ -133,8 +132,8 @@ describe('detailFor: a running timer', () => {
   });
 
   it('does not guess Nap or Night before the user has said which', () => {
-    // `nap` is only set once the running timer is edited, and calling an
-    // unedited night feed "Nap" would be a fabrication.
+    // `nap` is only set once the running timer is edited, and calling an unedited night
+    // feed "Nap" would be a fabrication.
     expect(detailFor(timer({ saveAs: 'sleep' }))).toBe('ongoing');
   });
 

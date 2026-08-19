@@ -14,15 +14,14 @@ describe('offlineBannerAction', () => {
   });
 
   it('retries in local mode, where the queue screen is unreachable', () => {
-    // `src/app/settings/index.tsx` hides the Offline queue row in local mode
-    // because the screen is permanently empty there, so navigating would send
-    // the user to a dead end.
+    // Settings hides the Offline queue row in local mode because the screen is
+    // permanently empty there, so navigating would send the user to a dead end.
     expect(offlineBannerAction({ serverMode: false, atQueue: false })).toBe('retry');
   });
 
   it('retries when the queue screen is already open', () => {
-    // The desktop pill rides every route. Navigating to the route already on
-    // screen is a no-op that reads as a broken button.
+    // The desktop pill rides every route. Navigating to the route already on screen is
+    // a no-op that reads as a broken button.
     expect(offlineBannerAction({ serverMode: true, atQueue: true })).toBe('retry');
   });
 
@@ -33,9 +32,8 @@ describe('offlineBannerAction', () => {
 
 describe('isQueueRoute', () => {
   it('recognises the offline queue route', () => {
-    // The literal, not `QUEUE_ROUTE`: comparing the constant with itself only
-    // restates the implementation. This pins the constant to the path the route
-    // file actually serves (`src/app/settings/queue.tsx`).
+    // The literal, not `QUEUE_ROUTE`: comparing the constant with itself only restates
+    // the implementation. This pins it to the path the route file actually serves.
     expect(isQueueRoute('/settings/queue')).toBe(true);
   });
 
@@ -49,27 +47,25 @@ describe('isQueueRoute', () => {
 
 describe('offlineBannerA11yLabel', () => {
   it('names the destination as that screen is titled', () => {
-    // The label is the whole announcement: a screen reader that reaches the
-    // banner reads it and never the text inside. Checked against
-    // `screenTitleFor`, so renaming the destination (or pointing QUEUE_ROUTE
-    // somewhere the title table does not know) cannot leave the banner
-    // announcing a screen that no longer goes by that name.
+    // The label is the whole announcement: a screen reader that reaches the banner
+    // reads it and never the text inside. Checked against `screenTitleFor` so renaming
+    // the destination cannot leave the banner announcing a name that no longer exists.
     expect(offlineBannerA11yLabel('open-queue').toLowerCase()).toContain(
       screenTitleFor(QUEUE_ROUTE).toLowerCase(),
     );
   });
 
   it('does not name the destination when the press goes nowhere', () => {
-    // `retry` is exactly the cases that navigate nowhere, so a label naming the
-    // queue screen would promise a press that never opens it.
+    // `retry` is exactly the cases that navigate nowhere, so a label naming the queue
+    // screen would promise a press that never opens it.
     expect(offlineBannerA11yLabel('retry').toLowerCase()).not.toContain(
       screenTitleFor(QUEUE_ROUTE).toLowerCase(),
     );
   });
 
   it('says something different for each action', () => {
-    // The two surfaces render the same banner for both actions, so a shared
-    // label would leave a screen reader describing the wrong one.
+    // The two surfaces render the same banner for both actions, so a shared label
+    // would leave a screen reader describing the wrong one.
     expect(offlineBannerA11yLabel('open-queue')).not.toBe(offlineBannerA11yLabel('retry'));
   });
 });

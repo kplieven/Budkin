@@ -1,11 +1,9 @@
 import type { MeasurementKind } from '@/types/models';
 
 /**
- * Display metadata for growth measurements: label, short label, and accent
- * color. The UNIT is intentionally NOT here — it depends on the user's
- * metric/imperial preference and comes from `unitLabel(kind, system)` in
- * `@/lib/units`. Stored values are always canonical metric (kg/cm); imperial is
- * a display lens applied at render.
+ * The UNIT is deliberately NOT here: it depends on the user's metric/imperial
+ * preference and comes from `unitLabel(kind, system)`. Stored values are always
+ * canonical metric (kg/cm), and imperial is a display lens applied at render.
  */
 export const MEAS_META: Record<
   MeasurementKind,

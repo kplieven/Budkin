@@ -4,9 +4,8 @@ import type { Child, Entry, Timer } from '@/types/models';
 import { buildWidgetSnapshot } from '@/widgets/snapshot';
 import { widgetToday } from '@/widgets/today';
 
-// Fixed local timestamps rather than `Date.now()` offsets: `now` is a parameter,
-// so nothing here depends on what time the suite runs at (the old version placed
-// its records on the previous calendar day when run between 00:00 and 02:00).
+// Fixed local timestamps rather than `Date.now()` offsets: `now` is a parameter, so
+// nothing here depends on what time of day the suite runs at.
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 const NOW = at(2026, 6, 5, 15); // 5 Jul 2026, 15:00; the noon window opened at 12:00
 
@@ -83,9 +82,8 @@ describe('buildWidgetSnapshot child scoping', () => {
     expect(s.lastFeedStart).toBeNull();
     expect(s.lastDiaper).toBeNull();
     expect(s.lastDiaperSolid).toBe(false);
-    // The records are gone from the snapshot entirely, so no render-time window
-    // can resurrect them. (The old test asserted zero totals that were zero for
-    // the wrong reason: they never reached the date filter at all.)
+    // The records are gone from the snapshot entirely, so no render-time window can
+    // resurrect them. Asserting zero totals alone would pass for the wrong reason.
     expect(s.entries).toEqual([]);
     const t = widgetToday(s, NOW);
     expect([t.sleepMin, t.feeds, t.diapers]).toEqual([0, 0, 0]);
@@ -136,8 +134,8 @@ describe('buildWidgetSnapshot running sleep timer', () => {
   });
 
   it('counts a quick timer repointed to sleep (saveAs, never activity)', () => {
-    // `setTimerSaveAs` rewrites `saveAs` and leaves `activity` at what the timer
-    // was started as, so an activity-keyed lookup would miss this one.
+    // `setTimerSaveAs` rewrites `saveAs` and leaves `activity` at what the timer was
+    // started as, so an activity-keyed lookup would miss this one.
     const s = buildWidgetSnapshot({ ...baseState, timers: [timer({ activity: 'feeding' })], connection: null });
     expect(s.sleepStart).toBe(at(2026, 6, 5, 14));
     expect(widgetToday(s, NOW).sleepMin).toBe(60);

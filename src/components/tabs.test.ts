@@ -7,8 +7,7 @@ import { isTabName, TABS, TAB_NAMES } from '@/components/tabs';
 
 const TABS_DIR = path.resolve(__dirname, '../app/(tabs)');
 
-/** The route names the (tabs) group actually contains: every screen file and
- *  every nested directory in it, minus the layout itself. */
+/** Every screen file and nested directory in the (tabs) group, minus the layout. */
 function routeNamesOnDisk(): string[] {
   return readdirSync(TABS_DIR, { withFileTypes: true })
     .filter((e) => e.name !== '_layout.tsx' && !e.name.endsWith('.test.ts'))
@@ -18,10 +17,9 @@ function routeNamesOnDisk(): string[] {
 
 describe('tab metadata', () => {
   it('has an entry for every route in the group, and no others', () => {
-    // The bar renders from this table, not from the navigator's route list, so
-    // a screen added to the group without a table entry would silently not
-    // appear in the bar — and a table entry with no screen would render a tab
-    // that navigates nowhere. This is the only thing keeping the two in step.
+    // The bar renders from this table, not from the navigator's route list, so a
+    // screen with no table entry silently never appears in the bar, and a table
+    // entry with no screen renders a tab that navigates nowhere.
     expect([...TAB_NAMES].sort()).toEqual(routeNamesOnDisk());
   });
 
@@ -30,9 +28,8 @@ describe('tab metadata', () => {
   });
 
   it('recognises its own names and nothing else', () => {
-    // The navigator hands back a plain route-name string. A route in the group
-    // that is not in the bar (or no active route at all) must light nothing up,
-    // rather than being forced into a name the table does not have.
+    // The navigator hands back a plain route-name string, and a route outside the
+    // bar (or no active route at all) must light nothing up.
     for (const name of TAB_NAMES) expect(isTabName(name)).toBe(true);
     expect(isTabName('timers')).toBe(false);
     expect(isTabName(undefined)).toBe(false);

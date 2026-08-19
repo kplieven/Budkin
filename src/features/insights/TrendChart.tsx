@@ -20,16 +20,13 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   xTicks?: number[]; fmtX?: (t: number) => string; dots?: 'all' | 'last';
   /** Web-only: hovering a data point reveals a value+date tooltip. */
   hover?: boolean; unit?: string; fmtHoverDate?: (t: number) => string;
-  /** Formats the hovered value; overrides the default `numLabel + unit`. */
   fmtValue?: (v: number) => string;
-  /** Time mode: shade weekends (short spans) or alternating months (long spans) behind the plot. */
   calendarBands?: boolean;
-  /** Time mode: solid line for consecutive days, dashed across missed-day gaps. */
   dashGaps?: boolean;
   /** Time mode only: WHO-style reference percentile lines drawn behind the data. */
   curves?: { points: { t: number; value: number }[]; emphasis?: boolean; label?: string }[];
-  /** Time mode only: override the right edge of the time domain (defaults to the
-   *  last point's t) so the plot can extend past the last datum. */
+  /** Time mode only: right edge of the time domain, defaulting to the last
+   *  point's t, so the plot can extend past the last datum. */
   xMax?: number;
 }) {
   const t = useTheme();
@@ -44,8 +41,6 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   const yMin = Math.min(...yTicks), yMax = Math.max(...yTicks);
   const yv = (v: number) => top + plotH - ((v - yMin) / (yMax - yMin)) * plotH;
   const tMin = points.length ? points[0].t : 0;
-  // xMax (time mode) lets the caller run the domain past the last datum; without
-  // it the right edge is the last point, as before.
   const tMax = xMax != null ? xMax : (points.length ? points[points.length - 1].t : 1);
   const xFrac = (i: number) => {
     if (points.length <= 1) return 0.5;
@@ -64,9 +59,8 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   };
   const line = points.map((p, i) => `${i ? 'L' : 'M'} ${xv(i).toFixed(1)} ${yv(p.value).toFixed(1)}`).join(' ');
 
-  // Daily insights data: draw contiguous days with a solid line and bridge gaps
-  // (missed days) with a dashed segment, so a sparse log doesn't look like a
-  // smooth run of consecutive days.
+  // Contiguous days get a solid line, gaps (missed days) a dashed bridge, so a
+  // sparse log doesn't look like a smooth run of consecutive days.
   const daily = dashGaps && xMode === 'time' && points.length >= 2;
   let solidD = '', dashD = '';
   if (daily) {
@@ -82,9 +76,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
     }
   }
 
-  // Calendar backdrop (insights only). Short spans shade each weekend column;
-  // longer spans (3 months) shade alternating months instead — weekend stripes
-  // would collapse into an unreadable zebra there.
+  // Calendar backdrop: short spans shade each weekend column, longer spans (3
+  // months) alternating months instead, since weekend stripes would collapse
+  // into an unreadable zebra there.
   const calBands: { x0: number; x1: number }[] = [];
   if (calendarBands && xMode === 'time' && points.length >= 2 && tMax > tMin) {
     const clampX = (x: number) => Math.max(gx, Math.min(x, gx + gw));
@@ -187,7 +181,7 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
 
   if (!canHover) return chart;
 
-  // Dots are 2–3px, too small to hover, so overlay enlarged hit-targets and
+  // Dots are 2-3px, too small to hover, so overlay enlarged hit-targets and
   // float a value+date tooltip, clamped to stay inside the chart's width.
   const HIT = 22, TIP_W = 128, TIP_GAP = 12;
   const ai = hoverIdx;
@@ -195,9 +189,8 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   const apx = ai != null ? xv(ai) : 0;
   const apy = ap ? yv(ap.value) : 0;
   const tipLeft = Math.max(0, Math.min(apx - TIP_W / 2, Math.max(0, width - TIP_W)));
-  // Prefer BELOW the dot (it never overlaps there); flip above only for
-  // low points, anchored by its bottom edge so it clears the dot regardless
-  // of the tooltip's own height.
+  // Prefer BELOW the dot (it never overlaps there); flip above only for low
+  // points, anchored by its bottom edge so it clears the dot whatever its height.
   const tipV = apy <= height / 2 ? { top: apy + TIP_GAP } : { bottom: height - apy + TIP_GAP };
   return (
     <View style={{ width, height, position: 'relative' }}>

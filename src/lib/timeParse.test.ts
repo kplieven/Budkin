@@ -25,7 +25,7 @@ describe('parseClockInput (24h)', () => {
     expect(parseClockInput('24')).toBeNull(); // hour 24
     expect(parseClockInput('2470')).toBeNull(); // hour 24
     expect(parseClockInput('1299')).toBeNull(); // minute 99
-    expect(parseClockInput('93')).toBeNull(); // hour 93 — must type 930 for 09:30
+    expect(parseClockInput('93')).toBeNull(); // hour 93, so 09:30 must be typed 930
     expect(parseClockInput('1:5')).toBeNull(); // colon needs two minute digits
   });
 });
