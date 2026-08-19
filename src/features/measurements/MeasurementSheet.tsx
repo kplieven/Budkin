@@ -45,8 +45,8 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
   const editing = editingId ? measurements.find((m) => m.id === editingId) : null;
-  // The stored value is canonical metric; show it in the user's chosen system
-  // and (in onSave) convert what they type back to metric before persisting.
+  // The stored value is canonical metric; show it in the user's chosen system and (in
+  // onSave) convert what they type back to metric before persisting.
   const [value, setValue] = useState(editing ? fmtValue(kind, editing.value, unitSystem) : '');
   const [valueFocused, setValueFocused] = useState(false);
   const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
@@ -63,9 +63,9 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const stepDay = (delta: number) => setDateMs((d) => Math.min(today, d + delta * ONE_DAY));
 
   const onSave = () => {
-    // Persist canonical metric regardless of the display system the user typed
-    // in. An unchanged edit keeps the exact stored value (no rounded-display
-    // drift); a blank/invalid value cancels. See resolveMetricInput.
+    // Persist canonical metric regardless of the display system the user typed in. An
+    // unchanged edit keeps the exact stored value (no rounded-display drift), and a
+    // blank or invalid value cancels.
     const metric = resolveMetricInput(kind, value, unitSystem, editing?.value);
     if (metric == null) {
       close();

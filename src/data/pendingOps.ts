@@ -1,9 +1,5 @@
-/**
- * Offline op-log: updates/deletes made to already-synced records while offline
- * are recorded here and replayed to the server on reconnect. Backed by
- * AsyncStorage. Pure persistence only — no dedup/merge logic (that's the
- * store's job later).
- */
+/** Offline op-log: updates and deletes to already-synced records made while offline
+ *  are recorded here and replayed on reconnect. Pure persistence, no dedup/merge. */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -46,24 +42,12 @@ export async function addPendingOp(op: PendingOp): Promise<PendingOp[]> {
   return ops;
 }
 
-/**
- * Remove ONE completed op from the log, by value: the first stored entry whose
- * `JSON.stringify` equals the given op's is dropped, the shortened list is
- * saved, and the remaining ops are returned.
- *
- * Stringify-equality is sound here because of who calls this: a flush run
- * removes the very objects it got from `loadPendingOps`, so both sides of the
- * comparison came out of the same serialize/parse round trip, with identical
- * key order and values. That makes removal work with no persisted-shape change
- * (no id field on `PendingOp`, no migration). Matching only the FIRST
- * occurrence keeps duplicates multiset-correct: two identical offline renames
- * queue two identical ops on purpose, and completing one replay must consume
- * exactly one of them.
- *
- * Re-reads the file instead of overwriting it with a list the caller holds,
- * so an op appended by `addPendingOp` while a flush is mid-run survives the
- * removal rather than being clobbered by the run's stale snapshot.
- */
+/** Remove ONE completed op by value. Stringify-equality is sound because a flush run
+ *  removes the very objects it got from `loadPendingOps`, so both sides came out of
+ *  the same serialize/parse round trip with identical key order. Matching only the
+ *  FIRST occurrence keeps duplicates multiset-correct: two identical offline renames
+ *  are two ops on purpose. Re-reads the file rather than writing back the caller's
+ *  list, so an op appended while a flush is mid-run is not clobbered. */
 export async function removePendingOp(op: PendingOp): Promise<PendingOp[]> {
   const ops = await loadPendingOps();
   const key = JSON.stringify(op);

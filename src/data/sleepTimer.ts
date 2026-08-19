@@ -1,18 +1,16 @@
 /**
  * Pure builders for the sleep timer, shared by the store (`stopTimer`) and the
  * headless widget toggle (`toggleNapFromWidget`) so both produce byte-identical
- * timers and entries. No I/O — trivially testable.
+ * timers and entries.
  */
 
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { DEFAULT_NAP_WINDOW, isNapStart, type NapWindow } from '@/store/selectors';
 import type { SleepEntry, Timer } from '@/types/models';
 
-/** A fresh running sleep timer starting at `now` (epoch ms), stamped with the
- *  child it belongs to so a later stop can't misattribute it to whoever
- *  happens to be selected at that point (e.g. the widget starts a nap, the
- *  app then switches the selected child, and Stop is tapped from the Timers
- *  tab). */
+/** Stamped with the child it belongs to so a later stop can't misattribute it to
+ *  whoever happens to be selected at that point (the widget starts a nap, the app
+ *  then switches child, and Stop is tapped from the Timers tab). */
 export function startSleepTimer(now: number, childId: string): Timer {
   return {
     id: 't' + now,
@@ -25,17 +23,14 @@ export function startSleepTimer(now: number, childId: string): Timer {
 }
 
 /**
- * Build the finished nap entry for a stopped sleep timer. Mirrors the sleep
- * branch of the store's `stopTimer`: `nap` falls back to the nap window unless
- * the timer carries an explicit flag; tags carry through.
+ * `nap` falls back to the nap window unless the timer carries an explicit flag.
+ * The window is a PARAMETER rather than a store read because this also runs in the
+ * headless widget task, which has no store: `napToggle.ts` loads the pref and
+ * passes it down.
  *
- * The window is a PARAMETER rather than a store read because this also runs in
- * the headless widget task, which has no store. `napToggle.ts` loads the pref
- * itself and passes it down, keeping this function pure.
- *
- * The fallback classifies on `timer.start`, not on `now` (the wake). That is a
- * deliberate change: Baby Buddy classifies on start only, so a wake-time answer
- * would flip as soon as the entry round-tripped through the server.
+ * The fallback classifies on `timer.start`, not on `now` (the wake), because Baby
+ * Buddy classifies on start only and a wake-time answer would flip as soon as the
+ * entry round-tripped through the server.
  */
 export function buildSleepEntry(
   timer: Timer,

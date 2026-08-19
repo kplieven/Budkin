@@ -10,7 +10,7 @@ import { widgetToday } from '@/widgets/today';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 
-// In-memory stand-in for the native AsyncStorage module (same pattern as timers.test.ts).
+// In-memory stand-in for the native AsyncStorage module.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -45,9 +45,8 @@ const snap = (over: Partial<WidgetSnapshot> = {}): WidgetSnapshot => ({
   ...over,
 });
 
-// Capture what the toggle renders. The toggle no longer returns the snapshot — it
-// invokes a render callback at the point the widget should repaint, so we record
-// every rendered snapshot and read the last one.
+// The toggle invokes a render callback at the point the widget should repaint
+// rather than returning a snapshot, so record every render and read the last.
 function capture() {
   const rendered: (WidgetSnapshot | null)[] = [];
   const render = (s: WidgetSnapshot | null) => {
@@ -92,8 +91,7 @@ describe('toggleNapFromWidget', () => {
   });
 
   it('stop: classifies the queued nap with the persisted nap window', async () => {
-    // The widget task has no store, so the window has to come off disk. Naps
-    // here run 10:00 to 13:00, and this sleep started at 09:00.
+    // The widget task has no store, so the nap window has to come off disk.
     mem.store.set('budkin.prefs.v1', JSON.stringify({ napWindowStartMin: 600, napWindowEndMin: 780 }));
     const start = new Date(2026, 0, 15, 9, 0, 0).getTime();
     const end = new Date(2026, 0, 15, 11, 0, 0).getTime();
@@ -115,8 +113,8 @@ describe('toggleNapFromWidget', () => {
   });
 
   it('stop: honours a persisted midnight window boundary rather than treating 0 as unset', async () => {
-    // `?? default` not `||`: startMin 0 is midnight. Naps run 00:00 to 06:00,
-    // so a 02:00 sleep is a nap and the default 07:00 window would disagree.
+    // `?? default` not `||`: startMin 0 is midnight, and the default 07:00
+    // window would disagree about this 02:00 sleep.
     mem.store.set('budkin.prefs.v1', JSON.stringify({ napWindowStartMin: 0, napWindowEndMin: 360 }));
     const start = new Date(2026, 0, 15, 2, 0, 0).getTime();
     const end = new Date(2026, 0, 15, 4, 0, 0).getTime();
@@ -169,8 +167,7 @@ describe('toggleNapFromWidget', () => {
     };
     await toggleNapFromWidget(1000, render);
     expect(order).toEqual(['render', 'notify']);
-    // and the state mutation is durable by the time we render
-    expect(await loadTimers()).toHaveLength(1);
+    expect(await loadTimers()).toHaveLength(1); // durable by the time we render
   });
 
   it('stop: renders before dismissing the notification', async () => {
@@ -185,8 +182,7 @@ describe('toggleNapFromWidget', () => {
     };
     await toggleNapFromWidget(5000, render);
     expect(order).toEqual(['render', 'dismiss']);
-    // the finished nap is durably queued before we render
-    expect(await loadQueue()).toHaveLength(1);
+    expect(await loadQueue()).toHaveLength(1); // durably queued before we render
   });
 
   it('debounce: a second toggle within the window is ignored (no stop, no 0-min entry)', async () => {
@@ -196,8 +192,8 @@ describe('toggleNapFromWidget', () => {
 
     const { render, last } = capture();
     await toggleNapFromWidget(1200, render); // duplicate delivery 200ms later
-    expect(last()?.sleepStart).toBe(1000); // still napping — the stop was swallowed
-    expect(await loadTimers()).toHaveLength(1); // timer untouched
+    expect(last()?.sleepStart).toBe(1000); // still napping, the stop was swallowed
+    expect(await loadTimers()).toHaveLength(1);
     expect(await loadQueue()).toHaveLength(0); // no phantom 0-minute nap logged
   });
 
@@ -206,15 +202,14 @@ describe('toggleNapFromWidget', () => {
     await toggleNapFromWidget(1000, () => {}); // start
     const { render, rendered } = capture();
     await toggleNapFromWidget(1200, render); // duplicate
-    expect(rendered).toHaveLength(1); // it repainted the widget
+    expect(rendered).toHaveLength(1);
     expect(rendered[0]?.sleepStart).toBe(1000); // from the current (napping) snapshot
     expect(postTimerNotification).toHaveBeenCalledTimes(1); // only the real start posted
   });
 
   it('stop: appends the finished nap to the snapshot records, so the total stays right', async () => {
-    // The sleep total is derived from these records at render time, so a stop
-    // that carried them forward unchanged would drop the nap out of the figure
-    // until the app next ran.
+    // The sleep total is derived from these records at render time, so carrying
+    // them forward unchanged would drop the nap out of the figure until the app ran.
     const start = at(2026, 6, 5, 13);
     const end = at(2026, 6, 5, 14);
     await writeWidgetSnapshot(snap({ sleepStart: start }));
@@ -242,9 +237,9 @@ describe('toggleNapFromWidget', () => {
   });
 
   it('stop: finds the timer by saveAs, so a quick timer repointed to sleep stops instead of starting a second one', async () => {
-    // `buildWidgetSnapshot` shows this timer as the running nap (same rule), so
-    // an activity-keyed lookup here would leave the widget saying "napping" while
-    // this tap started a SECOND timer.
+    // `buildWidgetSnapshot` shows this timer as the running nap (same rule), so an
+    // activity-keyed lookup here would leave the widget saying "napping" while this
+    // tap started a SECOND timer.
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
     await saveTimers([{ id: 't1', childId: 'c1', activity: 'feeding', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render, last } = capture();
@@ -255,9 +250,9 @@ describe('toggleNapFromWidget', () => {
   });
 
   it("does not stop a sibling's nap; it starts one for the selected child", async () => {
-    // Accepted consequence of scoping: a widget shows ONE child, and the unscoped
-    // version filed the stopped nap against the selected child whoever it
-    // belonged to. A sibling's timer stays stoppable on the Timers tab.
+    // Accepted consequence of scoping: a widget shows ONE child, and filing a
+    // stopped nap against whoever is selected is exactly the misattribution the
+    // scoping removes. A sibling's timer stays stoppable on the Timers tab.
     await writeWidgetSnapshot(snap({ selectedChildId: 'c1' }));
     await saveTimers([{ id: 't1', childId: 'c2', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render, last } = capture();
@@ -271,12 +266,10 @@ describe('toggleNapFromWidget', () => {
   });
 
   it('does not stop a legacy ownerless timer; migrating those is the store\'s job', async () => {
-    // Known consequence of retiring the adoption rule. `hydrate` stamps an owner
-    // onto timers persisted before stamping existed, and this task runs with no
-    // store, so between an app update and the next app launch a leftover
-    // ownerless timer is invisible here. Filing it against whoever the widget
-    // happens to show is the misattribution the stamping removed, so refusing is
-    // the point; the orphan is stamped and stoppable the moment the app opens.
+    // `hydrate` stamps an owner onto timers persisted before stamping existed, and
+    // this task runs with no store, so a leftover ownerless timer is invisible here
+    // until the app next opens. Filing it against whoever the widget shows is a
+    // guess, so refusing is the point.
     await writeWidgetSnapshot(snap({ sleepStart: 1000 }));
     await saveTimers([{ id: 't1', activity: 'sleep', name: 'Sleep', start: 1000, saveAs: 'sleep' }]);
     const { render } = capture();
@@ -286,14 +279,14 @@ describe('toggleNapFromWidget', () => {
     expect(timers[0]).toMatchObject({ id: 't1', start: 1000 }); // untouched, not stopped
     expect(timers[0]).not.toHaveProperty('childId'); // and not stamped out here either
     expect(timers[1]).toMatchObject({ childId: 'c1', start: 5000 });
-    expect(await loadQueue()).toHaveLength(0); // nothing filed against a guess
+    expect(await loadQueue()).toHaveLength(0);
   });
 
   it('with no child selected: does nothing, and never accumulates phantom timers', async () => {
     // A fresh install writes a baseline snapshot with an empty selectedChildId
-    // before onboarding. The scoped lookup can never match a timer stamped with
-    // an empty id, so without the guard each tap would start another timer and
-    // leave the widget stuck showing a nap that can never be stopped.
+    // before onboarding. The scoped lookup can never match a timer stamped with an
+    // empty id, so without the guard each tap would start another timer and leave
+    // the widget stuck showing a nap that can never be stopped.
     await writeWidgetSnapshot(snap({ selectedChildId: '' }));
     const { render, last } = capture();
     await toggleNapFromWidget(100000, render);

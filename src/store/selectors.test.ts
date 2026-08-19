@@ -16,10 +16,8 @@ describe('selectServerMode', () => {
   });
 
   it('answers with a boolean, never the connection or a wrapper around it', () => {
-    // This goes straight into `useAppStore(selectServerMode)`, where a fresh
-    // reference per call is the zustand v5 render loop: the store compares
-    // snapshots with Object.is, so a new object every call never settles and the
-    // web build renders a blank screen.
+    // This goes straight into `useAppStore(selectServerMode)`, where a fresh reference
+    // per call is the zustand v5 render loop: snapshots are compared with Object.is.
     const s: { connection: Connection | null } = {
       connection: { mode: 'server', serverUrl: 'https://bb.example', token: 'tok' },
     };
@@ -264,10 +262,8 @@ describe('washDueState', () => {
   });
 
   it('treats a legacy big wash value as a full bath, so it resets the full-bath clock', () => {
-    // A bath still sitting in the offline queue or pending-ops log from before
-    // the 2026-08 rename carries the literal legacy 'big', reachable here only
-    // via an untyped JSON.parse (reproduced with the cast, since `wash` is
-    // typed as `WashKind` post-rename).
+    // A bath still sitting in the offline queue or pending-ops log from before the
+    // rename carries the literal legacy 'big', reachable only via an untyped JSON.parse.
     const legacy: Entry = { id: 'b-legacy', childId: 'c1', type: 'bath', time: NOON, wash: 'big', tags: [] } as unknown as Entry;
     const s = washDueState([legacy], R(3, 1), NOON);
     expect(s.full).toBe(false);
@@ -410,10 +406,8 @@ describe('timersForChild', () => {
   });
 
   it('gives an unowned timer to nobody, not to whoever is selected', () => {
-    // The retired adoption rule handed it to the selected child. Every timer
-    // source stamps an owner and hydrate stamps the legacy ones, so a timer
-    // still unowned here is one nothing could attribute; listing it under the
-    // current child is the misattribution the stamping removes.
+    // Every timer source stamps an owner and hydrate stamps the legacy ones, so a timer
+    // still unowned here is one nothing could attribute.
     const unowned = timer('t3');
     const sibling = timer('t2', 'c2');
     expect(timersForChild([unowned, sibling], 'c1')).toEqual([]);
@@ -432,8 +426,6 @@ describe('timersForChild', () => {
 });
 
 describe('runningTimer', () => {
-  // Override factory rather than positional args: the interesting cases vary
-  // `activity` against `saveAs` and `childId` independently.
   const timer = (over: Partial<Timer> = {}): Timer => ({
     id: 't1',
     childId: 'c1',
@@ -494,8 +486,8 @@ describe('runningTimer', () => {
   });
 
   it('applies the same ownership rule as timersForChild for the selected child', () => {
-    // timersForChild is the special case childId === selectedChildId, so the
-    // two must agree for every child, unowned timer included. One rule, two shapes.
+    // timersForChild is the special case childId === selectedChildId, so the two must
+    // agree for every child, unowned timer included.
     const all = [timer({ id: 't1', childId: 'c1' }), timer({ id: 't2', childId: undefined }), timer({ id: 't3', childId: 'c2' })];
     for (const c of ['c1', 'c2', 'c3', '']) {
       expect(runningTimer(all, 'sleep', c)).toBe(timersForChild(all, c)[0]);
@@ -532,9 +524,8 @@ describe('minuteOfDayIsNap', () => {
   });
 
   it('reads start === end as an empty window, so nothing is a nap', () => {
-    // Half-open [s, s) is empty. That is the consistent reading of an
-    // inclusive start and an exclusive end, and it gives a usable state:
-    // an older child who no longer naps, so every sleep is night sleep.
+    // Half-open [s, s) is empty, and that reading gives a usable state: an older child
+    // who no longer naps, so every sleep is night sleep.
     const w = { startMin: 420, endMin: 420 };
     for (let m = 0; m < 1440; m += 7) expect(minuteOfDayIsNap(m, w)).toBe(false);
     expect(minuteOfDayIsNap(420, w)).toBe(false);

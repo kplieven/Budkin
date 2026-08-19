@@ -34,19 +34,17 @@ describe('anchorChildId', () => {
   });
 
   it('is undefined with several targets, so the chips are suppressed', () => {
-    // "Since last feed" has no single correct answer across two children, and
-    // tapping a chip PERSISTS that timestamp onto the entry rather than only
-    // displaying it. Offering one twin's last feed as the other's would save it
-    // as fact, so there is nothing safe to offer.
+    // "Since last feed" has no single correct answer across two children, and tapping
+    // a chip PERSISTS that timestamp onto the entry rather than only displaying it.
+    // Offering one twin's last feed as the other's would save it as fact.
     expect(anchorChildId(['c1', 'c2'], 'c1')).toBeUndefined();
   });
 });
 
 describe('eligibleTargetChildren', () => {
   it('drops expecting children', () => {
-    // Logging against a due date is unreachable everywhere else in the app
-    // (`resolveLogDeepLink` refuses it), and listing them here would be a new
-    // entrance to it.
+    // Logging against a due date is unreachable everywhere else in the app, so
+    // listing them here would be a new entrance to it.
     const bump = child('c4', 'Bump', { expected: true });
     expect(eligibleTargetChildren([mira, bump, ivo]).map((c) => c.id)).toEqual(['c1', 'c2']);
   });
@@ -57,8 +55,8 @@ describe('eligibleTargetChildren', () => {
 });
 
 describe('isEligibleTarget', () => {
-  // The single-id form of `eligibleTargetChildren`, for the picker's toggle:
-  // one rule about who may be a target, not two that can drift.
+  // The single-id form of `eligibleTargetChildren`, for the picker's toggle: one
+  // rule about who may be a target, not two that can drift.
   const bump = child('c4', 'Bump', { expected: true });
 
   it('accepts a born child on the roster', () => {

@@ -35,9 +35,8 @@ describe('queuedIdSet', () => {
   });
 
   it('is empty in local mode even when the queue file still holds ids', () => {
-    // `enterLocal` does not clear `budkin.queue.v1`, so a device that used a
-    // server before can carry stale ids into local mode. Nothing there is
-    // waiting to upload: local mode has nowhere to upload to.
+    // `enterLocal` does not clear `budkin.queue.v1`, so a device that used a server
+    // before carries stale ids into local mode, where there is nowhere to upload to.
     expect(queuedIdSet(['a', 'b'], false).size).toBe(0);
   });
 
@@ -56,25 +55,23 @@ describe('isItemQueued', () => {
   });
 
   it('never marks a running timer, even on an id collision', () => {
-    // Timers live in their own array with their own id space and are never
-    // enqueued (`flushQueue` only pushes entries), so a shared id could only
-    // ever be a coincidence, and marking one would be a plain lie.
+    // Timers live in their own array with their own id space and are never enqueued
+    // (`flushQueue` only pushes entries), so a shared id is only ever a coincidence.
     expect(isItemQueued(timer('t1'), queuedIdSet(['t1'], true))).toBe(false);
   });
 
   it('marks a queued entry that already carries a serverId', () => {
-    // `serverId` is not the test and must not become one. The reverse case
-    // below is the one that actually bites, but `undoDelete` re-queues through
-    // `commitWrite` with the original entry, serverId and all, and that entry
+    // `serverId` is not the test and must not become one: `undoDelete` re-queues
+    // through `commitWrite` with the original entry, serverId and all, and that entry
     // really is waiting to upload again.
     expect(isItemQueued(diaper('e1', 42), queuedIdSet(['e1'], true))).toBe(true);
   });
 
   it('does NOT mark an already-flushed entry that still has serverId == null', () => {
     // The trap this whole helper exists for: `flushQueue` discards
-    // `pushEntryToServer`'s return value, so an entry stays `serverId == null`
-    // in memory until the next refresh()/hydrate() replaces `entries`
-    // wholesale. A serverId-based badge would keep claiming "queued" forever.
+    // `pushEntryToServer`'s return value, so an entry stays `serverId == null` in
+    // memory until the next refresh()/hydrate() replaces `entries` wholesale. A
+    // serverId-based badge would keep claiming "queued" forever.
     expect(isItemQueued(diaper('e1'), queuedIdSet([], true))).toBe(false);
   });
 });
@@ -117,8 +114,8 @@ describe('timelineRowLabel', () => {
   });
 
   it('puts the child with the activity, before the elapsed time', () => {
-    // Whose row this is is part of WHAT the row is, not something still true of
-    // it, so it goes in the first clause rather than trailing the sentence.
+    // Whose row this is is part of WHAT the row is, not something still true of it, so
+    // it goes in the first clause rather than trailing the sentence.
     expect(
       timelineRowLabel({ activity: 'Sleep', ongoing: true, timer: true, elapsed: '20m', queued: false, child: ', Tom' }),
     ).toBe('Edit running Sleep timer, Tom, 20m so far');
@@ -131,9 +128,9 @@ describe('timelineRowLabel', () => {
   });
 
   it('says nothing extra when the household view is off or the household has one child', () => {
-    // `childAttribution` returns '' rather than null for the spoken form, and an
-    // absent prop is the desktop rail, which never attributes at all. Both must
-    // land on the byte-identical label the row had before this existed.
+    // `childAttribution` returns '' rather than null for the spoken form, and an absent
+    // prop is the desktop rail, which never attributes at all. Both must land on the
+    // byte-identical bare label.
     const bare = timelineRowLabel({ activity: 'Diaper', ongoing: false, timer: false, elapsed: '', queued: false });
     expect(
       timelineRowLabel({ activity: 'Diaper', ongoing: false, timer: false, elapsed: '', queued: false, child: '' }),

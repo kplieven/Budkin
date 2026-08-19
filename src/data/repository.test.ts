@@ -35,8 +35,8 @@ const createTimer = vi.fn(async () => 11);
 const updateTimer = vi.fn(async () => undefined);
 const deleteTimer = vi.fn(async () => undefined);
 // Only the client class is stubbed; `ApiError` stays the real one, because
-// `loadFromServer` now reads its `status` to tell a 404 (an ANSWER: this server
-// has no such endpoint) from any other failure (an absent answer).
+// `loadFromServer` reads its `status` to tell a 404 (an ANSWER: this server has
+// no such endpoint) from any other failure (an absent answer).
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   BabybuddyClient: vi.fn().mockImplementation(() => ({
@@ -144,11 +144,9 @@ describe('loadFromServer fans out to every child', () => {
   };
 
   it("fetches the SIBLING's records too, not just the selected child's", async () => {
-    // The regression this whole change exists for. Fetching only the selection
-    // left a sibling's History empty until a refresh landed on them, made every
-    // child switch a network round trip, and (through `applyServerLoad`, which
-    // replaces `entries` wholesale) deleted the previous child's month chunks
-    // from disk on the way past.
+    // Fetching only the selection leaves a sibling's History empty until a refresh
+    // lands on them, and (through `applyServerLoad`, which replaces `entries`
+    // wholesale) deletes the previous child's month chunks from disk on the way.
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
 
@@ -184,8 +182,8 @@ describe('loadFromServer fans out to every child', () => {
 
     const result = await loadFromServer(conn, 9);
 
-    // `preferredChildServerId` is now only the seed for `selectedChildId`: the
-    // records of BOTH children come back either way (asserted above).
+    // `preferredChildServerId` only seeds `selectedChildId`: the records of BOTH
+    // children come back either way (asserted above).
     expect(result.selectedChildId).toBe('9');
   });
 
@@ -209,9 +207,8 @@ describe('loadFromServer fans out to every child', () => {
   });
 
   it('carries a feeding prefill for EACH child that has been fed', async () => {
-    // A single-child load could only ever answer for the child it fetched, which
-    // is why `mergeLastFeed` merges rather than replaces. Now it answers for
-    // every child at once, and each one has to land under its own key.
+    // `mergeLastFeed` merges rather than replaces, and every child answered for
+    // has to land under its own key.
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
     listFeedings.mockImplementation(async (id: string) =>
@@ -241,9 +238,9 @@ describe('loadFromServer fans out to every child', () => {
   });
 
   it("files a failure against the child whose request failed, not the selection", async () => {
-    // With siblings' requests interleaved, a shared `degraded` list would blame
-    // whichever child was selected and freeze the WRONG child's rows through
-    // `carryOverIncomplete`, while silently deleting the failing child's.
+    // With siblings' requests interleaved, a shared `degraded` list would blame the
+    // selected child and freeze the WRONG child's rows through `carryOverIncomplete`,
+    // while silently deleting the failing child's.
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
     listChildNotes.mockImplementation((async (id: string) =>
@@ -255,9 +252,8 @@ describe('loadFromServer fans out to every child', () => {
   });
 
   it('holds concurrency at 8 across the whole load, not 8 per child', async () => {
-    // 3 children is 39 per-child requests. The cap is what keeps a multi-child
-    // load off a self-hosted gunicorn's worker pool (see `FETCH_CONCURRENCY`);
-    // an uncapped `Promise.all(children.map(...))` peaks at 13N instead.
+    // 3 children is 39 per-child requests. The cap keeps a multi-child load off a
+    // self-hosted gunicorn's worker pool; uncapped it would peak at 13N.
     listChildren.mockReset().mockResolvedValueOnce([
       ...serverChildren,
       { id: '11', serverId: 11, first: 'Ivo', last: '', birth: 0, color: '#fff' },
@@ -292,8 +288,7 @@ describe('loadFromServer fans out to every child', () => {
     ).toBe(39);
 
     // Put the shared mocks back to plain answers: the describes below reuse them
-    // without resetting every one, and a lingering timer-backed implementation
-    // would leak into them.
+    // without resetting every one, so a timer-backed implementation would leak in.
     resetLists();
   });
 });
@@ -329,9 +324,8 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
 
   it('names the slices one failed request emptied, while the rest still loads', async () => {
     answerEverything();
-    // The live repro: one timed-out /api/notes/ takes every note, bath and
-    // milestone out of `entries` with nothing in the answer saying so. ONE
-    // request, so all three of its slices are floors.
+    // One timed-out /api/notes/ takes every note, bath and milestone out of
+    // `entries` with nothing in the answer saying so. ONE request, three slices.
     listChildNotes.mockRejectedValueOnce(new Error('timeout'));
     listFeedings.mockResolvedValueOnce([
       { id: 'f-1', type: 'feeding', childId: '7', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
@@ -354,10 +348,9 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
   });
 
   it('does NOT count a 404: an endpoint this server does not have is an ANSWER', async () => {
-    // /api/medication/ postdates several Baby Buddy releases, so an older
-    // instance 404s on it forever. Counting that as a degrade would freeze the
-    // slice on every load for good, which is the one outcome carry-over exists
-    // to avoid.
+    // /api/medication/ postdates several Baby Buddy releases, so an older instance
+    // 404s on it forever. Counting that as a degrade would freeze the slice on
+    // every load for good, the one outcome carry-over exists to avoid.
     answerEverything();
     listMedication.mockRejectedValueOnce(new ApiError(404, 'Not found'));
 
@@ -375,13 +368,12 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     expect(result.incompleteSlices).toEqual({ '7': ['medication'] });
   });
 
-  // Fail-closed coverage. `orEmpty` is the only thing that reports a failed
-  // fetch, and an unreported failure is read as a real answer, so its rows are
-  // DELETED rather than preserved (see `LoadResult.incompleteSlices`). Every
-  // slice in the vocabulary therefore has to be reachable from a fetch that
-  // routes through it. These two are `Record<Union, true>`, so adding an
-  // activity type or a measurement kind fails to TYPECHECK here until it is
-  // listed, and then fails the test below until some fetch reports it.
+  // Fail-closed coverage. `orEmpty` is the only thing that reports a failed fetch,
+  // and an unreported failure is read as a real answer, so its rows are DELETED
+  // rather than preserved. Every slice must therefore be reachable from a fetch
+  // that routes through it. `Record<Union, true>` so a new activity type or
+  // measurement kind fails to typecheck here until listed, then fails the test
+  // below until some fetch reports it.
   const ALL_ACTIVITIES: Record<ActivityType, true> = {
     feeding: true,
     sleep: true,
@@ -398,9 +390,9 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
 
   it('every activity type and measurement kind is covered by a fetch that reports its own failure', async () => {
     answerEverything();
-    // Every per-type fetch fails at once. Named one by one on purpose: this
-    // list IS the set of fetches whose failures have to be reported, so a new
-    // fetch added without a line here surfaces as a slice nobody covers.
+    // Named one by one on purpose: this list IS the set of fetches whose failures
+    // have to be reported, so a new fetch without a line here shows as an
+    // uncovered slice.
     listFeedings.mockRejectedValueOnce(new Error('down'));
     listSleep.mockRejectedValueOnce(new Error('down'));
     listChanges.mockRejectedValueOnce(new Error('down'));

@@ -14,11 +14,9 @@ import { useTheme } from '@/theme/useTheme';
 const EMPTY: string[] = [];
 
 /**
- * Home-screen catch-up nudge. For the selected child, surfaces one milestone at
- * a time whose typical window has passed and that is not yet logged or already
- * answered. Yes routes to the normal milestone sheet; any action retires the
- * prompt for good (persisted per child). Renders nothing when there is nothing
- * to ask.
+ * Home-screen catch-up nudge. Surfaces one milestone at a time whose typical window has
+ * passed and that is not yet logged or already answered. Any action retires the prompt
+ * for good (persisted per child).
  */
 export function MilestoneNudge() {
   const t = useTheme();
@@ -43,7 +41,7 @@ export function MilestoneNudge() {
 
   const onYes = () => {
     answerMilestonePrompt(def.key); // retire the prompt even if the sheet is cancelled
-    openMilestone(def.key); // log via the normal flow (date + optional note)
+    openMilestone(def.key);
   };
   const onNotYet = () => answerMilestonePrompt(def.key);
 

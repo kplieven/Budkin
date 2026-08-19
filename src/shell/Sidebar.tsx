@@ -14,15 +14,13 @@ interface NavItem {
   label: string;
   icon: IconName;
   href: Href;
-  /** Whether the current pathname marks this item active. */
   match: (pathname: string) => boolean;
 }
 
-// Dashboard lives at the (tabs) group index, which resolves to "/".
+// Dashboard lives at the (tabs) group index, which resolves to "/". Timers is
+// deliberately absent: it is a pushed detail screen reached from the Dashboard,
+// not a top-level destination.
 const NAV: NavItem[] = [
-  // Timers is not listed: it is a pushed detail screen, not a top-level
-  // destination. The Dashboard's live-timer card and its "Timers" link open it,
-  // and its own back chevron returns here.
   { label: 'Dashboard', icon: 'home', href: '/(tabs)', match: (p) => p === '/' },
   { label: 'History', icon: 'list', href: '/history', match: (p) => p.startsWith('/history') },
   { label: 'Insights', icon: 'insights', href: '/insights', match: (p) => p.startsWith('/insights') },
@@ -32,7 +30,6 @@ const NAV: NavItem[] = [
   { label: 'Settings', icon: 'settings', href: '/settings', match: (p) => p.startsWith('/settings') },
 ];
 
-/** Persistent left sidebar for the desktop shell (replaces the phone tab bar). */
 export function Sidebar() {
   const t = useTheme();
   const pathname = usePathname();
@@ -52,7 +49,6 @@ export function Sidebar() {
         backgroundColor: t.dark ? '#13100D' : '#FBF4EB',
       }}
     >
-      {/* logo lockup */}
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 6, marginBottom: 26 }}>
         <View
           style={{
@@ -72,7 +68,6 @@ export function Sidebar() {
         </Txt>
       </View>
 
-      {/* nav */}
       <View style={{ gap: 4 }}>
         {NAV.map((item) => {
           const active = item.match(pathname);
@@ -111,7 +106,6 @@ export function Sidebar() {
       {/* spacer pushes the child card to the bottom */}
       <View style={{ flex: 1 }} />
 
-      {/* child card */}
       <Pressable
         onPress={openSwitcher}
         accessibilityRole="button"

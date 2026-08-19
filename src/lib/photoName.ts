@@ -1,18 +1,15 @@
-/** The name a picked photo is copied to in the document directory.
+/**
+ * The name a picked photo is copied to in the document directory.
  *
- *  Its own module so the naming rule is testable with no mocking at all.
- *  `src/lib/photoFile.ts` imports `expo-file-system` and only loads under
- *  vitest once that module is mocked (see `photoFile.test.ts`); this one
- *  needs none of that.
+ * The extension is taken from the source name so the stored file is still
+ * recognisable as an image, and because the native multipart part is named after the
+ * FILE (`buildChildForm` passes no filename on native), which means this name is
+ * what Baby Buddy stores the picture under.
  *
- *  The extension is taken from the source name so the stored file is still
- *  recognisable as an image, and because the native multipart part is named
- *  after the FILE (see `buildChildForm`, which passes no filename on native),
- *  which means this name is what Baby Buddy stores the picture under.
- *
- *  Anything that is not a short run of letters and digits is refused rather
- *  than cleaned up: the source name comes from the picker, and the result is
- *  appended to a path we build. */
+ * Anything that is not a short run of letters and digits is refused rather than
+ * cleaned up: the source name comes from the picker, and the result is appended to a
+ * path we build.
+ */
 export function photoFileName(sourceName: string, now: number): string {
   const dot = sourceName.lastIndexOf('.');
   const raw = dot === -1 ? '' : sourceName.slice(dot + 1).toLowerCase();

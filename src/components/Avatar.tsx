@@ -11,7 +11,6 @@ interface AvatarChild {
   picture?: string | null;
 }
 
-/** Child avatar: real photo when present, otherwise a tinted initial tile. */
 export function Avatar({
   child,
   size,
@@ -23,7 +22,7 @@ export function Avatar({
   size: number;
   radius: number;
   fontSize: number;
-  /** Optional accessible name (the child's name) — omit when a wrapping control already supplies one. */
+  /** Omit when a wrapping control already supplies an accessible name. */
   accessibilityLabel?: string;
 }) {
   const t = useTheme();

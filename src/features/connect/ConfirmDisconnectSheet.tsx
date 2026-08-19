@@ -11,31 +11,20 @@ import { hexA } from '@/lib/color';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet and the LogSheet Delete button
+const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet
 
 /**
  * The confirm step in front of Settings' "Reconnect / change server" row.
+ * `disconnect()` clears the write queue and the offline op-log along with the entity
+ * cache. The cache is refetchable; the other two exist nowhere else, so one unguarded
+ * tap could silently destroy entries logged offline.
  *
- * That row used to call `disconnect()` straight from the press, and
- * `disconnect()` clears the write queue and the offline op-log along with the
- * entity cache (see `useAppStore.ts`). The cache is refetchable; the other two
- * exist nowhere else, so one tap could silently destroy entries logged
- * offline. This sheet fronts the press: nothing at all happens until
- * "Sign out", and Cancel (or the scrim, Escape, the phone sheet's drag)
- * costs nothing. The copy itself lives in
- * `src/features/queue/disconnectWarning.ts`, where it is testable.
+ * A hand-built sheet and not `Alert.alert` because the app ships on web too, where
+ * RN's Alert renders no buttons, so the confirm could never be answered.
  *
- * A hand-built sheet and not `Alert.alert` because the app ships on web too,
- * where RN's Alert renders no buttons, so the confirm could never be answered.
- *
- * `queueCount` comes live from the store. The op-log has no mirror in state,
- * so it is read from AsyncStorage once, when the sheet opens; until that read
- * lands the loss line counts the queue alone, which only ever understates for
- * the few milliseconds the read takes.
- *
- * Mounted conditionally by the settings screen (so BottomSheet's exit
- * animation runs), not in `_layout.tsx` like the store-driven sheets: no other
- * screen opens it, and its whole open state is one boolean the screen owns.
+ * `queueCount` comes live from the store. The op-log has no mirror in state, so it is
+ * read from AsyncStorage once when the sheet opens; until that read lands the loss line
+ * counts the queue alone, which only ever understates.
  */
 export function ConfirmDisconnectSheet({
   onConfirm,
@@ -62,8 +51,8 @@ export function ConfirmDisconnectSheet({
 
   const loss = disconnectLossLine(queueCount, pendingOpsCount);
 
-  // One shot: the confirm disconnects and navigates, so a second press mid-way
-  // would replay the whole sequence against an already-cleared store.
+  // One shot: the confirm disconnects and navigates, so a second press mid-way would
+  // replay the whole sequence against an already-cleared store.
   const confirm = () => {
     if (leaving) return;
     setLeaving(true);

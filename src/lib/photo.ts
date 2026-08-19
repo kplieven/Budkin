@@ -18,17 +18,14 @@ const OPTIONS: ImagePicker.ImagePickerOptions = {
   quality: 0.7,
 };
 
-/** The upload's native counterpart to the web picker's `file`. A native bundle
- *  runs expo/fetch, whose multipart encoder builds a part from `bytes()` and
- *  cannot read a `file://` URI at all, so the picker's own file descriptor never
- *  uploaded anything. Built here rather than in the API client, which stays free
- *  of native imports so it keeps loading under the node test runner.
+/** The upload's native counterpart to the web picker's `file`. A native bundle runs
+ *  expo/fetch, whose multipart encoder builds a part from `bytes()` and cannot read a
+ *  `file://` URI at all. Built here rather than in the API client, which stays free of
+ *  native imports so it keeps loading under the node test runner.
  *
- *  Web has no such file to open (`asset.uri` is a blob: URL there) and does not
- *  need one. `new File` validates the path and throws on one it cannot address,
- *  which inside the picker would abort the pick with nothing shown; undefined
- *  instead defers that to the save, which reports it as a photo problem (see
- *  `nativePicturePart`). */
+ *  Web needs none of this (`asset.uri` is a blob: URL there). `new File` throws on a
+ *  path it cannot address, which inside the picker would abort the pick with nothing
+ *  shown; undefined defers that to the save, which reports it as a photo problem. */
 function uploadFile(uri: string): PickedPhoto['nativeFile'] {
   if (Platform.OS === 'web') return undefined;
   try {
@@ -40,16 +37,13 @@ function uploadFile(uri: string): PickedPhoto['nativeFile'] {
 
 /** Normalize the picker's asset, copying the file somewhere it will survive.
  *
- *  The copy happens HERE, at pick time, rather than at save time. It costs one
- *  extra write per pick and orphans a file when the sheet is then cancelled
- *  (which `sweepPhotoFiles` collects at launch), and it buys two things worth
- *  more than that: `saveChild` stays synchronous, in a store where several
- *  shipped bugs have been mid-flight write races, and every path downstream
- *  handles plain serializable data.
- *
- *  It also fixes a case nobody reported: in LOCAL mode the cache URI was the
- *  only copy a photo ever had, so it broke whenever Android reclaimed the file
- *  and there was no server copy to fall back on. */
+ *  The copy happens HERE, at pick time, rather than at save time. It costs one extra
+ *  write per pick and orphans a file when the sheet is then cancelled (`sweepPhotoFiles`
+ *  collects those at launch), and it buys `saveChild` staying synchronous, in a store
+ *  where several shipped bugs have been mid-flight write races, plus plain serializable
+ *  data on every path downstream. In LOCAL mode it is also the only copy a photo has:
+ *  the cache URI broke whenever Android reclaimed the file, with no server copy behind
+ *  it. */
 async function normalize(asset: ImagePicker.ImagePickerAsset): Promise<PickedPhoto> {
   const name = asset.fileName ?? 'photo.jpg';
   const durableUri = await persistPhotoFile(asset.uri, name);
@@ -64,9 +58,7 @@ async function normalize(asset: ImagePicker.ImagePickerAsset): Promise<PickedPho
   };
 }
 
-/** Request the matching permission, then launch the library or camera. Returns a
- *  normalized photo, or a reason when the user cancels / denies permission. On web
- *  the permission requests resolve as granted (no OS prompt). */
+/** On web both permission requests resolve as granted, with no OS prompt. */
 export async function pickChildPhoto(source: 'library' | 'camera'): Promise<PickResult> {
   const perm =
     source === 'camera'

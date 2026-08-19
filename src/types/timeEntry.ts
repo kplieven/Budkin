@@ -1,14 +1,10 @@
 /**
  * Working model for the reusable Time-Entry component.
  *
- * INTERVAL shape (feeding/sleep/pumping/tummy) has three quantities —
- * start, end, lasted (duration) — but only TWO are ever "active". The user
- * picks values and we keep the **last two selected**; the third is derived.
- * `order` is the recency list (most-recent first); `order[2]` is the derived
- * one. Each quantity can also be pinned to a precise value by tapping its
- * resolved readout (start/end → absolute ms, lasted → exact minutes).
- *
- * POINT shape (diaper) is a single timestamp via `agoMin`/`absTime`.
+ * The interval shape (feeding/sleep/pumping/tummy) has three quantities but only two are
+ * ever active: the last two the user picked, with the third derived. `order` is the
+ * recency list, most-recent first, so `order[2]` is the derived one. The point shape
+ * (diaper) is a single timestamp via `agoMin`/`absTime`.
  */
 
 import type { WashKind } from '@/lib/wash';
@@ -22,7 +18,7 @@ export type TimeField = 'start' | 'end' | 'lasted';
 export interface TimeEntryState {
   shape: TimeEntryShape;
 
-  // ---- interval ----
+  // interval
   /** recency order, most-recent first; order[2] is the derived quantity */
   order?: TimeField[];
   /** end as "minutes ago" (0 = now) when set relatively */
@@ -31,46 +27,39 @@ export interface TimeEntryState {
   endAbs?: number;
   /** which "Ended" anchor set the end (for highlighting); cleared by a manual edit */
   endAnchor?: 'feedstart' | 'sleepstart' | 'diaper';
-  /** end not set yet (in progress) — saved as a running timer */
+  /** end not set yet (in progress), saved as a running timer */
   ongoing?: boolean;
   /** absolute start (ms), pinned via an anchor / edit / going-ongoing */
   startAbs?: number;
   /** which "Started" anchor set the start (for highlighting) */
   startAnchor?: 'lastfeed' | 'wake' | 'diaper' | 'now';
-  /** start as "minutes ago" when set via a "Xm ago" chip (mirrors endAgoMin);
-   *  resolved live so it stays that many minutes before now */
+  /** start as "minutes ago", resolved live so it stays that many minutes before now */
   startAgoMin?: number;
-  /**
-   * The user set the start THEMSELVES (a "Started" chip or the clock), as
-   * opposed to it being derived from `end − lasted` or frozen by a nudge to the
-   * other endpoint. Editing a logged entry leaves the start derived, so it
-   * slides whenever the end or the duration moves; "Still ongoing" consults
-   * this to decide whether the entry's own recorded start still stands.
-   */
+  /** The user set the start themselves, rather than it being derived from `end - lasted`.
+   *  Editing a logged entry leaves it derived, so it slides whenever the end or the
+   *  duration moves, and "Still ongoing" consults this to decide whether the entry's own
+   *  recorded start still stands. */
   startEdited?: boolean;
   /** duration in minutes (the "lasted" quantity) */
   durationMin?: number;
 
-  // ---- point ----
+  // point
   agoMin?: number;
   absTime?: number;
   /** which "When" anchor set the timestamp (for highlighting); cleared by a manual edit */
   pointAnchor?: 'lastfeed' | 'wake' | 'diaper';
 
-  // ---- activity fields ----
+  // activity fields
   feedType?: FeedType;
   method?: FeedMethod;
   /** for breastfeeding "both": which side she started on (saved as a left/right tag) */
   startSide?: 'left' | 'right';
   /**
-   * The user picked this feeding value THEMSELVES, as opposed to it being the
-   * suggestion the sheet seeded from the child's own history on open. All three
-   * are CHILD-scoped, so re-aiming the sheet at a sibling re-seeds them (a
-   * breastfed twin and a bottle-fed one have genuinely different right answers),
-   * and these are what keep that recompute from overruling a decision already
-   * made. One flag per field, not one for the group: touching the feed type must
-   * not freeze the method and the side on the previous child's history. Mirrors
-   * `washEdited`.
+   * The user picked this value themselves, rather than taking the suggestion the sheet
+   * seeded from the child's own history. All three are child-scoped, so re-aiming at a
+   * sibling re-seeds them, and these keep that recompute from overruling a decision
+   * already made. One flag per field, not one for the group: touching the feed type must
+   * not freeze the method and the side on the previous child's history.
    */
   feedTypeEdited?: boolean;
   methodEdited?: boolean;
@@ -83,29 +72,21 @@ export interface TimeEntryState {
   milestone?: string;
   /** bath (point): which wash was given */
   wash?: WashKind;
-  /**
-   * The user picked the wash THEMSELVES, as opposed to it being the suggestion
-   * the sheet seeded from the child's own rhythm on open. Re-aiming the sheet at
-   * a sibling re-seeds that suggestion, since whose rhythm applies has changed,
-   * and this is what keeps it from overruling a decision already made. Mirrors
-   * `startEdited`.
-   */
+  /** As `feedTypeEdited`, for the wash. */
   washEdited?: boolean;
-  /** temperature (point): the numeric reading being entered (°C) */
+  /** °C */
   temperature?: number;
-  /** medication (point): the medication name being entered (required to save) */
+  /** required to save a medication */
   medName?: string;
-  /** medication (point): the amount given (paired with `medUnit`) */
   medDosage?: number;
-  /** medication (point): the free-text dosage unit (e.g. "mg", "mL") */
+  /** free text, e.g. "mg", "mL" */
   medUnit?: string;
-  /** medication (point): next-dose interval in whole seconds, seeded from an
-   *  interval treatment so the saved dose carries Baby Buddy's `next_dose_interval` */
+  /** whole seconds, seeded from an interval treatment so the saved dose carries Baby
+   *  Buddy's `next_dose_interval` */
   medNextDoseIntervalSec?: number;
-  /** note (point): the note BODY being edited — the primary free-text field of a
-   *  general note. Distinct from `notes` (the secondary per-entry annotation). */
+  /** the note BODY, distinct from `notes`, the secondary per-entry annotation */
   noteText?: string;
-  /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature — not bath/note) */
+  /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature, not bath/note) */
   notes?: string;
 
   tags: string[];

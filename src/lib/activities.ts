@@ -1,72 +1,50 @@
-/** Static (theme-independent) metadata for the five tracked activities. */
+/** Static (theme-independent) metadata for the tracked activities. */
 
 import type { ActivityType, FeedMethod, FeedType } from '@/types/models';
 import type { TimeEntryShape } from '@/types/timeEntry';
 
-/**
- * Does a feeding's `amount` hold a VOLUME, or a dimensionless intake level?
- *
- * The field is dual-purpose. A bottle or formula feed measures millilitres, so
- * it gets the ml/fl oz stepper and converts with the units preference. A feed
- * taken at the breast records a subjective intake level instead (1, 2 or 3, see
- * `INTAKE_LEVELS`), which has no unit and must never be converted or labelled.
- *
- * Both the log sheet (picking which control to show) and the history detail
- * line (picking how to format) must agree on this, so they share one predicate
- * rather than each carrying a copy that could drift.
- */
+/** `amount` is dual-purpose: millilitres for a bottle or formula feed, a subjective
+ *  `INTAKE_LEVELS` value at the breast, which must never be converted or labelled. */
 export function feedAmountIsVolume(feedType: FeedType | undefined, method: FeedMethod | undefined): boolean {
   return feedType !== 'breast' || method === 'bottle';
 }
 
 /**
- * A three-level qualitative scale stored in an entry's numeric `amount` as 1, 2
- * or 3. One shape, two uses: a solid diaper's size and a breast feed's intake.
+ * A three-level qualitative scale stored in an entry's numeric `amount`. One shape, two
+ * uses: a solid diaper's size and a breast feed's intake.
  *
- * `bucket` maps a stored number onto one of the three levels. It exists because
- * the field has held other things over time (both scales began life as a 1 to
- * 10 score) and because Baby Buddy's own amount fields are plain floats, so any
- * finite number can arrive. Every bucket MUST be the identity on 1, 2 and 3:
- * that is what lets today's levels survive a round-trip while older wider-range
- * values still land somewhere sensible instead of nowhere.
+ * Baby Buddy's amount fields are plain floats, so any finite number can arrive (both
+ * scales began life as a 1 to 10 score). Every `bucket` MUST be the identity on 1, 2 and
+ * 3, which is what lets today's levels survive a round-trip while older wider-range
+ * values still land somewhere sensible.
  */
 export interface LevelSet {
   labels: readonly [string, string, string];
   bucket: (value: number) => 1 | 2 | 3;
 }
 
-/** Solid diaper size. Unchanged from the original 3-level diaper control. */
+/** Solid diaper size. */
 export const DIAPER_LEVELS: LevelSet = {
   labels: ['Small', 'Medium', 'Large'],
   bucket: (v) => (v <= 1 ? 1 : v === 2 ? 2 : 3),
 };
 
 /**
- * How much the baby took at the breast.
+ * Deliberately NON-MONOTONIC: 3 is "A lot" but 4 is "Some". This scale only ever writes
+ * 1, 2 or 3, so a value above 3 cannot be a level and can only be a leftover from the old
+ * 1 to 10 score. So 1 to 3 map to themselves and 4 and up take the same by-thirds reading
+ * the API layer gives an untagged score off the wire. Making it monotonic would mean
+ * either mangling today's levels or misreading every old score.
  *
- * The bucket is deliberately NON-MONOTONIC: 3 is "A lot" but 4 is "Some". That
- * reads oddly until you know what the two ranges mean. This scale only ever
- * writes 1, 2 or 3, so a value above 3 cannot be a level and can only be a
- * leftover from the old 1 to 10 score. The two ranges are therefore different
- * kinds of number and are read differently: 1 to 3 are levels and map to
- * themselves, while 4 and up are old scores and take the same "by thirds"
- * reading the API layer gives an untagged score off the wire (4-7 some, 8-10 a
- * lot). Making it monotonic would mean either mangling today's levels or
- * misreading every old score, and both are worse than looking odd.
- *
- * That leaves an old 2 or 3 as the only residual misread: by thirds they were
- * both "A little", here they read as "Some" and "A lot". Those two values are
- * genuinely ambiguous (a stored 3 is both a valid level and a valid old score)
- * and nothing in the data can separate them, so today's meaning wins. Old
- * scores that reached a server are converted once, on read (see `client.ts`),
- * and arrive here already reduced to a level.
+ * An old 2 or 3 is the residual misread: by thirds they were both "A little", here they
+ * read as "Some" and "A lot". Those values are genuinely ambiguous, so today's meaning
+ * wins.
  */
 export const INTAKE_LEVELS: LevelSet = {
   labels: ['A little', 'Some', 'A lot'],
   bucket: (v) => (v < 1.5 ? 1 : v < 2.5 ? 2 : v <= 3 ? 3 : v <= 7 ? 2 : 3),
 };
 
-/** The word for a stored intake `amount`, e.g. 3 -> "A lot". */
 export function intakeLevelLabel(amount: number): string {
   return INTAKE_LEVELS.labels[INTAKE_LEVELS.bucket(amount) - 1];
 }
@@ -114,25 +92,19 @@ export const DEFAULT_DURATION_MIN: Record<ActivityType, number> = {
 export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath', 'temperature', 'medication'];
 
 /**
- * Activities a twin household can log for several children in one save, each
- * getting its own independent entry.
- *
- * An ALLOW-list, not a deny-list, so an activity added later has to be argued
- * onto it rather than inheriting the affordance. What is missing is missing on
- * purpose: `pumping` is parent-side, so copying one session onto each child
- * double-counts the milk in every aggregate built on it; `temperature` and any
- * measurement is a single reading that cannot belong to two children; a
- * `medication` dose, a `note` and a `milestone` are about one child by
- * construction.
+ * Activities a twin household can log for several children in one save, each getting its
+ * own entry. An allow-list, so an activity added later has to be argued onto it rather
+ * than inheriting the affordance. What is missing is missing on purpose: `pumping` is
+ * parent-side, so copying one session onto each child double-counts the milk in every
+ * aggregate built on it, and a `temperature`, `medication` dose, `note` or `milestone` is
+ * about one child by construction.
  */
 export const SHARED_ROUTINE_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'bath', 'tummy'];
 
-/** Whether the log sheet offers "log for both" for this activity. */
 export function allowsMultipleChildren(type: ActivityType): boolean {
   return SHARED_ROUTINE_ACTIVITIES.includes(type);
 }
 
-/** Activities a timer can be saved as. */
 export const TIMER_SAVE_OPTIONS: ActivityType[] = ['feeding', 'sleep', 'pumping', 'tummy'];
 
 export interface DurationShortcutCopy {
@@ -144,8 +116,7 @@ export interface DurationShortcutCopy {
   liveSub: string;
 }
 
-/** Copy for the two shortcut buttons shown at the top of every interval
- *  activity's log sheet. Point activities (diaper) have none. */
+/** Shown at the top of every interval activity's log sheet. Point activities have none. */
 export const DURATION_SHORTCUTS: Partial<Record<ActivityType, DurationShortcutCopy>> = {
   feeding: { doneTitle: 'Just finished', doneSub: 'ended this feed', liveTitle: 'Still feeding', liveSub: 'start a live timer' },
   sleep: { doneTitle: 'Woke up now', doneSub: 'ended this nap', liveTitle: 'Still sleeping', liveSub: 'start a live timer' },

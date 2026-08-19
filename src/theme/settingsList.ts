@@ -3,13 +3,9 @@ import type { TextStyle, ViewStyle } from 'react-native';
 import type { Theme } from '@/theme/tokens';
 
 /**
- * Shared grouped-list styling for the Settings screens (`settings/index.tsx`
- * and `settings/notifications.tsx`): a rounded, bordered card (`group`)
- * containing padded rows (`row`), preceded by an uppercase section heading
- * (`sectionLabel`, spread into a `Txt`, hence `TextStyle` rather than
- * `ViewStyle`). Theme-derived (border/background colors come from the
- * active `Theme`), so this is a function of the theme rather than a static
- * style object, exactly like `makeTheme` in `./tokens`.
+ * Shared grouped-list styling for the Settings screens: a rounded, bordered card
+ * (`group`) of padded rows (`row`), under an uppercase section heading
+ * (`sectionLabel`, spread into a `Txt`, hence `TextStyle` and not `ViewStyle`).
  */
 export function makeSettingsListStyles(t: Theme): {
   group: ViewStyle;

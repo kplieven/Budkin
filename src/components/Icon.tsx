@@ -1,7 +1,4 @@
-/**
- * All SVG glyphs used in the app, ported from the design handoff reference's
- * inline SVGs. Activity icons are soft-filled; UI icons are stroked.
- */
+/** All SVG glyphs used in the app. Activity icons are soft-filled; UI icons are stroked. */
 
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 
@@ -46,12 +43,11 @@ export type IconName =
 
 interface IconProps {
   name: IconName;
-  /** primary stroke/fill color */
   color: string;
   size?: number;
-  /** stroke width for stroked (UI) icons */
+  /** stroked (UI) icons only */
   strokeWidth?: number;
-  /** override the home icon's fill (for active tab tint) */
+  /** overrides the home icon's fill, for the active tab tint */
   fill?: string;
 }
 
@@ -66,9 +62,9 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
     height: size,
     viewBox: '0 0 24 24',
     fill: 'none' as const,
-    // Every icon here is either decorative next to labeled text or sits inside a
-    // control whose accessible name comes from the wrapping Pressable/IconButton —
-    // hide it from AT so labeled controls read once instead of twice.
+    // Every icon is either decorative next to labeled text or sits inside a control
+    // whose accessible name comes from the wrapping Pressable/IconButton, so hide it
+    // from AT to stop labeled controls reading twice.
     importantForAccessibility: 'no-hide-descendants' as const,
     'aria-hidden': true as const,
   };
@@ -109,8 +105,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'bath':
-      // A bathtub: filled basin, a little faucet spout, short legs, and a
-      // water-line detail — reads as "bath" without a literal figure.
       return (
         <Svg {...common}>
           <Path d="M7 11V7.4a1.9 1.9 0 0 1 3.6-.8" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
@@ -126,7 +120,7 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'solid':
-      // Abstract "stack" — reads as a solid mass without the literal poop shape.
+      // An abstract stack, deliberately not the literal poop shape.
       return (
         <Svg {...common}>
           <Rect x={5} y={13.5} width={14} height={5} rx={2.5} fill={color} />
@@ -141,7 +135,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'temperature':
-      // A thermometer: soft-filled stem + bulb with a mercury-column detail line.
       return (
         <Svg {...common}>
           <Rect x={10} y={3} width={4} height={13} rx={2} fill={color} />
@@ -150,7 +143,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'medication':
-      // A capsule pill on the diagonal, split into two halves by a divider line.
       return (
         <Svg {...common}>
           <Rect x={3.5} y={9} width={17} height={6} rx={3} fill={color} transform="rotate(45 12 12)" />
@@ -158,7 +150,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'milestone':
-      // A pennant flag on a pole: the "milestone reached" marker.
       return (
         <Svg {...common}>
           <Path d="M6 3.4v17.2" stroke={color} strokeWidth={2.2} strokeLinecap="round" />
@@ -166,7 +157,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'note':
-      // A soft-filled note page with a folded corner + a few text lines.
       return (
         <Svg {...common}>
           <Path d="M6 3h8l4 4v12.5A1.5 1.5 0 0 1 16.5 21h-10A1.5 1.5 0 0 1 5 19.5v-15A1.5 1.5 0 0 1 6 3z" fill={color} />
@@ -299,7 +289,6 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'edit':
-      // A pencil: stroked, matching the other UI (non-activity) icons.
       return (
         <Svg {...common}>
           <Path
@@ -345,29 +334,15 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
         </Svg>
       );
     case 'budkin':
-      // The Budkin mark: a two-leaf sprout resting in an open cradle.
-      //
-      // Ported from assets/brand/budkin-mark.svg, which draws on a 100-unit grid
-      // wrapped in <g transform="translate(50 50) scale(1.22) translate(-50 -56)">
-      // because the artwork is centred on (50,56) rather than (50,50). That
-      // wrapper and the 100 -> 24 viewBox change are folded together here into one
-      // affine map applied to every coordinate:
+      // Ported from assets/brand/budkin-mark.svg, whose artwork is centred on (50,56)
+      // rather than (50,50). Its wrapper transform and the 100 -> 24 viewBox change fold
+      // into one affine map applied to every coordinate:
       //
       //   x' = 0.2928 * x - 2.64        y' = 0.2928 * y - 4.3968
       //
-      // with stroke widths scaled by the same 0.2928 (11 -> 3.22, 7 -> 2.05).
-      // Re-derive the numbers that way if the source art changes. Do not nudge
-      // them by hand: the leaf tips have to stay clear of the cradle walls, and
-      // closing that gap makes the whole mark read as an anchor.
-      //
-      // This is a faithful port of the art as drawn, which includes the stem
-      // running into the bowl: source y 72 plus a 3.5 round cap reaches 75.5,
-      // against a cradle stroke edge at 70.5. The source file's own note asks
-      // for the stem to stop short of that curve, and it does not. If that is
-      // ever corrected, fix it in budkin-mark.svg and re-derive, not here.
-      //
-      // The source's two leaf fills collapse to `color`, the same flattening
-      // Android's monochrome themed-icon layer already does.
+      // with stroke widths scaled by the same 0.2928. Re-derive that way if the source
+      // art changes; do not nudge by hand, because the leaf tips have to stay clear of
+      // the cradle walls or the whole mark reads as an anchor.
       return (
         <Svg {...common}>
           <Path

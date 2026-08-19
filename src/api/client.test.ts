@@ -30,9 +30,7 @@ import {
 } from '@/api/client';
 import type { BathEntry, Child, Treatment, Entry, MilestoneEntry, NoteEntry, PickedPhoto } from '@/types/models';
 
-/** Minimal Fetch `Response` stand-in for stubbing `global.fetch` around a
- *  `BabybuddyClient` instance — the client's `request()` is private, so the
- *  fetch layer is the seam these tests mock. */
+/** Fetch `Response` stand-in: `request()` is private, so fetch is the seam to mock. */
 function jsonResponse(body: unknown, status = 200): Response {
   return {
     ok: status >= 200 && status < 300,
@@ -44,9 +42,8 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const TIME = Date.parse('2026-03-04T18:30:00.000Z');
 
-// Local stand-ins for client.ts's module-private toISO/fromISO: same semantics,
-// kept here so the bath serialization tests below can assert against them
-// without widening client.ts's exports.
+// Stand-ins for client.ts's module-private toISO/fromISO, so the bath tests can
+// assert against them without widening client.ts's exports.
 const toISO = (ms: number) => new Date(ms).toISOString();
 const fromISO = (s: string) => new Date(s).getTime();
 
@@ -69,28 +66,21 @@ describe('child serialization', () => {
 });
 
 // On native the bundle does NOT run React Native's fetch: expo's Metro config
-// injects `expo/src/winter/runtime.native.ts` into every native bundle, which
-// patches `FormData` and swaps `globalThis.fetch` for expo/fetch (unless
-// EXPO_PUBLIC_USE_RN_FETCH is set, which this app never sets). expo/fetch
-// serializes a multipart body itself, and its encoder only understands a
-// string, a Blob, or an object exposing `bytes()`. React Native's `{ uri }`
-// file descriptor throws there, so a photo upload never left the device.
+// injects `expo/src/winter/runtime.native.ts`, which patches `FormData` and swaps
+// `globalThis.fetch` for expo/fetch. That encoder serializes the multipart itself
+// and only understands a string, a Blob, or an object exposing `bytes()`. React
+// Native's `{ uri }` file descriptor throws there, so a photo upload never left the
+// device. These tests run the real encoder over the real FormData patch.
 //
-// These tests run the real encoder over the real FormData patch, so the picture
-// part is asserted in the shape the runtime actually accepts rather than the
-// one RN's own FormData would have wanted.
-//
-// That means deliberately reaching into expo's internals: the two imports at the
-// top of this file are unversioned paths that resolve only because expo ships no
-// `exports` map, so an SDK bump could move them. If they break, RE-POINT them.
-// Deleting the test restores the exact blind spot that hid this bug for months:
-// a hand-written stand-in would only ever encode what we already believe.
+// The two imports at the top of this file are unversioned paths into expo's
+// internals, resolving only because expo ships no `exports` map, so an SDK bump
+// could move them. If they break, RE-POINT them: a hand-written stand-in would
+// only ever encode what we already believe.
 describe('child photo upload serializes under expo/fetch', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  /** React Native's FormData, reduced to the `_parts` array expo's patch writes
-   *  to, with that patch applied. Local to the test: `installFormDataPatch`
-   *  mutates the prototype it is handed. */
+  /** RN's FormData reduced to the `_parts` array expo's patch writes to. Local to
+   *  the test: `installFormDataPatch` mutates the prototype it is handed. */
   class RNFormData {
     _parts: [string, unknown][] = [];
   }
@@ -98,9 +88,9 @@ describe('child photo upload serializes under expo/fetch', () => {
 
   const PICTURE_BYTES = new TextEncoder().encode('\xff\xd8JPEG-BYTES');
 
-  /** A picked photo carrying a file object shaped like `expo-file-system`'s
-   *  `File`: `bytes()` plus the name/type the encoder writes into the part
-   *  headers. The real `File` is a native module and cannot load here. */
+  /** A file object shaped like `expo-file-system`'s `File`: `bytes()` plus the
+   *  name/type the encoder writes into the part headers. The real `File` is a
+   *  native module and cannot load here. */
   const photo = (): PickedPhoto => ({
     uri: 'file:///cache/ImagePicker/cropped-42.jpg',
     name: 'a.jpg',
@@ -113,7 +103,6 @@ describe('child photo upload serializes under expo/fetch', () => {
     durable: true,
   });
 
-  /** Captures the RequestInit handed to fetch; returns a canned OK response. */
   function captureInit(response: unknown) {
     const calls: RequestInit[] = [];
     vi.stubGlobal('FormData', RNFormData);
@@ -127,14 +116,12 @@ describe('child photo upload serializes under expo/fetch', () => {
     return calls;
   }
 
-  /** The bytes actually handed to `fetch`. Native encodes the multipart ITSELF
-   *  (see `pictureInit`), so the body is already a Uint8Array rather than a
-   *  FormData for `fetch` to encode. */
+  /** Native encodes the multipart ITSELF, so the body is already a Uint8Array
+   *  rather than a FormData for `fetch` to encode. */
   function wireOf(init: RequestInit): string {
     return new TextDecoder().decode(init.body as unknown as Uint8Array);
   }
 
-  /** The boundary the request declares in its own Content-Type header. */
   function declaredBoundary(init: RequestInit): string | undefined {
     const ct = (init.headers as Record<string, string> | undefined)?.['Content-Type'];
     return /boundary=(.+)$/.exec(ct ?? '')?.[1];
@@ -154,8 +141,8 @@ describe('child photo upload serializes under expo/fetch', () => {
 
     // THE REGRESSION. Handing `fetch` the FormData instead reached Baby Buddy,
     // returned 200 and applied nothing, silently losing the photo and the name.
-    // Confirmed on device. So the body must be BYTES and the request must carry
-    // its own boundary: without both, the upload is a no-op.
+    // So the body must be BYTES and the request must carry its own boundary:
+    // without both, the upload is a no-op.
     expect(calls[0].body).toBeInstanceOf(Uint8Array);
     const boundary = declaredBoundary(calls[0]);
     expect(boundary).toBeTruthy();
@@ -164,8 +151,7 @@ describe('child photo upload serializes under expo/fetch', () => {
 
   it('names the native part after the file, not after the picked name (web sends the latter)', async () => {
     // expo's FormData patch keeps `append`'s third argument only for a real
-    // `Blob`, so a filename cannot be supplied for this part. Cosmetic: the
-    // picker's cache filename carries the right extension either way.
+    // `Blob`, so a filename cannot be supplied for this part.
     const calls = captureInit({ id: 9 });
     await new BabybuddyClient('https://x', 't').createChild(CHILD, photo());
 
@@ -217,14 +203,10 @@ describe('listChildren', () => {
     expect(children[0]).toMatchObject({ id: '7', serverId: 7, first: 'A' });
   });
 
-  // birth_date is date-only ('YYYY-MM-DD') and the rest of the app treats birth
-  // as LOCAL midnight: clampBirth produces it, toDateStr serializes the local
-  // calendar day, matchServerChild compares local days and the child sheet
-  // seeds its Y/M/D fields with local getters. Parsing with `new Date(s)`
-  // lands on UTC midnight instead, which west of UTC displays the birthday a
-  // day early, walks the server value back a day on every edit round-trip and
-  // breaks the adopt dedup. Local midnight equals UTC midnight only in UTC
-  // itself, so this assertion needs no timezone manipulation to bite.
+  // birth_date is date-only ('YYYY-MM-DD') and the rest of the app treats birth as
+  // LOCAL midnight. Parsing with `new Date(s)` lands on UTC midnight instead, which
+  // west of UTC displays the birthday a day early, walks the server value back a day
+  // on every edit round-trip and breaks the adopt dedup.
   it('parses birth_date as local midnight, matching how the app serializes it', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -242,10 +224,9 @@ describe('listChildren', () => {
     expect(children[0].birth).toBe(new Date(2025, 2, 4).getTime());
   });
 
-  // The avatar tint is purely local: Baby Buddy has no color field on a child,
-  // so anything set here would be fabricated from the server's list position
-  // and would move under the child whenever that ordering changed. The store
-  // owns it instead (nextChildColor / reconcileChildren).
+  // The avatar tint is purely local: Baby Buddy has no color field on a child, so
+  // anything set here would be fabricated from the server's list position and would
+  // move under the child whenever that ordering changed. The store owns it instead.
   it('does not invent an avatar color from the list position', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
@@ -267,9 +248,8 @@ describe('listChildren', () => {
     expect(children[1]).not.toHaveProperty('color');
   });
 
-  // The serialize half of the pair childBody uses: a parsed birth date must
-  // come back out as the same calendar day, or every edit round-trip
-  // (rename, gender, photo) would walk birth_date backwards on the server.
+  // A parsed birth date must come back out as the same calendar day, or every edit
+  // round-trip (rename, gender, photo) walks birth_date backwards on the server.
   it('round-trips a date-only string through fromDateStr + toDateStr unchanged', () => {
     expect(toDateStr(fromDateStr('2025-03-04'))).toBe('2025-03-04');
   });
@@ -281,8 +261,8 @@ describe('updateChild', () => {
   });
 
   it('returns undefined and skips the network call when the child has no serverId', async () => {
-    // `id` deliberately looks numeric to prove the source of truth is
-    // `serverId`, not a parse of the (now-stable, server-independent) `id`.
+    // `id` deliberately looks numeric to prove the source of truth is `serverId`,
+    // not a parse of the (stable, server-independent) `id`.
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const client = new BabybuddyClient('https://example.com', 'tok');
@@ -307,12 +287,11 @@ describe('updateChild', () => {
     expect(url).toBe('https://example.com/api/children/mira-doe/');
   });
 
-  // Baby Buddy DERIVES the slug from the child's name, so a rename changes it
-  // (verified against a live server: PATCHing first_name Gregory -> Gregor
-  // moved the slug gregory-hill -> gregor-hill). A cached slug therefore goes
-  // stale the moment a rename lands, and the next request keyed by it 404s:
-  // the same silent failure this whole describe exists to prevent. The fresh
-  // slug comes back in the PATCH response, so hand it to the caller to store.
+  // Baby Buddy DERIVES the slug from the child's name, so a rename MOVES it
+  // (verified live: first_name Gregory -> Gregor moved gregory-hill -> gregor-hill).
+  // A cached slug goes stale the moment a rename lands and the next request keyed by
+  // it 404s silently. The fresh slug comes back in the PATCH response, so hand it to
+  // the caller to store.
   it('returns the fresh slug from the PATCH response so a rename cannot stale it', async () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ picture: null, slug: 'mirabel-doe' }));
     vi.stubGlobal('fetch', fetchMock);
@@ -324,10 +303,8 @@ describe('updateChild', () => {
     expect(res?.slug).toBe('mirabel-doe');
   });
 
-  // uploadUnsynced (src/data/sync.ts) only learns the new numeric id when it
-  // pushes a child, and a child persisted by a build from before slugs were
-  // captured has none either. Look the slug up rather than sending a numeric
-  // id that would 404.
+  // A pushed child only learns its numeric id, never its slug. Look the slug up
+  // rather than sending a numeric id that would 404.
   it('resolves the slug via listChildren when the child carries none', async () => {
     const fetchMock = vi
       .fn()
@@ -351,9 +328,8 @@ describe('updateChild', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('https://example.com/api/children/mira-doe/');
   });
 
-  // An empty lookup is positive evidence the child is GONE (another device
-  // deleted it), not a reason to guess at a URL. Skipping the PATCH keeps the
-  // caller from reporting a failure for a child that no longer exists.
+  // An empty lookup is positive evidence the child is GONE (another device deleted
+  // it), not a reason to guess at a URL.
   it('skips the request when the lookup proves the child is no longer on the server', async () => {
     const fetchMock = vi
       .fn()
@@ -392,10 +368,9 @@ describe('createChild', () => {
     vi.unstubAllGlobals();
   });
 
-  // Verified against a live Baby Buddy: the POST response carries the slug for
-  // both the JSON and the multipart (photo) body. Capturing it here is what
-  // lets a child created this session be updated or deleted before the next
-  // refresh has had a chance to fill the slug in.
+  // The POST response carries the slug for both the JSON and the multipart (photo)
+  // body. Capturing it lets a child created this session be updated or deleted
+  // before the next refresh fills the slug in.
   it('captures the slug from the create response alongside the id', async () => {
     const fetchMock = vi
       .fn()
@@ -436,9 +411,8 @@ describe('bath <-> note serialization', () => {
   });
 
   it('normalizes a legacy big wash value still sitting in the offline queue or pending-ops log before serializing', () => {
-    // `BathEntry.wash` is typed as `WashKind` ('quick' | 'full') post-rename, so
-    // a queue/pendingOps entry written by a pre-rename build reaches here only
-    // via an untyped JSON.parse, which the cast reproduces.
+    // A queue/pendingOps entry written by a pre-rename build reaches here only via
+    // an untyped JSON.parse, which the cast reproduces.
     const entry = { id: 'e4', childId: 'c1', type: 'bath', time: TIME, wash: 'big', tags: [] } as unknown as BathEntry;
     expect(bathToNoteBody(entry, 3)).toEqual({
       child: 3,
@@ -477,10 +451,9 @@ describe('bath <-> note serialization', () => {
   });
 });
 
-// The tag system: `/api/tags/` returns { name, color, last_used } objects, and
-// entries carry tag NAMES (string[]). listTags maps the color (dropping an
-// empty one) and parses last_used to epoch ms. HIDDEN_TAGS names structural
-// tags the picker must never surface or let the user create.
+// `/api/tags/` returns { name, color, last_used } objects while entries carry tag
+// NAMES (string[]). HIDDEN_TAGS names structural tags the picker must never surface
+// or let the user create.
 describe('listTags + HIDDEN_TAGS', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
   const TIME = Date.parse(ISO);
@@ -537,14 +510,11 @@ describe('listTags + HIDDEN_TAGS', () => {
   });
 });
 
-// The real Baby Buddy `/api/profile/` response (verified against
-// babybuddy/api/serializers.py `ProfileSerializer` + `UserSerializer`):
-// account fields nest under a `user` object, `language`/`timezone` are
-// top-level on the profile itself (NOT under a `settings` sub-object,
-// despite the backing model being named `Settings`), and
-// `dashboard_refresh_rate` is a real field on that model but is
-// deliberately excluded from `ProfileSerializer.Meta.fields`, so it's never
-// present in a stock server's response.
+// The real `/api/profile/` shape (per babybuddy/api/serializers.py): account fields
+// nest under a `user` object, `language`/`timezone` are top-level on the profile
+// itself (NOT under a `settings` sub-object, despite the backing model being named
+// `Settings`), and `dashboard_refresh_rate` is a real field on that model but is
+// excluded from `ProfileSerializer.Meta.fields`, so a stock server never sends it.
 describe('mapProfile', () => {
   it('maps the real /api/profile/ shape: nested user, top-level language/timezone', () => {
     const raw = {
@@ -607,14 +577,11 @@ describe('mapProfile', () => {
   });
 });
 
-// Per-entry free-text `notes` on the five real activity resources (bath is
-// excluded — its note body is structural). These exercise the private
-// buildBody via createEntry/updateEntry (capturing the JSON sent to fetch) and
-// each list mapper via a canned paginated response.
+// Per-entry free-text `notes` on the five real activity resources. Bath is excluded:
+// its note body is structural.
 describe('per-entry notes', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
 
-  // Capture requests + return a canned JSON body from a stubbed global fetch.
   function stubFetch(response: unknown) {
     const calls: { url: string; body: any }[] = [];
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -635,7 +602,6 @@ describe('per-entry notes', () => {
 
   const client = () => new BabybuddyClient('https://x', 't');
 
-  // one representative entry per real type, each carrying a note
   const withNotes: Record<string, Entry> = {
     feeding: { id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount: null, tags: [], notes: 'spit up a lot' },
     sleep: { id: 's1', childId: 'c1', type: 'sleep', start: TIME, end: TIME, nap: true, tags: [], notes: 'went down easy' },
@@ -666,8 +632,7 @@ describe('per-entry notes', () => {
 
   it('buildBody sends nap:false explicitly rather than omitting it', async () => {
     // Omitting the field lets Baby Buddy re-derive nap from its own
-    // NAP_START_MIN/NAP_START_MAX, which is what silently reverted a manual
-    // "Night" choice on the next listSleep.
+    // NAP_START_MIN/NAP_START_MAX, silently reverting a manual "Night" choice.
     const calls = stubFetch({ id: 1 });
     await client().createEntry({ ...withNotes.sleep, nap: false } as Entry, 1);
     expect(calls[0].body.nap).toBe(false);
@@ -726,10 +691,10 @@ describe('per-entry notes', () => {
   });
 });
 
-// A breast feed's `amount` is a subjective intake level, and Baby Buddy reads
-// its `amount` field as a volume it sums into the child's feeding totals. So the
-// level travels as a structural tag with `amount: null`, and comes back off the
-// wire as a level again. Volumes are untouched by any of this.
+// A breast feed's `amount` is a subjective intake level, and Baby Buddy reads its
+// `amount` field as a volume it sums into the child's feeding totals. So the level
+// travels as a structural tag with `amount: null` and comes back off the wire as a
+// level again. Volumes are untouched by any of this.
 describe('breastfeeding intake level <-> tag transport', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
 
@@ -827,10 +792,9 @@ describe('breastfeeding intake level <-> tag transport', () => {
   });
 
   it('resolves a legacy score the same way in both directions of travel', async () => {
-    // The asymmetry this pins: a legacy score sitting in local-only history and
-    // pushed UP has to end up as the same level as the identical score pulled
-    // DOWN untagged from the server. If the write bucket and the read bucket
-    // disagree, the same feed means different things on two devices.
+    // A legacy score pushed UP has to end up as the same level as the identical
+    // score pulled DOWN untagged. If the write bucket and the read bucket disagree,
+    // the same feed means different things on two devices.
     for (const score of [1, 4, 5, 6, 7, 8, 9, 10]) {
       const calls = stubFetch({ id: 1 });
       await client().createEntry(atBreast(score), 1);
@@ -871,9 +835,8 @@ describe('breastfeeding intake level <-> tag transport', () => {
   });
 });
 
-// Temperature is a POINT event on Baby Buddy's /api/temperature/ resource:
-// a decimal reading + a single `time` + notes + tags. These exercise buildBody
-// (via createEntry/updateEntry) and the listTemperature mapper.
+// Temperature is a POINT event on /api/temperature/: a decimal reading + a single
+// `time` + notes + tags.
 describe('temperature serialization', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
 
@@ -938,11 +901,10 @@ describe('temperature serialization', () => {
   });
 });
 
-// Medication is a POINT event on Baby Buddy's /api/medication/ resource: a
-// required name + a single `time`, plus an optional dosage (number) + free-text
-// dosage_unit + next_dose_interval duration + notes + tags. These exercise
-// buildBody (via createEntry/updateEntry) and the listMedication mapper, plus the
-// duration <-> seconds helpers the interval field rides on.
+// Medication is a POINT event on /api/medication/ (present in Baby Buddy master,
+// absent from the published docs): a required name + a single `time`, plus an
+// optional dosage (number) + free-text dosage_unit + next_dose_interval duration
+// + notes + tags.
 describe('medication serialization', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
 
@@ -987,7 +949,6 @@ describe('medication serialization', () => {
     for (const k of ['dosage', 'dosage_unit', 'next_dose_interval']) {
       expect(k in calls[0].body).toBe(false);
     }
-    // notes is always present, so an empty string clears it on a PATCH edit
     expect(calls[0].body.notes).toBe('');
   });
 
@@ -1036,10 +997,8 @@ describe('medication serialization', () => {
   });
 });
 
-// General notes ride on the SAME `/api/notes/` endpoint as baths, discriminated
-// only by the `bath` tag. These exercise the single-fetch partition
-// (listChildNotes), the note body builder (strips structural tags), and the
-// note<->entry mappers.
+// General notes ride on the SAME `/api/notes/` endpoint as baths, discriminated only
+// by the `bath` tag.
 describe('general notes transport (shared /api/notes/ endpoint with baths)', () => {
   const ISO = '2026-03-04T18:30:00.000Z';
 
@@ -1076,7 +1035,7 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
       ],
     });
     const { baths, notes } = await client().listChildNotes('c1');
-    expect(calls).toHaveLength(1); // single fetch — no double-read of /notes/
+    expect(calls).toHaveLength(1); // single fetch, no double-read of /notes/
     expect(calls[0].url).toContain('/notes/');
     expect(baths).toHaveLength(1);
     expect(baths[0]).toMatchObject({ type: 'bath', wash: 'quick', serverId: 1 });
@@ -1138,11 +1097,10 @@ describe('general notes transport (shared /api/notes/ endpoint with baths)', () 
   });
 });
 
-// Deleting a child on the server: a single DELETE /children/{slug}/. Baby
-// Buddy cascades the child's feedings/sleep/changes/etc. server-side, so no
-// per-entry cleanup calls are needed. Unlike deleteEntry/deleteMeasurement this
-// is keyed by SLUG: Baby Buddy's ChildViewSet sets lookup_field = "slug" (only
-// TagViewSet does the same), so a numeric id 404s here.
+// Baby Buddy cascades the child's feedings/sleep/changes/etc. server-side, so a
+// single DELETE suffices. Unlike deleteEntry/deleteMeasurement it is keyed by SLUG:
+// ChildViewSet sets lookup_field = "slug" (only TagViewSet does the same), so a
+// numeric id 404s here.
 describe('deleteChild', () => {
   function stubFetch(response: unknown) {
     const calls: { url: string; method?: string }[] = [];
@@ -1197,9 +1155,9 @@ describe('deleteChild', () => {
     expect(calls).toHaveLength(0);
   });
 
-  // Another device got there first. The desired end state already holds, so
-  // this is a no-op success: issuing a doomed DELETE would make the store
-  // restore a child that no longer exists and claim the delete failed.
+  // Another device got there first, so the desired end state already holds. Issuing
+  // a doomed DELETE would make the store restore a child that no longer exists and
+  // claim the delete failed.
   it('treats a child already gone from the server as deleted, not as a failure', async () => {
     const calls: { url: string; method?: string }[] = [];
     const fn = vi.fn(async (url: string, init?: RequestInit) => {
@@ -1423,7 +1381,7 @@ describe('treatment <-> note serialization', () => {
     active: true,
   };
 
-  /** Round-trip helper: encode, then decode as the server would hand it back. */
+  /** Encode, then decode as the server would hand it back. */
   const roundTrip = (treatment: Treatment, id = 77): Treatment => {
     const body = treatmentToNoteBody(treatment, 5) as any;
     return noteToTreatment({ id, time: body.time, note: body.note, tags: body.tags }, treatment.childId);
@@ -1635,8 +1593,7 @@ describe('gender <-> note serialization', () => {
   it('reads an unknown or missing g: tag as not recorded', () => {
     expect(genderFromNote({ tags: ['gender'] })).toBeUndefined();
     expect(genderFromNote({ tags: ['gender', 'g:martian'] })).toBeUndefined();
-    // A legacy `g:other` note (a value this build no longer supports) also
-    // reads as not recorded, so a retired gender degrades to "Not set".
+    // A legacy `g:other` note degrades to "Not set" rather than to a broken value.
     expect(genderFromNote({ tags: ['gender', 'g:other'] })).toBeUndefined();
     expect(genderFromNote({})).toBeUndefined();
   });
@@ -1755,19 +1712,17 @@ describe('gender <-> note serialization', () => {
   });
 });
 
-// A write fired from `commitWrite` right before an installed PWA's webview is
-// frozen (locking the phone the moment after Save) is a normal fetch that the OS
-// cancels, dropping the entry to the offline queue with no "offline" signal —
-// it only re-sends on the next foreground refresh. `keepalive` tells the browser
-// to complete the request regardless. Web only, writes only, never FormData
-// (photo uploads can exceed keepalive's 64KB body budget).
+// A write fired right before an installed PWA's webview is frozen (locking the phone
+// the moment after Save) is a normal fetch that the OS cancels, dropping the entry to
+// the offline queue with no "offline" signal. `keepalive` tells the browser to
+// complete the request regardless. Web only, writes only, never FormData (photo
+// uploads can exceed keepalive's 64KB body budget).
 describe('write requests survive a page freeze (keepalive)', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const client = () => new BabybuddyClient('https://x', 't');
   const entry: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount: null, tags: [] };
 
-  // Captures the RequestInit handed to fetch; returns a canned OK response.
   function captureInit(response: unknown) {
     const calls: RequestInit[] = [];
     const fn = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -1800,13 +1755,11 @@ describe('write requests survive a page freeze (keepalive)', () => {
 });
 
 // Away from the home LAN the server address often black-holes: `fetch` neither
-// resolves nor rejects until the platform's socket timeout, minutes on some
-// stacks, and a cold start used to wait that whole window out on the splash
-// screen. `request()` therefore arms an AbortController: 10s for a GET, 20s
-// for a mutation (a slow write gets more room than a slow read, because
-// aborting a write the server actually committed re-queues it and risks a
-// duplicate). The abort surfaces as ApiError(0, ...) with a message distinct
-// from the unreachable one; status 0 keeps every existing catch working.
+// resolves nor rejects until the platform's socket timeout, minutes on some stacks.
+// `request()` therefore arms an AbortController: 10s for a GET, 20s for a mutation
+// (aborting a write the server actually committed re-queues it and risks a
+// duplicate). The abort surfaces as ApiError(0, ...) with a message distinct from
+// the unreachable one; status 0 keeps every existing catch working.
 describe('requests abort instead of hanging on a black-holed server', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -1815,8 +1768,8 @@ describe('requests abort instead of hanging on a black-holed server', () => {
 
   const entry: Entry = { id: 'f1', childId: 'c1', type: 'feeding', start: TIME, end: TIME, feedType: 'breast', method: 'left', amount: null, tags: [] };
 
-  /** A fetch that never settles on its own and only rejects once the caller's
-   *  abort signal fires: exactly how a black-holed socket behaves. */
+  /** Never settles on its own, rejecting only once the abort signal fires: how a
+   *  black-holed socket behaves. */
   function stubBlackHoleFetch() {
     vi.stubGlobal(
       'fetch',
@@ -1877,11 +1830,9 @@ describe('requests abort instead of hanging on a black-holed server', () => {
     });
   });
 
-  // The user-facing copy above blames the connection whatever went wrong, and
-  // `fetch` also rejects for reasons that are nothing to do with it (a body it
-  // cannot serialize, say). Keeping the original as `cause` is what leaves a
-  // trace of those; discarding it is how the native photo upload spent months
-  // looking like a network problem.
+  // The user-facing copy above blames the connection whatever went wrong, and `fetch`
+  // also rejects for reasons that are nothing to do with it (a body it cannot
+  // serialize, say). Keeping the original as `cause` is the only trace of those.
   it('keeps the underlying failure as the ApiError cause', async () => {
     const underlying = new Error('Unsupported FormDataPart implementation');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(underlying));

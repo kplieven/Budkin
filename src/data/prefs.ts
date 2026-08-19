@@ -1,11 +1,4 @@
-/**
- * Persisted on-device app preferences, backed by AsyncStorage.
- *
- * Unlike the connection/token (secureKv), these are non-secret UI choices —
- * the theme mode and the metric/imperial units lens — so a plain AsyncStorage
- * entry is fine (mirrors `src/data/timers.ts`). Kept as a small object so future
- * prefs can join it.
- */
+/** Persisted non-secret UI preferences; the connection and token live in secureKv. */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -16,11 +9,9 @@ const KEY = 'budkin.prefs.v1';
 
 export interface Prefs {
   themeMode: ThemeMode;
-  /** Budkin-local metric/imperial display lens (default 'metric'). */
+  /** Budkin-local display lens, not the server's unit setting (default 'metric'). */
   unitSystem: UnitSystem;
-  /** true once first-run setup has been completed. */
   tutorialSeen: boolean;
-  /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
   dueDateReminders: boolean;
   staleTimerReminders: boolean;
   ageMilestones: boolean;
@@ -28,74 +19,30 @@ export interface Prefs {
   pumpingIntervalMin: number;
   /** when the pumping toggle was last switched on, epoch ms */
   pumpingEnabledAt: number | null;
-  /** Nap suggestions. Off by default: unlike the other four this one gives
-   *  advice, from a curve the app labels as not medical consensus. */
   napSuggestions: boolean;
-  /**
-   * Treatment (treatment) dose reminders. On by default, unlike naps and pumping:
-   * this one reports back a schedule the parent authored rather than offering
-   * advice, and it is inert until they create a treatment, so defaulting it on
-   * cannot surprise anyone who does not use the feature.
-   */
   treatmentReminders: boolean;
-  /**
-   * When the treatments toggle was last switched on, epoch ms. The resync lever
-   * for a drifting interval grid, exactly like `pumpingEnabledAt`: a dose given
-   * but not logged leaves the reminder early, and toggling off and on rebases
-   * the phase to now. It can only ever MOVE an existing grid, never start one.
-   * See `treatmentReminders` in src/notifications/scheduled.ts.
-   */
+  /** When the treatments toggle was last switched on, epoch ms. Toggling off and on
+   *  rebases the reminder phase to now; it can MOVE a grid, never start one. */
   treatmentRemindersEnabledAt: number | null;
-  /**
-   * Milestone catch-up nudges: when a catalog milestone's typical window closes
-   * with nothing logged, ask whether it already happened. Off by default, like
-   * naps and pumping: it is the notification twin of the home-screen
-   * `MilestoneNudge` card, which already asks unprompted, so the push half is
-   * the part a parent should opt into.
-   */
   milestoneCatchUp: boolean;
-  /**
-   * Sleep rhythm: the window in which a sleep counts as a NAP rather than night
-   * sleep, as minutes since local midnight (default 420/1140 = 07:00 to 19:00).
-   * Start inclusive, end exclusive; a start later than the end wraps midnight.
-   *
-   * Minutes since midnight rather than a timestamp because this is a wall-clock
-   * rule that must mean the same thing on every date and across DST.
-   */
+  /** The window in which a sleep counts as a NAP, as minutes since LOCAL midnight
+   *  (default 420/1140 = 07:00 to 19:00). Start inclusive, end exclusive; a start
+   *  later than the end wraps midnight. Wall-clock, so it holds across DST. */
   napWindowStartMin: number;
   napWindowEndMin: number;
-  /**
-   * Insights "Rhythm" graph: the hour of day the 24h window starts at (0..23,
-   * default 12 = noon-to-noon). This is the tab's day boundary — it anchors the
-   * heatmap AND the per-window trend bucketing so the graph and the numbers
-   * agree. A whole hour (not a timestamp) so it means the same on every date.
-   */
+  /** Hour of day the Insights 24h window starts at (0..23, default 12). Anchors the
+   *  heatmap AND the per-window trend bucketing, so graph and numbers agree. */
   rhythmOriginHour: number;
-  /**
-   * Insights "Rhythm" graph layer toggles: which series the heatmap draws.
-   * Remembered so a user who hides, say, diapers keeps them hidden across app
-   * restarts. Global (like every other pref); all default to visible.
-   */
   rhythmShowSleep: boolean;
   rhythmShowFeeds: boolean;
   rhythmShowDiapers: boolean;
-  /**
-   * Growth charts: whether the WHO growth-standard percentile curves are drawn
-   * behind a metric's own line. Global (like every other pref), default on.
-   */
   showGrowthReference: boolean;
 }
 
-/**
- * Fields Budkin no longer writes, kept readable so a stored value can be
- * migrated forward. Not part of `Prefs`, so nothing can accidentally save one.
- */
+/** Fields Budkin no longer writes, kept readable so a stored value can be migrated
+ *  forward. Not part of `Prefs`, so nothing can accidentally save one. */
 export interface LegacyPrefs {
-  /**
-   * Pre-2026-08 bath rhythm: SMALL washes between two big ones. Superseded by
-   * the per-child day intervals in src/data/bathRhythm.ts, and read only to
-   * derive the fallback for a child with nothing stored (`legacyBathRhythm`).
-   */
+  /** Pre-2026-08 bath rhythm, read only to seed a child with nothing stored. */
   smallWashesPerBig?: number;
 }
 
@@ -111,12 +58,8 @@ export async function loadPrefs(): Promise<Partial<Prefs> & LegacyPrefs> {
   }
 }
 
-/**
- * Persist a partial set of prefs, MERGING into whatever is already stored. Each
- * setter (e.g. `toggleTheme`, `setUnitSystem`) passes only its own field, so a
- * merge is required — a whole-object overwrite would silently clobber the other
- * fields (a plain overwrite worked only while `themeMode` was the sole field).
- */
+/** Persist a partial set of prefs, MERGING into whatever is already stored: each
+ *  setter passes only its own field, so an overwrite would clobber the others. */
 export async function savePrefs(patch: Partial<Prefs>): Promise<void> {
   try {
     const existing = await loadPrefs();

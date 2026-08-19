@@ -6,7 +6,7 @@ const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, 
 const sleep = (start: number, end: number, nap: boolean): Entry => ({
   id: `s-${start}`, childId: 'c1', type: 'sleep', start, end, nap, tags: [],
 });
-/** A running sleep timer (no `end` exists on a Timer — it runs until stopped). */
+/** A running sleep timer: a Timer has no `end`, it runs until stopped. */
 const timer = (start: number): Timer => ({
   id: `t-${start}`, childId: 'c1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start,
 });
@@ -50,7 +50,7 @@ describe('buildSleepHeatmap', () => {
 
   it('spans oldest data → today inclusive, with no rows older than the data', () => {
     const rows = buildSleepHeatmap([sleep(at(2026, 6, 3, 20), at(2026, 6, 4, 6), false)], now); // 3pm Jul 5
-    expect(rows).toHaveLength(3); // offsets 2,1,0 — nothing older than the data
+    expect(rows).toHaveLength(3); // offsets 2,1,0, nothing older than the data
     expect(rows[0].segments).toHaveLength(1);
     expect(rows[2].segments).toHaveLength(0); // today-so-far, still empty
   });
@@ -96,8 +96,7 @@ describe('buildTrend', () => {
 
   it('totalSleep still counts logged sleep only, never a running timer', () => {
     // Regression guard for liveSleepMsInWindow: the trend takes no timers and
-    // must stay that way, or a history point would creep upward while a nap
-    // runs. Same window, same entries — Home's live number is the bigger one.
+    // must stay that way, or a history point would creep upward while a nap runs.
     const win = at(2026, 6, 5, 12);
     const entries = [sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14), true)];
     const pts = buildTrend(entries, 'totalSleep', now, 30);
@@ -240,7 +239,7 @@ describe('sleepMsInWindow', () => {
 });
 
 describe('liveSleepMsInWindow', () => {
-  const win = at(2026, 6, 5, 12);  // noon Jul 5 — the window under test
+  const win = at(2026, 6, 5, 12);  // noon Jul 5, the window under test
   const now = at(2026, 6, 5, 15);  // 3pm, three hours into it
   const napped = sleep(at(2026, 6, 5, 13), at(2026, 6, 5, 14), true); // logged 1h nap
 

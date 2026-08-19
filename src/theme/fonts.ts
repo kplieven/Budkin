@@ -1,9 +1,7 @@
 /**
- * Figtree font loading + per-weight family mapping.
- *
- * React Native does NOT synthesize weights for custom fonts — each weight is a
- * distinct family name. Use `fontFamily(weight)` everywhere instead of the RN
- * `fontWeight` style prop.
+ * Figtree loading and per-weight family mapping. React Native does NOT synthesize
+ * weights for custom fonts: each weight is a distinct family name, so use
+ * `fontFamily(weight)` everywhere instead of the RN `fontWeight` style prop.
  */
 
 import { Figtree_400Regular } from '@expo-google-fonts/figtree/400Regular';
@@ -12,7 +10,6 @@ import { Figtree_600SemiBold } from '@expo-google-fonts/figtree/600SemiBold';
 import { Figtree_700Bold } from '@expo-google-fonts/figtree/700Bold';
 import { Figtree_800ExtraBold } from '@expo-google-fonts/figtree/800ExtraBold';
 
-/** Passed to `useFonts(...)` in the root layout. */
 export const FONTS_TO_LOAD = {
   Figtree_400Regular,
   Figtree_500Medium,

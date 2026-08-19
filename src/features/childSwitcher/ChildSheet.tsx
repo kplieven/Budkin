@@ -26,7 +26,6 @@ const GENDER_OPTIONS: readonly (readonly [string, ChildGender | undefined])[] = 
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the LogSheet Delete button
 
-/** A compact icon+label action pill for the photo controls. */
 function PhotoPill({
   icon,
   label,
@@ -106,22 +105,19 @@ function Inner({ editingId }: { editingId: string | null }) {
   const canSave = first.trim().length > 0;
   const previewChild = { first: first.trim() || editing?.first || '?', color: editing?.color ?? t.primary };
 
-  // Shown when creating, and when editing a child who is still expected (so the
-  // born direction stays available as a birth confirmation). Never shown for an
-  // already-born child: that flip is meaningless and would not persist anyway,
-  // since saveChild's edit branch does not carry `expected`.
+  // Shown when creating, and when editing a child who is still expected (so the born
+  // direction stays available as a birth confirmation). Never for an already-born
+  // child: that flip is meaningless and would not persist anyway, since saveChild's
+  // edit branch does not carry `expected`.
   const canSetStatus = !editing || !!editing.expected;
 
-  // An already-born child cannot be edited into an expected one (the toggle is
-  // hidden for it), so `expecting` is only ever true here when creating or
-  // when the child was already expected.
   const stillExpecting = canSetStatus && expecting;
 
-  // Delete is gated behind typing the child's first name (front-loaded
-  // confirmation — the cascade is NOT undoable, so there's no undo toast).
-  // A server-backed child (has a serverId, mirrors the store's delete gating)
-  // can only be deleted durably while online in server mode; offline the next
-  // refresh would resurrect it, so block it. Local-mode children delete in memory.
+  // Delete is gated behind typing the child's first name: the cascade is NOT undoable,
+  // so the confirmation is front-loaded instead of an undo toast. A server-backed child
+  // (has a serverId, mirroring the store's own gating) can only be deleted durably
+  // while online in server mode, since offline the next refresh would resurrect it.
+  // Local-mode children delete in memory.
   const serverBacked = !!editing && editing.serverId != null;
   const deleteBlocked = serverBacked && !!connection && connection.mode === 'server' && offline;
   const nameConfirmed =
@@ -157,19 +153,18 @@ function Inner({ editingId }: { editingId: string | null }) {
   const onSave = () => {
     if (!canSave) return;
     const date = stillExpecting ? clampDueDate(year, month, day) : clampBirth(year, month, day);
-    // Flipping an existing expected child to Born IS a birth confirmation, so it
-    // goes through the same store transition Home's confirm sheet uses rather
-    // than a second implementation of it. saveChild runs first so any name or
-    // photo edits made in the same session are not lost, and it closes the
+    // Flipping an existing expected child to Born IS a birth confirmation, so it goes
+    // through the same store transition Home's confirm sheet uses. saveChild runs first
+    // so name or photo edits made in the same session are not lost, and it closes the
     // sheet; confirmBirth then reads fresh state and flips the flag.
     if (editing?.expected && !expecting) {
       saveChild({ first: first.trim(), last: last.trim(), birth: date, photo: photoChange, gender });
       confirmBirth(editing.id, date);
       return;
     }
-    // `expected` only takes effect when creating. saveChild's edit branch spreads
-    // the existing child and ignores it, which is safe here because the toggle is
-    // hidden for a born child, so an edit can only ever re-assert what is already set.
+    // `expected` only takes effect when creating: saveChild's edit branch spreads the
+    // existing child and ignores it. Safe here because the toggle is hidden for a born
+    // child, so an edit can only ever re-assert what is already set.
     saveChild({ first: first.trim(), last: last.trim(), birth: date, expected: stillExpecting, photo: photoChange, gender });
   };
 

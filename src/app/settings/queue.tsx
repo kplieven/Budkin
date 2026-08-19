@@ -32,33 +32,14 @@ import { useTheme } from '@/theme/useTheme';
 import type { Entry } from '@/types/models';
 
 /**
- * The offline write queue, read-only.
- *
- * Shows `budkin.queue.v1` (`src/data/queue.ts`) and nothing else: the entries
- * created on this device that `flushQueue` has yet to push. Deliberately NOT a
- * unified "everything unsynced" view: unsynced children, measurements and timers
- * reach the server down a different path (`flushUnsynced`, `flushPendingOps`),
- * and folding them in here would make the count on this screen mean something
- * different again from the two it already has to coexist with.
- *
- * Read-only by design. Nothing here removes an entry: `removeQueuedEntry` exists
- * for the write paths that own the record (a delete, a replace-by-timer), and a
- * discard offered from a viewer would drop a record the user can still see
- * elsewhere in the app, leaving two screens disagreeing about what exists.
- * Which screen that is depends on the type, so nothing here sends the user to
- * one: a queued `note` shows in the Notes tab and a queued `milestone` in the
- * Growth checklist, neither of them in History.
- *
- * The queue lives in AsyncStorage rather than in the store, which is what keeps
- * this screen clear of the zustand v5 selector trap: the list is `useState` fed
- * by `loadQueue()`, and the only things selected out of the store are object
- * references (`connection`, `children`, `flushQueue`, `refresh`) or a scalar
- * (`offline`). No selector here returns a freshly built array.
- *
- * The one button re-checks the connection and then flushes, in that order, so it
- * is the app's single retry affordance rather than a second, weaker one. That
- * sequence is `runQueueRetry` in `queueView.ts`, where it can be tested; `onSync`
- * below is only the wiring.
+ * The offline write queue, read-only. Shows `budkin.queue.v1` and nothing else:
+ * deliberately NOT a unified "everything unsynced" view, since children,
+ * measurements and timers reach the server down a different path (`flushUnsynced`,
+ * `flushPendingOps`) and folding them in would give this screen's count a third
+ * meaning. Read-only because a discard offered from a viewer would drop a record
+ * the user can still see elsewhere, leaving two screens disagreeing about what
+ * exists. The one button re-checks the connection and then flushes, in that order;
+ * that sequence is `runQueueRetry`, where it can be tested.
  */
 export default function OfflineQueue() {
   const t = useTheme();
@@ -71,25 +52,22 @@ export default function OfflineQueue() {
   const flushQueue = useAppStore((s) => s.flushQueue);
   const refresh = useAppStore((s) => s.refresh);
 
-  // `null` is "not read yet", which is distinct from an empty queue: the empty
-  // card claims everything is synced, and it must not flash up before the read
-  // that would contradict it lands.
+  // `null` is "not read yet", distinct from an empty queue: the empty card claims
+  // everything is synced, and it must not flash up before the read that would
+  // contradict it lands.
   const [queue, setQueue] = useState<Entry[] | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [result, setResult] = useState<string | null>(null);
-  // Snapshot taken with each read, purely so the day headings ("Today",
-  // "Yesterday") have a reference point. Deliberately not the store's `now`,
-  // which ticks every second and would re-render this whole list that often for
-  // labels that change twice a day.
+  // Reference point for the day headings. Not the store's `now`, which ticks every
+  // second and would re-render the whole list for labels that change twice a day.
   const [readAt, setReadAt] = useState(() => Date.now());
 
   const read = useCallback(async () => {
     const q = await loadQueue();
     setQueue(q);
     setReadAt(Date.now());
-    // A sync result describes the flush that produced it and nothing else.
-    // Leaving it up would let "Uploaded 3 entries." sit over a queue read
-    // minutes later, on a return visit that uploaded nothing.
+    // A sync result describes the flush that produced it and nothing else: leaving
+    // it up would let "Uploaded 3 entries." sit over a later read that uploaded none.
     setResult(null);
     return q;
   }, []);
@@ -97,8 +75,7 @@ export default function OfflineQueue() {
   // On focus rather than on mount alone. `queueCount` in the store is not a
   // reliable mirror of the file: the Android nap widget enqueues from a headless
   // task in another process and never touches the store, so the only way to know
-  // what is really queued is to read it. Coming back from elsewhere in the app
-  // re-reads for the same reason.
+  // what is really queued is to read it.
   useFocusEffect(
     useCallback(() => {
       void read();
@@ -110,24 +87,22 @@ export default function OfflineQueue() {
   const count = queue?.length ?? 0;
   const block = syncBlockedBy({ loaded, serverMode });
   // At most one line ever shows under the button: `offlineHint` stays quiet in
-  // local mode (the only state `syncBlockedHint` speaks in) and quiet again once
-  // a press has been answered below.
+  // local mode, the only state `syncBlockedHint` speaks in, and quiet again once a
+  // press has been answered.
   const showResult = result != null && !syncing;
   const blockedHint = syncBlockedHint(block);
   const connectionHint = offlineHint({ offline, block, answered: showResult });
   const typeCounts = queueTypeCounts(queue ?? []);
-  // Grouped by the entry's OWN timestamp, not by when it was enqueued: the queue
-  // records no enqueue time (`Entry` has no such field and `budkin.queue.v1` is
-  // not migrated for this screen), and the entry's timestamp is the one the user
-  // recognises. Same grouping as History, so a queued entry sits under the day
+  // Grouped by the entry's OWN timestamp: the queue records no enqueue time, and
+  // this is the same grouping as History, so a queued entry sits under the day
   // heading it will still have once it lands.
   const groups = groupByDay(queue ?? [], readAt);
 
   const onSync = useCallback(async () => {
     setSyncing(true);
-    // The whole sequence, including the order of the two awaits and when the
-    // counts are taken, lives in `runQueueRetry`. `read` doubles as this
-    // screen's own re-read, so the list and the counts always agree.
+    // The whole sequence, including the order of the two awaits and when the counts
+    // are taken, lives in `runQueueRetry`. `read` doubles as this screen's own
+    // re-read, so the list and the counts always agree.
     setResult(
       await runQueueRetry({
         read,
@@ -147,10 +122,9 @@ export default function OfflineQueue() {
 
   const summaryCard = (
     <View style={{ ...group, padding: 16, marginBottom: 4 }}>
-      {/* Headline AND hint gate on `loaded`, together. Splitting them is what
-          made the first paint of every visit read "Reading the queue" over
-          "Nothing is waiting right now.", which is the synced-and-settled claim
-          this screen exists to be trusted about. */}
+      {/* Headline AND hint gate on `loaded` together: split them and the first paint
+          reads "Reading the queue" over "Nothing is waiting right now.", which is
+          the synced-and-settled claim this screen exists to be trusted about. */}
       <Txt weight={700} size={16}>
         {loaded ? queueSummaryLine(count) : 'Reading the queue'}
       </Txt>
@@ -182,13 +156,9 @@ export default function OfflineQueue() {
         </View>
       )}
 
-      {/* Labelled "Retry connection" to a screen reader because, announced on
-          its own with none of the card around it, a bare "Retry" says nothing
-          about what is being retried. Not a match with the offline banner any
-          more: wherever this screen is offered at all, the banner announces
-          "Offline, open the offline queue" instead (`offlineBanner.ts`). It
-          keeps the old wording only in local mode, which is the one mode that
-          never sends anyone here. */}
+      {/* Labelled "Retry connection" to a screen reader: announced on its own with
+          none of the card around it, a bare "Retry" says nothing about what is
+          being retried. */}
       <Pressable
         onPress={() => void onSync()}
         disabled={block != null || syncing}
@@ -212,10 +182,8 @@ export default function OfflineQueue() {
       >
         {syncing && <ActivityIndicator size="small" color={block != null ? t.dim : t.onPrimary} />}
         <Txt unselectable weight={700} size={15} color={block != null ? t.faint : t.onPrimary}>
-          {/* "Retry", not "Sync now": the press re-checks the connection first
-              and uploads second, so "Retry" names the whole of it. It is also
-              the app's one retry affordance now, the banner having become the
-              way here rather than a second, weaker re-check. */}
+          {/* "Retry", not "Sync now": the press re-checks the connection first and
+              uploads second, so "Retry" names the whole of it. */}
           {syncing ? 'Retrying…' : 'Retry'}
         </Txt>
       </Pressable>
@@ -226,8 +194,8 @@ export default function OfflineQueue() {
         </Txt>
       )}
       {/* Under a LIVE button, not a greyed one: this route is a stack screen on
-          mobile with no offline banner over it, so without this the connection
-          being down is a fact the screen never states. */}
+          mobile with no offline banner over it, so without this the connection being
+          down is a fact the screen never states. */}
       {connectionHint != null && (
         <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 8, lineHeight: 18 }}>
           {connectionHint}
@@ -261,9 +229,9 @@ export default function OfflineQueue() {
               const color = t.activity[e.type];
               const detail = detailFor(e);
               const who = attributionFor(e.childId, children);
-              // `entryTimestamp` would prefer an interval's end; the queue is
-              // about when the thing happened, and an entry with no end yet has
-              // only a start, so the start is the one time every shape has.
+              // `entryTimestamp` would prefer an interval's end; an entry with no
+              // end yet has only a start, so the start is the one time every shape
+              // has.
               const at = e.type === 'feeding' || e.type === 'sleep' || e.type === 'pumping' || e.type === 'tummy'
                 ? e.start
                 : e.time;
@@ -303,10 +271,9 @@ export default function OfflineQueue() {
         </Fragment>
       ))}
 
-      {/* The queue carries no enqueue time, no retry count and no last error:
-          `Entry` has none of those fields and `budkin.queue.v1` is not migrated
-          for this screen. Saying so is better than leaving a user to wonder why
-          a stuck entry never explains itself. */}
+      {/* The queue carries no enqueue time, no retry count and no last error, so say
+          so rather than leave a user wondering why a stuck entry never explains
+          itself. */}
       {count > 0 && (
         <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 18, marginHorizontal: 4, lineHeight: 17 }}>
           Budkin does not record why an upload failed, so an entry that keeps

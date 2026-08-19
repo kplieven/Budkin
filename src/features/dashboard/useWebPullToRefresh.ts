@@ -9,11 +9,7 @@ import {
   shouldTrigger,
 } from '@/features/dashboard/pullToRefresh';
 
-/**
- * True only in a touch-capable browser (phones/tablets) — never on a
- * mouse-driven laptop (`pointer: fine`), and never on native. Evaluated once;
- * `matchMedia('(pointer: coarse)')` is stable for the life of the session.
- */
+/** Evaluated once: the media query is stable for the life of the session. */
 const isTouchWeb =
   Platform.OS === 'web' &&
   typeof window !== 'undefined' &&
@@ -21,31 +17,18 @@ const isTouchWeb =
   window.matchMedia('(pointer: coarse)').matches;
 
 /**
- * Custom pull-to-refresh for touch-capable web, where React Native's
- * `RefreshControl` is an inert stub (it renders a bare View and drops
- * `onRefresh`). Attaches touch listeners to the ScrollView's DOM node: a
- * downward drag while scrolled to the top tracks the finger 1:1 (with an
- * Android-style rubber-band past the ceiling), and releasing past the threshold
- * runs `onRefresh`. Release always eases back with `withTiming`.
+ * Pull-to-refresh for touch-capable web, where React Native's `RefreshControl` is an
+ * inert stub: it renders a bare View and drops `onRefresh`.
  *
- * No-op on native (use the platform `RefreshControl`) and on mouse-driven web,
- * which has no manual refresh gesture at all: it leans on the auto-refresh when
- * the app or the browser tab regains focus (`src/app/_layout.tsx`). The offline
- * banner and the desktop pill are no longer a second one: in server mode they
- * open the queue screen, and the re-check is its Retry button. The indicator is driven
- * entirely by the `pull` shared value, so at rest (0) it is simply transparent —
- * no mount/unmount bookkeeping.
+ * No-op on native and on mouse-driven web, which has no manual refresh gesture and leans
+ * on the auto-refresh when the tab regains focus. While dragging, the caller shows a
+ * determinate glyph rotated by `glyphStyle`; only once released into a refresh does
+ * `refreshing` flip true, so spinning always means "working".
  *
- * While dragging, the caller shows a determinate glyph rotated by `glyphStyle`
- * (progress, not motion); only once released into a refresh does `refreshing`
- * flip true and the caller swap in a spinner. Spinning always means "working".
- *
- * `suppressed` lets a caller switch the gesture off for the length of some other
- * gesture that owns the finger. Insights passes it while a drag is scrubbing the
- * Rhythm plot's crosshair: these listeners sit on the scroll node's DOM and
- * inspect neither `scrollEnabled` nor `e.target`, so without it a scrub that
- * drifts downward at the top of the page reloads the screen. It defaults to
- * false, so the four callers that have no competing gesture pass nothing.
+ * `suppressed` switches the gesture off for the length of another gesture that owns the
+ * finger. Insights passes it while a drag is scrubbing the Rhythm plot's crosshair: these
+ * listeners sit on the scroll node's DOM and inspect neither `scrollEnabled` nor
+ * `e.target`, so without it a scrub drifting downward at the top of the page reloads.
  */
 export function useWebPullToRefresh(
   scrollRef: RefObject<ScrollView | null>,
@@ -54,25 +37,21 @@ export function useWebPullToRefresh(
 ) {
   const pull = useSharedValue(0);
   const [refreshing, setRefreshing] = useState(false);
-  // Read through a ref inside the handlers, deliberately NOT in the effect's
-  // dependency array: depending on it would tear the listeners down and rebuild
-  // them on every scrub start and end, discarding the in-progress gesture state
-  // (`startY`, `busy`) each time. Synced by a no-dep effect that runs after
-  // every render, so nothing is mutated during render (the React Compiler is
-  // on). Same shape as the `onScrubEnd` ref in SleepHeatmap.
+  // Read through a ref inside the handlers, deliberately NOT in the effect's dependency
+  // array: depending on it would tear the listeners down and rebuild them on every scrub
+  // start and end, discarding the in-progress gesture state each time. Synced by a no-dep
+  // effect so nothing is mutated during render, since the React Compiler is on.
   const suppressedRef = useRef(suppressed);
   useEffect(() => {
     suppressedRef.current = suppressed;
   });
 
-  // Puck position/fade: opacity ramps in with the pull, and it rides down with it.
   const style = useAnimatedStyle(() => ({
     opacity: Math.min(1, pull.value / PULL_TRIGGER_PX),
     transform: [{ translateY: pull.value }],
   }));
 
-  // Determinate drag glyph: a chevron that rotates from down (0) to up (180°) as
-  // the pull approaches the trigger — reflects where it's dragged, does not spin.
+  // Rotates from down to up as the pull approaches the trigger: progress, not motion.
   const glyphStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${Math.min(1, pull.value / PULL_TRIGGER_PX) * 180}deg` }],
   }));
@@ -100,19 +79,11 @@ export function useWebPullToRefresh(
     };
     const onMove = (e: TouchEvent) => {
       if (startY == null || busy) return;
-      // Suppression usually lands mid-drag rather than at touch-down: the caller
-      // sets it from a React state update on the very touch that starts the
-      // competing gesture, so the ref only catches up a commit later and the
-      // guard in `onStart` above misses it. Abandoning here is what actually
-      // does the work. `startY = null` both stops this drag driving the
-      // indicator and disarms `finish` below, so the gesture is dead for good
-      // rather than resuming if the flag clears mid-drag.
-      //
-      // Ease back rather than dropping to 0, so a pull that was already part
-      // drawn retracts the same way a released-too-short one does instead of
-      // stranding a half-drawn indicator on screen. `busy` is checked first on
-      // purpose: a refresh that already committed is left to finish and unwind
-      // through its own `.finally`, since its spinner means real work is running.
+      // Suppression usually lands mid-drag rather than at touch-down: the caller sets it
+      // from a React state update on the very touch that starts the competing gesture, so
+      // the ref catches up a commit later and the guard in `onStart` misses it.
+      // `startY = null` also disarms `finish`, so the gesture is dead for good rather
+      // than resuming if the flag clears mid-drag.
       if (suppressedRef.current) {
         startY = null;
         easeTo(0, 320);
@@ -120,7 +91,7 @@ export function useWebPullToRefresh(
       }
       const dy = e.touches[0].pageY - startY;
       if (dy > 0 && node.scrollTop <= 0) {
-        // Direct assignment tracks the finger 1:1 and cancels any easing in flight.
+        // Direct assignment tracks the finger and cancels any easing in flight.
         pull.value = pullOffset(dy);
         if (pull.value > 2 && e.cancelable) e.preventDefault();
       } else if (pull.value !== 0) {
@@ -129,24 +100,22 @@ export function useWebPullToRefresh(
     };
     const finish = () => {
       if (startY == null) return;
-      // Re-checked rather than left to `onMove`, which cannot cover every case:
-      // the suppression flag can land between the last touchmove and touchend,
-      // with `pull.value` already past the threshold from earlier moves that ran
-      // while the ref was still stale. Without this the release would go straight
-      // into a refresh. Falling through to the else branch still eases back.
+      // Re-checked rather than left to `onMove`: the suppression flag can land between
+      // the last touchmove and touchend, with `pull.value` already past the threshold
+      // from earlier moves that ran while the ref was stale.
       const reached = !suppressedRef.current && shouldTrigger(pull.value);
       startY = null;
       if (reached) {
         busy = true;
-        setRefreshing(true); // released past the threshold → now spinning/working
+        setRefreshing(true);
         easeTo(PULL_REST_PX, 180); // settle to the resting spot while loading
         Promise.resolve(onRefresh()).finally(() => {
           busy = false;
           setRefreshing(false);
-          easeTo(0, 320); // eased snap-back
+          easeTo(0, 320);
         });
       } else {
-        easeTo(0, 320); // eased snap-back (did not reach the threshold)
+        easeTo(0, 320);
       }
     };
 

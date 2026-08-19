@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// In-memory AsyncStorage so the store's data modules (timers/queue/servers) load
-// under the node test environment.
+// In-memory AsyncStorage so the store's data modules load under node.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
 vi.mock('@react-native-async-storage/async-storage', () => ({
   default: {
@@ -15,18 +14,16 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-// `@/data/secureKv` pulls in expo-secure-store (a native module, transitively
-// react-native) via both `@/data/storage` and `@/data/servers`; stub it so the
-// store module can be imported under node.
+// `@/data/secureKv` pulls in expo-secure-store, a native module, so the store
+// cannot be imported under node without this stub.
 vi.mock('@/data/secureKv', () => ({
   kvGet: vi.fn(async () => null),
   kvSet: vi.fn(async () => {}),
   kvRemove: vi.fn(async () => {}),
 }));
 
-// `@/lib/photoFile` pulls in expo-file-system and react-native's Platform,
-// both native; stub it so the store module (saveChild's deferred-photo path)
-// imports under node.
+// Same for `@/lib/photoFile`, which pulls in expo-file-system and react-native's
+// Platform on saveChild's deferred-photo path.
 vi.mock('@/lib/photoFile', () => ({
   reopenPhotoFile: vi.fn(() => undefined),
   discardPhotoFile: vi.fn(async () => {}),
@@ -47,8 +44,8 @@ vi.mock('@/widgets/snapshot', async (importActual) => {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-// Fresh store + sync module per test (the sync module carries `started`/`lastKey`
-// singleton state, so it must be reset between scenarios).
+// Fresh store + sync module per test: the sync module carries `started`/`lastKey`
+// singleton state.
 async function setup() {
   vi.resetModules();
   const { buildWidgetSnapshot } = await import('@/widgets/snapshot');
@@ -78,8 +75,8 @@ describe('initWidgetSync gating', () => {
   });
 
   it('rebuilds and pushes when the day boundary changes', async () => {
-    // The snapshot carries `rhythmOriginHour` for the widget to window against,
-    // so a Settings change that is not in this gate would never reach the widget.
+    // The snapshot carries `rhythmOriginHour` for the widget to window against, so
+    // a Settings change missing from the gate would never reach the widget.
     const { build, push, useAppStore } = await setup();
     const builds = build.mock.calls.length;
     const pushes = push.mock.calls.length;
@@ -93,9 +90,9 @@ describe('initWidgetSync gating', () => {
 
   it('rebuilds and pushes when timer data changes', async () => {
     const { build, push, useAppStore } = await setup();
-    // A child has to be selected first: the snapshot's running-nap lookup is
-    // scoped (`runningTimer`), so with no selected child a new timer changes
-    // nothing in the snapshot and the identical-key dedupe would skip the push.
+    // A child has to be selected first: the snapshot's running-nap lookup is scoped,
+    // so with no selected child a new timer changes nothing in the snapshot and the
+    // identical-key dedupe would skip the push.
     useAppStore.setState({
       children: [{ id: 'c1', first: 'Ada', last: 'L', birth: 0, color: '#ffffff' }],
       selectedChildId: 'c1',

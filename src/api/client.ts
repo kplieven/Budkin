@@ -3,10 +3,7 @@
  *
  * Baby Buddy is Django REST Framework at `<server>/api/`, token auth
  * (`Authorization: Token <key>`), JSON only, LimitOffset pagination, ISO 8601
- * datetimes. Note the non-obvious resource slugs: diaper changes are `changes`
- * and tummy time is `tummy-times`.
- *
- * Docs: https://docs.baby-buddy.net/api/
+ * datetimes. Docs: https://docs.baby-buddy.net/api/
  */
 
 import { INTAKE_LEVELS, feedAmountIsVolume } from '@/lib/activities';
@@ -42,10 +39,8 @@ import type {
 } from '@/types/models';
 
 export class ApiError extends Error {
-  /** `cause` carries whatever actually failed. The transport errors below are
-   *  written for the user and say nothing about what went wrong underneath; a
-   *  client-side failure (a body that could not be serialized, say) used to be
-   *  reported as an unreachable server and left no trace of itself anywhere. */
+  /** `cause` carries whatever actually failed. The transport errors below are written
+   *  for the user, so without it a client-side failure reads as an unreachable server. */
   constructor(
     public status: number,
     message: string,
@@ -74,12 +69,10 @@ export interface ServerTimer {
 const toISO = (ms: number) => new Date(ms).toISOString();
 const fromISO = (s: string) => new Date(s).getTime();
 
-// Date-only fields ('YYYY-MM-DD'): measurement dates, treatment from/to dates
-// and a child's birth_date. The whole app treats these as LOCAL calendar days
-// (clampBirth yields local midnight, the child sheet reads local Y/M/D), so
-// both directions must stay in local time. `new Date('YYYY-MM-DD')` is NOT a
-// substitute for fromDateStr: it parses to UTC midnight, which west of UTC
-// displays a day early and walks the value back a day on every edit round-trip.
+// Date-only fields ('YYYY-MM-DD') are LOCAL calendar days app-wide, so both directions
+// must stay in local time. `new Date('YYYY-MM-DD')` is not a substitute: it parses to UTC
+// midnight, which west of UTC displays a day early and walks the value back a day on
+// every edit round-trip.
 export const toDateStr = (ms: number) => {
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -102,7 +95,7 @@ const MEAS_FIELD: Record<MeasurementKind, string> = {
   bmi: 'bmi',
 };
 
-// --- enum <-> API string mappings (Baby Buddy uses human-readable strings) ---
+// Baby Buddy stores feed type and method as human-readable strings.
 const FEED_TYPE_TO_API: Record<FeedType, string> = {
   breast: 'breast milk',
   formula: 'formula',
@@ -132,8 +125,8 @@ const FEED_METHOD_FROM_API: Record<string, FeedMethod> = {
   'self fed': 'self',
 };
 
-/** Activity type -> REST resource slug (note: diaper=changes, tummy=tummy-times).
- *  Baths have no Baby Buddy resource — they ride on generic Notes. */
+/** Baths, milestones and treatments have no Baby Buddy resource of their own: they ride
+ *  on generic Notes, tagged. */
 const ENDPOINT: Record<ActivityType, string> = {
   feeding: 'feedings',
   sleep: 'sleep',
@@ -147,14 +140,8 @@ const ENDPOINT: Record<ActivityType, string> = {
   milestone: 'notes',
 };
 
-/**
- * Baby Buddy DurationField <-> whole seconds, for the medication
- * `next_dose_interval`. Django REST Framework serializes a duration as
- * `[D ]HH:MM:SS[.ffffff]` (an optional leading day count), so parse that shape
- * back to seconds and format the reverse. A bare numeric string is tolerated on
- * read. Returns undefined for anything unparseable so a malformed value degrades
- * to "no interval" rather than NaN.
- */
+/** DRF serializes a DurationField as `[D ]HH:MM:SS[.ffffff]`, the day count optional. A
+ *  bare numeric string is tolerated; anything unparseable degrades to undefined. */
 export function durationToSec(raw: string): number | undefined {
   const str = String(raw).trim();
   const m = str.match(/^(?:(\d+)\s+)?(\d+):(\d{1,2}):(\d{1,2})(?:\.\d+)?$/);
@@ -175,72 +162,39 @@ export function secToDuration(sec: number): string {
   return days ? `${days} ${hms}` : hms;
 }
 
-// --- bath <-> Baby Buddy Note (tagged-note) serialization ---
-// Baby Buddy has no bath resource, so a bath is a Note tagged `bath` plus the
-// wash size. The tags are the source of truth on read; the body is human copy
-// only, so other Baby Buddy clients see a meaningful entry. User tags are kept
-// distinct from these structural tags so they survive a round-trip untouched.
+// A bath is a Note tagged `bath` plus the wash size. Tags are the source of truth on
+// read; the body is human copy only, so other Baby Buddy clients see a meaningful entry.
 //
-// The size tag was a bare `small`/`big` until 2026-08 and is now `bath:quick`/
-// `bath:full`, matching the `intake:` and `mk:` prefix convention. The bare
-// words are still READ (a note the migration script has not reached, or one an
-// older Budkin wrote, must not come back as the wrong wash) and never written.
-// They stay in the structural list so they remain stripped from user tags and
-// hidden from the picker: freeing two ordinary English words would let a user
-// tag literally named `big` read back as a full bath.
+// The bare `small`/`big` tags predate `bath:quick`/`bath:full`: still read so an
+// unmigrated note does not come back as the wrong wash, never written, and listed here
+// so they stay stripped. Freeing them would let a user tag named `big` read back as a
+// full bath.
 const BATH_STRUCTURAL_TAGS = ['bath', 'bath:quick', 'bath:full', 'small', 'big'];
 
-/**
- * Tags the tag picker must never surface or let the user create: the bath
- * structural tags plus the breastfeeding "both" side markers (`left`/`right`)
- * that `save()` folds into an entry's tags. They must still round-trip untouched
- * on entries that legitimately carry them, so this set only gates the UI
- * (display + creation), not serialization.
- */
+/** Gates the UI (display and creation) only, never serialization: entries that
+ *  legitimately carry these must round-trip untouched. */
 export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'right']);
 
 const tagNames = (raw: unknown): string[] =>
   (Array.isArray(raw) ? raw : []).map((t: any) => (typeof t === 'string' ? t : t.name));
 
-// --- breastfeeding intake <-> Baby Buddy tag ---
-// Baby Buddy's `Feeding.amount` is a plain float that it reads as a VOLUME and
-// sums into its feeding-amount statistics, so a subjective intake level must not
-// be written there: a level 3 would land in those totals as 3 ml. The level
-// rides as a structural tag instead and `amount` goes out null.
+// Baby Buddy's `Feeding.amount` is a VOLUME it sums into its feeding statistics, so a
+// subjective intake level must not go there: level 3 would land in those totals as 3 ml.
+// The level rides as a structural tag instead and `amount` goes out null. Index 0..2 ==
+// level 1..3.
 //
-// The names are prefixed, like the milestone `mk:` tags, so they can never be
-// mistaken for the bare `left`/`right` start-side markers that a breastfeed also
-// carries, nor collide with a tag the user typed themselves.
-//
-// KNOWN LIMITATION: the scheme is name-based, so a tag named `intake:...` that
-// the user had already created in Baby Buddy before Budkin claimed the prefix is
-// indistinguishable from one of ours. It is dropped on read and not written
-// back, so a later edit removes it from the server. `isHiddenTag` stops Budkin
-// offering to create one, but it cannot un-create an existing one. Preserving it
-// is not free: keeping such a tag through a write is exactly what would let a
-// stale level survive a level change or a switch to a bottle, which is the bug
-// the stripping exists to prevent. Given the prefix and how narrow the window
-// is, the trade favours never shipping a wrong level.
-// Index 0..2 == level 1..3.
+// Known limitation: name-based, so an `intake:…` tag the user already had is
+// indistinguishable from ours and a later edit strips it from the server.
 const INTAKE_TAGS = ['intake:little', 'intake:some', 'intake:lot'] as const;
 
 const isIntakeTag = (t: string): boolean => t.startsWith('intake:');
 
-/**
- * Bucket a legacy 1 to 10 intake score into a level, by thirds: 1-3 is a
- * little, 4-7 is some, 8-10 is a lot.
- *
- * Only ever applied to a number that arrived WITHOUT an intake tag, which means
- * it predates the level scale (an older Budkin) or was typed into Baby Buddy's
- * own UI. Baby Buddy's field is an unconstrained float, so any finite value has
- * to land somewhere.
- */
+/** Only for a number that arrived WITHOUT an intake tag, so it was typed into Baby
+ *  Buddy's own UI or predates the level scale. */
 function bucketLegacyIntake(score: number): 1 | 2 | 3 {
   return score <= 3 ? 1 : score <= 7 ? 2 : 3;
 }
 
-/** The intake level a server feeding carries: its tag if it has one, else its
- *  legacy numeric score bucketed. `null` when the feed records no intake. */
 function intakeLevelFromServer(tags: string[], amount: number | null): 1 | 2 | 3 | null {
   const i = INTAKE_TAGS.findIndex((t) => tags.includes(t));
   if (i >= 0) return (i + 1) as 1 | 2 | 3;
@@ -248,15 +202,9 @@ function intakeLevelFromServer(tags: string[], amount: number | null): 1 | 2 | 3
   return bucketLegacyIntake(amount);
 }
 
-// --- milestone <-> Baby Buddy Note (tagged-note) serialization ---
-// Baby Buddy has no milestone resource, so a reached milestone is a Note tagged
-// `milestone` (marker) + `mk:<key>` (which one). Same pattern as baths.
+// A reached milestone is a Note tagged `milestone` (marker) + `mk:<key>` (which one).
 const isStructuralMilestoneTag = (t: string): boolean => t === 'milestone' || t.startsWith('mk:');
 
-// --- treatment structural tags ---
-// A treatment is a Note tagged `treatment` plus its schedule; the full encoding
-// and the reasoning behind the tag/body split live with the serializers further
-// down.
 const TREATMENT_TAG = 'treatment';
 const TREATMENT_TOD_PREFIX = 'treatment:tod:';
 const TREATMENT_EVERY_PREFIX = 'treatment:every:';
@@ -264,20 +212,14 @@ const TREATMENT_PAUSED_TAG = 'treatment:paused';
 
 const isStructuralTreatmentTag = (t: string): boolean => t === TREATMENT_TAG || t.startsWith('treatment:');
 
-// --- gender structural tags ---
-// Baby Buddy's `Child` model carries only first_name / last_name / birth_date /
-// birth_time / slug / picture — there is no gender field, and DRF drops unknown
-// keys silently, so a `gender` sent to /api/children/ would vanish without an
-// error. A child's gender therefore rides as a `gender`-tagged note against that
-// child, the same channel baths, milestones and treatments use.
+// Baby Buddy's `Child` has no gender field, and DRF drops unknown keys silently, so a
+// `gender` sent to /api/children/ would vanish without an error. Gender rides as a
+// `gender`-tagged note instead, the same channel baths and milestones use.
 const GENDER_TAG = 'gender';
 const GENDER_PREFIX = 'g:';
 
 const isStructuralGenderTag = (t: string): boolean => t === GENDER_TAG || t.startsWith(GENDER_PREFIX);
 
-/** True for any tag the picker must never surface or let the user create: the
- *  bath/side structural tags plus the milestone marker, mk:<key>, intake level
- *  and treatment schedule tags. */
 export function isHiddenTag(name: string): boolean {
   return (
     HIDDEN_TAGS.has(name) ||
@@ -288,35 +230,25 @@ export function isHiddenTag(name: string): boolean {
   );
 }
 
-/**
- * The single discriminator between the two things that share `/api/notes/`: a
- * bath carries the `bath` structural tag, a general note does not. Used by BOTH
- * partition paths (baths vs notes) so the classification can never diverge.
- */
+/** The single discriminator between the things sharing `/api/notes/`. */
 export function isBathNote(n: any): boolean {
   return tagNames(n?.tags).includes('bath');
 }
 
-/** Encode a bath entry as the body for a Baby Buddy Note (create/update).
- *  Runs `entry.wash` through `normalizeWash` rather than comparing it raw: an
- *  entry sitting in the offline queue or pending-ops log since before the
- *  2026-08 rename still carries the literal `'big'`, and those two stores are
- *  not covered by `entityStore.ts`'s load-time normalization, so a bare
- *  comparison here would silently downgrade a full bath to a quick wash on
- *  the server. */
+/** `normalizeWash` rather than a raw compare: an entry sitting in the offline queue or
+ *  pending-ops log still carries the legacy literal `'big'`, since neither store gets
+ *  the load-time normalization, and a bare compare downgrades it to a quick wash. */
 export function bathToNoteBody(entry: BathEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t) && !isStructuralMilestoneTag(t));
   const full = normalizeWash(entry.wash) === 'full';
   return {
     child: childServerId,
     time: toISO(entry.time),
-    // Self-contained, so it reads as a real entry in Baby Buddy's own note list.
     note: full ? 'Full bath' : 'Quick wash',
     tags: ['bath', full ? 'bath:full' : 'bath:quick', ...userTags],
   };
 }
 
-/** Reconstruct a bath entry from a Baby Buddy Note that carries the `bath` tag. */
 export function noteToBathEntry(n: any, childId: string): BathEntry {
   const tags = tagNames(n.tags);
   return {
@@ -325,17 +257,12 @@ export function noteToBathEntry(n: any, childId: string): BathEntry {
     childId,
     type: 'bath',
     time: fromISO(n.time),
-    // `bath:full` is current, a bare `big` is pre-2026-08. Reading both means a
-    // note the migration has not reached still yields the right wash, and it
-    // self-heals: the next edit rewrites the note with the current tags.
+    // Self-healing: the next edit rewrites the legacy tags to the current ones.
     wash: tags.includes('bath:full') || tags.includes('big') ? 'full' : 'quick',
     tags: tags.filter((t) => !BATH_STRUCTURAL_TAGS.includes(t)),
   };
 }
 
-/** Reconstruct a general note from a Baby Buddy Note (one WITHOUT the `bath`
- *  tag). The `note` field is the primary body; all tag names are kept as-is
- *  (a general note carries no structural tags to strip). */
 export function noteToNoteEntry(n: any, childId: string): NoteEntry {
   return {
     id: `note-${n.id}`,
@@ -348,8 +275,7 @@ export function noteToNoteEntry(n: any, childId: string): NoteEntry {
   };
 }
 
-/** Encode a general note as the body for a Baby Buddy Note (create/update). The
- *  structural bath tags are stripped so a note can never be misread as a bath. */
+/** Structural bath tags are stripped so a note can never be misread as a bath. */
 export function noteToNoteBody(entry: NoteEntry, childServerId: number): Record<string, unknown> {
   return {
     child: childServerId,
@@ -359,13 +285,11 @@ export function noteToNoteBody(entry: NoteEntry, childServerId: number): Record<
   };
 }
 
-/** The single discriminator: a milestone note carries the `milestone` tag. */
 export function isMilestoneNote(n: any): boolean {
   return tagNames(n?.tags).includes('milestone');
 }
 
-/** Encode a milestone entry as the body for a Baby Buddy Note (create/update).
- *  Body is `🎉 <title>` with the optional parent note on a second line. */
+/** Body is `🎉 <title>` with the optional parent note on a second line. */
 export function milestoneToNoteBody(entry: MilestoneEntry, childServerId: number): Record<string, unknown> {
   const userTags = entry.tags.filter((t) => !isStructuralMilestoneTag(t));
   const note = entry.note?.trim();
@@ -377,9 +301,6 @@ export function milestoneToNoteBody(entry: MilestoneEntry, childServerId: number
   };
 }
 
-/** Reconstruct a milestone entry from a Baby Buddy Note carrying the `milestone`
- *  tag. `key` comes from the mk:<key> tag; the body's first line (emoji stripped)
- *  is the title snapshot and any later lines are the parent note. */
 export function noteToMilestoneEntry(n: any, childId: string): MilestoneEntry {
   const tags = tagNames(n.tags);
   const keyTag = tags.find((t) => t.startsWith('mk:'));
@@ -399,40 +320,27 @@ export function noteToMilestoneEntry(n: any, childId: string): MilestoneEntry {
   };
 }
 
-// --- treatment <-> Baby Buddy Note (tagged-note) serialization ---
-// Baby Buddy has no regimen resource, so a treatment is a Note tagged
-// `treatment` plus its schedule: `treatment:tod:<slot>` per chosen time of day,
-// or `treatment:every:<hours>`, plus `treatment:paused` while the treatment is
-// off. Same tagged-note pattern as baths and milestones.
+// A treatment is a Note tagged `treatment` plus its schedule: `treatment:tod:<slot>` per
+// chosen time of day, or `treatment:every:<hours>`, plus `treatment:paused` while off.
 //
-// Why the split between tags and body: the SCHEDULE rides in tags because it is
-// bounded (four slots, a whole number of hours), and a Baby Buddy tag name is
-// globally unique and shared by every record on the server. Putting a free-text
-// value like a medication name or a dosage unit in a tag would mint a new global
-// tag per treatment and pollute the tag list for every other client. So the
-// free-text and date fields ride in the note BODY instead, as a machine-readable
-// payload line beneath a human-readable summary. A body edited by hand in Baby
-// Buddy's own UI therefore degrades to the tag-borne schedule plus a best-effort
-// name, rather than losing the treatment altogether.
+// The split between tags and body matters: a Baby Buddy tag name is globally unique and
+// shared by every record on the server, so a free-text medication name would mint a new
+// global tag per treatment and pollute every other client's tag list. Only the bounded
+// schedule rides in tags. Free text and dates ride in the note body as a payload line
+// under a human-readable summary, so a body hand-edited in Baby Buddy's own UI degrades
+// to the tag-borne schedule plus a best-effort name rather than losing the treatment.
 //
-// KNOWN LIMITATION: the scheme is name-based, exactly like the `intake:` tags
-// above. A tag the user had already created called `treatment` (or `treatment:…`)
-// is indistinguishable from ours, and any note carrying it will read back here as
-// a regimen.
-/** Marks the machine-readable line in a treatment note's body. Versioned so a
- *  later encoding can be told apart from this one instead of being mis-parsed. */
+// Known limitation: name-based, like the `intake:` tags above.
+/** Versioned so a later encoding can be told apart rather than mis-parsed. */
 const TREATMENT_PAYLOAD_PREFIX = 'budkin-treatment-v1:';
 
 const TREATMENT_TIMES_OF_DAY: TreatmentTimeOfDay[] = ['morning', 'noon', 'evening', 'night'];
 
-/** The single discriminator: a treatment note carries the `treatment` tag. */
 export function isTreatmentNote(n: any): boolean {
   return tagNames(n?.tags).includes(TREATMENT_TAG);
 }
 
-/** The human-readable first line of a treatment note, e.g.
- *  "Omeprazol, 2.5 mL, morning and evening". Kept independent of the UI's label
- *  helpers so the API layer does not reach into `features/`. */
+/** The human-readable first line, e.g. "Omeprazol, 2.5 mL, morning and evening". */
 function treatmentSummary(treatment: Treatment): string {
   const dose = treatment.dosage == null ? '' : [String(treatment.dosage), treatment.dosageUnit].filter(Boolean).join(' ');
   const schedule =
@@ -444,7 +352,6 @@ function treatmentSummary(treatment: Treatment): string {
   return [treatment.name.trim(), dose, schedule].filter(Boolean).join(', ');
 }
 
-/** Encode a treatment as the body for a Baby Buddy Note (create/update). */
 export function treatmentToNoteBody(treatment: Treatment, childServerId: number): Record<string, unknown> {
   const payload: Record<string, unknown> = { name: treatment.name.trim(), fromDate: toDateStr(treatment.fromDate) };
   if (treatment.dosage != null) payload.dosage = treatment.dosage;
@@ -463,17 +370,16 @@ export function treatmentToNoteBody(treatment: Treatment, childServerId: number)
 
   return {
     child: childServerId,
-    // A regimen is not a point event; dating the note at its start is the one
-    // timestamp that means something, and `listChildTreatments` filters by tag rather
-    // than recency so an old start date can never push a treatment out of view.
+    // A regimen is not a point event: `time` carries its start date, and
+    // `listChildTreatments` filters by tag rather than recency so an old start date
+    // can never push a treatment out of view.
     time: toISO(treatment.fromDate),
     note: `${treatmentSummary(treatment)}\n${TREATMENT_PAYLOAD_PREFIX}${JSON.stringify(payload)}`,
     tags,
   };
 }
 
-/** The payload object encoded in a treatment note's body, or `null` when the body
- *  carries none (hand-edited in Baby Buddy, or written by an older client). */
+/** `null` when the body carries no payload line: hand-edited in Baby Buddy, or older. */
 function treatmentNotePayload(note: string): Record<string, unknown> | null {
   const line = note.split('\n').find((l) => l.trimStart().startsWith(TREATMENT_PAYLOAD_PREFIX));
   if (!line) return null;
@@ -488,13 +394,9 @@ function treatmentNotePayload(note: string): Record<string, unknown> | null {
 const asString = (v: unknown): string | undefined => (typeof v === 'string' && v.trim() ? v : undefined);
 const asNumber = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
-/**
- * Reconstruct a treatment from a Baby Buddy Note carrying the `treatment` tag. The tags are
- * the source of truth for the schedule and the paused flag; the body payload
- * supplies the name, dose, dates and free text. With no usable payload the treatment
- * still comes back with its schedule intact and the body's first line as its
- * name, which is what keeps a hand-edited note from destroying the record.
- */
+/** Tags are the source of truth for the schedule and the paused flag, the body payload
+ *  for everything else. With no usable payload the schedule and the body's first line
+ *  survive, so a hand-edited note cannot destroy the record. */
 export function noteToTreatment(n: any, childId: string): Treatment {
   const tags = tagNames(n.tags);
   const payload = treatmentNotePayload(String(n.note ?? '')) ?? {};
@@ -509,14 +411,12 @@ export function noteToTreatment(n: any, childId: string): Treatment {
     id: `treatment-${n.id}`,
     serverId: n.id,
     childId,
-    // Falls back to the note's first line, which is the human summary we wrote.
     name: asString(payload.name) ?? String(n.note ?? '').split('\n')[0]?.trim() ?? '',
     scheduleMode: isInterval ? 'everyHours' : 'timesOfDay',
     ...(isInterval ? { everyHours } : { timesOfDay }),
     dosage: asNumber(payload.dosage),
     dosageUnit: asString(payload.dosageUnit),
-    // The note's own time is exactly what `treatmentToNoteBody` wrote the start date
-    // from, so it is a lossless fallback for a missing payload.
+    // Lossless fallback: `treatmentToNoteBody` wrote `time` from this same date.
     fromDate: fromDate ? fromDateStr(fromDate) : startOfLocalDay(fromISO(n.time)),
     toDate: toDate ? fromDateStr(toDate) : undefined,
     condition: asString(payload.condition),
@@ -525,20 +425,16 @@ export function noteToTreatment(n: any, childId: string): Treatment {
   };
 }
 
-// --- gender <-> Baby Buddy Note (tagged-note) serialization ---
-// One note per child, tagged `gender` + `g:<value>`. An attribute rather than an
-// event, so unlike a bath its `time` carries no meaning beyond recency: the
-// NEWEST gender note for a child wins, which is what lets a re-write that failed
-// to find the old note still resolve to the right answer.
+// One note per child, tagged `gender` + `g:<value>`. An attribute rather than an event,
+// so `time` means nothing beyond recency: the newest gender note wins, which lets a
+// re-write that failed to find the old note still resolve to the right answer.
 
 const CHILD_GENDERS: ChildGender[] = ['girl', 'boy'];
 
-/** The single discriminator: a gender note carries the `gender` tag. */
 export function isGenderNote(n: any): boolean {
   return tagNames(n?.tags).includes(GENDER_TAG);
 }
 
-/** Encode a child's gender as the body for a Baby Buddy Note (create/update). */
 export function genderToNoteBody(gender: ChildGender, childServerId: number, atMs: number): Record<string, unknown> {
   return {
     child: childServerId,
@@ -548,8 +444,8 @@ export function genderToNoteBody(gender: ChildGender, childServerId: number, atM
   };
 }
 
-/** The gender a `gender`-tagged note records, or undefined when its `g:` tag is
- *  missing or holds a value this build doesn't know. */
+/** Undefined when the `g:` tag is missing or holds a value this build doesn't know,
+ *  so a retired gender degrades to "not recorded". */
 export function genderFromNote(n: any): ChildGender | undefined {
   const tags = tagNames(n?.tags);
   const tag = tags.find((t) => t.startsWith(GENDER_PREFIX));
@@ -557,26 +453,19 @@ export function genderFromNote(n: any): ChildGender | undefined {
   return CHILD_GENDERS.find((g) => g === value);
 }
 
-/** Local midnight of the day containing `ms`. Treatment dates are stored at local
- *  midnight, so a fallback derived from a timestamp has to be floored to it. */
+/** Treatment dates are stored at local midnight, so a timestamp fallback has to be
+ *  floored to it. */
 function startOfLocalDay(ms: number): number {
   const d = new Date(ms);
   d.setHours(0, 0, 0, 0);
   return d.getTime();
 }
 
-/**
- * Map a raw `/api/profile/` response onto our `Profile` shape. Baby Buddy's
- * `ProfileSerializer` nests the account fields (username/first/last/email)
- * under a `user` object, with `language`/`timezone` top-level on the profile
- * itself — NOT under a `settings` sub-object, despite the backing model
- * being named `Settings`. `dashboard_refresh_rate` is a real field on that
- * model but is deliberately excluded from `ProfileSerializer.Meta.fields`,
- * so it's never present on a stock server; mapped defensively in case a
- * fork/future version adds it. Optional chaining throughout so a missing or
- * reshaped response degrades to an all-undefined `Profile` instead of
- * throwing (the caller must never let this break the Settings screen).
- */
+/** `ProfileSerializer` nests the account fields under `user`, with `language`/`timezone`
+ *  top-level on the profile itself, NOT under a `settings` sub-object despite the backing
+ *  model being named `Settings`. `dashboard_refresh_rate` is excluded from
+ *  `ProfileSerializer.Meta.fields`, so it is absent on a stock server and mapped only in
+ *  case a fork adds it. A reshaped response degrades to undefined rather than throwing. */
 export function mapProfile(raw: unknown): Profile {
   const p = (raw ?? {}) as any;
   const u = p.user ?? {};
@@ -597,7 +486,6 @@ export function normalizeServerUrl(raw: string): string {
   return url;
 }
 
-/** JSON body for a child create / PATCH. Pass `clearPicture` to remove the photo. */
 export function childBody(child: Child, clearPicture = false): Record<string, unknown> {
   const body: Record<string, unknown> = {
     first_name: child.first,
@@ -608,23 +496,17 @@ export function childBody(child: Child, clearPicture = false): Record<string, un
   return body;
 }
 
-/** Native only: the file object the multipart part is built from. Native bundles
- *  run expo/fetch rather than React Native's fetch, and its multipart encoder
- *  reads a part's `bytes()`; it cannot read RN's `{ uri, name, type }`
- *  descriptor, which used to throw inside `fetch` before a byte left the device.
- *  The picker layer attaches this (see `src/lib/photo.ts`), because building it
- *  needs `expo-file-system` and this file stays import-free of native modules.
- *
- *  Missing means the photo came from somewhere that could not open the file, so
- *  it fails loudly and distinctly: raised before `request()`, it never reaches
- *  the transport catch that would have blamed the connection. */
+/** Native bundles run expo/fetch, whose multipart encoder reads a part's `bytes()` and
+ *  cannot read RN's `{ uri, name, type }` descriptor: that throws inside `fetch` before
+ *  a byte leaves the device. The picker layer attaches the file object, since building
+ *  it needs `expo-file-system` and this file stays free of native imports. */
 function nativePicturePart(photo: PickedPhoto): UploadableFile {
   if (!photo.nativeFile) throw new ApiError(0, "Couldn't read the selected photo.");
   return photo.nativeFile;
 }
 
 /** Web only: cover-crop the picked image onto a 512px square canvas and return a
- *  compressed JPEG blob — the web picker has no crop/quality step of its own. */
+ *  compressed JPEG blob. The web picker has no crop/quality step of its own. */
 async function squarePictureBlob(photo: PickedPhoto): Promise<Blob> {
   const srcBlob = photo.file ? photo.file : await fetch(photo.uri).then((r) => r.blob());
   const bitmap = await createImageBitmap(srcBlob);
@@ -641,15 +523,10 @@ async function squarePictureBlob(photo: PickedPhoto): Promise<Blob> {
   );
 }
 
-/** Multipart child body including a picture upload. Native appends the picked
- *  file itself; web appends the square-cropped JPEG blob. Web is detected by
- *  the presence of `document` (no `react-native` import — keeps this file
- *  loadable under the node test runner).
- *
- *  The native part deliberately passes no filename: expo's FormData patch keeps
- *  the third argument only for a real `Blob`, so the part is named after the
- *  file itself (the picker's cache filename, extension included) rather than
- *  after `photo.name` as on web. */
+/** Web is detected by `document` rather than `Platform`, so this file needs no
+ *  `react-native` import and stays loadable under the node test runner. Native passes no
+ *  filename: expo's FormData patch keeps the third argument only for a real `Blob`, so
+ *  the native part is named after the picker's cache filename instead. */
 async function buildChildForm(child: Child, photo: PickedPhoto): Promise<FormData> {
   const form = new FormData();
   form.append('first_name', child.first);
@@ -665,24 +542,13 @@ async function buildChildForm(child: Child, photo: PickedPhoto): Promise<FormDat
 
 /** The RequestInit for a child write that carries a picture.
  *
- *  NATIVE ENCODES THE MULTIPART ITSELF rather than handing `fetch` the
- *  `FormData`. Handing it over looks correct and is not: the request reaches
- *  Baby Buddy, returns 200, and applies NOTHING, so the photo and any name or
- *  birthday riding the same request are silently lost, and the next refresh
- *  reverts them from the server's unchanged copy. Confirmed on device: encoding
- *  here and sending the bytes with our own boundary makes the identical upload
- *  land, and the same photo uploaded by `curl` always worked, so the payload and
- *  the server were never at fault.
- *
- *  The mechanism inside expo/fetch is NOT established. Reading its source, the
- *  `FormData` branch looks like it should work: it recognises the body, encodes
- *  it with `convertFormDataAsync` (the same encoder used here), and overrides
- *  Content-Type with the boundary. So do not "simplify" this back to passing the
- *  `FormData`, however wrong that looks: the difference is observed, repeatedly,
- *  and the simplification is exactly the bug.
- *
- *  Web keeps the `FormData` path, where the browser owns the encoding and this
- *  has always worked. */
+ *  NATIVE ENCODES THE MULTIPART ITSELF rather than handing `fetch` the `FormData`.
+ *  Handing it over looks correct and is not: the request reaches Baby Buddy, returns 200,
+ *  and applies nothing, so the photo and any name or birthday riding along are silently
+ *  lost and the next refresh reverts them. Confirmed on device; the same upload by `curl`
+ *  always worked. The mechanism inside expo/fetch was never established, and reading its
+ *  source the `FormData` branch looks like it should work, so do not "simplify" this back
+ *  to passing the `FormData`. Web keeps that path, where the browser owns the encoding. */
 async function pictureInit(method: 'POST' | 'PATCH', child: Child, photo: PickedPhoto): Promise<RequestInit> {
   const form = await buildChildForm(child, photo);
   if (typeof document !== 'undefined') return { method, body: form };
@@ -691,9 +557,7 @@ async function pictureInit(method: 'POST' | 'PATCH', child: Child, photo: Picked
   return {
     method,
     body: body as unknown as BodyInit,
-    // Ours, so it cannot go missing. `request()` only defaults Content-Type to
-    // JSON when the body is not a FormData, and an explicit header here wins
-    // over that default.
+    // Explicit, so the boundary cannot go missing: this wins over `request()`'s default.
     headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
   };
 }
@@ -710,29 +574,21 @@ export class BabybuddyClient {
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
     let res: Response;
     const method = init?.method ?? 'GET';
-    // Away from the home LAN the server address often black-holes: `fetch`
-    // then neither resolves nor rejects until the platform's socket timeout,
-    // which can be minutes. Abort instead of hanging: 10s for a read, 20s for
-    // a mutation. A slow write deliberately gets more room than a slow read,
-    // because aborting a write the server actually committed re-queues it and
-    // risks a duplicate, so the write budget errs on the generous side.
-    // RN's fetch supports AbortController natively; no polyfill involved.
+    // Away from the home LAN the server address often black-holes, and `fetch` then
+    // neither resolves nor rejects until the platform's socket timeout, which can be
+    // minutes. A write gets more room because aborting one the server actually committed
+    // re-queues it and risks a duplicate.
     const timeoutMs = method === 'GET' ? 10000 : 20000;
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const isForm = typeof FormData !== 'undefined' && init?.body instanceof FormData;
-      // On web, let a mutating request outlive the page. An installed PWA freezes
-      // its webview the instant it is backgrounded — locking the phone right after
-      // a log is saved is the common case — which cancels a normal in-flight fetch
-      // and drops the write to the offline queue, where it sits (with no "offline"
-      // signal, since the app never actually went offline) until the next
-      // foreground refresh replays it. `keepalive` tells the browser to complete
-      // the request regardless. Web only (native fetch has no such freeze and does
-      // not support the flag); never for FormData (a photo upload can exceed
-      // keepalive's 64KB body budget); writes only (a GET has no side effect to
-      // lose). The abort timer above does not fight keepalive: freezing the page
-      // freezes the timer with it, so a keepalive write still completes.
+      // Let a mutating request outlive the page. An installed PWA freezes its webview the
+      // instant it is backgrounded (locking the phone right after saving a log is the
+      // common case), which cancels an in-flight fetch and drops the write to the offline
+      // queue with no "offline" signal until the next foreground refresh. Never for
+      // FormData: a photo upload can exceed keepalive's 64KB body budget. The abort timer
+      // does not fight it, since freezing the page freezes the timer.
       const keepalive = typeof document !== 'undefined' && !isForm && method !== 'GET';
       res = await fetch(`${this.apiBase}${path}`, {
         ...init,
@@ -747,14 +603,9 @@ export class BabybuddyClient {
         },
       });
     } catch (err) {
-      // Timed out vs unreachable: distinct copy, so a hung server reads
-      // differently from a wrong address, but the same status 0, so every
-      // existing catch that switches on it keeps working.
-      //
-      // The underlying error rides along as `cause`. Not every rejection here is
-      // the network: `fetch` also throws when it cannot serialize the body, and
-      // discarding that is how an upload that never left the device spent months
-      // reading as a connection problem.
+      // Timed out vs unreachable: distinct copy, same status 0, so callers switching on
+      // the status keep working. `cause` matters because not every rejection here is the
+      // network: `fetch` also throws when it cannot serialize the body.
       if (controller.signal.aborted) {
         throw new ApiError(0, 'Server took too long to respond.', { cause: err });
       }
@@ -779,14 +630,14 @@ export class BabybuddyClient {
     return (await res.json()) as T;
   }
 
-  /** Fetch the connected user's Baby Buddy account + general settings (read-only display). */
+  /** `/api/profile/` is read-only over the token API, so this is display only. */
   async getProfile(): Promise<Profile> {
     const raw = await this.request<unknown>('/profile/');
     return mapProfile(raw);
   }
 
-  /** List the server's tags for the picker. No create endpoint — Baby Buddy
-   *  auto-creates a tag when an entry is POSTed carrying a new name. */
+  /** No create endpoint: Baby Buddy auto-creates a tag when an entry is POSTed
+   *  carrying a new name. */
   async listTags(): Promise<Tag[]> {
     const data = await this.request<Paginated<any>>('/tags/?limit=100');
     return data.results.map((c) => ({
@@ -796,10 +647,8 @@ export class BabybuddyClient {
     }));
   }
 
-  /** No `color`: the avatar tint is a local concept Baby Buddy knows nothing
-   *  about, so inventing one here would key it to the server's list position
-   *  and move it under the child on the next fetch. `reconcileChildren` keeps
-   *  the persisted tint and assigns one to a genuinely new child. */
+  /** No `color`: the avatar tint is a local concept, so inventing one here would key it
+   *  to the server's list position and move it under the child on the next fetch. */
   async listChildren(): Promise<ServerChild[]> {
     const data = await this.request<Paginated<any>>('/children/?limit=100');
     return data.results.map((c) => ({
@@ -807,41 +656,23 @@ export class BabybuddyClient {
       serverId: c.id,
       first: c.first_name ?? '',
       last: c.last_name ?? '',
-      // birth_date is date-only: parse it as a LOCAL calendar day (fromDateStr),
-      // never with fromISO, which would read it as UTC midnight and desync it
-      // from clampBirth, matchServerChild and the childBody serialization.
+      // birth_date is date-only: parse as a LOCAL calendar day, never with fromISO,
+      // which reads it as UTC midnight and desyncs it from childBody's serialization.
       birth: c.birth_date ? fromDateStr(c.birth_date) : Date.now(),
       slug: c.slug,
       picture: c.picture ?? null,
     }));
   }
 
-  /** Resolve the path segment that addresses a single child.
+  /** Baby Buddy keys the CHILD endpoints by SLUG, not by numeric id: its `ChildViewSet`
+   *  sets `lookup_field = "slug"`, and only `TagViewSet` does the same. Every other
+   *  resource is keyed by id, which is why the calls below address `{serverId}`.
+   *  Addressing a child by numeric id 404s, which silently broke both delete and rename.
+   *  The slug is derived from the name, so a rename moves it and a cached copy goes
+   *  stale; `updateChild` re-stamps it from the PATCH response for that reason.
    *
-   *  Baby Buddy keys the CHILD endpoints by SLUG, not by numeric id: its
-   *  `ChildViewSet` sets `lookup_field = "slug"`, and only `TagViewSet` does the
-   *  same. Every other resource is keyed by id, which is why the entry, timer
-   *  and measurement calls below address `{serverId}` and are right as they
-   *  stand. Addressing a child by its numeric id 404s, which is what silently
-   *  broke both delete and rename.
-   *
-   *  The slug is DERIVED from the child's name, so it moves whenever the child
-   *  is renamed and a cached copy can go stale. `updateChild` re-stamps it from
-   *  the PATCH response for exactly that reason. When a child has no slug at all
-   *  (`uploadUnsynced` only learns the new numeric id when it pushes one, and a
-   *  child persisted before slugs were captured has none either), look it up by
-   *  `serverId`.
-   *
-   *  Undefined means "do not send the request": either the child was never
-   *  pushed, or the lookup positively established it is no longer on the server
-   *  (another device deleted it). The caller treats that as a no-op rather than
-   *  a failure, since the desired end state already holds. A child that IS
-   *  present but has no slug falls back to the numeric id, which is the one case
-   *  where a 404 is still possible and worth surfacing.
-   *
-   *  Propagates rather than swallows: `listChildren` raises `ApiError` on a 5xx
-   *  or a timeout, which is a genuine "could not reach the server" the callers
-   *  are set up to report. */
+   *  Undefined means "do not send the request": the child was never pushed, or the lookup
+   *  positively established it is gone, which the caller treats as a no-op. */
   private async childKey(child: Child): Promise<string | number | undefined> {
     if (child.slug) return child.slug;
     if (child.serverId == null) return undefined;
@@ -850,11 +681,8 @@ export class BabybuddyClient {
     return match.slug ?? child.serverId;
   }
 
-  /** Create a child on the server; uploads a picture when provided. Returns the
-   *  new server id, its slug and the stored picture URL. The slug matters: it is
-   *  how the child is addressed from here on (see `childKey`), and without
-   *  capturing it a child created this session could not be renamed or deleted
-   *  until the next refresh filled it in. */
+  /** Capturing the slug matters: without it a child created this session could not be
+   *  renamed or deleted until the next refresh filled it in. */
   async createChild(
     child: Child,
     photo?: PickedPhoto,
@@ -866,10 +694,9 @@ export class BabybuddyClient {
     return { id: res?.id, slug: res?.slug, picture: res?.picture ?? null };
   }
 
-  /** Update a child (requires a server-backed child). Applies the photo change
-   *  and returns the stored picture URL (null when cleared/absent) plus the
-   *  child's CURRENT slug, which a rename will have moved. Undefined when
-   *  skipped, i.e. the child was never pushed. */
+  /** Returns the stored picture URL (null when cleared or absent) plus the child's
+   *  CURRENT slug, which a rename will have moved. Undefined when skipped, i.e. the
+   *  child was never pushed. */
   async updateChild(
     child: Child,
     change: PhotoChange = { kind: 'none' },
@@ -885,9 +712,8 @@ export class BabybuddyClient {
     return { picture: res?.picture ?? null, slug: res?.slug };
   }
 
-  /** Delete a child on the server, addressed by slug (see `childKey`). Baby
-   *  Buddy cascades the child's feedings/sleep/changes/etc., so no per-entry
-   *  cleanup is needed. A never-pushed child has nothing to delete. */
+  /** Addressed by slug (see `childKey`). Baby Buddy cascades the child's
+   *  feedings/sleep/changes/etc., so no per-entry cleanup is needed. */
   async deleteChild(child: Child): Promise<void> {
     if (child.serverId == null) return;
     const key = await this.childKey(child);
@@ -917,10 +743,8 @@ export class BabybuddyClient {
         // level, recovered from the tag (or from a legacy score, bucketed).
         amount: feedAmountIsVolume(feedType, method) ? amount : intakeLevelFromServer(tags, amount),
         notes: f.notes || undefined,
-        // The intake tag is a wire detail, not one of the entry's own tags:
-        // `amount` is the local truth and `buildBody` re-derives the tag on the
-        // way out. Dropping it here is what keeps a changed level from shipping
-        // alongside the stale one.
+        // The intake tag is a wire detail, not one of the entry's own tags. Dropping it
+        // keeps a changed level from shipping alongside the stale one.
         tags: tags.filter((t) => !isIntakeTag(t)),
       };
     });
@@ -992,7 +816,6 @@ export class BabybuddyClient {
       // dosage is a plain number; dosage_unit is free text (never unit-converted).
       dosage: r.dosage != null ? Number(r.dosage) : undefined,
       dosageUnit: r.dosage_unit || undefined,
-      // next_dose_interval is a duration string; parse to seconds when present.
       nextDoseIntervalSec: r.next_dose_interval ? durationToSec(r.next_dose_interval) : undefined,
       notes: r.notes || undefined,
       tags: (r.tags ?? []).map((t: any) => (typeof t === 'string' ? t : t.name)),
@@ -1033,18 +856,12 @@ export class BabybuddyClient {
     }));
   }
 
-  /**
-   * Read the child's recent `/api/notes/` ONCE and partition it three ways:
-   * `milestone`-tagged notes become `MilestoneEntry`s, `bath`-tagged notes become
-   * `BathEntry`s, and everything else becomes general `NoteEntry`s. All three
-   * share this one endpoint, so a single fetch feeds them all — no double-fetch.
-   * Milestone is checked first, so a note carrying both marker tags is a milestone.
+  /** Baths, milestones and general notes share `/api/notes/`, so one fetch feeds all
+   *  three. Milestone is checked first, so a note carrying both markers is a milestone.
    *
-   * `treatment`-tagged notes are DROPPED here rather than returned: they are treatment
-   * regimens, not timeline events, and `listChildTreatments` fetches them in full by
-   * tag. Recognising them is still this method's job, because otherwise they
-   * would fall through to the general-notes bucket and show up in the Notes tab.
-   */
+   *  `treatment`-tagged notes are dropped: they are regimens, not timeline events, and
+   *  `listChildTreatments` fetches them by tag. Recognising them here is still necessary,
+   *  or they would fall through to general notes and show up in the Notes tab. */
   async listChildNotes(
     childId: string,
     limit = 100,
@@ -1064,40 +881,30 @@ export class BabybuddyClient {
     return { baths, milestones, notes };
   }
 
-  /**
-   * The child's treatment regimens, as `treatment`-tagged notes. Filtered server-side
-   * by tag (`NoteFilter` extends `TagsFieldFilter`) rather than read out of the
-   * recent-notes window: a treatment note is dated at the regimen's START, so a
-   * long-running treatment would otherwise fall off the end of `listChildNotes`
-   * and silently vanish from the other device.
-   */
+  /** Filtered server-side by tag (`NoteFilter` extends `TagsFieldFilter`) rather than
+   *  read out of the recent-notes window: a treatment note is dated at the regimen's
+   *  START, so a long-running one would fall off the end of `listChildNotes`. */
   async listChildTreatments(childId: string, limit = 100): Promise<Treatment[]> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childId}&tags=${TREATMENT_TAG}&ordering=-time&limit=${limit}`,
     );
-    // The tag filter is a server-side `tags__name in [...]` match, so re-check
-    // locally: an instance that ignores the filter would otherwise turn every
-    // note into a treatment.
+    // The tag filter is server-side, so re-check locally: an instance that ignores it
+    // would otherwise turn every note into a treatment.
     return data.results.filter((n: any) => isTreatmentNote(n)).map((n: any) => noteToTreatment(n, childId));
   }
 
-  /**
-   * Every child's gender in ONE request, keyed by the child's SERVER id. Notes
-   * come back newest-first, so the first note seen per child wins and an older
-   * duplicate (left behind by a write that couldn't find the previous note)
-   * loses without needing a cleanup pass.
-   *
-   * Unfiltered by child on purpose: one request covers the whole account, where
-   * per-child fetches would be one request per child on every load.
-   */
+  /** Keyed by the child's SERVER id. Notes come back newest-first, so the first note seen
+   *  per child wins and an older duplicate loses without needing a cleanup pass.
+   *  Unfiltered by child on purpose: one request covers the whole account, where
+   *  per-child fetches would be one request per child on every load. */
   async listGenders(limit = 200): Promise<Map<number, ChildGender>> {
     const data = await this.request<Paginated<any>>(
       `/notes/?tags=${GENDER_TAG}&ordering=-time&limit=${limit}`,
     );
     const out = new Map<number, ChildGender>();
     for (const n of data.results) {
-      // Re-check the tag locally: an instance that ignored the filter would
-      // otherwise read a plain note's absent `g:` tag as a real answer.
+      // Re-check locally: an ignored filter would read a plain note's absent `g:` tag as
+      // a real answer.
       if (!isGenderNote(n)) continue;
       const childServerId = typeof n.child === 'number' ? n.child : Number(n.child);
       const gender = genderFromNote(n);
@@ -1107,13 +914,9 @@ export class BabybuddyClient {
     return out;
   }
 
-  /**
-   * Write a child's gender, overwriting the existing `gender` note when there is
-   * one and deleting it when `gender` is undefined ("not recorded"). Reads
-   * before writing rather than caching the note id locally: the id would be one
-   * more thing to keep in sync across devices, and a gender is written rarely
-   * enough that the extra GET costs nothing.
-   */
+  /** Reads before writing rather than caching the note id locally: the id would be one
+   *  more thing to keep in sync across devices, and a gender is written rarely enough
+   *  that the extra GET costs nothing. */
   async setChildGender(childServerId: number, gender: ChildGender | undefined, atMs: number): Promise<void> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childServerId}&tags=${GENDER_TAG}&ordering=-time&limit=1`,
@@ -1128,7 +931,6 @@ export class BabybuddyClient {
     else await this.request('/notes/', { method: 'POST', body });
   }
 
-  /** Create a treatment on the server as a tagged note; returns its new server id. */
   async createTreatment(treatment: Treatment, childServerId: number): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>('/notes/', {
       method: 'POST',
@@ -1137,7 +939,6 @@ export class BabybuddyClient {
     return res?.id;
   }
 
-  /** Overwrite an already-synced treatment's note. */
   async updateTreatment(treatment: Treatment, childServerId: number): Promise<void> {
     if (treatment.serverId == null) return;
     await this.request(`/notes/${treatment.serverId}/`, {
@@ -1146,8 +947,8 @@ export class BabybuddyClient {
     });
   }
 
-  /** Delete a treatment's note. Deleting a treatment deletes the regimen only; the doses
-   *  already logged from it are ordinary medication entries and stay put. */
+  /** Deletes the regimen only: the doses already logged from it are ordinary medication
+   *  entries and stay put. */
   async deleteTreatment(serverId: number): Promise<void> {
     await this.request(`/notes/${serverId}/`, { method: 'DELETE' });
   }
@@ -1157,9 +958,8 @@ export class BabybuddyClient {
     const tags = entry.tags ?? [];
     switch (entry.type) {
       case 'feeding': {
-        // At the breast, `amount` is an intake level, and Baby Buddy would read
-        // any number in its `amount` as millilitres and sum it into the child's
-        // feeding totals. So the level goes out as a tag and `amount` as null.
+        // At the breast `amount` is an intake level, which Baby Buddy would read as
+        // millilitres and sum into the child's feeding totals, so it goes out as a tag.
         const isVolume = feedAmountIsVolume(entry.feedType, entry.method);
         const level = entry.amount == null ? null : INTAKE_LEVELS.bucket(entry.amount);
         const own = tags.filter((t) => !isIntakeTag(t));
@@ -1175,12 +975,10 @@ export class BabybuddyClient {
         };
       }
       case 'sleep':
-        // `nap` goes out explicitly so the CLIENT wins. Baby Buddy derives nap
-        // from its own server-side NAP_START_MIN/NAP_START_MAX when the field is
-        // absent, so omitting it (as this did) meant a manual Nap/Night choice
-        // silently reverted on the next `listSleep`. Sending it means Budkin's
-        // nap window overrides that Baby Buddy instance's own setting for
-        // everyone using it, not just this device.
+        // `nap` goes out explicitly so the client wins: Baby Buddy derives it from its own
+        // NAP_START_MIN/NAP_START_MAX when the field is absent, so omitting it makes a
+        // manual Nap/Night choice revert on the next `listSleep`. The tradeoff is that
+        // Budkin's nap window then overrides that instance's setting for everyone on it.
         return { child, start: toISO(entry.start), end: toISO(entry.end ?? entry.start), nap: entry.nap, notes: entry.notes ?? '', tags };
       case 'diaper':
         return {
@@ -1214,17 +1012,14 @@ export class BabybuddyClient {
       case 'temperature':
         return { child, time: toISO(entry.time), temperature: entry.value, notes: entry.notes ?? '', tags };
       case 'medication': {
-        // /api/medication/ has a required name + a single time. dosage, unit and
-        // interval are numeric/duration fields whose server nullability is
-        // unknown, so omit them when unset (rather than sending null) so a
-        // partly-filled entry validates and DRF keeps its own defaults.
-        // dosage_unit is Baby Buddy's free text, sent verbatim.
+        // dosage, unit and interval have unknown server nullability, so they are omitted
+        // when unset rather than sent as null: a partly-filled entry then validates and
+        // DRF keeps its own defaults.
         const body: Record<string, unknown> = { child, time: toISO(entry.time), name: entry.name, tags };
         if (entry.dosage != null) body.dosage = entry.dosage;
         if (entry.dosageUnit) body.dosage_unit = entry.dosageUnit;
         if (entry.nextDoseIntervalSec != null) body.next_dose_interval = secToDuration(entry.nextDoseIntervalSec);
-        // notes is a blankable text field (temperature clears it the same way),
-        // so always send it: an empty string clears it on a PATCH edit.
+        // Always sent: an empty string is what clears it on a PATCH edit.
         body.notes = entry.notes ?? '';
         return body;
       }
@@ -1237,7 +1032,6 @@ export class BabybuddyClient {
     }
   }
 
-  /** Create an entry on the server; returns the new server id. */
   async createEntry(entry: Entry, childServerId: number): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>(`/${ENDPOINT[entry.type]}/`, {
       method: 'POST',
@@ -1246,7 +1040,6 @@ export class BabybuddyClient {
     return res?.id;
   }
 
-  /** Update an existing entry on the server (requires entry.serverId). */
   async updateEntry(entry: Entry, childServerId: number): Promise<void> {
     if (entry.serverId == null) return;
     await this.request(`/${ENDPOINT[entry.type]}/${entry.serverId}/`, {
@@ -1255,12 +1048,9 @@ export class BabybuddyClient {
     });
   }
 
-  /** Delete an entry on the server by type + server id. */
   async deleteEntry(type: ActivityType, serverId: number): Promise<void> {
     await this.request(`/${ENDPOINT[type]}/${serverId}/`, { method: 'DELETE' });
   }
-
-  // ---- measurements (weight / height / head circumference / BMI) ----
 
   async listMeasurements(kind: MeasurementKind, childId: string, limit = 50): Promise<Measurement[]> {
     const field = MEAS_FIELD[kind];
@@ -1302,9 +1092,6 @@ export class BabybuddyClient {
     await this.request(`/${MEAS_ENDPOINT[kind]}/${serverId}/`, { method: 'DELETE' });
   }
 
-  // ---- running timers (/api/timers/) ----
-
-  /** List the connected user's running timers. */
   async listTimers(limit = 100): Promise<ServerTimer[]> {
     const data = await this.request<Paginated<any>>(`/timers/?limit=${limit}`);
     return data.results.map((t) => ({
@@ -1315,7 +1102,6 @@ export class BabybuddyClient {
     }));
   }
 
-  /** Create a timer for a child; returns its new server id. */
   async createTimer(childServerId: number, startMs: number, name: string): Promise<number | undefined> {
     const res = await this.request<{ id?: number }>('/timers/', {
       method: 'POST',
@@ -1324,7 +1110,6 @@ export class BabybuddyClient {
     return res?.id;
   }
 
-  /** Update a timer's encoded name and start. */
   async updateTimer(id: number, name: string, startMs: number): Promise<void> {
     await this.request(`/timers/${id}/`, {
       method: 'PATCH',
@@ -1332,7 +1117,6 @@ export class BabybuddyClient {
     });
   }
 
-  /** Delete a timer on the server. */
   async deleteTimer(id: number): Promise<void> {
     await this.request(`/timers/${id}/`, { method: 'DELETE' });
   }

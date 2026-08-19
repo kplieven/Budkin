@@ -6,10 +6,9 @@ import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
 import type { SafetyFlag } from './safety';
 
-// Warm amber, NOT red. The evidence is explicit that a hydration/intake nudge
-// must read as gentle attention rather than an alarm; the theme has no
-// warn/danger token, so this is defined locally (same pattern as TrendCard's
-// delta hex). One value works in both themes on a tinted card.
+// Warm amber, NOT red: a hydration/intake nudge must read as gentle attention
+// rather than an alarm. The theme has no warn/danger token, so it is defined
+// locally; one value works in both themes on a tinted card.
 const AMBER = '#C8944B';
 
 function copyFor(flag: SafetyFlag): { title: string; body: string } {

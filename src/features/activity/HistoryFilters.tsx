@@ -13,35 +13,20 @@ import type { ActivityType } from '@/types/models';
 
 import { dayKeyLabel, type DayOption, type TimelineFilter } from './filter';
 
-/** Which filter sheet is open, or null. Owned by the screen, because the chips
- *  and the sheets cannot live in the same parent — see `HistoryFilterSheets`. */
+/** Which filter sheet is open, or null. Owned by the screen: the chips and the
+ *  sheets cannot live in the same parent, see `HistoryFilterSheets`. */
 export type OpenFilterSheet = 'day' | 'activity' | null;
 
 /**
- * The History timeline's filter row: a household toggle, a day chip and an
- * activity chip (the latter two opening sheets), plus a clear button once either
- * of those two is set.
+ * The row WRAPS, because three chips plus the clear button overflow a 360dp phone once
+ * the activity chip shows a long label.
  *
- * Chips rather than rows of inline options, because the alternative does not
- * fit. There are eight activities and as many days as the child has been logged
- * for, so anything inline is either horizontally scrollable (fiddly on a phone,
- * and it hides its own options) or takes more vertical space than the timeline
- * it is there to shorten. A chip that names its current value costs one line and
- * stays readable at any number of options.
- *
- * The row WRAPS. Three chips plus the clear button overflow a 360dp phone once
- * the activity chip is showing a long label, and this row is neither scrollable
- * (see above) nor allowed to clip a control.
- *
- * The household toggle is NOT part of `TimelineFilter`, and the difference is
- * load-bearing rather than tidiness. `filterItems` is a purely SUBTRACTIVE
- * filter over a list it is handed; the household toggle is ADDITIVE and changes
- * what that list is built FROM, upstream of the filter. Keeping it out is also
- * what stops "Clear filters" from resetting it: both cleared-state literals
- * (the one just below and its twin in `history.tsx`) spell out `TimelineFilter`
- * in full, so a toggle living inside that type would be reset BY ACCIDENT, by
- * two call sites that never mention it. Clearing a day and an activity should
- * not throw the user back to one child.
+ * The household toggle is NOT part of `TimelineFilter`, and that is load-bearing.
+ * `filterItems` is purely subtractive over a list it is handed, where the toggle is
+ * additive and changes what that list is built FROM. Keeping it out is also what stops
+ * "Clear filters" resetting it: both cleared-state literals spell `TimelineFilter` out in
+ * full, so a toggle inside that type would be reset by two call sites that never mention
+ * it.
  */
 export function HistoryFilterChips({
   filter,
@@ -64,13 +49,9 @@ export function HistoryFilterChips({
   householdLabel: string;
   onToggleHousehold: () => void;
   /** Whether there is anything to filter. False when the timeline is empty, and
-   *  then the day and activity chips are hidden: both would open a sheet with no
-   *  options in it, and "Clear filters" would offer to clear nothing.
-   *
-   *  The household toggle deliberately still shows in that case. An empty
-   *  timeline is exactly when someone wants to look at the rest of the
-   *  household, and a toggle that appears only once THIS child has activity is
-   *  unreachable in the one state that most needs it. */
+   *  then the day and activity chips hide: both would open an empty sheet. The
+   *  household toggle deliberately still shows, since an empty timeline is
+   *  exactly when someone wants to look at the rest of the household. */
   showFilters: boolean;
 }) {
   const t = useTheme();
@@ -86,8 +67,7 @@ export function HistoryFilterChips({
 
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 8, rowGap: 8, marginHorizontal: 20, marginBottom: 14 }}>
-      {/* First, because it is the broadest question the row asks: whose activity,
-          then when, then what. */}
+      {/* First, because it is the broadest question the row asks. */}
       {household != null && (
         <ToggleChip
           label={householdLabel}
@@ -114,9 +94,8 @@ export function HistoryFilterChips({
       )}
       {showFilters && filtered && (
         <Pressable
-          // Deliberately does NOT clear the household toggle: see this
-          // component's own doc. `TimelineFilter` is the whole of what "filters"
-          // means here, and the toggle is not in it.
+          // Deliberately does NOT clear the household toggle: `TimelineFilter`
+          // is the whole of what "filters" means here, and the toggle is not in it.
           onPress={() => onChange({ day: null, types: [] })}
           accessibilityRole="button"
           accessibilityLabel="Clear filters"
@@ -145,11 +124,10 @@ export function HistoryFilterChips({
  *
  * Separate from the chips, and mounted by the screen OUTSIDE its scroll
  * container, because a sheet is `position: absolute` against its nearest
- * positioned ancestor. Rendered next to the chips — inside the timeline's own
- * ScrollView — it anchors to the scrolled CONTENT instead of the viewport: the
- * panel lands at the bottom of the list rather than the bottom of the screen,
- * and the scrim only dims as far as the content reaches. Every other sheet in
- * the app avoids this by being mounted at the root layout.
+ * positioned ancestor. Rendered inside the timeline's own ScrollView it anchors
+ * to the scrolled CONTENT instead of the viewport: the panel lands at the bottom
+ * of the list rather than the bottom of the screen, and the scrim only dims as
+ * far as the content reaches.
  */
 export function HistoryFilterSheets({
   open,
@@ -171,8 +149,7 @@ export function HistoryFilterSheets({
   const t = useTheme();
   const insets = useSafeAreaInsets();
 
-  // Toggle one activity in or out. Removing the last one lands back on the
-  // cleared state, which is the same thing as "all" — see TimelineFilter.
+  // Removing the last one lands back on the cleared state, which means "all".
   const toggle = (a: ActivityType) => {
     const next = filter.types.includes(a) ? filter.types.filter((x) => x !== a) : [...filter.types, a];
     onChange({ ...filter, types: next });
@@ -185,10 +162,8 @@ export function HistoryFilterSheets({
           <SheetHeader title="Jump to a day" subtitle="Only days with something logged" />
           {/* flexGrow: 0 is load-bearing. react-native-web's ScrollView base
               style sets flexGrow: 1, so a plain flexShrink: 1 leaves it growing
-              to the panel's maxHeight — a four-day list would open a sheet two
-              thirds of the screen tall with the rows stranded at the top. With
-              growth off it hugs its content and only shrinks (and scrolls) once
-              there are more days than fit. */}
+              to the panel's maxHeight: a four-day list would open a sheet two
+              thirds of the screen tall with the rows stranded at the top. */}
           <ScrollView
             style={{ flexGrow: 0, flexShrink: 1 }}
             contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 6, paddingBottom: insets.bottom + 10, gap: 6 }}
@@ -293,16 +268,11 @@ function DropdownChip({
 }
 
 /**
- * A chip that flips a boolean, styled as the active/inactive twin of
- * `DropdownChip` but with no chevron: there is no sheet behind it and nothing to
- * choose from, so the affordance must not promise one. The absence of the
- * chevron IS the distinction, which is why this carries no icon of its own to
- * blur it; the primary tint says which state it is in, exactly as it does on the
- * two chips beside it.
- *
- * `accessibilityRole="switch"` rather than "button", because that is what it is,
- * and it is what makes a screen reader announce the state as on or off instead
- * of leaving the user to infer it from a label that names only the current one.
+ * A chip that flips a boolean, styled as the twin of `DropdownChip` but with no
+ * chevron: there is no sheet behind it, so the affordance must not promise one.
+ * `accessibilityRole="switch"` rather than "button", so a screen reader announces
+ * the state as on or off instead of leaving the user to infer it from a label
+ * that names only the current one.
  */
 function ToggleChip({
   label,
@@ -321,14 +291,12 @@ function ToggleChip({
       onPress={onPress}
       accessibilityRole="switch"
       accessibilityLabel={accessibilityLabel}
-      // BOTH forms, deliberately. `accessibilityState` is the native one, and
-      // react-native-web drops it on the floor: the two DropdownChips beside
-      // this one pass `accessibilityState={{ selected }}` and emit no
-      // `aria-selected` at all, which is survivable for a button but not for a
-      // switch, whose whole ARIA contract is the checked state. `aria-checked`
-      // is what actually reaches the DOM on web, and RN maps the `aria-*` props
-      // back onto `accessibilityState` on native, so neither platform is left
-      // announcing "switch" with no on or off.
+      // BOTH forms, deliberately. react-native-web drops `accessibilityState` on
+      // the floor, which is survivable for a button but not for a switch, whose
+      // whole ARIA contract is the checked state. `aria-checked` is what actually
+      // reaches the DOM on web, and RN maps the `aria-*` props back onto
+      // `accessibilityState` on native, so neither platform announces "switch"
+      // with no on or off.
       accessibilityState={{ checked: on }}
       aria-checked={on}
       style={(s) => [

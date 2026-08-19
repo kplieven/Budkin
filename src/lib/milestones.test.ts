@@ -67,7 +67,7 @@ describe('reachedForChild', () => {
     const forB: Entry = { id: 'b1', childId: 'B', type: 'milestone', key: 'crawls', time: 1, text: 'x', tags: [] };
     const mapA = reachedForChild([forA, forB], 'A');
     expect(mapA.has('rolls-over')).toBe(true);
-    expect(mapA.has('crawls')).toBe(false); // child B's milestone does not count for A
+    expect(mapA.has('crawls')).toBe(false);
   });
 
   it('returns an empty map when childId is undefined', () => {
@@ -90,7 +90,7 @@ describe('overdueUnlogged', () => {
   });
 
   it('excludes a milestone still within its window (age == maxMonths)', () => {
-    // waves-bye maxMonths is 12; at exactly 12 it is still "around now", not overdue.
+    // waves-bye maxMonths is 12; at exactly 12 it is "around now", not overdue.
     const keys = overdueUnlogged(12, noneReached, []).map((d) => d.key);
     expect(keys).not.toContain('waves-bye');
   });
@@ -107,7 +107,6 @@ describe('overdueUnlogged', () => {
   });
 
   it('sorts by maxMonths ascending (longest-overdue first)', () => {
-    // At 60 months many are overdue; the result must be ascending by maxMonths.
     const out = overdueUnlogged(60, noneReached, []);
     const maxes = out.map((d) => d.maxMonths);
     expect(maxes).toEqual([...maxes].sort((a, b) => a - b));

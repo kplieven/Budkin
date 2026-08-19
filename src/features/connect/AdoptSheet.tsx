@@ -12,14 +12,12 @@ import { fontFamily } from '@/theme/fonts';
 import { useAppStore, type AdoptResult } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-/** Warning-card tone (server already has data / partial upload) — the same
- *  amber used by the offline banner (app/(tabs)/index.tsx) and TopBar. */
+/** Warning-card tone, the same amber used by the offline banner and TopBar. */
 const WARN_COLOR = '#E2B554';
 
-/** Which content/footer the sheet is showing. A separate `busy` flag (not a
- *  4th "checking" screen) drives the in-flight spinner, so e.g. tapping
- *  "Upload anyway" from the guard card keeps the guard copy on screen while
- *  the button itself shows a spinner — mirrors onboarding's connect button. */
+/** Which content/footer the sheet is showing. A separate `busy` flag, not a 4th
+ *  "checking" screen, drives the in-flight spinner, so tapping "Upload anyway" from
+ *  the guard card keeps the guard copy on screen while the button spins. */
 type Screen = 'form' | 'guard' | 'partial';
 
 export function AdoptSheet() {
@@ -46,8 +44,8 @@ function Inner() {
 
   const canSubmit = url.trim().length > 0 && token.trim().length > 0;
 
-  // Every `adopt()` call MUST be try/caught — a post-upload reload failure
-  // isn't wrapped internally and would otherwise reject out of this handler.
+  // Every `adopt()` call MUST be try/caught: a post-upload reload failure isn't
+  // wrapped internally and would otherwise reject out of this handler.
   const attempt = async (opts?: { uploadAnyway?: boolean }) => {
     setBusy(true);
     setError(null);
@@ -72,8 +70,8 @@ function Inner() {
     }
   };
 
-  // Guard card's "Use the server's data": switch to the server WITHOUT
-  // uploading local data — the normal connect() flow, not adopt().
+  // Guard card's "Use the server's data": switch to the server WITHOUT uploading local
+  // data, so the normal connect() flow and not adopt().
   const useServerData = () => {
     void connect(url.trim(), token.trim());
     close();

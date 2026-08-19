@@ -34,7 +34,7 @@ async function main() {
   const children = await client.listChildren();
   check('listChildren (auth ok)', children.length > 0, children.map((c) => `${c.first} #${c.id}`));
 
-  // ---- feeding create -> update -> delete ----
+  // feeding: create, update, delete
   const feeding: Entry = {
     id: 'x', childId: CHILD, type: 'feeding',
     start: now - 20 * M, end: now - 2 * M, feedType: 'formula', method: 'bottle', amount: 120, tags: [],
@@ -50,7 +50,7 @@ async function main() {
   feeds = await client.listFeedings(CHILD);
   check('feeding deleted', !feeds.some((x) => x.serverId === fid));
 
-  // ---- other entry types create ----
+  // other entry types
   const others: Entry[] = [
     { id: 'x', childId: CHILD, type: 'sleep', start: now - 120 * M, end: now - 30 * M, nap: true, tags: [] },
     { id: 'x', childId: CHILD, type: 'diaper', time: now - 10 * M, wet: true, solid: true, color: 'yellow', tags: [] },
@@ -66,7 +66,7 @@ async function main() {
     }
   }
 
-  // ---- measurements create -> (update) -> delete ----
+  // measurements
   const values: Record<MeasurementKind, number> = { weight: 5.4, height: 60, head: 40, bmi: 15.2 };
   const kinds: MeasurementKind[] = ['weight', 'height', 'head', 'bmi'];
   for (const kind of kinds) {
@@ -92,7 +92,7 @@ async function main() {
     check(`measurement ${kind} deleted`, !l3.some((x) => x.serverId === mid));
   }
 
-  // ---- tags + intake + diaper amount round-trip (new write fields) ----
+  // tags, intake and diaper amount round-trip
   const taggedFeed: Entry = {
     id: 'x', childId: CHILD, type: 'feeding',
     start: now - 300 * M, end: now - 290 * M, feedType: 'breast', method: 'both', amount: 7, tags: ['left'],
@@ -112,18 +112,18 @@ async function main() {
   const ad = (await client.listChanges(CHILD)).find((x) => x.serverId === adid);
   check('diaper amount=3 round-trips', ad?.amount === 3, ad?.amount);
 
-  // ---- child create -> update -> delete ----
-  // Baby Buddy keys the CHILD endpoints by SLUG, not by numeric id: its
-  // ChildViewSet sets lookup_field = "slug" (only TagViewSet does the same).
-  // Addressing a child by its numeric id 404s, which silently broke both delete
-  // and rename. These checks exist to catch that regressing, so they assert the
-  // effect on the server, never just that the call did not throw.
+  // child create, update, delete.
+  //
+  // Baby Buddy keys the CHILD endpoints by SLUG, not by numeric id: its ChildViewSet
+  // sets lookup_field = "slug" (only TagViewSet does the same). Addressing a child by
+  // numeric id 404s, which silently broke both delete and rename. These checks assert
+  // the effect on the server, never just that the call did not throw.
   const kidName = 'Itest' + String(now).slice(-6);
   const newKid: Child = { id: 'x', first: kidName, last: 'Probe', birth: now - 86400000, color: '#fff' };
   const created = await client.createChild(newKid);
   check('create child returns id', typeof created.id === 'number', created);
-  // Without the slug, a child created this session could not be addressed at
-  // all until the next full refresh filled it in.
+  // Without it, a child created this session cannot be addressed until the next
+  // full refresh fills the slug in.
   check('create child returns slug', typeof created.slug === 'string' && created.slug.length > 0, created.slug);
 
   const kid: Child = { ...newKid, serverId: created.id, slug: created.slug };
@@ -131,9 +131,9 @@ async function main() {
   const updated = await client.updateChild(renamed);
   const afterRename = (await client.listChildren()).find((c) => c.serverId === created.id);
   check('rename lands on the server', afterRename?.first === kidName + 'X', afterRename?.first);
-  // The slug is DERIVED from the name, so a rename MOVES it. A cached slug goes
-  // stale at that moment, and the next request keyed by it would 404: the same
-  // silent failure, one rename removed. updateChild returns the current one.
+  // The slug is DERIVED from the name, so a rename MOVES it. A cached slug goes stale
+  // at that moment and the next request keyed by it 404s: the same silent failure, one
+  // rename removed. updateChild returns the current one.
   check('rename returns the new slug', updated?.slug === afterRename?.slug, {
     returned: updated?.slug,
     server: afterRename?.slug,
@@ -144,8 +144,8 @@ async function main() {
   const afterDelete = await client.listChildren();
   check('child deleted (not resurrected)', !afterDelete.some((c) => c.serverId === created.id));
 
-  // A child carrying no slug at all (uploadUnsynced only learns the numeric id)
-  // must still be deletable: the client looks the slug up by serverId.
+  // A child carrying no slug (uploadUnsynced only learns the numeric id) must still be
+  // deletable: the client looks the slug up by serverId.
   const slugless = await client.createChild({ ...newKid, first: kidName + 'S' });
   await client.deleteChild({ ...newKid, first: kidName + 'S', serverId: slugless.id });
   const afterSlugless = await client.listChildren();

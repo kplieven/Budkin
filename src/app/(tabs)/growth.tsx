@@ -21,15 +21,14 @@ export default function Growth() {
   const desktop = useDesktopShell();
   const allMeasurements = useAppStore((s) => s.measurements);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
-  // `measurements` holds every child's, so scope to the selected one: charting
-  // a sibling's weights under this child is the same bug History had.
+  // `measurements` holds every child's, so scope to the selected one or a
+  // sibling's weights get charted under this child.
   const measurements = measurementsForChild(allMeasurements, child?.id);
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openMeasurement = useAppStore((s) => s.openMeasurement);
 
-  // Rendered in place of the normal content below, rather than an early return
-  // above the wrappers, so the waiting state keeps the header (child-switcher
-  // avatar), safe-area padding, and desktop max-width like the rest of the page.
+  // Swapped in as the body rather than early-returned above the wrappers, so the
+  // waiting state keeps the header, safe-area padding and desktop max-width.
   const body = child?.expected ? (
     <WaitingForBirth what="Growth charts" />
   ) : (

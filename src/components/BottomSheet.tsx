@@ -1,32 +1,15 @@
 /**
- * Hand-built sheet/dialog using Reanimated 4 (see memory: @gorhom/bottom-sheet
- * is broken on Reanimated 4). It owns the frame + entrance only; consumers pass
- * the header/body/footer as children.
+ * Hand-built sheet/dialog, because @gorhom/bottom-sheet is broken on Reanimated 4. It
+ * owns the frame and entrance only, and the parent must mount and unmount it
+ * conditionally so the exit animation runs.
  *
- * Two presentations, chosen automatically by viewport (useDesktopShell):
- *  - Phone: a slide-up bottom sheet (28px top radius, 92% max-height, .26s
- *    cubic-bezier slide) with a grabber you drag down to dismiss.
- *  - Desktop/large screen: a centered modal dialog (capped width, all-corner
- *    radius, scale+fade "pop" entrance, no grabber) matching the web handoff's
- *    Log Modal. Dismiss via the scrim, Escape (web), or the children's own
- *    close/Cancel control.
- *
- * Mount/unmount this conditionally from the parent so the exit animation runs.
- * The panel sizes to its content up to maxHeight; give a flexible child
- * (e.g. a ScrollView with flexShrink) to make tall content scroll.
- *
- * The ENTER animation is driven by a shared value in a mount effect rather than
- * the declarative `entering={SlideInDown}` prop. On the New Architecture the
- * declarative entering animation is configured asynchronously by the native side
- * after mount; when the sheet mounts during the app's cold-start commit storm
- * (e.g. opened from a home-screen widget deep link while the app was closed),
- * that config is silently dropped and the panel is left at the animation's
- * initial off-screen state — so the sheet "doesn't open". Animating a shared
- * value from a `useEffect` runs reliably after first paint and also degrades to
- * an instant reveal under reduce-motion, so the sheet is always visible. The
- * effect also re-runs if the viewport crosses the desktop breakpoint while open
- * (sheet <-> dialog); it resets to a clean closed state first so the new
- * presentation animates from scratch rather than a stale offset.
+ * The ENTER animation is driven by a shared value in a mount effect rather than the
+ * declarative `entering={SlideInDown}` prop. On the New Architecture that prop is
+ * configured asynchronously by the native side after mount, and when the sheet mounts
+ * during the app's cold-start commit storm (opened from a widget deep link while the app
+ * was closed), the config is silently dropped and the panel is left off-screen, so the
+ * sheet "doesn't open". A shared value animated from a `useEffect` runs reliably after
+ * first paint and degrades to an instant reveal under reduce-motion.
  */
 
 import type { ReactNode } from 'react';
@@ -47,35 +30,21 @@ import { keyboardInset, raisesKeyboard } from '@/components/keyboardInset';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useTheme } from '@/theme/useTheme';
 
-// On mobile web the on-screen keyboard does not resize the page. The LAYOUT
-// viewport (window.innerHeight, and with it the app's 100%-height root that
-// this sheet is absolutely positioned in) keeps its full height and the
-// keyboard simply covers its bottom edge; only the VISUAL viewport shrinks,
-// and the browser may additionally pan it (visualViewport.offsetTop > 0, e.g.
-// iOS Safari auto-revealing a focused input). So a bottom:0 sheet stays pinned
-// behind the keyboard, and it must be raised by exactly the covered height (see
-// keyboardInset() for the geometry).
+// On mobile web the on-screen keyboard does not resize the page. The LAYOUT viewport
+// keeps its full height and the keyboard simply covers its bottom edge; only the VISUAL
+// viewport shrinks, and the browser may additionally pan it. So a bottom:0 sheet stays
+// pinned behind the keyboard and must be raised by exactly the covered height.
 //
-// The lift is gated on an actually-focused text field, NOT on the size of the
-// gap. iOS Safari's innerHeight and visualViewport.height differ AT REST (the
-// large address bar, overscroll offsetTop, a keyboard caught mid-dismiss as the
-// modal opens): with no gate that gap lifted the sheet ~a keyboard height with
-// no keyboard on screen. The keyboard cannot exist without a focused text field,
-// so `raisesKeyboard(document.activeElement)` is the honest signal. It also
-// avoids the old `covered > 120` threshold, which fought Safari's focus auto-pan
-// (offsetTop grows, the value drops under the threshold, the lift snapped back
-// mid-keyboard). Recomputed on `resize` and `scroll` so the sheet stays glued
-// while the browser pans the visual viewport around.
+// The lift is gated on an actually-focused text field, NOT on the size of the gap. iOS
+// Safari's innerHeight and visualViewport.height differ AT REST (the large address bar,
+// overscroll offsetTop, a keyboard caught mid-dismiss), so the gap alone lifted the sheet
+// about a keyboard height with no keyboard on screen, and a size threshold instead fights
+// Safari's focus auto-pan.
 //
-// Note `useWindowDimensions().height` cannot stand in for any of this:
-// react-native-web 0.21 feeds it visualViewport.height (updated on
-// visualViewport resize), so it already shrinks by the keyboard. That makes it
-// the right value for capping the panel's HEIGHT, but it says nothing about
-// where the visible bottom edge sits inside the layout viewport, and
-// subtracting this inset from it double-counts the keyboard.
-//
-// Web only: returns 0 on native (keyboard out of scope there) and when there
-// is no visualViewport (SSR / older browsers).
+// `useWindowDimensions().height` cannot stand in for this: react-native-web 0.21 feeds it
+// visualViewport.height, so it already shrinks by the keyboard. That makes it right for
+// capping the panel's HEIGHT, but it says nothing about where the visible bottom edge
+// sits inside the layout viewport, and subtracting this inset from it double-counts.
 function useKeyboardInset() {
   const [inset, setInset] = useState(0);
   useEffect(() => {
@@ -85,11 +54,9 @@ function useKeyboardInset() {
       const focused = raisesKeyboard(document.activeElement);
       const covered = keyboardInset(window.innerHeight, vv.height, vv.offsetTop, focused);
       setInset(covered);
-      // The browser's own focus-reveal scroll ran BEFORE the sheet moved, so
-      // re-reveal the focused field inside the sheet's own ScrollView once the
-      // lifted layout has committed (double rAF: after React's flush + a
-      // frame). The sheet is modal (scrim behind it), so any focused text
-      // field on the page is one of its own.
+      // The browser's own focus-reveal scroll ran BEFORE the sheet moved, so re-reveal
+      // the focused field once the lifted layout has committed: React's flush, then a
+      // frame.
       if (covered > 0) {
         requestAnimationFrame(() =>
           requestAnimationFrame(() => {
@@ -116,8 +83,7 @@ interface BottomSheetProps {
   onClose: () => void;
   children: ReactNode;
   maxHeightRatio?: number;
-  /** Desktop dialog placement: a centered modal (default) or a bottom-left
-   *  anchored popover (e.g. the child switcher). Ignored in phone sheet mode. */
+  /** Desktop dialog placement; ignored in phone sheet mode. */
   anchor?: 'center' | 'bottom-left';
 }
 
@@ -125,27 +91,18 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
   const t = useTheme();
   const { width, height } = useWindowDimensions();
   const dialog = useDesktopShell();
-  // How far the mobile-web keyboard (plus any browser pan of the visual
-  // viewport) covers the layout viewport's bottom edge; 0 elsewhere. Applied as
-  // the phone wrapper's layout `bottom`: plain layout, deliberately NOT via
-  // the animated transform, so the keyboard correction never depends on a
-  // React-state-in-worklet round trip and the transform stays single-purpose
-  // (entrance + drag).
+  // Applied as the phone wrapper's layout `bottom`, deliberately not via the animated
+  // transform, so the correction never depends on a React-state-in-worklet round trip.
   const keyboardInset = useKeyboardInset();
-  // `enter` is the bottom-sheet slide-in offset (off-screen -> 0). `pop` is the
-  // dialog entrance progress (0 -> 1, mapped to opacity+scale). `dragY` is the
-  // sheet's drag-to-dismiss offset. Kept as separate shared values so no value
-  // is mutated both inside and outside an effect.
+  // Separate shared values so none is mutated both inside and outside an effect.
   const enter = useSharedValue(height);
   const pop = useSharedValue(0);
   const scrim = useSharedValue(0);
   const dragY = useSharedValue(0);
 
   useEffect(() => {
-    // Re-arm the active presentation from its closed state so a breakpoint flip
-    // while open animates from scratch, not a stale offset. Only effect-owned
-    // values are touched here; `dragY` stays single-owned by the gesture (the
-    // immutability rule forbids mutating it both here and in onUpdate/onEnd).
+    // Re-arm from the closed state so a breakpoint flip while open animates from scratch,
+    // not a stale offset. `dragY` stays single-owned by the gesture.
     pop.value = 0;
     if (dialog) {
       pop.value = withTiming(1, { duration: 220, easing: Easing.bezier(0.2, 0.8, 0.2, 1) });
@@ -156,7 +113,6 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
     scrim.value = withTiming(1, { duration: 200 });
   }, [dialog, enter, pop, scrim]);
 
-  // Desktop dialog: Escape dismisses (web only; native dismisses via gesture/scrim).
   useEffect(() => {
     if (!dialog || Platform.OS !== 'web' || typeof document === 'undefined') return;
     const onKey = (e: KeyboardEvent) => {
@@ -166,8 +122,8 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
     return () => document.removeEventListener('keydown', onKey);
   }, [dialog, onClose]);
 
-  // Run on the JS thread to avoid worklet/runOnJS naming differences and to call
-  // onClose directly. A grabber drag doesn't need per-frame UI-thread precision.
+  // On the JS thread, to avoid worklet/runOnJS naming differences and call onClose
+  // directly. A grabber drag does not need per-frame UI-thread precision.
   const pan = Gesture.Pan()
     .runOnJS(true)
     .onUpdate((e) => {
@@ -199,7 +155,7 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
         scrimStyle,
       ]}
     >
-      {/* On desktop the scrim is decorative (Escape/close handle dismissal for AT); keep it out of the focus order. */}
+      {/* Decorative on desktop, where Escape and the close button handle dismissal. */}
       <Pressable style={{ flex: 1, cursor: 'auto' }} onPress={onClose} accessible={dialog ? false : undefined} />
     </Animated.View>
   );
@@ -221,8 +177,7 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
         }}
       >
         {scrimNode}
-        {/* Outer carries the radius + shadow (no overflow, or the shadow clips); */}
-        {/* inner clips the children to the same radius. */}
+        {/* Outer carries the radius and shadow (no overflow, or the shadow clips); inner clips the children. */}
         <Animated.View
           exiting={FadeOut.duration(150)}
           accessibilityViewIsModal
@@ -252,11 +207,8 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
     <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 }}>
       {scrimNode}
 
-      {/* bottom = keyboardInset pins the sheet's bottom edge to the VISIBLE
-          bottom edge (top of the mobile-web keyboard); 0 on native/desktop.
-          Recomputing on visualViewport scroll keeps it glued when the browser
-          pans the viewport to reveal the focused input, instead of fighting
-          that pan. */}
+      {/* bottom = keyboardInset pins the sheet to the VISIBLE bottom edge (top of
+          the mobile-web keyboard); 0 on native and desktop. */}
       <Animated.View
         exiting={SlideOutDown.duration(220)}
         style={{ position: 'absolute', left: 0, right: 0, bottom: keyboardInset }}
@@ -264,9 +216,8 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
         <Animated.View
           style={[
             {
-              // Keyboard-aware for free: react-native-web derives `height` from
-              // visualViewport.height, which already excludes the keyboard. Do
-              // NOT also subtract keyboardInset here; that double-counts.
+              // react-native-web derives `height` from visualViewport.height, which
+              // already excludes the keyboard. Subtracting keyboardInset double-counts.
               maxHeight: height * maxHeightRatio,
               backgroundColor: t.bg,
               borderTopLeftRadius: 28,

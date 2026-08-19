@@ -26,10 +26,10 @@ function midnight(offsetDays: number): number {
 export type MilestoneTarget = { mode: 'log'; def: MilestoneDef } | { mode: 'edit'; entry: MilestoneEntry };
 
 /**
- * Rendered once at the app root (like LogSheet/MeasurementSheet) so its overlay
- * anchors to the viewport, not the milestones page. Reads the open descriptor
- * from the store and resolves it to a concrete target: a catalog def to log, or
- * an existing entry to edit. Keyed so switching targets re-seeds the editor.
+ * Rendered once at the app root so its overlay anchors to the viewport, not the
+ * milestones page. Resolves the store's open descriptor to a concrete target: a
+ * catalog def to log, or an existing entry to edit. Keyed so switching targets
+ * re-seeds the editor.
  */
 export function MilestoneSheet() {
   const sheet = useAppStore((s) => s.milestoneSheet);

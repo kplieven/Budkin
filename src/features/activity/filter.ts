@@ -1,10 +1,7 @@
 /**
- * The History timeline's day and activity filters.
- *
- * Pure, and deliberately separate from the screen: the day list, the activity
- * list and the filter itself all have to agree about what day an item is on and
- * what activity it counts as, and a screen-local copy of either rule is how they
- * start disagreeing.
+ * The History timeline's day and activity filters. Kept out of the screen because the
+ * day list, the activity list and the filter itself all have to agree about what day
+ * an item is on and what activity it counts as.
  */
 
 import { dayGroupLabel, dayKey } from '@/lib/format';
@@ -27,21 +24,15 @@ export interface DayOption {
   count: number;
 }
 
-/**
- * What activity an item counts as. A running timer answers with `saveAs`, not
- * `activity`: a quick timer repointed at sleep belongs under Sleep, which is the
- * rule Home and the reminder scheduler already follow.
- */
+/** A running timer answers with `saveAs`, not `activity`: a quick timer repointed at
+ *  sleep belongs under Sleep, the rule Home and the reminder scheduler follow. */
 export function itemActivity(item: TimelineItem): ActivityType {
   return isTimer(item) ? item.saveAs : item.type;
 }
 
 /**
- * The heading a `dayKey` reads as, given the current time.
- *
- * Derived from the key on every render rather than stored with the selection,
- * because the labels are relative: a day picked as "Today" has to read
- * "Yesterday" once the clock passes midnight. Noon, so the reconstructed
+ * Derived on every render rather than stored with the selection: a day picked as "Today"
+ * has to read "Yesterday" once the clock passes midnight. Noon, so the reconstructed
  * instant cannot fall outside its own day on a DST-shifted midnight.
  */
 export function dayKeyLabel(key: string, now: number): string {
@@ -57,17 +48,10 @@ export function activityOptions(items: TimelineItem[]): ActivityType[] {
 }
 
 /**
- * The days that have something on them, newest first, each with the heading the
- * timeline uses and how many items it holds.
- *
- * Built from the items rather than from a calendar so the picker can only ever
- * offer a day that has records. That matters beyond tidiness: connected to a
- * server, History holds roughly the last 50 records per activity type, so most
- * calendar dates a picker could offer have nothing behind them.
- *
- * Pass items that the OTHER filters have already been applied to, and the day
- * list narrows with them (no day that would come back empty once the type
- * filter is taken into account).
+ * Built from the items rather than from a calendar, so the picker can only offer a day
+ * that has records: History holds roughly the last 50 per activity type, so most calendar
+ * dates have nothing behind them. Pass items the other filters have already been applied
+ * to and the day list narrows with them.
  */
 export function dayOptions(items: TimelineItem[], now: number): DayOption[] {
   const byKey = new Map<string, DayOption>();
@@ -81,13 +65,8 @@ export function dayOptions(items: TimelineItem[], now: number): DayOption[] {
   return [...byKey.values()].sort((a, b) => (a.key < b.key ? 1 : -1));
 }
 
-/**
- * Apply a filter. Order is untouched, so the caller still owns sorting (the
- * timeline hands the result to `groupByDay`, which sorts it).
- *
- * Generic in the item type for the same reason `groupByDay` is: an entry-only
- * caller keeps its narrower rows.
- */
+/** Apply a filter. Order is untouched, so the caller still owns sorting (the timeline
+ *  hands the result to `groupByDay`, which sorts it). */
 export function filterItems<T extends TimelineItem>(items: T[], filter: TimelineFilter): T[] {
   const { day, types } = filter;
   if (!day && types.length === 0) return items;

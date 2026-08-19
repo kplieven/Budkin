@@ -1,10 +1,8 @@
 /**
- * Inline precise time/duration editor — the escape hatch from the quick chips.
- *
- * Clock mode edits an absolute timestamp: a type-able clock value (digits-first
- * smart parsing, no AM/PM needed), ±1/5/15m step chips, and a day stepper for
- * cross-midnight entries. Duration mode edits minutes the same way.
- * Controlled and pure: all state lives in the parent via value/onChange.
+ * Inline precise time/duration editor, the escape hatch from the quick chips.
+ * Clock mode edits an absolute timestamp (digits-first smart parsing, no AM/PM
+ * needed) with a day stepper for cross-midnight entries; duration mode edits
+ * minutes. Controlled and pure: all state lives in the parent.
  */
 
 import { useState } from 'react';
@@ -26,7 +24,6 @@ interface TimeAdjusterProps {
   /** clock: absolute ms · duration: minutes */
   value: number;
   now: number;
-  /** activity accent color */
   color: string;
   onChange: (v: number) => void;
   /** clock mode only: show a live "45m ago" caption under the input */
@@ -66,30 +63,19 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
   };
   const isToday = new Date(value).toDateString() === new Date(now).toDateString();
 
-  // The six nudges share the row's free space instead of hugging a fixed padding.
+  // The six nudges share the row's free space rather than hugging a fixed padding.
   //
-  // · flexGrow + flexBasis 'auto', deliberately NOT flex:1. flex:1 expands to flexBasis 0%,
-  //   which throws away the intrinsic width and flattens all six to one size, squeezing the
-  //   wider "−15m"/"+15m" ink out over its padding. 'auto' keeps each label's own width as the
-  //   floor, so the wide ones stay wide and every chip takes an equal share of the slack.
-  // · paddingHorizontal 2 is a MINIMUM, not the padding you see, and it is this low only to
-  //   lower the width at which the row wraps, which is what buys room for the "m". flexGrow
-  //   then hands each chip an equal share of whatever the row has LEFT OVER, so how tight the
-  //   chips actually look depends on the context: the row needs 245px, so on the Timers card
-  //   at 360dp (254px) there is 9px to share and the chips do sit near the minimum, about 3px
-  //   a side, while the log sheet is ~40px wider and gives them about 6px. Same for the 4px gap.
-  // · alignItems 'center' is not a no-op just because the Pressable has one child: the default
-  //   'stretch' makes that Txt span the whole chip, which left-aligns the ink the moment the
-  //   chip grows wider than its text.
-  // · maxWidth caps the tap target so a wide row gives chips, not buttons, and so a lone chip
-  //   is still chip-sized if the row takes its flexWrap escape hatch. 56 sits just above the
-  //   52px widest chip in the Timers "Started earlier?" row, which is the geometry this row is
-  //   meant to match. It must scale with fontScale: maxWidth clamps the flex BASE size, so it
-  //   binds BEFORE line breaking. Held at a flat 56 it would stop the chip growing once the
-  //   label outgrew it and paint the glyphs outside the border, instead of letting the row wrap
-  //   (reachable for real users: Android a11y text reaches 2x, iOS Dynamic Type about 3x, and
-  //   nothing here passes allowFontScaling={false}). Scaling the cap keeps it binding at 1x and
-  //   lets it step aside when the text is large.
+  // · flexGrow + flexBasis 'auto', NOT flex:1. flex:1 expands to flexBasis 0%, throwing away
+  //   the intrinsic width and flattening all six to one size, which squeezes the wider
+  //   "−15m"/"+15m" ink out over its padding.
+  // · paddingHorizontal 2 is a MINIMUM, not the padding you see. It is this low only to lower
+  //   the width at which the row wraps, which is what buys room for the "m".
+  // · alignItems 'center' is not a no-op with one child: the default 'stretch' makes the Txt
+  //   span the whole chip, left-aligning the ink once the chip grows wider than its text.
+  // · maxWidth must scale with fontScale, because it clamps the flex BASE size and so binds
+  //   BEFORE line breaking. Held flat it would stop the chip growing once the label outgrew
+  //   it and paint the glyphs outside the border rather than letting the row wrap, which
+  //   real users reach: Android a11y text goes to 2x and iOS Dynamic Type to about 3x.
   const stepBtn = {
     paddingHorizontal: 2,
     paddingVertical: 8,

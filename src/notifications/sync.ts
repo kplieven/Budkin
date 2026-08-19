@@ -1,9 +1,5 @@
-/**
- * Keeps the Android notification tray in sync with running timers — the exact
- * twin of `widgets/sync.ts`. On every store change, rebuild the desired
- * notification set from `state.timers`, diff it against what was last posted, and
- * post/dismiss the delta. No-ops cleanly off Android (the post module is a stub).
- */
+/** Keeps the Android notification tray in sync with running timers. No-ops off
+ *  Android, where the post module is a stub. */
 
 import { desiredTimerNotifications, diffTimerNotifications, type TimerNotification } from '@/notifications/content';
 import { dismissTimerNotification, postTimerNotification } from '@/notifications/postNotification';
@@ -22,11 +18,8 @@ export function initTimerNotificationSync(): void {
     for (const n of toPost) await postTimerNotification(n);
     for (const id of toDismiss) await dismissTimerNotification(id);
   };
-  // Notifications derive only from `timers` and the child roster (each timer is
-  // titled with its own child), so gate on those two slices: the per-second `now`
-  // tick changes nothing here and early-returns — no rebuild, no diff, no
-  // notification round-trip. The selected child is deliberately NOT in the gate:
-  // it no longer feeds a title, so switching child rebuilds nothing.
+  // Gated on the only two slices a title derives from: the per-second `now` tick
+  // would otherwise cost a rebuild and a native round trip for nothing.
   useAppStore.subscribe((state, previous) => {
     if (state.timers === previous.timers && state.children === previous.children) {
       return;

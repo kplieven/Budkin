@@ -25,28 +25,14 @@ function domNode(ref: RefObject<unknown>): HTMLElement | null {
 }
 
 /**
- * Drives a horizontal pager on web, where `pagingEnabled` is only
- * `scroll-snap-type: x mandatory`. Mandatory snap lets the fling run its own
- * momentum and then lands on whichever snap point it happened to reach, so a
- * brisk wheel gesture or a hard swipe crosses several pages at once.
+ * Drives a horizontal pager on web, where `pagingEnabled` is only `scroll-snap-type: x
+ * mandatory`. Mandatory snap lets the fling run its own momentum and land on whichever
+ * snap point it reached, so a brisk wheel gesture crosses several pages at once. So the
+ * browser does not get to scroll the deck at all: snap is off, `touch-action` keeps the
+ * horizontal axis, and wheel, mouse and touch all become one-slide steps.
  *
- * So the browser does not get to scroll the deck at all: snap is switched off,
- * `touch-action` keeps the horizontal axis for us, and wheel, mouse and touch are
- * all translated into one-slide steps. A drag tracks the pointer but is bounded
- * to one page either side of where it began, so the neighbouring slide is the
- * most that can ever come into view. Releasing commits that page or eases back.
- * The arrow keys turn a page outright.
- *
- * `deckRef` is the deck being scrolled; `host` is the region the gestures are
- * heard over, which is deliberately wider than the deck so a desktop pointer can
- * wheel or drag anywhere in the view rather than only over the narrow column.
- * That is also why `pageWidth` is passed in: the host is not the pager, so its
- * own width says nothing about how far one page is.
- *
- * `onStep` receives -1, 0 or +1: 0 means the gesture fell short and the deck
- * should settle back onto the slide it started from.
- *
- * No-op on native, where `pagingEnabled` already pages one slide per swipe.
+ * `hostRef` is deliberately wider than the deck so a desktop pointer can drag anywhere in
+ * the view, which is why `pageWidth` is passed in separately. No-op on native.
  */
 export function useWebPaging({
   deckRef,
@@ -63,19 +49,18 @@ export function useWebPaging({
 }) {
   // Kept in a ref so a re-render mid-gesture cannot resurrect stale travel.
   const wheel = useRef(IDLE_WHEEL_PAGER);
-  // Read through a ref so the listeners never have to be torn down and
-  // re-attached when the callback identity changes (it closes over the index).
+  // Read through a ref so the listeners never have to be torn down and re-attached
+  // when the callback identity changes (it closes over the index).
   const step = useRef(onStep);
   useEffect(() => {
     step.current = onStep;
   });
 
-  // The arrow keys are handled on the host rather than on the document, which
-  // already carries the bottom sheet's Escape listener. That needs the host to be
-  // able to hold focus, and to hold it from the start: a carousel whose keys only
-  // wake up after a click reads as broken. `-1` keeps it out of the tab order, so
-  // tabbing still goes straight to Skip and Next (whose own key events bubble
-  // back up to here).
+  // The arrow keys are handled on the host rather than on the document, which already
+  // carries the bottom sheet's Escape listener. That needs the host to hold focus from
+  // the start: a carousel whose keys only wake up after a click reads as broken. `-1`
+  // keeps it out of the tab order, so tabbing still goes straight to Skip and Next
+  // (whose own key events bubble back up to here).
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     const host = domNode(hostRef);
@@ -111,7 +96,7 @@ export function useWebPaging({
       const r = readWheel(wheel.current, e, e.timeStamp);
       wheel.current = r.state;
       // Only what the pager actually takes: this host spans the whole view, so
-      // blanket-preventing would swallow the page's own scrolling everywhere.
+      // blanket-preventing would swallow the page's own scrolling.
       if (r.consumed && e.cancelable) e.preventDefault();
       if (r.step !== 0) step.current(r.step);
     };
@@ -142,9 +127,9 @@ export function useWebPaging({
         axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
       }
       if (axis !== 'x') return;
-      // Holding the default is what stops the browser adding its own momentum,
-      // and it also suppresses the compatibility click that would otherwise fire
-      // on whatever the finger came to rest over.
+      // Holding the default stops the browser adding its own momentum, and also
+      // suppresses the compatibility click that would otherwise fire on whatever the
+      // finger came to rest over.
       if (e.cancelable) e.preventDefault();
       deck.scrollLeft = dragScrollLeft(start.scroll, dx, pageWidth, count);
     };
@@ -160,17 +145,17 @@ export function useWebPaging({
       if (dragged) step.current(stepFromDrag(travel, pageWidth, elapsed));
     };
 
-    // Mouse drag. The gesture is claimed only once the pointer has travelled far
-    // enough sideways, so an ordinary click still reaches the button under it and
-    // a vertical drag is handed straight back to the page.
+    // Mouse drag, claimed only once the pointer has travelled far enough sideways, so
+    // an ordinary click still reaches the button under it and a vertical drag is
+    // handed straight back to the page.
     let mouse: { x: number; y: number; scroll: number; at: number } | null = null;
     let dragging = false;
     let mdx = 0;
     let prevUserSelect: string | null = null;
     let clickGuard: ReturnType<typeof setTimeout> | null = null;
 
-    // The release that ends a drag must not also press whatever it landed on.
-    // Caught on the way down, before React's delegated click reaches the root.
+    // The release that ends a drag must not also press whatever it landed on. Caught
+    // on the way down, before React's delegated click reaches the root.
     const swallowClick = (e: MouseEvent) => {
       e.stopPropagation();
       e.preventDefault();
@@ -225,8 +210,8 @@ export function useWebPaging({
       if (!began || !dragged) return;
       host.addEventListener('click', swallowClick, true);
       if (clickGuard) clearTimeout(clickGuard);
-      // Dropped again straight after the click that follows this release, so it
-      // never outlives the gesture (a drag ending off-region emits no click).
+      // Dropped again straight after the click that follows this release, so it never
+      // outlives the gesture (a drag ending off-region emits no click).
       clickGuard = setTimeout(() => host.removeEventListener('click', swallowClick, true), 0);
       step.current(stepFromDrag(travel, pageWidth, e.timeStamp - began.at));
     };

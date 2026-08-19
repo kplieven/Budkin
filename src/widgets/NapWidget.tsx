@@ -1,9 +1,9 @@
 'use no memo';
 
-// Android home-screen widget: a single nap start/stop toggle. The whole surface
-// is one tap target (clickAction NAP_TOGGLE), handled headless in the widget
-// task handler — tapping never opens the app. `now` is passed in (not read in
-// render) to keep the render pure, mirroring StatusWidget.
+// Android home-screen widget: a single nap start/stop toggle. The whole surface is
+// one tap target (clickAction NAP_TOGGLE), handled headless in the widget task
+// handler, so tapping never opens the app. The accessibilityLabel sits on the root
+// because that is the one element TalkBack can reach (see `napLabels`).
 
 import { FlexWidget, SvgWidget, TextWidget } from 'react-native-android-widget';
 

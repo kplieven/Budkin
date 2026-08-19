@@ -17,9 +17,9 @@ import type { Treatment, TreatmentScheduleMode, TreatmentTimeOfDay } from '@/typ
 
 const REMOVE_COLOR = '#E2725B'; // destructive accent, matches the child sheet
 
-// Quick-pick dosage units, same set as the medication log form. `dosage_unit` is
-// free text, so these are shortcuts; "+ Other" takes anything else. µg uses the
-// real micro sign.
+// Quick-pick dosage units, same set as the medication log form. `dosage_unit` is free
+// text, so these are shortcuts and "+ Other" takes anything else. µg uses the real
+// micro sign.
 const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 
 const TIMES_OF_DAY: [TreatmentTimeOfDay, string][] = [
@@ -29,9 +29,9 @@ const TIMES_OF_DAY: [TreatmentTimeOfDay, string][] = [
   ['night', 'Night'],
 ];
 
-/** Local midnight epoch ms from raw D/M/Y text. Unlike `clampBirth` this does
- *  NOT cap at today: a treatment can start or end in the future. Out-of-range parts
- *  are clamped to a valid date. `new Date(y, m-1, d)` is local midnight. */
+/** Local midnight epoch ms from raw D/M/Y text. Unlike `clampBirth` this does NOT cap
+ *  at today: a treatment can start or end in the future. Out-of-range parts are
+ *  clamped to a valid date. */
 function toMidnightMs(dStr: string, mStr: string, yStr: string): number {
   const now = new Date();
   const y = Math.min(2999, Math.max(1900, parseInt(yStr, 10) || now.getFullYear()));
@@ -41,7 +41,6 @@ function toMidnightMs(dStr: string, mStr: string, yStr: string): number {
   return new Date(y, mo - 1, d).getTime();
 }
 
-/** Split an epoch ms into DD / MM / YYYY strings for the date fields. */
 function toDMY(ms: number): { d: string; m: string; y: string } {
   const dt = new Date(ms);
   return { d: String(dt.getDate()), m: String(dt.getMonth() + 1), y: String(dt.getFullYear()) };
@@ -64,9 +63,8 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
   const close = useAppStore((s) => s.closeTreatmentEditor);
 
   const editing: Treatment | null = editingId ? (treatments.find((c) => c.id === editingId) ?? null) : null;
-  // The sheet's open instant, stamped by `openTreatmentEditor` (never
-  // `Date.now()` here: render must stay pure, and Inner remounts per open via
-  // its key, so the stamp is exactly "when this sheet appeared").
+  // The sheet's open instant, stamped by `openTreatmentEditor`, never `Date.now()`
+  // here: render must stay pure, and Inner remounts per open via its key.
   const today = toDMY(openedAt);
   const fromInit = editing ? toDMY(editing.fromDate) : today;
   const toInit = editing?.toDate != null ? toDMY(editing.toDate) : today;
@@ -110,9 +108,9 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
     const parsedHours = Math.max(1, Math.round(parseInt(everyHours, 10) || 1));
     const treatment: Treatment = {
       id: editing?.id ?? 'treatment' + Date.now(),
-      // Carry the backing note's server id through an edit. Dropping it would
-      // make `updateTreatment` skip the PATCH and leave the treatment looking unsynced,
-      // so `flushUnsynced` would POST a second note for the same treatment.
+      // Carry the backing note's server id through an edit. Dropping it would make
+      // `updateTreatment` skip the PATCH and leave the treatment looking unsynced, so
+      // `flushUnsynced` would POST a second note for the same treatment.
       serverId: editing?.serverId,
       childId: editing?.childId ?? selectedChildId,
       name: name.trim(),
@@ -261,9 +259,9 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
           Dose per intake (optional)
         </Txt>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: t.surface, borderWidth: 1.5, borderColor: dosageFocused ? t.primary : t.line, borderRadius: 14, paddingHorizontal: 14, marginBottom: 12 }}>
-          {/* flex:1/minWidth:0 wrapper so the input SHRINKS to fit the unit; a
-              bare flex:1 TextInput keeps min-width:auto on web and pushes a long
-              unit ("puffs", "drops") past the right edge. Matches LogSheet. */}
+          {/* flex:1/minWidth:0 wrapper so the input SHRINKS to fit the unit: a bare
+              flex:1 TextInput keeps min-width:auto on web and pushes a long unit
+              ("puffs", "drops") past the right edge. */}
           <View style={{ flex: 1, minWidth: 0 }}>
             <TextInput
               value={dosage}

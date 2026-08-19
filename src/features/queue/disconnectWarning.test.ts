@@ -19,9 +19,9 @@ describe('changeCountLabel', () => {
 
 describe('DISCONNECT_BASE_LINE', () => {
   it('never claims a loss', () => {
-    // The base sentence shows on EVERY open, queue or no queue. The loss claim
-    // belongs to disconnectLossLine alone, which is null when nothing would be
-    // lost; a "lost" in the base line would cry wolf on every empty disconnect.
+    // The base sentence shows on EVERY open. The loss claim belongs to
+    // disconnectLossLine alone, which is null when nothing would be lost, so a "lost"
+    // here would cry wolf on every empty disconnect.
     expect(DISCONNECT_BASE_LINE.toLowerCase()).not.toContain('lost');
   });
 
@@ -56,8 +56,8 @@ describe('disconnectLossLine', () => {
   });
 
   it('says the loss is permanent, in every shape', () => {
-    // "will be permanently lost" is the whole point of the confirm: disconnect()
-    // clears the queue and the op-log, and they exist nowhere else.
+    // The whole point of the confirm: disconnect() clears the queue and the op-log,
+    // and they exist nowhere else.
     for (const line of [disconnectLossLine(2, 0), disconnectLossLine(0, 2), disconnectLossLine(2, 2)]) {
       expect(line).toContain('permanently lost');
     }

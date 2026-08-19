@@ -23,8 +23,8 @@ describe('nextChildColor', () => {
   });
 
   it('reuses the tint a deleted sibling freed rather than counting the list', () => {
-    // Exactly the shape left by deleting the middle of three children. Picking
-    // by list length here would hand out a tint already on screen.
+    // The shape left by deleting the middle of three children: picking by list
+    // length would hand out a tint already on screen.
     expect(nextChildColor([kid(CHILD_COLORS[0]), kid(CHILD_COLORS[2])])).toBe(CHILD_COLORS[1]);
   });
 

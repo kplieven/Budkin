@@ -82,7 +82,6 @@ describe('addDays / addMonths', () => {
     expect(addDays(at(2026, 9, 8), -7)).toBe(at(2026, 9, 1));
   });
   it('clamps a month addition to the last day of a short month', () => {
-    // 31 January plus three months has no 31 April, so it lands on the 30th.
     expect(addMonths(at(2026, 1, 31), 3)).toBe(at(2026, 4, 30));
   });
   it('adds whole months when the day exists', () => {
@@ -171,11 +170,8 @@ describe('desiredScheduled: stale timers', () => {
   });
 
   it('names no child for a timer nobody owns', () => {
-    // `childId` is optional on Timer, because the persisted payloads are cast and
-    // never validated, and an absent one means "not attributable" rather than
-    // "the selected child". So the tap carries no child either, and lands on the
-    // current selection. Same permanent shape as a reminder scheduled before the
-    // parameter existed.
+    // `childId` is optional on Timer, and an absent one means "not attributable"
+    // rather than "the selected child", so the tap carries no child either.
     const out = desiredScheduled(
       input({ children: [born], timers: [timer({ childId: undefined })], prefs: prefs({ ageMilestones: false }) }),
       at(2026, 9, 1, 21),
@@ -298,7 +294,6 @@ describe('desiredScheduled: age milestones', () => {
   it('clamps a month step to the last day of a short month', () => {
     const born = child({ birth: at(2026, 1, 31) });
     const out = desiredScheduled(input({ children: [born], prefs: noOthers }), at(2026, 1, 31, 12));
-    // 31 January plus three months has no 31 April.
     expect(out.find((n) => n.identifier.includes(':3m:'))?.fireAt).toBe(at(2026, 4, 30, 9));
   });
 
@@ -363,9 +358,7 @@ describe('desiredScheduled: pumping', () => {
     expect(out[1].fireAt).toBe(at(2026, 9, 1, 12));
     expect(out[0].title).toBe('Time to pump');
     expect(out[0].body).toBe('Tap to log a session.');
-    // Deliberately childless, unlike every other kind: pumping is parent-side,
-    // scheduled once for the device rather than per child, so there is nobody
-    // for the tap to select.
+    // Deliberately childless: pumping is parent-side, so nobody to select.
     expect(out[0].data.url).toBe('/timers');
   });
 
@@ -400,8 +393,8 @@ describe('desiredScheduled: pumping', () => {
   });
 
   it('re-enters the grid on phase when every occurrence has already passed', () => {
-    // Enabled two days ago, app never opened since. Naively scheduling from the
-    // anchor would produce only past instants and therefore nothing at all.
+    // Enabled two days ago, app never opened since: scheduling straight from the
+    // anchor would produce only past instants, and so nothing at all.
     const out = desiredScheduled(
       input({
         prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 6) }),
@@ -434,10 +427,8 @@ describe('desiredScheduled: pumping', () => {
   });
 
   it('keeps the same identifier for an occurrence while now advances toward it', () => {
-    // The grid stays anchored, so an identifier must depend only on the anchor
-    // and the occurrence number, never on `now`. Otherwise every reconcile
-    // (e.g. a bare clock tick) would look like a change and re-trigger a
-    // cancel-and-reschedule of the whole pumping set.
+    // An identifier must depend only on the anchor and the occurrence number,
+    // never on `now`, or a bare clock tick reschedules the whole pumping set.
     const pumpPrefs = only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) });
     const a = desiredScheduled(
       input({ prefs: pumpPrefs, lastPumpAt: at(2026, 9, 1, 6) }),
@@ -452,10 +443,8 @@ describe('desiredScheduled: pumping', () => {
   });
 
   it('changes the identifier when the interval changes, so a moved cadence reschedules', () => {
-    // Same anchor, same occurrence number (both are the first occurrence), but a
-    // different interval means a different fire time. The title and body of a
-    // pumping alert never change, so the identifier is the only thing that can
-    // tell the diff an occurrence moved.
+    // Same anchor and occurrence number, different interval. Title and body never
+    // change, so only the identifier can tell the diff an occurrence moved.
     const anchor = at(2026, 9, 1, 0);
     const now = at(2026, 9, 1, 1);
     const a = desiredScheduled(
@@ -478,9 +467,7 @@ describe('desiredScheduled: pumping', () => {
 
   it('skips a candidate that lands exactly on now, and still produces a full PUMP_AHEAD run', () => {
     // (now - anchor) % interval === 0 puts the first candidate exactly on `now`,
-    // which `if (fireAt <= now) continue;` skips. The loop bound is one wider
-    // than PUMP_AHEAD specifically to compensate for that one skip, so this
-    // pins that the compensation still produces a full run.
+    // which is skipped. The loop bound is one wider than PUMP_AHEAD for that.
     const anchor = at(2026, 9, 1, 0);
     const now = at(2026, 9, 1, 3); // anchor plus exactly one 180-minute interval
     const out = desiredScheduled(
@@ -533,9 +520,7 @@ describe('desiredScheduled: pumping', () => {
   });
 
   it('suppresses on a pumping timer owned by any child, matching lastPumpAt\'s own scope', () => {
-    // `lastPumpAt` is derived from every pumping entry with no child filter (see
-    // scheduleSync's toInput), so the suppression is scoped the same way. Unlike
-    // naps, there is no per-child pump reminder for a sibling's timer to silence.
+    // `lastPumpAt` has no child filter, so the suppression is scoped the same way.
     const out = desiredScheduled(
       input({
         prefs: only({ pumpingReminders: true, pumpingIntervalMin: 180, pumpingEnabledAt: at(2026, 9, 1, 0) }),
@@ -646,22 +631,18 @@ describe('nap suggestions', () => {
   });
 
   it('does not suppress the nudge for a running non-sleep timer', () => {
-    // Only a running SLEEP timer means the baby is currently asleep. A
-    // running feeding (or any other) timer must not suppress the nudge.
     const t = timer({ id: 't1', childId: 'c1', activity: 'feeding', saveAs: 'feeding' });
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
   it("lets an ownerless sleep timer suppress nobody's nudge", () => {
-    // Nothing here consults a selection any more (0.15.3 removed it from the
-    // input entirely), so an ownerless timer answers for nobody at all.
+    // Nothing here consults a selection, so an ownerless timer answers for nobody.
     const t = timer({ id: 't1', childId: undefined, saveAs: 'sleep' });
     expect(naps(napInput({ timers: [t] })).length).toBe(1);
   });
 
   it('says nothing while the child has an ongoing sleep ENTRY with no running timer', () => {
-    // e.g. a sleep entry edited to "still ongoing" (end: null, no Timer
-    // created), or a server sleep record with no end.
+    // e.g. an entry edited to "still ongoing", or a server record with no end.
     expect(naps(napInput({ asleepChildIds: { c1: true } }))).toEqual([]);
   });
 
@@ -706,8 +687,7 @@ describe('nap suggestions', () => {
     });
 
     it('drops rather than defers an overnight window', () => {
-      // Woke 03:00, would fire 04:15. Nothing is scheduled, and in particular
-      // nothing is pushed to 07:00: by then the anchor is stale.
+      // Woke 03:00, would fire 04:15. Nothing is pushed to 07:00 either.
       const woke = at(2026, 10, 31, 3);
       expect(naps(napInput({ lastSleepEndByChild: { c1: woke } }), woke + 60_000)).toEqual([]);
     });
@@ -803,12 +783,10 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('keeps every occurrence on its mapped hour across an autumn-back boundary', () => {
-    // Built and asserted with calendar arithmetic on each day's own midnight,
-    // never by adding 86_400_000: a fixed millisecond day drifts by an hour
-    // across a DST change and would move the 08:00 dose to 07:00 or 09:00 for
-    // half the year. In a timezone without DST this is a tautology; in one with
-    // it, it is the whole point. The eight-day run from 24 October crosses the
-    // European clock change on the 25th.
+    // Asserted with calendar arithmetic on each day's own midnight, never by
+    // adding 86_400_000: a fixed millisecond day drifts an hour across a DST
+    // change. The run from 24 October crosses the European clock change on the
+    // 25th, so in a timezone without DST this test is a tautology.
     const out = run({ treatments: [treatment({ timesOfDay: ['morning'], fromDate: at(2026, 10, 20) })] }, at(2026, 10, 24, 6));
     expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
@@ -817,9 +795,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('keeps every occurrence on its mapped hour across a spring-forward boundary', () => {
-    // The other direction, which fails differently: a millisecond day walk
-    // lands at 09:00 here rather than 07:00. The eight-day run from 27 March
-    // crosses the European clock change on the 29th.
+    // The other direction: a millisecond day walk lands at 09:00, not 07:00.
     const out = run({ treatments: [treatment({ timesOfDay: ['morning'], fromDate: at(2026, 3, 20) })] }, at(2026, 3, 27, 6));
     expect(out).toHaveLength(TREATMENT_AHEAD);
     expect(out.every((n) => new Date(n.fireAt).getHours() === 8)).toBe(true);
@@ -828,9 +804,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it("suppresses today's kth slot once k doses are logged today", () => {
-    // One dose given on a morning+evening treatment. Counting, not slot matching:
-    // the dose settles the FIRST slot and leaves the second owed, so exactly
-    // one of today's two slots survives.
+    // Counting, not slot matching: the dose settles the FIRST slot and leaves
+    // the second owed.
     const out = run(
       { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 7) } } },
       at(2026, 9, 2, 6),
@@ -841,9 +816,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('counts k from the start of the day, not from now', () => {
-    // Morning and noon have already passed and two doses were logged, so the
-    // evening slot is k = 3 and survives. Numbering the remaining slots from
-    // now would make evening k = 1, see dosesToday >= 1, and wrongly drop it.
+    // Morning and noon have passed and two doses were logged, so evening is
+    // k = 3 and survives. Numbering from now would make it k = 1 and drop it.
     const out = run(
       {
         treatments: [treatment({ timesOfDay: ['morning', 'noon', 'evening'] })],
@@ -904,16 +878,12 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('schedules nothing for a treatment whose child is not in the roster', () => {
-    // An orphan record. `deleteChild` purges a deleted child's treatments as of
-    // 0.15.2, so this is the stale-record case rather than the ordinary one, and
-    // an alert naming nobody is worse than no alert.
+    // `deleteChild` purges a child's treatments, so this is the stale record case.
     expect(run({ treatments: [treatment({ childId: 'c2' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
   it("covers a child who is not selected", () => {
-    // The point of the change: a sibling's regimen now produces alerts. There is
-    // no selection in the input at all after this task's sibling task, so what
-    // this pins is that every treatment with a live child is scheduled.
+    // There is no selection in the input at all.
     const sibling = child({ id: 'c2', first: 'Wren' });
     const out = run(
       {
@@ -943,11 +913,8 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('gates `expected` per treatment, not across the household', () => {
-    // Every other reminder kind guards `child.expected`; this one must too,
-    // because resolveLogDeepLink (src/lib/logDeepLink.ts) refuses to open
-    // anything for an expected child, so a scheduled "X due" alert would be a
-    // tap the app itself cannot service. Applied per child now: one expecting
-    // child must not silence a born sibling's regimen.
+    // `resolveLogDeepLink` refuses to open anything for an expected child, so the
+    // alert would be a tap the app cannot service. Per child, not per household.
     const expecting = child({ id: 'c2', first: 'Wren', expected: true });
     const out = run(
       {
@@ -986,8 +953,7 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
   });
 
   it('schedules nothing for a treatment whose name is blank', () => {
-    // `logMedicationFromTreatment` refuses a blank name, so such a notification would
-    // dead-tap. It would also read as " due".
+    // `logMedicationFromTreatment` refuses a blank name, so this would dead-tap.
     expect(run({ treatments: [treatment({ name: '   ' })] }, at(2026, 9, 2, 6))).toEqual([]);
   });
 
@@ -1049,8 +1015,8 @@ describe('desiredScheduled: treatments, every N hours', () => {
   });
 
   it('re-enters the grid on phase when every occurrence has already passed', () => {
-    // Dosed two days ago, app never opened since. Scheduling blindly from the
-    // anchor would produce only past instants and therefore nothing at all.
+    // Dosed two days ago, app never opened since: straight from the anchor this
+    // would produce only past instants, and so nothing at all.
     const out = run(
       { treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: at(2026, 9, 1, 6) } } },
       at(2026, 9, 3, 7),
@@ -1061,9 +1027,8 @@ describe('desiredScheduled: treatments, every N hours', () => {
   });
 
   it('schedules nothing for an interval treatment that has never been dosed', () => {
-    // "Every 8 hours" means eight hours after the last dose. With no last dose
-    // there is no defined next instant, and any anchor invented for one is a
-    // guess. The in-app tile still shows it as due, so nobody is left unaware.
+    // "Every 8 hours" means eight hours after the last dose, so with no last dose
+    // there is no defined next instant. The in-app tile still shows it as due.
     expect(run({ treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 7))).toEqual([]);
     expect(run({ treatments: [treatment()], treatmentDoses: {} }, at(2026, 9, 2, 7))).toEqual([]);
   });
@@ -1096,9 +1061,8 @@ describe('desiredScheduled: treatments, every N hours', () => {
   });
 
   it('still schedules nothing when the resync stamp is set but no dose was ever logged', () => {
-    // The ordering guard. A plain Math.max(lastAt ?? 0, enabledAt ?? 0), which
-    // is what pumpReminders does, would manufacture a grid here out of a time
-    // the app invented. The stamp may only ever MOVE an existing grid.
+    // The ordering guard: pumpReminders' plain Math.max(lastAt ?? 0, enabledAt ??
+    // 0) would manufacture a grid here. The stamp may only MOVE an existing one.
     expect(
       run({ treatments: [treatment()], treatmentDoses: { treatment1: { today: 0, lastAt: null } } }, at(2026, 9, 2, 11), {
         treatmentRemindersEnabledAt: at(2026, 9, 2, 10),
@@ -1108,8 +1072,7 @@ describe('desiredScheduled: treatments, every N hours', () => {
 
   it('does not let the resync stamp shift a times-of-day treatment', () => {
     // Those instants come off the wall clock, not off a phase, so there is
-    // nothing for a rebase to move. Toggling off and on cannot move an 08:00
-    // dose, and should not.
+    // nothing for a rebase to move.
     const todTreatment: Treatment = {
       id: 'treatment2',
       childId: 'c1',
@@ -1178,9 +1141,8 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('never fires before the home-screen nudge would show the same milestone', () => {
-    // The load-bearing guarantee: `MilestoneNudge` renders `overdueUnlogged`,
-    // so every scheduled alert must name milestones that call already returns
-    // at its own fire time. A calendar-month fire date fails this.
+    // `MilestoneNudge` renders `overdueUnlogged`, so every scheduled alert must
+    // name milestones that call already returns at its own fire time.
     for (const n of run()) {
       const keys = n.identifier.split(':')[3].split(',');
       const overdue = overdueUnlogged(ageMonths(born.birth, n.fireAt), new Map(), []).map((m) => m.key);
@@ -1240,8 +1202,6 @@ describe('desiredScheduled: milestone catch-up', () => {
   });
 
   it('nudges every child, each against their own history', () => {
-    // Was "only ever covers the selected child". The keys can answer per child
-    // now, so a sibling is no longer read as having reached nothing.
     const sibling = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
     const out = run({
       children: [born, sibling],
@@ -1250,7 +1210,6 @@ describe('desiredScheduled: milestone catch-up', () => {
 
     expect(out.some((n) => n.identifier.includes(':c1:'))).toBe(true);
     expect(out.some((n) => n.identifier.includes(':c2:'))).toBe(true);
-    // c1 logged it, c2 did not, so only c2 is nudged about it.
     const liftsHead = out.filter((n) => n.identifier.includes('lifts-head'));
     expect(liftsHead).toHaveLength(1);
     expect(liftsHead[0].identifier).toContain(':c2:');
@@ -1266,27 +1225,22 @@ describe('desiredScheduled: milestone catch-up', () => {
       '/milestones?child=c1',
       '/milestones?child=c2',
     ]);
-    // `lifts-head` and `first-smile` both close at 3 months (see the "groups
-    // every milestone" test above), so the earliest window for a newborn
-    // always groups both into one notification per child, not one milestone.
+    // `lifts-head` and `first-smile` both close at 3 months, so both group.
     expect(sameMorning.map((n) => n.title).sort()).toEqual(
       [`2 milestones to check for Rowan.`, `2 milestones to check for Wren.`].sort(),
     );
   });
 
   it("reads a child with no entry in either map as having reached nothing", () => {
-    // The maps are sparse: a child who has logged no milestone and answered no
-    // prompt has no key at all, which must not throw and must not suppress.
+    // The maps are sparse: no key at all must not throw and must not suppress.
     const out = run({ reachedMilestoneKeysByChild: {}, answeredMilestoneKeysByChild: {} });
     expect(out.length).toBeGreaterThan(0);
   });
 });
 
-/**
- * The delivered half of the reconcile. `diffScheduled` above only ever sees
- * PENDING alerts, and a notification leaves the pending set the moment it
- * fires, so nothing there can reach a banner already sitting in the tray.
- */
+/** The delivered half of the reconcile. `diffScheduled` above only ever sees
+ *  PENDING alerts, and a notification leaves the pending set the moment it
+ *  fires, so nothing there can reach a banner already in the tray. */
 describe('staleDelivered', () => {
   const rowan = child({ id: 'c1', first: 'Rowan', birth: at(2026, 9, 1) });
   const wren = child({ id: 'c2', first: 'Wren', birth: at(2026, 9, 1) });
@@ -1307,8 +1261,7 @@ describe('staleDelivered', () => {
     });
 
     it('leaves due, age and milestone reminders delivered', () => {
-      // These three report a calendar fact that stays true once it fires. No
-      // condition can retire them, so they are out of scope.
+      // These three report a calendar fact that stays true once it fires.
       const ids = [
         `${REMINDER_PREFIX}due:c1:day:${now}`,
         `${REMINDER_PREFIX}age:c1:3m:${now}`,
@@ -1340,8 +1293,7 @@ describe('staleDelivered', () => {
     });
 
     it('KEEPS a nudge that just fired and is still true, the child being awake', () => {
-      // The whole feature turns on this one. A desired reminder leaves the
-      // desired set the instant it fires (`fireAt <= now` drops it), so a
+      // A desired reminder leaves the desired set the instant it fires, so a
       // "dismiss anything not desired" rule would wipe every banner on arrival.
       expect(staleDelivered(input({ children: [rowan] }), [napId('c1', fireAt)], now)).toEqual([]);
     });
@@ -1356,8 +1308,7 @@ describe('staleDelivered', () => {
     });
 
     it("keys on the identifier's own child, not the selected one", () => {
-      // c2 is asleep, so c2's banner must go; c1's must not, because the sweep
-      // asks about each identifier's own child, not a single child for the whole call.
+      // The sweep asks about each identifier's own child, not one per call.
       const i = input({ children: [rowan, wren], asleepChildIds: { c2: true } });
       expect(staleDelivered(i, [napId('c1', fireAt), napId('c2', fireAt)], now)).toEqual([
         napId('c2', fireAt),
@@ -1457,9 +1408,8 @@ describe('staleDelivered', () => {
     });
 
     it('settles the EARLIEST owed slot only, matching the counting rule', () => {
-      // Both slots have fired and one late dose arrived. Counting says the first
-      // slot is settled and the second is still owed. A per-slot "any later dose
-      // clears it" rule would wrongly clear both.
+      // Both slots have fired and one late dose arrived. A per-slot "any later
+      // dose clears it" rule would wrongly clear both.
       const i = input({
         treatments: [t()],
         treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 19, 5) } },
@@ -1486,10 +1436,8 @@ describe('staleDelivered', () => {
     });
 
     it('KEEPS a slot for a treatment with no dose scalars, whose history is unreliable', () => {
-      // A treatment in `input.treatments` with no entry in `treatmentDoses` is
-      // "never considered", not "no doses given": `treatmentDoseScalars` keys
-      // every treatment it is handed, so a missing key cannot mean an empty
-      // dose history. That is why the slot is kept rather than dismissed.
+      // No entry in `treatmentDoses` means "never considered", not "no doses
+      // given": `treatmentDoseScalars` keys every treatment it is handed.
       const i = input({ treatments: [t({ id: 'treatment2', childId: 'c2' })], treatmentDoses: {} });
       expect(staleDelivered(i, [treatmentId('treatment2', morning)], now)).toEqual([]);
     });
@@ -1501,8 +1449,7 @@ describe('staleDelivered', () => {
     });
 
     it("KEEPS a fire time that matches none of the treatment's slots", () => {
-      // The parent removed the evening slot, so a banner from it can no longer
-      // be counted against the remaining schedule.
+      // The evening slot was removed, so its banner has no index to count against.
       const i = input({
         treatments: [t({ timesOfDay: ['morning'] })],
         treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 10, 31, 8, 5) } },

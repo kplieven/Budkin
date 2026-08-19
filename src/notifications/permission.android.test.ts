@@ -2,13 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as Notifications from 'expo-notifications';
 
-// Imported by its explicit platform path: `.android.ts` files are normally
-// selected by Metro's platform resolution and never load under the node test
-// environment through the platform-agnostic specifier.
+// Explicit platform path: Metro picks the `.android.ts` suffix on device, but the
+// node test environment never would.
 import { hasReminderPermission, requestReminderPermission } from '@/notifications/permission.android';
 
-// The module's only native surface. Every export it calls is mocked so the
-// real .android.ts module can be imported directly under node.
 vi.mock('expo-notifications', () => ({
   getPermissionsAsync: vi.fn(),
   requestPermissionsAsync: vi.fn(),
@@ -56,10 +53,8 @@ describe('requestReminderPermission', () => {
     expect(Notifications.requestPermissionsAsync).not.toHaveBeenCalled();
   });
 
-  // Regression test for the finding: a native-module failure here used to
-  // reject, which meant saveChild and finish() never ran in setup/baby.tsx's
-  // onAddExpected, and setSaving(false) is called nowhere in that file. The
-  // user was left on a dead form with the baby never saved.
+  // A rejection here strands setup/baby.tsx's onAddExpected: saveChild and
+  // finish() never run and nothing calls setSaving(false), leaving a dead form.
   it('resolves false rather than rejecting when getPermissionsAsync rejects', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(Notifications.getPermissionsAsync).mockRejectedValue(new Error('boom on getPermissionsAsync'));

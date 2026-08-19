@@ -11,11 +11,7 @@ import { entriesForChild, selectServerMode, timersForChild } from '@/store/selec
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
-/**
- * Desktop dashboard's right-hand timeline rail (fixed 372px): day-grouped recent
- * activity, sharing TimelineEntry + groupByDay with the History screen. Rendered
- * only above the rail breakpoint (see showRail / the dashboard's desktop branch).
- */
+/** Desktop dashboard's right-hand rail: day-grouped recent activity. */
 export function TimelineRail() {
   const t = useTheme();
   const entries = useAppStore((s) => s.entries);
@@ -25,24 +21,19 @@ export function TimelineRail() {
   const now = useAppStore((s) => s.now);
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
-  // The queued markers, on exactly the terms History uses: same helper, same
-  // raw-select-then-derive shape (a Set built inside a selector loops zustand
-  // v5). Desktop and mobile must not disagree about what has reached the server.
+  // Queued markers on the terms History uses: raw-select then derive, because a
+  // Set built inside a selector loops zustand v5. The shared predicate then runs
+  // on the already-selected `connection` rather than taking a second subscription.
   const queuedIds = useAppStore((s) => s.queuedIds);
   const connection = useAppStore((s) => s.connection);
-  // The shared predicate, like History: called on the already-selected
-  // `connection` rather than taking a second subscription.
   const serverMode = selectServerMode({ connection });
   const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
-  // Scoped to the selected child, like History: `entries` holds every child's
-  // records. Notes have their own dedicated tab, so keep them out of the rail.
+  // `entries` holds every child's records, so scope it. Notes have their own
+  // dedicated tab, so keep them out of the rail.
   const activityEntries = entriesForChild(entries, selectedChildId).filter(
     (e) => e.type !== 'note' && e.type !== 'milestone',
   );
-  // Running timers show here as well, on the same terms as on History: desktop
-  // and mobile run the identical pipeline and must not disagree about whether
-  // an unfinished activity exists.
   const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
   const groups = groupByDay(items, now);
 
@@ -91,9 +82,9 @@ export function TimelineRail() {
                 {g.label}
               </Txt>
               <View>
-                {/* A timer row opens the running-timer editor: `openEdit` only
-                    knows ids that exist in `entries` and returns early on a
-                    miss, so a timer sent there would be a dead row. */}
+                {/* A timer row opens the running-timer editor: `openEdit` only knows
+                    ids in `entries` and returns early on a miss, so a timer sent
+                    there would be a dead row. */}
                 {g.items.map((e, i) => (
                   <TimelineEntry
                     key={isTimer(e) ? `timer:${e.id}` : e.id}

@@ -3,19 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Notifications from 'expo-notifications';
 import type { Notification, NotificationRequest } from 'expo-notifications';
 
-// Imported by its explicit platform path: `.android.ts` files are normally
-// selected by Metro's platform resolution and never load under the node test
-// environment through the platform-agnostic specifier.
+// Explicit platform path: Metro picks the `.android.ts` suffix on device, but the
+// node test environment never would.
 import { applyScheduled } from '@/notifications/applySchedule.android';
 import { REMINDER_CHANNEL_ID, TIMER_CHANNEL_ID } from '@/notifications/content';
 import { hasReminderPermission, requestReminderPermission } from '@/notifications/permission';
 import type { ScheduleInput, ScheduledNotification } from '@/notifications/scheduled';
 import type { Timer } from '@/types/models';
 
-// The reconciler's only native surface. Every export it calls is mocked so
-// the real .android.ts module can be imported directly under node. `vi.mock`
-// calls are hoisted above these imports by vitest, so evaluation order here
-// does not matter.
 vi.mock('expo-notifications', () => ({
   getAllScheduledNotificationsAsync: vi.fn(),
   cancelScheduledNotificationAsync: vi.fn(),
@@ -40,7 +35,7 @@ function pending(identifier: string, title: string, body: string): NotificationR
   };
 }
 
-/** One banner sitting in the tray, as `getPresentedNotificationsAsync` reports it. */
+/** A banner sitting in the tray, as `getPresentedNotificationsAsync` reports it. */
 function delivered(identifier: string): Notification {
   return { date: NOW, request: pending(identifier, '', '') } as Notification;
 }
@@ -57,8 +52,7 @@ function wanted(overrides: Partial<ScheduledNotification> = {}): ScheduledNotifi
   };
 }
 
-/** The store projection the dismissal pass asks its staleness questions against.
- *  Empty by default, so nothing is stale unless a test makes it so. */
+/** Empty by default, so nothing reads as stale unless a test makes it so. */
 function scheduleInput(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
   return {
     children: [],
@@ -257,7 +251,6 @@ describe('dismissing delivered reminders', () => {
   });
 
   it('never dismisses a delivered identifier without the budkin prefix', async () => {
-    // A timer notification's bare uuid, posted by a different subsystem.
     vi.mocked(Notifications.getPresentedNotificationsAsync).mockResolvedValue([
       delivered('3fa85f64-5717-4562-b3fc-2c963f66afa6'),
     ]);
@@ -341,8 +334,8 @@ describe('DATE trigger shape', () => {
         },
       }),
     );
-    // Sanity: the reminders channel is not the timers channel, so a channel-id
-    // typo that happened to still be a real channel would not slip past this.
+    // Sanity: a channel-id typo that happened to be the timers channel would
+    // otherwise slip past.
     expect(REMINDER_CHANNEL_ID).not.toBe(TIMER_CHANNEL_ID);
   });
 });

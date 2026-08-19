@@ -1,14 +1,11 @@
 /**
- * WHO Child Growth Standards LMS tables (0 to 60 completed months), one row per
- * month. `M` is in canonical metric units: kg (weight), cm (height/head),
- * kg/m^2 (BMI). Values transcribed from the WHO expanded z-score tables
- * (weight-for-age, length/height-for-age, head-circumference-for-age,
- * BMI-for-age), verified against the same tables' published SD columns in
- * whoLms.test.ts. Do not hand-edit; regenerate from source.
+ * WHO Child Growth Standards LMS tables (0 to 60 completed months), one row per month.
+ * `M` is in canonical metric units: kg (weight), cm (height/head), kg/m^2 (BMI).
+ * Transcribed from the WHO expanded z-score tables and verified against their published
+ * SD columns in whoLms.test.ts. Do not hand-edit; regenerate from source.
  *
- * height uses recumbent length to month 23 and standing height from month 24
- * (WHO's own length/height-for-age join). BMI stitches the 0-2y and 2-5y
- * tables at month 24.
+ * height uses recumbent length to month 23 and standing height from month 24 (WHO's own
+ * length/height-for-age join). BMI stitches the 0-2y and 2-5y tables at month 24.
  */
 import type { MeasurementKind } from '@/types/models';
 import type { Lms } from './whoReference';

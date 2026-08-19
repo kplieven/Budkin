@@ -15,8 +15,8 @@ describe('childAttribution', () => {
   });
 
   it('draws the middle dot and speaks a comma, from the same name', () => {
-    // The whole reason every form comes out of one call: a screen reader saying
-    // "middle dot" is noise, and the forms must never name different children.
+    // The whole reason every form comes out of one call: a screen reader saying "middle
+    // dot" is noise, and the forms must never name different children.
     const a = childAttribution('c1', kids);
     expect(a.drawn).toBe(' · Mara');
     expect(a.spoken).toBe(', Mara');
@@ -24,10 +24,9 @@ describe('childAttribution', () => {
   });
 
   it('hands History the bare name and tint to build its own chip from', () => {
-    // The timeline draws an element rather than appending to a line, so it needs
-    // the name unattached and the child's avatar colour to tint it with. It
-    // still takes `spoken` from here rather than rebuilding one, which is what
-    // keeps a drawn chip from going unannounced.
+    // The timeline draws an element rather than appending to a line, so it needs the
+    // name unattached and the child's avatar colour to tint it with. It still takes
+    // `spoken` from here, which is what keeps a drawn chip from going unannounced.
     const a = childAttribution('c1', kids);
     expect(a.name).toBe('Mara');
     expect(a.color).toBe('#f0a');
@@ -44,15 +43,14 @@ describe('childAttribution', () => {
 
   it('stays silent for a legacy timer that carries no owner at all', () => {
     // `Timer.childId` is optional because the persisted payloads are cast, not
-    // validated. An unattributable timer shows nothing rather than being filed
-    // under whoever happens to be selected.
+    // validated. An unattributable timer shows nothing rather than being filed under
+    // whoever happens to be selected.
     expect(childAttribution(undefined, kids)).toEqual(SILENT);
   });
 
   it('names the child but reports no tint when the list carries none', () => {
-    // The widget snapshots pass `{ id, first }` alone. A missing tint is not the
-    // same as no attribution: the name is still worth saying, and the caller
-    // draws it in a neutral colour.
+    // The widget snapshots pass `{ id, first }` alone. A missing tint is not the same
+    // as no attribution: the name is still worth saying, in a neutral colour.
     const a = childAttribution('c2', [
       { id: 'c1', first: 'Mara' },
       { id: 'c2', first: 'Tom' },

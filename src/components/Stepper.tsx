@@ -6,23 +6,21 @@ import { useTheme } from '@/theme/useTheme';
 import { toDisplay, unitLabel, type UnitSystem } from '@/lib/units';
 
 interface StepperProps {
-  /** Canonical millilitres, as stored. Imperial is a display lens only, so the
-   *  caller keeps handing us ml and we relabel + convert here. */
+  /** Canonical millilitres, as stored: imperial is a display lens only, so the
+   *  caller keeps handing us ml and we relabel and convert here. */
   value: number;
   system: UnitSystem;
   onMinus: () => void;
   onPlus: () => void;
 }
 
-/** Amount stepper for feeding and pumping volumes. Displays (and announces) the
- *  amount in the user's unit system; the stored value stays canonical ml. */
 export function Stepper({ value, system, onMinus, onPlus }: StepperProps) {
   const t = useTheme();
   const unit = unitLabel('volume', system);
   const shown = toDisplay('volume', value, system);
-  // Imperial steps by halves, so hold one decimal to keep 3.0 / 3.5 / 4.0 an
-  // even column. Metric is whole millilitres, but an amount first entered in
-  // fl oz converts back to a fraction, so trim that to one decimal as well.
+  // Imperial steps by halves, so hold one decimal to keep 3.0 / 3.5 / 4.0 an even
+  // column. Metric is whole millilitres, but an amount first entered in fl oz
+  // converts back to a fraction, so trim that to one decimal as well.
   const text = system === 'imperial' ? shown.toFixed(1) : String(Math.round(shown * 10) / 10);
   const btn = {
     width: 54,

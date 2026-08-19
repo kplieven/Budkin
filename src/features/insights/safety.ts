@@ -2,31 +2,22 @@ import { entryTimestamp, type Entry } from '@/types/models';
 import { DAY, dayStart } from './compute';
 
 /**
- * The narrow, calm safety net. Two hydration/intake signals the literature
- * treats as genuinely worth a parent's attention: too few wet nappies, and (for
- * newborns) too few feeds. Everything here is tuned HARD against false alarms —
- * the evidence is that noisy alerts on normal variation increase anxiety and get
- * the tab abandoned, so a flag only fires when the signal is both real and
- * current:
+ * Two hydration and intake signals the literature treats as worth a parent's attention:
+ * too few wet nappies, and for newborns too few feeds. Tuned hard against false alarms,
+ * since noisy alerts on normal variation increase anxiety and get the tab abandoned. So a
+ * flag needs a run of at least 2 consecutive below-floor days reaching the most recent
+ * reliably-logged day. Under-logged days are skipped, so "no wet nappy logged" is never
+ * mistaken for "no wet nappy happened": a day counts only if its logging volume is at
+ * least half that family's own recent median.
  *
- *   - It needs a run of >= 2 consecutive below-floor days, not a single dip.
- *   - Days that look under-logged are skipped, so "no wet nappy logged" is never
- *     mistaken for "no wet nappy happened" (the classic parent-data caveat). A
- *     day counts only if its total logging volume is at least half that family's
- *     own recent median — this adapts to light vs heavy loggers.
- *   - The run must reach the most recent reliably-logged day (the situation is
- *     ongoing), so a dip that already recovered doesn't nag.
- *   - Thresholds are age-gated: the wet floor applies once the newborn ramp is
- *     past, the feed floor only in the newborn window and after the first week.
- *
- * This is intentionally NOT medical advice and NOT an alarm; the UI renders it
- * as a gentle "worth a word with your doctor" note, never red.
+ * Intentionally not medical advice and not an alarm. The UI renders it as a gentle
+ * "worth a word with your doctor" note, never red.
  */
 
 const LOOKBACK_DAYS = 10;
 const WET_FLOOR = 6;            // NHS: "6 or more wet nappies a day" from ~day 5
 const WET_MIN_AGE_DAYS = 5;     // before this the count is still ramping up
-const FEEDS_FLOOR = 6;          // well under the newborn 8–12/24h → worth a mention
+const FEEDS_FLOOR = 6;          // well under the newborn 8-12/24h, worth a mention
 const FEEDS_MIN_AGE_DAYS = 7;   // "after the first week"
 const FEEDS_MAX_AGE_DAYS = 120; // a newborn-window concern only
 const MIN_RELIABLE_DAYS = 3;    // need enough well-logged history to trust a run
@@ -38,7 +29,6 @@ export interface SafetyFlag {
   kind: SafetyKind;
   /** length of the current consecutive below-floor run (>= MIN_RUN) */
   days: number;
-  /** the age-appropriate floor the count fell under */
   floor: number;
   /** the most recent reliably-logged day's count of that event */
   latest: number;

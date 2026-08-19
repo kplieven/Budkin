@@ -39,12 +39,11 @@ export default function Onboarding() {
   const serverConnected = connected && connection?.mode === 'server';
   const offeredBabyStep = useRef(false);
 
-  // Re-decided on focus, not just on a dependency change. Coming BACK to this
-  // screen (from the add-baby step) has to be handled too, or a user who
-  // reached it as the stack root would be stranded on a form that can no longer
-  // do anything. A fresh Baby Buddy install has no children on it, so a
-  // successful connect continues into the add-baby step rather than dropping
-  // the user on an empty Home; anything else means setup is done.
+  // Re-decided on focus, not just on a dependency change: coming BACK from the
+  // add-baby step has to be handled too, or a user who reached this as the stack
+  // root is stranded on a form that can no longer do anything. A fresh Baby Buddy
+  // install has no children on it, so a successful connect continues into the
+  // add-baby step rather than dropping the user on an empty Home.
   useFocusEffect(
     useCallback(() => {
       if (!serverConnected) return;

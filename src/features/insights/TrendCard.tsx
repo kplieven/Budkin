@@ -24,9 +24,8 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
   // regressed. The theme has no danger/negative token, so fall back to a warm red.
   const deltaColor = deltaGood ? '#3E9E6E' : '#C7583F';
   // The "in typical range" chip replaces the static caption when the caller
-  // resolves the baby's position against a solid band. "In range" reads as calm
-  // reassurance (green + check); out-of-range stays neutral grey, never alarming
-  // — a population band is not a target (the ⓘ sheet says so).
+  // resolves the baby's position against a solid band. Out-of-range stays neutral
+  // grey, never alarming: a population band is not a target (the ⓘ sheet says so).
   const statusLabel = status === 'in' ? 'In typical range'
     : status === 'below' ? 'Below typical range'
     : status === 'above' ? 'Above typical range' : null;
@@ -35,8 +34,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
   const band = bandForRange(norm, birth, points);
   const ruleOfThumb = norm.kind === 'ruleOfThumb';
   const chartW = width - 32;
-  // Calendar-nice date ticks across the range (same helper the growth chart
-  // uses); it adapts the label from day -> month -> year as the span grows.
+  // Calendar-nice date ticks; the label adapts day -> month -> year as spans grow.
   const { ticks: xTicks, fmtX } = xTicksFor(points, Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)));
 
   return (
@@ -77,7 +75,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
 
       <Modal visible={info} transparent animationType="fade" onRequestClose={() => setInfo(false)}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-          {/* Scrim is a sibling of the content, not its parent — tapping the
+          {/* Scrim is a sibling of the content, not its parent: tapping the
               sheet must not bubble into this Pressable and dismiss it. */}
           <Pressable
             onPress={() => setInfo(false)}

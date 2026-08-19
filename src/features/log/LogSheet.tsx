@@ -43,16 +43,13 @@ const COLORS: [DiaperColor, string][] = [
   ['green', SOLID_COLORS.green],
   ['yellow', SOLID_COLORS.yellow],
 ];
-// Quick-pick dosage units. Baby Buddy's `dosage_unit` is free text, so these are
-// just shortcuts; the "+ Other" field takes anything else. µg uses the real
-// micro sign so it reads correctly rather than an ASCII "u".
+// Quick-pick dosage units. Baby Buddy's `dosage_unit` is free text, so these are just
+// shortcuts and the "+ Other" field takes anything else. µg uses the real micro sign.
 const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 /**
- * Dashed "+ New tag" pill that sits at the end of the tag chip row. Tapping it
- * reveals TagInputRow below the chips. Styled lighter than a real Chip (dashed
- * border, faint text) so it never reads as a selectable / selected tag; its
- * dimensions mirror the tag chips (padH 13 / padV 8 / radius 13) so it lines up
- * in the wrap row.
+ * Dashed "+ New tag" pill at the end of the tag chip row, revealing TagInputRow.
+ * Styled lighter than a real Chip so it never reads as a selectable or selected tag;
+ * its dimensions mirror the tag chips so it lines up in the wrap row.
  */
 function AddTagPill({ onPress }: { onPress: () => void }) {
   const t = useTheme();
@@ -84,17 +81,15 @@ function AddTagPill({ onPress }: { onPress: () => void }) {
 }
 
 /**
- * Free-form tag input, revealed by AddTagPill. Type a brand-new tag name and
- * submit to add it as a selected tag. No server call — Baby Buddy auto-creates
- * the tag when the entry is POSTed (createTag rejects blank / structural names).
- * Enter or "Add" commits and keeps the row open for fast multi-add; blurring
- * while empty (or Escape on web) collapses back to the pill via onDismiss. Local
- * text state re-seeds empty on every reveal since the row unmounts on collapse.
+ * Free-form tag input, revealed by AddTagPill. No server call: Baby Buddy
+ * auto-creates the tag when the entry is POSTed. Enter or "Add" commits and keeps the
+ * row open for fast multi-add; blurring while empty (or Escape on web) collapses back
+ * to the pill.
  *
  * blurOnSubmit={false} is load-bearing, not a nicety: without it react-native-web
- * blurs the input on Enter, which (with an empty field post-submit) would trip
- * the blur-when-empty collapse and defeat multi-add. It still fires
- * onSubmitEditing for this single-line input, so tags commit on Enter.
+ * blurs the input on Enter, which with an empty field post-submit would trip the
+ * blur-when-empty collapse and defeat multi-add. It still fires onSubmitEditing for
+ * this single-line input, so tags commit on Enter.
  */
 function TagInputRow({
   color,
@@ -172,11 +167,9 @@ function TagInputRow({
 }
 
 /**
- * The "Tags" field: selectable chips for the server list ∪ the entry's own tags
- * (minus structural ones), plus an AddTagPill that expands into TagInputRow for
- * creating a brand-new tag. The editing flag lives here so the pill (in the chip
- * row) and the input (below it) can sit in different rows; it unmounts with the
- * sheet, so the field always re-opens collapsed.
+ * The "Tags" field. The editing flag lives here so the pill (in the chip row) and the
+ * input (below it) can sit in different rows; it unmounts with the sheet, so the
+ * field always re-opens collapsed.
  */
 function TagField({
   color,
@@ -233,14 +226,11 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 }
 
 /**
- * Decimal temperature reading. The Stepper is integer-only and LevelScale has
- * three fixed steps, so neither fits 37.4. This is a free decimal TextInput
- * (styled like MeasurementSheet's value input). Local text state holds the raw string so a
- * trailing "." while typing "37." isn't dropped. The stored value (`te.temperature`)
- * is always canonical °C: the field shows it in the user's units lens and
- * converts the typed value back to °C before pushing it to the store. The block
- * is conditionally rendered, so it remounts (re-seeding from the store) on every
- * temperature sheet open.
+ * Decimal temperature reading. The Stepper is integer-only and LevelScale has three
+ * fixed steps, so neither fits 37.4. Local text state holds the raw string so a
+ * trailing "." while typing "37." isn't dropped. The stored value is always canonical
+ * °C: the field shows it in the user's units lens and converts back before pushing to
+ * the store. Conditionally rendered, so it re-seeds from the store on every open.
  */
 function TemperatureField({ value, color, onChange }: { value?: number; color: string; onChange: (v?: number) => void }) {
   const t = useTheme();
@@ -286,11 +276,9 @@ function TemperatureField({ value, color, onChange }: { value?: number; color: s
 }
 
 /**
- * Medication field block: a required name, an optional amount paired with a unit,
- * and a unit picker of quick-pick chips with a free-text "+ Other" fallback. The
- * unit is Baby Buddy's free-text `dosage_unit`, so it is stored as a plain string
- * and never routed through the units.ts converter. Conditionally rendered, so it
- * remounts (re-seeding its local text state from the store draft) on every open.
+ * Medication field block. The unit is Baby Buddy's free-text `dosage_unit`, so it is
+ * stored as a plain string and never routed through the units.ts converter.
+ * Conditionally rendered, so it re-seeds from the store draft on every open.
  */
 function MedicationField({
   name,
@@ -357,10 +345,9 @@ function MedicationField({
           marginBottom: 12,
         }}
       >
-        {/* The input is wrapped in a flex:1/minWidth:0 View so it SHRINKS to make
-            room for the unit. A bare flex:1 TextInput keeps min-width:auto on web
-            and won't shrink, pushing a long unit ("puffs", "drops") past the right
-            edge. See src/components/DateFields.tsx for the same pattern. */}
+        {/* Wrapped in a flex:1/minWidth:0 View so the input SHRINKS to make room for
+            the unit. A bare flex:1 TextInput keeps min-width:auto on web and won't
+            shrink, pushing a long unit ("drops") past the right edge. */}
         <View style={{ flex: 1, minWidth: 0 }}>
           <TextInput
             value={amountText}
@@ -448,9 +435,9 @@ export function LogSheet() {
   const te = useAppStore((s) => s.te);
   const editingId = useAppStore((s) => s.editingId);
   const fromTimerId = useAppStore((s) => s.fromTimerId);
-  // Raw selections, derived below in the render body: a selector that builds a
-  // fresh array (a .filter or a .map) makes zustand v5 see a snapshot that never
-  // settles, which blank-screens the web build.
+  // Raw selections, derived below in the render body: a selector that builds a fresh
+  // array (a .filter or a .map) makes zustand v5 see a snapshot that never settles,
+  // which blank-screens the web build.
   const children = useAppStore((s) => s.children);
   const sheetChildIds = useAppStore((s) => s.sheetChildIds);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
@@ -474,12 +461,11 @@ export function LogSheet() {
   const closeSheet = useAppStore((s) => s.closeSheet);
   const expandMedicationLog = useAppStore((s) => s.expandMedicationLog);
   const [pickerOpen, setPickerOpen] = useState(false);
-  // Collapse the picker whenever the sheet changes. LogSheet itself never
-  // unmounts (it renders null while closed), so unlike TagField's reveal this
-  // state would otherwise survive from one open to the next. Adjusted DURING
-  // render against the previous value rather than in an effect: React re-runs
-  // this component before touching the DOM, so the picker is never painted
-  // open, and an effect here would be a setState-in-effect anyway.
+  // Collapse the picker whenever the sheet changes. LogSheet never unmounts (it
+  // renders null while closed), so this state would otherwise survive from one open
+  // to the next. Adjusted DURING render against the previous value rather than in an
+  // effect: React re-runs this component before touching the DOM, so the picker is
+  // never painted open.
   const [pickerFor, setPickerFor] = useState(sheet);
   if (sheet !== pickerFor) {
     setPickerFor(sheet);
@@ -792,7 +778,7 @@ export function LogSheet() {
           </>
         )}
 
-        {/* sleep fields — nap vs night sleep */}
+        {/* nap vs night sleep */}
         {type === 'sleep' && (
           <>
             <FieldLabel hint="follows your rhythm">Kind</FieldLabel>
@@ -891,7 +877,7 @@ export function LogSheet() {
           </>
         )}
 
-        {/* temperature field — a decimal reading with a °C unit */}
+        {/* a decimal reading with a °C unit */}
         {type === 'temperature' && (
           <TemperatureField value={te.temperature} color={color} onChange={(v) => setTE({ temperature: v })} />
         )}
@@ -937,8 +923,8 @@ export function LogSheet() {
             />
           ))}
 
-        {/* note field — the PRIMARY multiline body (taller than the secondary
-            per-entry notes input, which is suppressed for a note below) */}
+        {/* The PRIMARY multiline body, taller than the secondary per-entry notes
+            input, which is suppressed for a note below. */}
         {type === 'note' && (
           <>
             <FieldLabel>Note</FieldLabel>
@@ -970,10 +956,9 @@ export function LogSheet() {
         {/* time entry */}
         <TimeEntry key={type} type={type} color={color} />
 
-        {/* notes — the secondary per-entry annotation. Shown for the 5 real
-            activities; NOT for bath (structural note body), NOT for a general
-            note (its body IS its primary text), and NOT for medication in
-            confirm mode (read-only summary only). */}
+        {/* The secondary per-entry annotation. Not for a bath, whose note body is
+            structural, not for a general note, whose body IS its primary text, and
+            not for medication in confirm mode, which is a read-only summary. */}
         {type !== 'bath' && type !== 'note' && !confirmMode && (
           <>
             <FieldLabel>Notes (optional)</FieldLabel>
@@ -1002,10 +987,9 @@ export function LogSheet() {
           </>
         )}
 
-        {/* tags — the server list ∪ the entry's own tags, minus the structural
-            ones (bath/bath:quick/bath:full and the legacy bare small/big,
-            breastfeeding left/right). Server colors render via the Chip
-            swatch; a "New tag…" field adds a brand-new tag. */}
+        {/* The server list plus the entry's own tags, minus the structural ones:
+            bath/bath:quick/bath:full, the legacy bare small/big, and the
+            breastfeeding left/right. */}
         {!confirmMode && (
           <TagField color={color} tags={tags} selected={te.tags} onToggle={toggleTag} onCreate={createTag} />
         )}

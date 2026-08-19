@@ -2,8 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { backOr } from '@/lib/nav';
 
-// Stand-in for the imperative router (same pattern as storage.test.ts's
-// expo-secure-store mock). `canGoBack` is what the helper branches on.
+// Stand-in for the imperative router. `canGoBack` is what the helper branches on.
 const nav = vi.hoisted(() => ({ canGoBack: false }));
 vi.mock('expo-router', () => ({
   router: {

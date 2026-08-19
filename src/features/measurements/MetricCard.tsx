@@ -22,9 +22,9 @@ export function MetricCard({ kind, points, onPress }: {
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
   const [w, setW] = useState(0);
-  // `points` values are canonical metric; the Sparkline is shape-only (it
-  // normalizes by min/max, so a linear unit change leaves the curve identical),
-  // so only the latest numeric value shown needs converting to the display unit.
+  // `points` values are canonical metric. The Sparkline is shape-only (it normalizes
+  // by min/max, so a linear unit change leaves the curve identical), so only the
+  // latest numeric value needs converting to the display unit.
   const latest = points.length ? points[points.length - 1] : null;
 
   return (

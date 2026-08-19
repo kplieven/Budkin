@@ -12,26 +12,20 @@ import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
 import { useTheme } from '@/theme/useTheme';
 
-/**
- * First-run intro carousel. Five swipeable slides (horizontal paging ScrollView),
- * a page-dot indicator, a Skip control (all but the last slide), and a primary
- * button that reads Next until the last slide, where it becomes Get started.
- * Presentational: the caller owns what "done" means (persist + navigate).
- */
+/** First-run intro carousel. Presentational: the caller owns what "done" means
+ *  (persist + navigate). */
 export function Walkthrough({ onDone }: { onDone: () => void }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const [index, setIndex] = useState(0);
-  // Measured pager box (width <= maxWidth, plus height). Slides are sized to this
-  // so paging snaps cleanly on phone and a constrained desktop column, and the
-  // explicit height lets each slide center its content vertically (a horizontal
-  // paging ScrollView does not reliably stretch its children to full height on web).
+  // Measured pager box. Slides are sized to it so paging snaps cleanly, and the
+  // explicit height lets each slide center its content vertically (a horizontal paging
+  // ScrollView does not reliably stretch its children to full height on web).
   const [size, setSize] = useState({ w: 0, h: 0 });
   const scrollRef = useRef<ScrollView | null>(null);
-  // Gestures are heard over the whole screen, not just the narrow deck: on a
-  // laptop the slides are a 460px column in the middle of a wide window, and a
-  // pager you can only wheel or drag while the pointer is inside that strip
-  // reads as one that does not work at all.
+  // Gestures are heard over the whole screen, not just the narrow deck: on a laptop
+  // the slides are a 460px column in the middle of a wide window, and a pager you can
+  // only wheel or drag inside that strip reads as one that does not work at all.
   const hostRef = useRef<View | null>(null);
 
   const last = index >= WALKTHROUGH_SLIDES.length - 1;
@@ -47,10 +41,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
     else goTo(index + 1);
   };
 
-  // Wheel, trackpad, mouse drag, touch and the arrow keys all move one slide at a
-  // time, forwards or back. A 0 step is a gesture that fell short, which settles
-  // back onto `index`. The page width has to be handed over because the listener
-  // host is wider than a page.
   useWebPaging({
     deckRef: scrollRef,
     hostRef,
@@ -60,9 +50,9 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
   });
 
   // Native only: react-native-web never fires the momentum callbacks, so on web
-  // `index` is authoritative and every gesture arrives through `useWebPaging`.
-  // Deriving it from the scroll offset there would double-count a drag, which
-  // already moved the deck one page before the release commits the turn.
+  // `index` is authoritative and every gesture arrives through `useWebPaging`. Deriving
+  // it from the scroll offset there would double-count a drag, which already moved the
+  // deck one page before the release commits the turn.
   const syncIndex = (offsetX: number) =>
     setIndex(pageFromOffset(offsetX, size.w, WALKTHROUGH_SLIDES.length));
 
@@ -81,7 +71,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
       ref={hostRef}
       style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top, paddingBottom: insets.bottom }}
     >
-      {/* Skip (hidden on the last slide, where the primary button dismisses) */}
       <View style={{ height: 48, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: 20 }}>
         {!last && (
           <Pressable
@@ -97,7 +86,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
         )}
       </View>
 
-      {/* pager: centered, max-width column so it is not full-bleed on desktop */}
+      {/* centered, max-width column so the pager is not full-bleed on desktop */}
       <View
         style={{ flex: 1, alignSelf: 'center', width: '100%', maxWidth: 460 }}
         onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
@@ -112,8 +101,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             onMomentumScrollEnd={(e) => syncIndex(e.nativeEvent.contentOffset.x)}
           >
             {WALKTHROUGH_SLIDES.map((slide) => (
-              // Each slide is sized to the measured pager box (width + height) so
-              // its content centers vertically and paging snaps to full pages.
               <View key={slide.headline} style={{ width: size.w, height: size.h, paddingHorizontal: 32, alignItems: 'center', justifyContent: 'center' }}>
                 <View
                   style={{
@@ -139,7 +126,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
         )}
       </View>
 
-      {/* page dots (active dot widens) */}
       <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 8, marginBottom: 20 }}>
         {WALKTHROUGH_SLIDES.map((slide, i) => (
           <View
@@ -154,7 +140,6 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
         ))}
       </View>
 
-      {/* primary button */}
       <View style={{ paddingHorizontal: 24, paddingBottom: 8 }}>
         <Pressable
           onPress={next}

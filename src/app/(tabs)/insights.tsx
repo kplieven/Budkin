@@ -65,62 +65,38 @@ export default function Insights() {
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const loadInsights = useAppStore((s) => s.loadInsights);
   const reloadInsights = useAppStore((s) => s.reloadInsights);
-  // Insights is retrospective: hour-quantized `now` keeps memos stable between
-  // ticks, and quantizing inside the selector means the per-second store tick
-  // doesn't re-render this screen at all. The heatmap's Today-window anchor
-  // rolls over within the hour of the noon boundary (exact in whole-hour
-  // timezones).
+  // Insights is retrospective, so quantizing to the hour INSIDE the selector keeps the
+  // per-second store tick from re-rendering this screen at all.
   const nowH = useAppStore((s) => Math.floor(s.now / 3600000) * 3600000);
   const entries = useAppStore((s) => s.insightsEntries);
-  // Raw select (a stable reference), with the two live-bar anchors derived in the
-  // render body below rather than inside the selector, per the zustand v5 rule.
-  // Costs no extra renders: `s.timers` identity only changes on timer mutation,
-  // so this screen stays off the per-second path that `nowH` above keeps it off.
+  // Raw select, with the live-bar anchors derived in the render body below rather than
+  // inside the selector, per the zustand v5 rule.
   const timers = useAppStore((s) => s.timers);
-  // Start of a currently-running sleep timer (epoch ms), else null. Drives the
-  // live breathing bar on the heatmap's Today row. Scoped to the selected child,
-  // which `insightsEntries` already is by construction, and keyed on `saveAs`
-  // rather than `activity` so a quick timer repointed to sleep draws in the sleep
-  // colour: the same rule Home and the reminder scheduler use.
+  // Keyed on `saveAs` rather than `activity`, so a quick timer repointed to sleep draws
+  // in the sleep colour. That also makes the two mutually exclusive per timer, so the
+  // feeding-over-sleep precedence below is only reachable with both running at once.
   const runningSince = runningTimer(timers, 'sleep', selectedChildId)?.start ?? null;
-  // Start of a currently-running feeding timer, for the live feeding bar (drawn
-  // on top of a live sleep bar so feeding takes precedence). Keying on `saveAs`
-  // makes the two mutually exclusive per timer, so that precedence is only
-  // reachable with a sleep and a feeding timer running at the same time.
   const runningFeedSince = runningTimer(timers, 'feeding', selectedChildId)?.start ?? null;
-  // The day boundary (set on the Settings page). Drives the heatmap and every
-  // per-window trend below, so the graph and the numbers share one "day".
+  // One day boundary for the heatmap and every per-window trend, so the graph and the
+  // numbers share one "day".
   const originHour = useAppStore((s) => s.rhythmOriginHour);
   const [width, setWidth] = useState(0);
-  // True while a pointer is down on the Rhythm plot, dragging the crosshair.
-  // Three things read it: the native scroll lock below, Android's RefreshControl
-  // and the touch-web pull-to-refresh gesture. A drag inside the plot scrubs the
-  // crosshair and does nothing else, on every platform. SleepHeatmap reports the
-  // end on both release and terminate, so none of the three can latch on.
+  // True while a pointer is down on the Rhythm plot. Read by the native scroll lock
+  // below, Android's RefreshControl and the touch-web pull gesture; SleepHeatmap reports
+  // the end on both release and terminate, so none of the three can latch on.
   //
-  // For the scroll lock specifically: Android's native ScrollView intercepts a
-  // child's vertical drag by itself, and under the New Architecture the JS
-  // responder can no longer veto that: BridgelessUIManager.setJSResponder is a
-  // soft-error stub and the Fabric renderer never calls it, so
-  // requestDisallowInterceptTouchEvent is never reached and
-  // onResponderTerminationRequest only blocks JS-side termination. Switching the
-  // ScrollView off for the length of the gesture is what actually traps the drag.
+  // The scroll lock exists because Android's native ScrollView intercepts a child's
+  // vertical drag by itself, and under the New Architecture the JS responder cannot veto
+  // that: BridgelessUIManager.setJSResponder is a soft-error stub the Fabric renderer
+  // never calls, so requestDisallowInterceptTouchEvent is never reached.
   const [scrubbing, setScrubbing] = useState(false);
   const onScrubStart = useCallback(() => setScrubbing(true), []);
   const onScrubEnd = useCallback(() => setScrubbing(false), []);
-  // Pull-to-refresh, mirroring History: native uses the platform RefreshControl,
-  // touch-web the custom gesture, mouse-web nothing. Reloads insights history only.
-  //
-  // Both paths need their own scrub guard, because neither is reached by the
-  // scroll lock below. On Android the RefreshControl is a SwipeRefreshLayout
-  // WRAPPING the ScrollView (ScrollView.js clones it as the parent), so it
-  // intercepts the downward drag before the ScrollView ever sees it; its
-  // `enabled` prop maps straight to the layout's isEnabled, which androidx
-  // re-checks on every touch event. On web the gesture listens on the scroll
-  // node's DOM directly and never consulted scrollEnabled at all, so it takes
-  // the flag as a parameter. iOS needs neither: there the RefreshControl is a
-  // CHILD of the ScrollView, so switching scrolling off already stops it (and
-  // RefreshControl.render drops `enabled` on iOS anyway).
+  // Both refresh paths need their own scrub guard, because neither is reached by the
+  // scroll lock below. On Android the RefreshControl is a SwipeRefreshLayout WRAPPING the
+  // ScrollView, so it intercepts the downward drag first. On web the gesture listens on
+  // the scroll node's DOM and never consulted scrollEnabled, so it takes the flag as a
+  // parameter. iOS needs neither, its RefreshControl being a child of the ScrollView.
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {
@@ -129,17 +105,12 @@ export default function Insights() {
   }, [reloadInsights]);
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, reloadInsights, scrubbing);
-  // The web SCROLL is deliberately left alone (its pull-to-refresh is suppressed
-  // separately, just above), for two reasons. The plot already blocks the
-  // browser's own scroll with `touchAction: 'none'` (see SleepHeatmap), and
-  // touch-action is latched at touchstart, so flipping it on an ancestor
-  // mid-gesture cannot reach the drag already in flight either way. And
-  // react-native-web renders scrollEnabled={false} as overflow:hidden, which on
-  // a classic-scrollbar browser reflows the page mid-drag and slides the plot
-  // out from under a plot-left measured once at gesture start. That last part
-  // does NOT bite on a touch phone, where scrollbars overlay at zero width; it
-  // bites a desktop window under the 1024px shell breakpoint. Web is the
-  // reference behaviour here, Android is being brought up to match it.
+  // The web SCROLL is deliberately left alone. The plot already blocks the browser's own
+  // scroll with `touchAction: 'none'`, and touch-action is latched at touchstart, so
+  // flipping it on an ancestor mid-gesture cannot reach a drag in flight. And
+  // react-native-web renders scrollEnabled={false} as overflow:hidden, which on a
+  // classic-scrollbar browser reflows the page mid-drag and slides the plot out from
+  // under a plot-left measured once at gesture start.
   const lockScroll = scrubbing && Platform.OS !== 'web';
   const heatRows = useMemo(() => buildSleepHeatmap(entries, nowH, 28, originHour), [entries, nowH, originHour]);
 
@@ -147,12 +118,8 @@ export default function Insights() {
   const [rangeDays, setRangeDays] = useState(30);
   const RANGES: [string, number][] = [['2 weeks', 14], ['1 month', 30], ['3 months', 90]];
   const originPhrase = `${fmtDayStartHour(originHour)} to ${fmtDayStartHour(originHour)}`;
-  // Layer toggles for the Rhythm graph. Sleep is the band; feeds/diapers are the
-  // marker lanes. The legend chips double as the on/off toggles.
   const napColor = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);
-  // Persisted per the store (global, all default on) so a hidden layer stays
-  // hidden across restarts. Three scalar selectors, not one object selector, to
-  // avoid returning a fresh reference every render (zustand v5).
+  // Three scalar selectors, not one object selector, so no fresh reference per render.
   const showSleep = useAppStore((s) => s.rhythmShowSleep);
   const showFeeds = useAppStore((s) => s.rhythmShowFeeds);
   const showDiapers = useAppStore((s) => s.rhythmShowDiapers);
@@ -169,20 +136,15 @@ export default function Insights() {
   const feeds = useMemo(() => buildTrend(entries, 'feedsPerDay', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
   const interval = useMemo(() => buildTrend(entries, 'feedInterval', nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
   const diapers = useMemo(() => buildDiaperSeries(entries, nowH, rangeDays, originHour), [entries, nowH, rangeDays, originHour]);
-  // The narrow safety net: at most a wet-nappy and a newborn low-feed nudge,
-  // only when the signal is real and current (see safety.ts). Range-independent.
+  // Range-independent, and only when the signal is real and current (see safety.ts).
   const safetyFlags = useMemo(() => detectSafetyFlags(entries, birth, nowH), [entries, birth, nowH]);
-  // A gentle, age-based "what's happening now" note for the Sleep section
-  // (currently just the ~4-month sleep change). null outside its age window.
   const phaseNote = useMemo(() => phaseNoteFor(birth, nowH), [birth, nowH]);
   const lastVal = (pts: { value: number }[]) => (pts.length ? pts[pts.length - 1].value : 0);
-  // The big number is the current (partial) window's value — only call it
-  // "today so far" when that last point really is today's window.
+  // The big number is the partial current window, so only call it "today so far" when
+  // that last point really is today's window.
   const isToday = (pts: { t: number }[]) => pts.length > 0 && nowH - pts[pts.length - 1].t < DAY;
-  // "In typical range" status is judged on complete windows only: drop the
-  // partial current window so a low "today so far" reading can't flip the chip.
-  // Only the two solid-band metrics get a status (bandStatus returns null for
-  // the rule-of-thumb and floor norms).
+  // "In typical range" is judged on complete windows only, so a low "today so far"
+  // reading cannot flip the chip.
   const completeOf = (pts: TrendPoint[]) => (isToday(pts) ? pts.slice(0, -1) : pts);
   const sleepStatus = bandStatus(NORMS.totalSleep, birth, completeOf(totalSleep)) ?? undefined;
   const feedsStatus = bandStatus(NORMS.feedsPerDay, birth, completeOf(feeds)) ?? undefined;
@@ -191,23 +153,21 @@ export default function Insights() {
   const error = useAppStore((s) => s.insightsError);
   const daysWithSleep = heatRows.filter((r) => r.segments.length > 0).length;
   const enoughForChart = (pts: unknown[]) => pts.length >= 3;
-  // delta for longest stretch: last minus first in range, when there's a span.
-  // Only a *gain* (>= 0.5h) is surfaced, labeled with what it compares against
-  // ("vs 2 wks ago", etc.). A decrease is deliberately not shown: night sleep
-  // fragmenting for a stretch (most notably the ~4-month sleep change) is normal
-  // maturation, and a red "-1.2h" pill framed it as a regression to worry about.
+  // Only a gain is surfaced. Night sleep fragmenting for a stretch, most notably the
+  // ~4-month change, is normal maturation, and a red "-1.2h" pill framed it as a
+  // regression to worry about.
   const stretchDelta = longest.length >= 2 ? longest[longest.length - 1].value - longest[0].value : 0;
   const stretchDeltaShown = stretchDelta >= 0.5;
   const stretchDeltaText = `${stretchDelta < 0 ? '-' : '+'}${fmtDur(Math.abs(stretchDelta) * 60)}`;
   const stretchNote = rangeDays === 14 ? 'vs 2 wks ago' : rangeDays === 90 ? 'vs 3 mo ago' : 'vs 1 mo ago';
-  // Decimal hours read oddly ("6.2h"); show sleep/interval values as h+m instead.
+  // Decimal hours read oddly ("6.2h"), so durations show as h+m.
   const hmValue = (v: number) => fmtDur(v * 60);
   const gated = (pts: unknown[], what: string, node: ReactNode): ReactNode =>
     enoughForChart(pts) ? node : <KeepLogging what={what} />;
 
-  // Re-run on child switch — selectChild resets the cache, this refills it.
-  // Skip for an expecting child: the server has no history for a child that
-  // hasn't been born yet, so loading would just fail and set insightsError.
+  // Re-runs on child switch, refilling the cache selectChild reset. Skipped for an
+  // expecting child, where the server has no history and loading would set
+  // insightsError.
   useEffect(() => {
     if (child?.expected) return;
     loadInsights();
@@ -328,7 +288,7 @@ export default function Insights() {
     </View>
   );
 
-  // Phone shows the inline header; desktop uses the shell's own top bar (as in growth.tsx).
+  // Phone shows the inline header; desktop uses the shell's own top bar.
   const head = (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
       <Txt weight={800} size={27} tracking={-0.6}>Insights</Txt>
@@ -372,11 +332,10 @@ export default function Insights() {
                 onRefresh={onRefresh}
                 // `|| refreshing` keeps a COMMITTED refresh visible: androidx's
                 // SwipeRefreshLayout overrides setEnabled and calls reset() on
-                // false, which hides the spinner without clearing mRefreshing,
-                // and RefreshControl only re-pushes `refreshing` when that prop
-                // itself changes, so it would never come back. Scrubbing during
-                // a live reload would otherwise blank the indicator while the
-                // network call ran. Matches what the web path already does.
+                // false, which hides the spinner without clearing mRefreshing, and
+                // RefreshControl only re-pushes `refreshing` when that prop itself
+                // changes, so it would never come back. Scrubbing during a live
+                // reload would otherwise blank the indicator mid-request.
                 enabled={!scrubbing || refreshing}
                 tintColor={t.dim}
                 colors={['#E2B554']}
@@ -392,12 +351,12 @@ export default function Insights() {
       </View>
     );
 
-  // Before the load guards on purpose: an expected child has nothing to load,
-  // so there is no point showing a loading or error state for it.
+  // Before the load guards on purpose: an expected child has nothing to load, so
+  // there is no point showing a loading or error state for it.
   if (child?.expected) return frame(<WaitingForBirth what="Insights" />);
 
-  // Order matters: a failed load leaves insightsLoaded=false, so the error
-  // check must come FIRST or the error/retry state is unreachable.
+  // Order matters: a failed load leaves insightsLoaded=false, so the error check
+  // must come FIRST or the error/retry state is unreachable.
   if (error)
     return frame(
       <CenteredState

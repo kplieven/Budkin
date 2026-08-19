@@ -1,6 +1,6 @@
 /**
  * Persisted connection (server URL + token, or demo flag). Native: secure-store
- * (Keychain/Keystore); web: localStorage — see secureKv / secureKv.web.
+ * (Keychain/Keystore); web: localStorage. See secureKv / secureKv.web.
  */
 
 import type { Connection } from '@/data/repository';
@@ -17,15 +17,12 @@ export async function loadConnection(): Promise<Connection | null> {
   if (!s) return null;
   try {
     const raw = JSON.parse(s) as any;
-    // Migrate a legacy `{ demo: boolean; serverUrl; token }` shape (pre-`mode`
-    // union) into the current discriminated union, and WRITE the converted
-    // shape back. A read-only migration leaves the legacy record in place
-    // forever (the web deploy's origin never changed, so a browser that
-    // connected before the union still holds it), which is what would keep
-    // this branch permanently load-bearing. Awaited so the upgrade lands even
-    // if the app dies right after launch; kvSet swallows its own failures, so
-    // a failed write simply migrates again next launch. Once every client has
-    // loaded a build containing this write, this whole branch can be deleted.
+    // Migrate the legacy `{ demo, serverUrl, token }` shape into the current
+    // union, and WRITE the converted shape back: a read-only migration would
+    // leave the legacy record on disk forever and keep this branch permanently
+    // load-bearing. Awaited so the upgrade lands even if the app dies right after
+    // launch; kvSet swallows its own failures, so a failed write simply migrates
+    // again next launch.
     if (raw && typeof raw === 'object' && 'demo' in raw) {
       const migrated: Connection = raw.demo
         ? { mode: 'local' }

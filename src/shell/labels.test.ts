@@ -56,8 +56,7 @@ describe('screenTitleFor', () => {
   });
 
   it('titles the offline queue settings route', () => {
-    // Without its own case the desktop top bar would silently read "Budkin"
-    // over a screen that has a name.
+    // Without its own case the top bar silently reads "Budkin" over a named screen.
     expect(screenTitleFor('/settings/queue')).toBe('Offline queue');
   });
 });

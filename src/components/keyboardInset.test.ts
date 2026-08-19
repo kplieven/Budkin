@@ -4,15 +4,14 @@ import { keyboardInset } from '@/components/keyboardInset';
 
 describe('keyboardInset', () => {
   it('is 0 when no text field is focused, even if the viewport math is large', () => {
-    // iOS Safari at rest: the large address bar (and any overscroll offset)
-    // leaves innerHeight well above visualViewport.height, but there is no
-    // keyboard, so the sheet must NOT lift.
+    // iOS Safari at rest: the large address bar (and any overscroll offset) leaves
+    // innerHeight well above visualViewport.height, but there is no keyboard, so
+    // the sheet must NOT lift.
     expect(keyboardInset(844, 600, 0, false)).toBe(0);
     expect(keyboardInset(844, 600, 44, false)).toBe(0);
   });
 
   it('measures the covered height when a text field is focused', () => {
-    // Keyboard up: innerHeight 844, visible area 500 tall, not panned.
     expect(keyboardInset(844, 500, 0, true)).toBe(344);
   });
 

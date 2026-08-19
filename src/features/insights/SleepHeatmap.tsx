@@ -23,49 +23,37 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   rows: HeatRow[]; width: number; now: number; runningSince?: number | null; runningFeedSince?: number | null; originHour?: number;
   showSleep?: boolean; showFeeds?: boolean; showDiapers?: boolean;
   /**
-   * Called when a pointer goes down on the plot and when that gesture ends
-   * (released or terminated). The plot cannot keep an enclosing native
-   * ScrollView from stealing a vertical drag on its own, so the parent uses
-   * this pair to switch scrolling off for the duration. Every start is followed
-   * by exactly one end, so the parent never latches.
+   * Pointer down, and once when that gesture ends (released or terminated). The
+   * plot cannot keep an enclosing native ScrollView from stealing a vertical drag
+   * on its own, so the parent switches scrolling off between the two. Every start
+   * is followed by exactly one end, so the parent never latches.
    */
   onScrubStart?: () => void; onScrubEnd?: () => void;
 }) {
   const t = useTheme();
-  // Breathing pulse for the live "asleep now" bar. Declared before the early
-  // return below so the hook order stays stable across renders (matches
-  // PulsingDot's 1 ↔ 0.45 / 800ms loop). Only the bar's RENDER is conditional.
+  // Declared before the early return below so hook order stays stable across renders;
+  // only the bar's RENDER is conditional.
   const pulse = useSharedValue(1);
   useEffect(() => {
     pulse.value = withRepeat(withTiming(0.45, { duration: 800 }), -1, true);
   }, [pulse]);
   const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
   // Sticky scrub marker: a tap drops a vertical guide at that x (as a window
-  // fraction 0..1); another tap moves it, the ✕ on its label clears it. Declared
-  // before the early return so hook order stays stable.
+  // fraction 0..1); another tap moves it, the ✕ on its label clears it.
   const [scrubX, setScrubX] = useState<number | null>(null);
-  // Ref on the plot so a tap can be located from the pointer's page X minus the
-  // plot's measured page-left. RN-web does NOT populate nativeEvent.locationX on
-  // mobile touch (it's fine with a desktop mouse), so relying on it put the line
-  // at x=0 with a NaN clock. pageX is populated on both, and there is no
-  // horizontal scroll here, so page and viewport X agree.
+  // Located from pageX minus the plot's measured page-left. RN-web does NOT populate
+  // nativeEvent.locationX on mobile touch, though it is fine with a desktop mouse, so
+  // relying on it puts the line at x=0 with a NaN clock. There is no horizontal scroll
+  // here, so page and viewport X agree.
   const plotRef = useRef<View>(null);
-  // Cached page-left of the plot, measured on gesture start so each drag move can
-  // convert pageX synchronously without re-measuring.
+  // Measured on gesture start so each drag move converts pageX without re-measuring.
   const plotLeftRef = useRef(0);
-  // A gesture normally ends with release or terminate, but neither fires if the
-  // plot is unmounted mid-drag (a background sync dropping the row count under
-  // the render threshold, a child switch resetting the load state). That would
-  // strand the parent's scroll lock on and leave the page unscrollable, so
-  // report the end on teardown too. Doing that with no scrub in flight is
-  // harmless: the parent just clears an already-clear flag.
-  //
-  // The callback goes through a ref so the teardown can depend on nothing. Were
-  // it to depend on `onScrubEnd` directly, a caller passing an inline arrow
-  // would change its identity every render, and the cleanup would then fire one
-  // frame after the lock landed, silently restoring the bug this exists to fix
-  // with nothing in the types or the linter to catch it. Both declared before
-  // the early return below so hook order stays stable.
+  // Neither release nor terminate fires if the plot is unmounted mid-drag, say a
+  // background sync dropping the row count under the render threshold, which would
+  // strand the parent's scroll lock on and leave the page unscrollable. The callback
+  // goes through a ref so the teardown can depend on nothing: depending on `onScrubEnd`
+  // directly would make a caller's inline arrow change identity every render, firing the
+  // cleanup one frame after the lock landed and restoring the very bug this fixes.
   const onScrubEndRef = useRef(onScrubEnd);
   useEffect(() => {
     onScrubEndRef.current = onScrubEnd;
@@ -77,30 +65,23 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const nap = hexA(t.activity.sleep, t.dark ? 0.5 : 0.42);
   const feedColor = t.activity.feeding;
   const diaperColor = t.activity.diaper;
-  // Wider gutter than the trend charts so the full "Today" row label fits. Each
-  // row is one band: sleep shaded in, feeding blocks drawn over it (feeding wins
-  // any overlap), and diapers as full-height vertical bars.
+  // Wider gutter than the trend charts so the full "Today" row label fits.
   const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8.5, rowH = 6.6;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
   const xAt = (h: number) => gx + (h / 24) * gw;
-  // Clock hour shown at offset `h` (0..24) from the window origin, and where
-  // clock-midnight falls inside the row. Midnight is the anchor line; when the
-  // origin doesn't put it on a 6h tick, it gets its own emphasized line + label.
+  // Midnight is the anchor line, and when the origin does not put it on a 6h tick it
+  // gets its own line and label.
   const clockAt = (h: number) => (((originHour + h) % 24) + 24) % 24;
   const midnightH = (24 - (originHour % 24)) % 24;
   const midnightOnTick = midnightH % 6 === 0;
-  // Fraction of the current window already elapsed; the remainder of the Today
-  // row hasn't happened yet, so it's dimmed as "yet to come".
+  // The remainder of the Today row has not happened yet, so it is dimmed.
   const todayFrac = Math.min(1, Math.max(0, (now - windowStart(now, originHour)) / DAY));
   const future = hexA('#000000', t.dark ? 0.32 : 0.08);
 
-  // Live in-progress bars on the Today row: sleep in the sleep colour, a running
-  // feed in the feeding colour drawn on top so feeding takes precedence. Each
-  // spans its timer's start (clamped to the window origin so it never spills onto
-  // the previous row) up to now, growing in the hourly steps of `now`; the
-  // breathing opacity supplies the "live" feel.
+  // Each spans its timer's start, clamped to the window origin so it never spills onto
+  // the previous row, up to now.
   const win = windowStart(now, originHour);
   const todayIdx = rows.findIndex((r) => r.offsetFromToday === 0);
   const liveGeom = (since: number | null | undefined) => {
@@ -112,15 +93,14 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const liveSleep = showSleep ? liveGeom(runningSince) : null;
   const liveFeed = showFeeds ? liveGeom(runningFeedSince) : null;
 
-  // Scrub guide geometry: its x, the clock time it points at (origin + fraction
-  // of the 24h window), and a clamped left for the floating time label.
+  // Scrub guide geometry: its x, the clock it points at (origin + fraction of the
+  // 24h window), and a clamped left for the floating time label.
   const scrubLineX = scrubX == null ? 0 : xAt(scrubX * 24);
   const scrubClock = scrubX == null ? '' : fmtClock(originHour * 60 + scrubX * 1440);
   const labelLeft = scrubX == null ? 0 : Math.min(Math.max(gx, scrubLineX - 28), Math.max(gx, width - 66));
 
-  // Drag-to-scrub: place/move the guide from the pointer's page X. Measure the
-  // plot's page-left once per gesture (grant), then track moves synchronously.
-  // Clamped to [0,1] so dragging into the gutter or off the edge sticks there.
+  // Measure the plot's page-left once per gesture (grant), then track moves
+  // synchronously. Clamped to [0,1] so a drag into the gutter sticks at the edge.
   const scrubToPageX = (pageX: number) => {
     const lx = pageX - plotLeftRef.current;
     if (!Number.isFinite(lx)) return;
@@ -138,8 +118,8 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
       <View
         ref={(node: View | null) => {
           plotRef.current = node;
-          // Web only: disable native scroll/zoom on the plot so a drag inside it
-          // moves only the guide. Native refs have no `style`, so the guard skips.
+          // Web only: disable native scroll/zoom so a drag inside the plot moves only the
+          // guide. Native refs have no `style`, so the guard skips.
           const el = node as unknown as { style?: { touchAction?: string } } | null;
           if (el?.style) el.style.touchAction = 'none';
         }}
@@ -151,14 +131,10 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
           measureThenScrub(e.nativeEvent.pageX);
         }}
         onResponderMove={(e) => scrubToPageX(e.nativeEvent.pageX)}
-        // A gesture can end two ways and BOTH have to report it. Release is the
-        // finger lifting; terminate is the responder being taken away, which
-        // onResponderTerminationRequest cannot always prevent (the OS can still
-        // claim it). Missing either one would leave the parent's scroll lock
-        // stuck on, so the page would never scroll again.
-        //
-        // Ending a scrub only lifts that lock. The guide is sticky on purpose:
-        // it stays where it was dropped until the ✕ on its label clears it.
+        // Both endings have to report: terminate is the responder being taken away, which
+        // onResponderTerminationRequest cannot always prevent. Missing either would leave
+        // the parent's scroll lock stuck on. Ending a scrub only lifts that lock, and the
+        // guide stays where it was dropped.
         onResponderRelease={() => onScrubEnd?.()}
         onResponderTerminate={() => onScrubEnd?.()}
       >
@@ -178,14 +154,13 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
               {showSleep ? r.segments.map((s, j) => (
                 <Rect key={`s${j}`} x={gx + s.x0 * gw} y={y} width={Math.max(0, (s.x1 - s.x0) * gw)} height={rowH} rx={1.6} fill={s.nap ? nap : night} />
               )) : null}
-              {/* feeding over sleep — a feed logged across a sleep wins the overlap */}
+              {/* feeding over sleep: a feed logged across a sleep wins the overlap */}
               {showFeeds ? r.feeds.map((f, j) => (
                 <Rect key={`f${j}`} x={gx + f.x0 * gw} y={y} width={Math.max(1.5, (f.x1 - f.x0) * gw)} height={rowH} rx={1.6} fill={feedColor} />
               )) : null}
               {isToday && todayFrac < 1 ? (
                 <Rect x={gx + todayFrac * gw} y={y} width={Math.max(0, (1 - todayFrac) * gw)} height={rowH} rx={1.5} fill={future} />
               ) : null}
-              {/* diapers as thin full-height vertical bars, on top of the blocks */}
               {showDiapers ? r.diapers.map((x, j) => (
                 <Rect key={`d${j}`} x={gx + x * gw - 0.8} y={y - 1} width={1.6} height={rowH + 2} rx={0.6} fill={diaperColor} />
               )) : null}

@@ -46,8 +46,7 @@ describe('resolveLogDeepLink', () => {
   });
 
   it('does nothing when the selected child is still expected', () => {
-    // Logging against a due date rather than a birth date. Same guard the route
-    // has always had, and the one timer.tsx mirrors.
+    // Logging against a due date rather than a birth date.
     expect(resolveLogDeepLink({ ...base, expected: true })).toEqual({ kind: 'none' });
   });
 
@@ -70,22 +69,19 @@ describe('resolveLogDeepLink', () => {
 
   it('falls back when the parameter names a treatment that no longer exists', () => {
     // A pending notification outlives the treatment it names: it can be deleted
-    // between being scheduled and being tapped. logMedicationFromTreatment refuses an
-    // unknown id and would open nothing at all.
+    // between being scheduled and being tapped, and logMedicationFromTreatment
+    // refuses an unknown id, so it would open nothing at all.
     expect(
       resolveLogDeepLink({ ...base, type: 'medication', treatment: 'gone', treatments: [treatment()] }),
     ).toEqual({ kind: 'medicationLog' });
   });
 
   it('falls back when a link naming no child names a treatment belonging to someone else', () => {
-    // A delivered notification can outlive a child switch: the pending alert for
-    // child A stays in the tray after the parent switches to child B, and
-    // tapping it must not seed the sheet with A's treatment while the app is headed
-    // for B. Falls back to the picker exactly like an unknown treatment.
-    //
-    // Still reachable, and permanently: a treatment reminder scheduled by a build
-    // that predates `?child=` keeps its childless url until its identifier moves,
-    // and `diffScheduled` compares identifier, title and body only.
+    // A delivered notification outlives a child switch: A's alert stays in the tray
+    // after the parent switches to B, and tapping it must not seed the sheet with A's
+    // treatment while the app is headed for B. Permanently reachable, too: a reminder
+    // scheduled by a build predating `?child=` keeps its childless url until its
+    // identifier moves, and `diffScheduled` compares identifier, title and body only.
     expect(
       resolveLogDeepLink({
         ...base,
@@ -98,9 +94,8 @@ describe('resolveLogDeepLink', () => {
   });
 
   it('selects the treatment\'s own child when the link names them, and honours the treatment', () => {
-    // Same tray-outlives-a-switch situation, but the alert says who it is for.
-    // The dose belongs to c1, so select c1 and seed from it rather than dropping
-    // the parent into c2's picker.
+    // Same tray-outlives-a-switch situation, but the alert says who it is for: the
+    // dose belongs to c1, so select c1 rather than dropping the parent into c2's picker.
     expect(
       resolveLogDeepLink({
         ...base,
@@ -124,8 +119,7 @@ describe('resolveLogDeepLink', () => {
   });
 
   it('selects nobody when the link names whoever is already selected', () => {
-    // The common case. A store write here would cost a refetch and an insights
-    // reset for nothing.
+    // A store write here would cost a refetch and an insights reset for nothing.
     expect(resolveLogDeepLink({ ...base, child: 'c1' })).toEqual({
       kind: 'sheet',
       activity: 'feeding',
@@ -134,21 +128,19 @@ describe('resolveLogDeepLink', () => {
   });
 
   it('refuses a link naming a child we no longer have', () => {
-    // Unlike a navigation-only reminder, which just proceeds against the current
-    // selection, this one opens a write surface. Retargeting it silently is the
-    // bug the treatment guard above exists to prevent, so refuse instead.
+    // Unlike a navigation-only reminder, which proceeds against the current selection,
+    // this one opens a write surface. Silently retargeting it is the bug, so refuse.
     expect(resolveLogDeepLink({ ...base, child: 'gone' })).toEqual({ kind: 'none' });
   });
 
   it('refuses when the child the link names is expected, whoever is selected', () => {
-    // Judged on the LINK's child rather than the selection: `expected` describes
-    // the selected child, who is not the one this would log against.
+    // Judged on the LINK's child: `expected` describes the selected child, who is
+    // not the one this would log against.
     const bean = child({ id: 'c3', first: 'Bean', expected: true });
     expect(resolveLogDeepLink({ ...base, child: 'c3', children: [...base.children, bean] })).toEqual({ kind: 'none' });
   });
 
   it('falls back when the named treatment has a blank name', () => {
-    // logMedicationFromTreatment refuses this too, for the same reason save() does.
     expect(
       resolveLogDeepLink({ ...base, type: 'medication', treatment: 'treatment1', treatments: [treatment({ name: '  ' })] }),
     ).toEqual({ kind: 'medicationLog' });

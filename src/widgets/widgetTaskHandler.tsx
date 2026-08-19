@@ -12,10 +12,10 @@ import { StatusWidget } from '@/widgets/StatusWidget';
 export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<void> {
   const now = Date.now();
 
-  // Nap widget tapped: toggle start/stop in place. `toggleNapFromWidget` calls
-  // the render callback the moment the new state is durable (before the slower
-  // notification round-trip), then awaits that notification work — so the tap
-  // repaints fast while the headless task stays alive until everything settles.
+  // `toggleNapFromWidget` calls the render callback the moment the new state is
+  // durable (before the slower notification round-trip), then awaits that
+  // notification work: the tap repaints fast while the headless task stays alive
+  // until everything settles.
   if (props.widgetAction === 'WIDGET_CLICK' && props.clickAction === 'NAP_TOGGLE') {
     await toggleNapFromWidget(now, (snapshot) => props.renderWidget(<NapWidget snapshot={snapshot} now={now} />));
     return;

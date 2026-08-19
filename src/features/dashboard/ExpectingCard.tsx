@@ -11,10 +11,9 @@ import { useTheme } from '@/theme/useTheme';
 import type { Child } from '@/types/models';
 
 /**
- * Shown in place of the dashboard while the selected child is still expected.
- * The activity tiles are deliberately absent: a feed or a nap logged against an
- * unborn baby is junk data, and hiding the tiles prevents it rather than just
- * discouraging it.
+ * Shown in place of the dashboard while the selected child is still expected. The
+ * activity tiles are deliberately absent: a feed or a nap logged against an unborn
+ * baby is junk data, and hiding the tiles prevents it rather than discouraging it.
  */
 export function ExpectingCard({ child }: { child: Child }) {
   const t = useTheme();

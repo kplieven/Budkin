@@ -2,14 +2,9 @@
  * Six weeks of plausible logging behind the demo seed's single day.
  *
  * `makeSeed` covers today richly, which is enough to explore the app but not to
- * photograph it: Insights asks for about a week of sleep before it draws the
- * rhythm heatmap, its trend charts want a few days, and a growth curve needs
- * more than one point. Captured against the bare seed, those screens show empty
- * states, which is the opposite of what a store listing should say.
- *
- * Screenshot tooling only. Nothing here ships in the app, and it never touches
- * a Baby Buddy server: the output is written to local storage as Local mode data.
- *
+ * photograph it: Insights asks for about a week of sleep before it draws the rhythm
+ * heatmap, and a growth curve needs more than one point. Screenshot tooling only,
+ * written to local storage as Local mode data, never to a Baby Buddy server.
  * Deterministic on purpose (fixed-seed PRNG): re-running the capture must not
  * silently change what the screenshots show.
  */
@@ -37,12 +32,7 @@ export interface History {
   measurements: Measurement[];
 }
 
-/**
- * @param now    the instant the seed is built at (see buildFixture.ts)
- * @param childId whose history this is
- * @param birth  the child's birth, for the growth series
- * @param days   how many days BEFORE today to fill; today is left to `makeSeed`
- */
+/** `days` counts BACK from `now`; today itself belongs to `makeSeed`. */
 export function makeHistory(now: number, childId: string, birth: number, days = 42): History {
   const rand = rng(0x8ad10c);
   const jitter = (mins: number) => Math.round((rand() * 2 - 1) * mins) * M;
@@ -58,19 +48,16 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
     return x.getTime();
   };
 
-  /**
-   * Today is generated too, but only up to four hours ago. Leaving today empty
-   * made the "total sleep per day" trend plunge to nothing on its last point,
-   * which reads as a broken chart rather than a day still in progress. The
-   * four-hour margin keeps the seed's own afternoon entries the most recent
-   * ones, so the home screen still says what it was written to say.
-   */
+  // Today is generated too, but only up to four hours ago. Leaving today empty made
+  // the "total sleep per day" trend plunge to nothing on its last point, which reads
+  // as a broken chart rather than a day in progress. The margin also keeps the seed's
+  // own afternoon entries the most recent ones.
   const cutoff = now - 4 * HOUR;
 
   for (let d = 0; d <= days; d++) {
     const day = midnight(d);
 
-    // Night sleep, logged as one stretch that runs into the next morning.
+    // One stretch, running past midnight into the next morning.
     const nightStart = day + 19 * HOUR + 40 * M + jitter(35);
     entries.push({
       id: id(), childId, type: 'sleep', nap: false, tags: [],
@@ -78,19 +65,18 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
       end: nightStart + 10 * HOUR + 20 * M + jitter(70),
     });
 
-    // Three naps, shorter and later as the weeks go by.
     for (const [h, m] of [[9, 15], [12, 10], [15, 40]] as const) {
       const start = day + h * HOUR + m * M + jitter(30);
       entries.push({
         id: id(), childId, type: 'sleep', nap: true, tags: [],
         start,
-        // Long enough that the day's total lands inside the typical-range band
-        // the app draws, so Insights reads "in typical range" rather than below it.
+        // Long enough that the day's total lands inside the typical-range band the
+        // app draws, so Insights reads "in typical range" rather than below it.
         end: start + (55 + Math.round(rand() * 55)) * M,
       });
     }
 
-    // Roughly three-hourly feeds, mostly breast, one evening bottle.
+    // Roughly three-hourly, mostly breast, one evening bottle.
     let side: 'left' | 'right' = d % 2 ? 'left' : 'right';
     for (let i = 0; i < 7; i++) {
       const start = day + (6 * HOUR + 45 * M) + i * (2 * HOUR + 50 * M) + jitter(25);
@@ -104,7 +90,6 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
       );
     }
 
-    // Diapers, a couple of them solid.
     for (let i = 0; i < 7; i++) {
       const time = day + (7 * HOUR + 10 * M) + i * (2 * HOUR + 20 * M) + jitter(30);
       if (time > now) break;
@@ -115,7 +100,6 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
       });
     }
 
-    // A pumping session or two.
     const pumpStart = day + 21 * HOUR + jitter(40);
     entries.push({
       id: id(), childId, type: 'pumping', tags: [],
@@ -123,15 +107,14 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
       amount: 70 + Math.round(rand() * 4) * 10,
     });
 
-    // Daily tummy time.
     const tummyStart = day + 10 * HOUR + 30 * M + jitter(45);
     entries.push({
       id: id(), childId, type: 'tummy', tags: [],
       start: tummyStart, end: tummyStart + (5 + Math.round(rand() * 8)) * M,
     });
 
-    // Baths: the seed owns the last four days (its own full/quick rhythm), so
-    // only fill in behind it, keeping the same every-third-day cadence.
+    // The seed owns the last four days of baths (its own full/quick rhythm), so only
+    // fill in behind it, keeping the same every-third-day cadence.
     if (d >= 5) {
       entries.push({
         id: id(), childId, type: 'bath', tags: [],
@@ -140,7 +123,6 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
       });
     }
 
-    // The occasional temperature check.
     if (d % 11 === 0) {
       entries.push({
         id: id(), childId, type: 'temperature', tags: [],
@@ -150,9 +132,8 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
     }
   }
 
-  // A few notes at daytime hours. The seed's own two land at whatever offset
-  // from `now` it hardcodes (one of them in the small hours), and two entries
-  // leave most of the Notes tab empty.
+  // At daytime hours: the seed's own two land at whatever offset from `now` it
+  // hardcodes (one in the small hours), and two entries leave the Notes tab bare.
   const notes: [string, number][] = [
     ['Slept through from 20:30 to 06:15 for the first time. We both cried.', now - 1 * DAY - 3 * HOUR],
     ['Health visitor came by, happy with the weight. Next check in a month.', now - 3 * DAY - 2 * HOUR],
@@ -163,8 +144,7 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
     entries.push({ id: id(), childId, type: 'note', tags: [], text, time });
   }
 
-  // Reached milestones, plausible for a twelve-week-old. `first-laugh` is dated
-  // today so it lines up with the seed's own "first real giggle" note.
+  // `first-laugh` is dated today so it lines up with the seed's "first real giggle".
   const milestones: [string, number][] = [
     ['lifts-head', now - 33 * DAY],
     ['first-smile', now - 26 * DAY],
@@ -175,8 +155,8 @@ export function makeHistory(now: number, childId: string, birth: number, days = 
     entries.push({ id: id(), childId, type: 'milestone', tags: [], key, time, text: MILESTONE_BY_KEY[key].title });
   }
 
-  // Weekly weight, fortnightly length and head, from birth up to the values the
-  // seed already reports for the last few days.
+  // Weekly weight, fortnightly length and head, stopping short of the last few days
+  // the seed already reports.
   const measurements: Measurement[] = [];
   let mi = 0;
   const mid = () => `hm${++mi}`;

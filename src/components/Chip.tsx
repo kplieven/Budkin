@@ -16,7 +16,6 @@ interface ChipProps {
   onPress?: () => void;
   /** leading swatch dot color (diaper colors) */
   swatch?: string;
-  /** dashed primary-tinted action chip (e.g. "Start live timer") */
   dashed?: boolean;
   padH?: number;
   padV?: number;

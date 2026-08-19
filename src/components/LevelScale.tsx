@@ -6,8 +6,6 @@ import type { LevelSet } from '@/lib/activities';
 import { useTheme } from '@/theme/useTheme';
 
 interface LevelScaleProps {
-  /** Which three-level scale this is: the labels plus how to read a stored
-   *  number back as a level. See `DIAPER_LEVELS` / `INTAKE_LEVELS`. */
   levels: LevelSet;
   value?: number | null;
   color: string;
@@ -16,13 +14,10 @@ interface LevelScaleProps {
 
 /**
  * A row of three mutually exclusive level buttons, backed by an entry's numeric
- * `amount`. Shared by the solid diaper size and the breastfeeding intake, which
- * differ only in wording and in how they bucket a stored number.
- *
- * Selection is derived through `levels.bucket` rather than by exact equality so
- * a value the current scale never writes (an older wider-range score, or any
- * float Baby Buddy hands back) still lights a button up instead of showing an
- * empty row that silently discards what is on file.
+ * `amount`. Selection is derived through `levels.bucket` rather than by exact
+ * equality so a value the current scale never writes (an older wider-range score,
+ * or any float Baby Buddy hands back) still lights a button up instead of showing
+ * an empty row that silently discards what is on file.
  */
 export function LevelScale({ levels, value, color, onSelect }: LevelScaleProps) {
   const t = useTheme();

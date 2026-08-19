@@ -65,8 +65,8 @@ describe('detectSafetyFlags', () => {
       ...makeDay(16, 9, 7), ...makeDay(17, 9, 7), ...makeDay(18, 9, 7), ...makeDay(19, 9, 7),
       feeding(midnight(20) + 8 * 3600000), // Jul 20: a single entry, clearly under-logged
     ];
-    // Without the guard, Jul 20 (0 wet) would look like a below-floor day; it must
-    // be ignored, leaving the latest trustworthy day (Jul 19) normal → no flag.
+    // Without the guard, Jul 20 (0 wet) reads as a below-floor day; ignoring it
+    // leaves Jul 19, the latest trustworthy day, normal → no flag.
     expect(detectSafetyFlags(entries, born(30), now)).toEqual([]);
   });
 

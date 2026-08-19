@@ -1,17 +1,12 @@
 /**
  * The document-directory copy of a picked photo, and its lifecycle.
  *
- * The picker hands back a URI in Android's CACHE directory, which is exactly
- * the place the system reclaims under storage pressure. A photo that has to
- * wait for a reconnect cannot live there, so it is copied here at pick time.
+ * The picker hands back a URI in Android's CACHE directory, which is exactly the
+ * place the system reclaims under storage pressure. A photo that has to wait for a
+ * reconnect cannot live there, so it is copied here at pick time.
  *
  * Split out of `src/lib/photo.ts` so the store can import the file half without
- * pulling in `expo-image-picker`. Tested in `./photoFile.test.ts` by mocking
- * `expo-file-system`'s `File`/`Directory`/`Paths` and `react-native`'s
- * `Platform`, the same way `permission.android.test.ts` mocks
- * `expo-notifications` to load a native-importing module under node. What
- * stays out of reach here is the native call doing real I/O on a device,
- * which is why Task 8's on-device acceptance test exists.
+ * pulling in `expo-image-picker`.
  */
 
 import { Directory, File, Paths } from 'expo-file-system';
@@ -27,10 +22,9 @@ function photoDir(): Directory {
 }
 
 /**
- * Copy a freshly picked file into the document directory and return the URI of
- * the copy, or undefined when there is no copy to be had (web) or the copy
- * failed. Undefined is a real answer, not an error: the caller reports it as a
- * photo that cannot outlive the moment, and an online save still works.
+ * Undefined is a real answer, not an error: there is no copy to be had on web, and
+ * the caller reports a failed copy as a photo that cannot outlive the moment. An
+ * online save still works.
  */
 export async function persistPhotoFile(uri: string, sourceName: string): Promise<string | undefined> {
   if (Platform.OS === 'web') return undefined;
@@ -46,10 +40,9 @@ export async function persistPhotoFile(uri: string, sourceName: string): Promise
 }
 
 /**
- * Rebuild an uploadable photo from a stored record. Undefined when the file is
- * gone, which the caller treats as "push the child without a photo" rather than
- * as a failure to retry: a document-directory file going missing has no
- * ordinary cause, and retrying cannot bring it back.
+ * Undefined when the file is gone, which the caller treats as "push the child without
+ * a photo" rather than as a failure to retry: a document-directory file going missing
+ * has no ordinary cause, and retrying cannot bring it back.
  */
 export function reopenPhotoFile(stored: { uri: string; name: string; type: string }): PickedPhoto | undefined {
   if (Platform.OS === 'web') return undefined;
@@ -74,10 +67,9 @@ export async function discardPhotoFile(uri: string): Promise<void> {
 }
 
 /**
- * Delete every copy nothing points at any more. Collects the orphans no single
- * call site can: a sheet cancelled after picking, a crash between the copy and
- * the save, a record dropped because its child turned out to be gone
- * server-side.
+ * Delete every copy nothing points at any more. Collects the orphans no single call
+ * site can: a sheet cancelled after picking, a crash between the copy and the save, a
+ * record dropped because its child turned out to be gone server-side.
  */
 export async function sweepPhotoFiles(keep: string[]): Promise<void> {
   if (Platform.OS === 'web') return;

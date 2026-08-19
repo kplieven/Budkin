@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearConnection, loadConnection, saveConnection } from '@/data/storage';
 import type { Connection } from '@/data/repository';
 
-// In-memory stand-in for the native expo-secure-store module (same pattern as servers.test.ts).
+// In-memory stand-in for the native expo-secure-store module.
 const mem = vi.hoisted(() => ({ store: new Map<string, string>() }));
 vi.mock('expo-secure-store', () => ({
   getItemAsync: vi.fn(async (k: string) => mem.store.get(k) ?? null),
@@ -54,11 +54,9 @@ describe('connection persistence', () => {
     expect(await loadConnection()).toEqual({ mode: 'server', serverUrl: 'https://x', token: 't' });
   });
 
-  // The migration also WRITES the converted shape back. A read-only migration
-  // leaves the legacy record in place forever (the web deploy's origin never
-  // changed, so browsers from before the `mode` union still hold it), which is
-  // what would keep the migration branch permanently load-bearing. Persisting
-  // the upgrade is what lets that branch be deleted once clients have cycled.
+  // The migration also WRITES the converted shape back. Read-only, it would leave
+  // the legacy record in place forever (the web deploy's origin never changed, so
+  // old browsers still hold it) and the branch could never be deleted.
   it('re-saves a migrated legacy demo:true record in the new shape', async () => {
     mem.store.set(KEY, JSON.stringify({ demo: true, serverUrl: '', token: '' }));
     await loadConnection();

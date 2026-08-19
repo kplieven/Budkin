@@ -1,7 +1,5 @@
-/**
- * Pure label helpers for the desktop top bar. Kept separate from the React
- * component so they are unit-testable in the node test environment.
- */
+/** Pure label helpers for the desktop top bar, kept out of the component so they
+ *  are unit-testable. */
 
 /** Time-of-day greeting eyebrow, per the web design handoff. */
 export function greetingFor(hour: number): string {
@@ -12,7 +10,6 @@ export function greetingFor(hour: number): string {
   return 'Late night';
 }
 
-/** Screen title for a given route path; the dashboard is personalised. */
 export function screenTitleFor(pathname: string, childFirst?: string): string {
   switch (pathname) {
     case '/':

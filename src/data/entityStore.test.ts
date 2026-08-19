@@ -38,8 +38,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
       return [...mem.store.keys()];
     }),
     // Android reads a batch through one shared cursor, so a single unreadable
-    // row fails the WHOLE multiGet, not just its own pair. Model that: any
-    // requested key in rejectKeys rejects the entire call.
+    // row fails the WHOLE multiGet: any requested key in rejectKeys rejects it all.
     multiGet: vi.fn(async (keys: readonly string[]) => {
       for (const k of keys) {
         if (mem.rejectKeys.has(k)) throw new Error(`simulated native I/O error batch-reading "${k}"`);
@@ -82,9 +81,9 @@ const entry = (id: string): Entry => ({
   nap: false,
 });
 
-// Chunking is keyed by LOCAL month of entryTimestamp, so build timestamps via
-// the local-time Date constructor (noon, away from any DST boundary) to keep
-// the expected month deterministic in whatever timezone the tests run.
+// Chunking is keyed by LOCAL month of entryTimestamp, so build timestamps via the
+// local-time Date constructor (noon, away from any DST boundary) to keep the
+// expected month deterministic in whatever timezone the tests run.
 const entryAt = (id: string, y: number, m: number, day = 10): SleepEntry => ({
   id,
   childId: 'c1',
@@ -107,7 +106,7 @@ beforeEach(() => {
   mem.store.clear();
   mem.rejectKeys.clear();
   mem.rejectGetAllKeys = false;
-  // The guard set and the per-month write cache are module session state; reset
+  // The guard set and the per-month write cache are module session state: reset
   // them so each test starts as a fresh "app launch".
   resetEntityStoreForTests();
 });
@@ -152,9 +151,8 @@ describe('entityStore persistence', () => {
   });
 
   it('reads a pre-map last-feed value as the legacy fallback, not as a map', async () => {
-    // What a build before the per-child map left on the key. Both shapes are
-    // plain objects, so a naive object guard would take this as a map of two
-    // children called `feedType` and `method`.
+    // What a build before the per-child map left on the key. Both shapes are plain
+    // objects, so a naive object guard reads this as a map of two children.
     mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
     const loaded = await loadEntities();
     expect(loaded?.lastFeed).toEqual({});
@@ -168,11 +166,10 @@ describe('entityStore persistence', () => {
   });
 
   it('keeps the pre-map value across repeated launches that never save a feed', async () => {
-    // The map SHARES its key with the pre-map scalar, so the empty map a
-    // fallback launch loads must not be written back over it. The store's
-    // persistence subscription fires on the fresh `{}` reference the read
-    // hands it, which is what made this a single-restart data loss rather
-    // than a theoretical one.
+    // The map SHARES its key with the pre-map scalar, so the empty map a fallback
+    // launch loads must not be written back over it. The store's persistence
+    // subscription fires on the fresh `{}` reference the read hands it, so this is
+    // a single-restart data loss, not a theoretical one.
     mem.store.set(KEY_LAST_FEED, JSON.stringify({ feedType: 'formula', method: 'bottle' }));
 
     // Launch 1: falls back, then persists whatever it is holding.
@@ -180,12 +177,11 @@ describe('entityStore persistence', () => {
     expect(first?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
     await saveLastFeed(first!.lastFeed);
 
-    // Launch 2: the same answer, not the built-in default.
     const second = await loadEntities();
     expect(second?.lastFeed).toEqual({});
     expect(second?.legacyLastFeed).toEqual({ feedType: 'formula', method: 'bottle' });
 
-    // And it still degrades per child on a REAL save, which is the design.
+    // A REAL save still degrades per child, which is the design.
     await saveLastFeed({ c1: { feedType: 'solid', method: 'self' } });
     const third = await loadEntities();
     expect(third?.lastFeed).toEqual({ c1: { feedType: 'solid', method: 'self' } });
@@ -268,12 +264,9 @@ describe('entityStore persistence', () => {
   });
 });
 
-// F8 follow-up: which data set the stored entities belong to (a normalized
-// server URL, or 'local'). connect() reads it to decide whether a reconnect
-// may reconcile the stored entities with the incoming server load; its
-// lifecycle is paired with the DATA it labels, not with the connection, so
-// only clearEntities removes it and a session expiry (which clears just the
-// connection) leaves it in place alongside the entities it describes.
+// Which data set the stored entities belong to (a normalized server URL, or
+// 'local'). Its lifecycle is paired with the DATA it labels, not the connection:
+// only clearEntities removes it, and a session expiry leaves it in place.
 describe('entity origin', () => {
   it('is null until stamped, then round-trips', async () => {
     expect(await loadEntityOrigin()).toBeNull();
@@ -313,11 +306,9 @@ describe('entityStore read-failure write guard', () => {
     await saveChildren([child('x')]);
     expect(mem.store.get('budkin.children.v1')).toBe(childrenRawBefore);
 
-    // A healthy key keeps persisting.
     await saveMeasurements([measurement('m1'), measurement('m2')]);
     expect(mem.store.get('budkin.measurements.v1')).toBe(JSON.stringify([measurement('m1'), measurement('m2')]));
 
-    // Next session: the read succeeds again, so writes resume.
     resetEntityStoreForTests();
     mem.rejectKeys.clear();
     const reloaded = await loadEntities();
@@ -342,7 +333,6 @@ describe('entityStore read-failure write guard', () => {
     expect(chunkKeysInStore()).toEqual([]);
     expect(mem.store.get(KEY_ENTRIES_V1)).toBe(JSON.stringify(v1));
 
-    // Next session reads v1 fine: it migrates and entry writes resume.
     resetEntityStoreForTests();
     mem.rejectKeys.clear();
     const reloaded = await loadEntities();
@@ -361,7 +351,6 @@ describe('entityStore read-failure write guard', () => {
     resetEntityStoreForTests();
     mem.rejectKeys.add(chunkKey(2026, 6));
     const loaded = await loadEntities();
-    // Partial history: July still loads even though the batched read failed.
     expect(loaded?.entries).toEqual([july]);
 
     // A save that touches both months writes July but leaves June's on-disk
@@ -614,9 +603,8 @@ describe('entityStore v1 to v2 migration', () => {
   });
 
   it('drops a marker-covered v1 blob without reading it and never overwrites chunks from it', async () => {
-    // The state a failed removeItem leaves behind: migration completed (marker
-    // set), v1 lingering, and a chunk holding entries written SINCE, which a
-    // re-migration would overwrite with the stale blob.
+    // The state a failed removeItem leaves behind: marker set, v1 lingering, and a
+    // chunk holding entries written SINCE, which a re-migration would clobber.
     const current = entryAt('cur', 2026, 6, 15);
     mem.store.set(KEY_ENTRIES_V1, JSON.stringify([entryAt('stale', 2026, 6, 3)]));
     mem.store.set(KEY_MIGRATED, '1');

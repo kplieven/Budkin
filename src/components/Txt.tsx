@@ -13,7 +13,6 @@ interface TxtProps extends TextProps {
   unselectable?: boolean;
 }
 
-/** Text with the Figtree family resolved from `weight`. */
 export function Txt({
   weight = 400,
   size = 15,

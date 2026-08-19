@@ -1,7 +1,5 @@
-// No scheduled reminders off Android, the platform-resolved `.android.ts` does
-// the real work. Signature kept in parity with it, including the `input` and
-// `now` the delivered-notification sweep needs, so a caller cannot compile here
-// and then fail to on Android.
+// No scheduled reminders off Android. Signature kept in parity with the
+// `.android.ts` so a caller cannot compile here and then fail to on Android.
 import type { ScheduleInput, ScheduledNotification } from '@/notifications/scheduled';
 
 export async function applyScheduled(

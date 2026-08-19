@@ -59,9 +59,8 @@ describe('buildTimerNotification', () => {
     expect(out.data.url).toBe('/timers?child=c2');
   });
   it('names no child for a timer nobody owns', () => {
-    // Persisted before ownership was stamped: `childId` absent means "not
-    // attributable", so the tap keeps the current selection rather than
-    // adopting one.
+    // `childId` absent means "not attributable", so the tap keeps the current
+    // selection rather than adopting one.
     expect(buildTimerNotification(timer({ childId: undefined }), [child()]).data.url).toBe('/timers');
   });
   it('uses saveAs (not activity) for the label', () => {

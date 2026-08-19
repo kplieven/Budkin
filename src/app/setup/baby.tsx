@@ -20,13 +20,11 @@ type Step = 'ask' | 'form' | 'expecting';
 /**
  * First-run step 2: who are we tracking. Reached from the welcome screen in the
  * local branch, and from the connect form when a server turns out to have no
- * children on it yet. Both cases create the child through the store's saveChild,
- * which handles the server push itself when connected.
+ * children on it yet.
  *
- * An expecting parent gives a name and a due date, which creates a child
- * carrying expected: true with birth holding the due date. Budkin counts down
- * to it, and the child is held back from server sync until the birth is
- * confirmed.
+ * An expecting parent gives a name and a due date, which creates a child carrying
+ * expected: true with `birth` holding the due date. That child is held back from
+ * server sync until the birth is confirmed.
  */
 export default function SetupBaby() {
   const t = useTheme();
@@ -41,9 +39,8 @@ export default function SetupBaby() {
   const [year, setYear] = useState(String(today.getFullYear()));
   const [month, setMonth] = useState(String(today.getMonth() + 1));
   const [day, setDay] = useState(String(today.getDate()));
-  // The due date is its own state with its own default. Sharing the birthday
-  // fields meant switching branches leaked one date into the other, and
-  // re-entering this step silently discarded a hand-edited due date.
+  // The due date is its own state with its own default: sharing the birthday
+  // fields leaks one date into the other when the branch changes.
   const due = new Date();
   due.setDate(due.getDate() + 30);
   const [dueYear, setDueYear] = useState(String(due.getFullYear()));
@@ -53,9 +50,9 @@ export default function SetupBaby() {
 
   const canSave = first.trim().length > 0;
 
-  // Guarded against a double tap: saveChild returns before its server push
-  // settles and finish() only schedules the navigation, so a second tap landing
-  // before the screen unmounts would create a second child.
+  // Guarded against a double tap: saveChild returns before its server push settles
+  // and finish() only schedules the navigation, so a second tap landing before the
+  // screen unmounts would create a second child.
   const onAdd = () => {
     if (!canSave || saving) return;
     setSaving(true);
@@ -63,24 +60,17 @@ export default function SetupBaby() {
     finish();
   };
 
-  // Guarded against a double tap for the same reason as onAdd: saveChild returns
-  // before its work settles and finish() only schedules the navigation.
-  // setSaving(true) still runs before the first await below, so a second tap
-  // during the permission dialog is blocked exactly as it was before this
-  // handler became async.
+  // Same double-tap guard as onAdd. setSaving(true) runs before the first await
+  // below, so a second tap during the permission dialog is blocked too.
   const onAddExpected = async () => {
     if (!canSave || saving) return;
     setSaving(true);
-    // Ask BEFORE saving, not after: saveChild's store write is what triggers
-    // the scheduling reconciler (scheduleSync), and that reconciler silently
-    // skips scheduling when permission is missing rather than requesting it
-    // itself. A permission dialog takes seconds for a human to answer, so an
-    // ask fired after saveChild would race the reconciler and lose, and
-    // granting permission afterwards touches no store slice, so nothing would
-    // ever re-run the reconciler to pick it up. Asking first means the store
-    // write in saveChild always happens with permission already resolved,
-    // granted or not. A denial still saves the child; it just means no
-    // reminders, not no baby.
+    // Ask BEFORE saving, not after: saveChild's store write is what triggers the
+    // scheduling reconciler (scheduleSync), and that reconciler silently skips
+    // scheduling when permission is missing rather than requesting it itself. An
+    // ask fired after saveChild would race the reconciler and lose, and granting
+    // afterwards touches no store slice, so nothing would re-run the reconciler to
+    // pick it up. A denial still saves the child, it just means no reminders.
     await requestReminderPermission();
     saveChild({
       first: first.trim(),
@@ -91,10 +81,10 @@ export default function SetupBaby() {
     finish();
   };
 
-  // Back leaves the fork before it leaves the route, so changing the answer
-  // does not drop the user back to the branch they arrived from. Leaving the
-  // route falls back to the welcome screen, the step this one is pushed from,
-  // for a session that started here (welcome re-gates a finished setup itself).
+  // Back leaves the fork before it leaves the route, so changing the answer does
+  // not drop the user back to the branch they arrived from. Leaving the route falls
+  // back to welcome, the step this one is pushed from, for a session that started
+  // here (welcome re-gates a finished setup itself).
   const onBack = () => {
     if (step === 'ask') backOr('/welcome');
     else setStep('ask');

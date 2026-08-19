@@ -39,10 +39,9 @@ describe('napLabels with a sibling', () => {
 });
 
 describe('napLabels caps a long name', () => {
-  // The tile is measured at its exact size (`RootWidget.java`, MeasureSpec.EXACTLY),
-  // so an over-wide line wraps and the overflow is clipped out of the bitmap. On
-  // the napping branch the row pushed out is the 26sp elapsed time, the tile's
-  // primary information, so an unbounded name costs more than it says.
+  // The tile is measured at its exact size (MeasureSpec.EXACTLY), so an over-wide
+  // line wraps and the overflow is clipped out of the bitmap. On the napping branch
+  // the row pushed out is the 26sp elapsed time, the tile's primary information.
   it('leaves a name at the cap alone', () => {
     expect(napLabels({ childName: 'Alexandria', childCount: 2, napping: false }).text).toBe('Alexandria · Start nap');
     expect(napLabels({ childName: 'Alexandria', childCount: 2, napping: true }).text).toBe('● Alexandria napping');
@@ -64,14 +63,13 @@ describe('napLabels caps a long name', () => {
   });
 
   it('shows fewer than the cap when trimming that space shortens the name', () => {
-    // "Mary Jane " is exactly ten characters, so the trim hands back nine. Short
-    // of the cap is expected: the cap is a bound, never a target.
+    // "Mary Jane " is exactly ten characters, so the trim hands back nine. The cap
+    // is a bound, never a target.
     const { text } = napLabels({ childName: 'Mary Jane Elizabeth', childCount: 2, napping: false });
     expect(text.slice(0, text.indexOf('…'))).toBe('Mary Jane');
   });
 
-  // A contentDescription has no width, so there is nothing to save by cutting it
-  // and the screen-reader user should get the real name.
+  // A contentDescription has no width, so there is nothing to save by cutting it.
   it('never truncates the accessible name', () => {
     const idle = napLabels({ childName: 'Christopher', childCount: 2, napping: false });
     const napping = napLabels({ childName: 'Christopher', childCount: 2, napping: true });
@@ -82,9 +80,9 @@ describe('napLabels caps a long name', () => {
 });
 
 describe('napLabels falls back to the unnamed tile', () => {
-  // A snapshot written before `childCount` existed still parses as a v2 payload,
-  // so the count arrives undefined until the app next writes. Degrading to the
-  // unnamed tile is the safe direction: it says less, never something wrong.
+  // A snapshot written before `childCount` existed still parses as a v2 payload, so
+  // the count arrives undefined until the app next writes. The unnamed tile is the
+  // safe direction: it says less, never something wrong.
   it('when the count is missing, even with a name', () => {
     expect(napLabels({ childName: 'Ada', childCount: undefined, napping: false }).text).toBe('Start nap');
     expect(napLabels({ childName: 'Ada', childCount: undefined, napping: true }).accessibilityLabel).toBe('Stop nap');

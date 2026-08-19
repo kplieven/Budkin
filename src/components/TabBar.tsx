@@ -9,17 +9,15 @@ import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
 
 interface TabBarProps {
-  /** The tab to light up, or null for none. */
   activeName: TabName | null;
   onSelect: (name: TabName) => void;
 }
 
 /**
- * The bottom bar. Driven by the shared `TABS` table rather than by the
- * navigator's route list, so it can also be rendered by a screen that has no
- * tab navigator above it — the Timers screen, which lives on the root Stack
- * and passes a router navigation instead. The bar always renders all six
- * items, so a screen can rely on its bottom safe-area padding either way.
+ * The bottom bar. Driven by the shared `TABS` table rather than by the navigator's
+ * route list, so a screen with no tab navigator above it (Timers, on the root
+ * Stack) can render it and pass a router navigation instead. It always renders all
+ * six items, so a screen can rely on its bottom safe-area padding either way.
  */
 export function AppTabBar({ activeName, onSelect }: TabBarProps) {
   const t = useTheme();

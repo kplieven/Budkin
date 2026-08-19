@@ -1,10 +1,10 @@
 /**
- * Parsing for the precise time editor (TimeAdjuster). Pure — `now` is always
- * passed explicitly.
+ * Parsing for the precise time editor (TimeAdjuster). Pure: `now` is always passed
+ * explicitly.
  *
- * Clock input is 24-hour and digits-first (number-pad friendly): "9" → 09:00,
- * "14" → 14:00, "930" → 09:30, "1447" → 14:47, "2:47" → 02:47. 24h means there
- * is no AM/PM ambiguity to resolve — the typed value is the time.
+ * Clock input is 24-hour and digits-first (number-pad friendly): "9" → 09:00, "14" →
+ * 14:00, "930" → 09:30, "1447" → 14:47, "2:47" → 02:47. 24h means no AM/PM ambiguity
+ * to resolve, so the typed value is the time.
  */
 
 export interface ClockInput {
@@ -12,7 +12,6 @@ export interface ClockInput {
   m: number; // 0-59
 }
 
-/** Parse raw 24h clock text. Returns null when it isn't a valid time. */
 export function parseClockInput(text: string): ClockInput | null {
   const cleaned = text.trim().replace(/\s+/g, '');
   let h: number;
@@ -24,10 +23,10 @@ export function parseClockInput(text: string): ClockInput | null {
     m = Number(colon[2]);
   } else if (/^\d{1,4}$/.test(cleaned)) {
     if (cleaned.length <= 2) {
-      h = Number(cleaned); // "9" → 09:00, "14" → 14:00
+      h = Number(cleaned);
       m = 0;
     } else {
-      h = Number(cleaned.slice(0, -2)); // "930" → 09:30, "1447" → 14:47
+      h = Number(cleaned.slice(0, -2));
       m = Number(cleaned.slice(-2));
     }
   } else {
@@ -39,11 +38,10 @@ export function parseClockInput(text: string): ClockInput | null {
 }
 
 /**
- * Resolve parsed clock input to an absolute timestamp on the day containing
- * `dayMs`. A logged time is never in the future: if the time on that day would
- * be after `now` (only possible on today), roll back to the previous day — so
- * typing "14:47" at 09:00 means 14:47 yesterday, its most recent occurrence,
- * rather than silently snapping to now.
+ * Resolve parsed clock input to an absolute timestamp on the day containing `dayMs`.
+ * A logged time is never in the future: if the time on that day would be after `now`
+ * (only possible on today), roll back a day, so typing "14:47" at 09:00 means 14:47
+ * yesterday, its most recent occurrence, rather than silently snapping to now.
  */
 export function resolveClock(input: ClockInput, dayMs: number, now: number): number {
   const day = new Date(dayMs);

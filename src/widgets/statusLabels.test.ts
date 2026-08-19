@@ -16,8 +16,7 @@ const full = {
   today: 'since midnight · 4 feeds · 5 changes',
 };
 
-/** The tile with no snapshot behind it: every row draws the placeholder, and the
- *  side is unknown rather than left. */
+/** The tile with no snapshot behind it: every row draws the placeholder. */
 const empty = {
   childName: undefined,
   childCount: undefined,
@@ -37,7 +36,6 @@ describe('statusLabels drawn side line', () => {
     expect(statusLabels({ ...full, side: 'right' }).sideText).toBe('start Right');
   });
 
-  // The tile keeps drawing it for an expected child; only the spoken clause goes.
   it('survives for an expected child, whose root label drops the clause', () => {
     expect(statusLabels({ ...full, expected: true }).sideText).toBe('start Left');
   });
@@ -50,9 +48,9 @@ describe('statusLabels root label', () => {
     );
   });
 
-  // "start Left" is legible only because it is drawn in the feed colour above a
-  // Fed row in that same colour. Speech keeps none of that, and a flattened
-  // "start left" parses as an imperative missing its object.
+  // "start Left" is legible only because it is drawn in the feed colour above a Fed
+  // row in that same colour. Speech keeps none of that, and a flattened "start left"
+  // parses as an imperative missing its object.
   it('says which side the next feed begins on, not the drawn shorthand', () => {
     expect(statusLabels(full).root).toContain('Ada, 3 months old, next feed on the left.');
     expect(statusLabels({ ...full, side: 'right' }).root).toContain('next feed on the right.');
@@ -89,8 +87,7 @@ describe('statusLabels root label', () => {
   });
 
   // `nextStartSide` defaults to left with nothing to go on, so the tile draws
-  // `start Left` on an empty tile. Speaking it would present that default as a
-  // fact, on the one tile where every other row is honestly a placeholder.
+  // `start Left` even when empty. Speaking it would present that default as a fact.
   it('does not speak a side it does not know, though the tile still draws one', () => {
     const labels = statusLabels(empty);
     expect(labels.root).not.toContain('next feed');
@@ -101,8 +98,7 @@ describe('statusLabels root label', () => {
     expect(statusLabels({ ...empty, side: 'right' as const }).root).toContain('next feed on the right');
   });
 
-  // A child who is not born has no next feed. The tile draws the line anyway,
-  // but this label already drops rows the tile draws.
+  // A child who is not born has no next feed, though the tile draws the line anyway.
   it('drops the side clause entirely for an expected child', () => {
     expect(statusLabels({ ...empty, childName: 'Wren', childCount: 2, age: 'Due in 3 weeks', expected: true }).root).toBe(
       'Wren, Due in 3 weeks. Since midnight, 0 feeds, 0 changes. Open Budkin.',
@@ -195,7 +191,7 @@ describe('agoMinutes', () => {
   });
 
   // An entry can carry a start the user set ahead of the clock, and "-1m ago" is
-  // never the right thing to show. Same floor `fmtAgoShort` and `fmtDur` apply.
+  // never the right thing to show.
   it('floors a timestamp in the future at zero', () => {
     expect(agoMinutes(now + 5 * 60000, now)).toBe(0);
   });
@@ -214,9 +210,9 @@ describe('agoValue draws what the tile has always drawn', () => {
   });
 });
 
-// The compact forms exist only because the bitmap has a width. A
-// contentDescription has none, and "1h18m ago" is one unspaced token a speech
-// engine reads as "one h eighteen m ago".
+// The compact forms exist only because the bitmap has a width. A contentDescription
+// has none, and "1h18m ago" is one unspaced token a speech engine reads as "one h
+// eighteen m ago".
 describe('spokenAgo', () => {
   it('says just now for the current minute', () => {
     expect(spokenAgo(0)).toBe('just now');

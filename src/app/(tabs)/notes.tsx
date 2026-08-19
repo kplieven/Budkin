@@ -18,8 +18,6 @@ import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 import { entryTimestamp, type NoteEntry } from '@/types/models';
 
-/** A single general-note card: the full multi-line body + time + tags. Tapping
- *  opens the editor, where a note can be edited or deleted. */
 function NoteRow({ note, now, onPress }: { note: NoteEntry; now: number; onPress: () => void }) {
   const t = useTheme();
   const color = t.activity.note;
@@ -81,10 +79,9 @@ export default function Notes() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
-  // Select the raw `entries` array (a stable reference) and filter in render —
-  // filtering *inside* the selector returns a fresh array every call, which
-  // makes zustand v5's useSyncExternalStore see a perpetually-changed snapshot
-  // and loop forever ("Maximum update depth exceeded"). Mirrors History.
+  // Raw `entries` (a stable reference), filtered in render: filtering *inside* the
+  // selector returns a fresh array every call, which makes zustand v5's
+  // useSyncExternalStore loop forever ("Maximum update depth exceeded").
   const entries = useAppStore((s) => s.entries);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   // Scoped to the selected child: `entries` holds every child's records, so
@@ -98,8 +95,7 @@ export default function Notes() {
   const openEdit = useAppStore((s) => s.openEdit);
   const refresh = useAppStore((s) => s.refresh);
 
-  // Pull-to-refresh, mirroring History: native uses RefreshControl, touch-web a
-  // custom gesture, mouse-web nothing.
+  // Native uses RefreshControl, touch-web a custom gesture, mouse-web nothing.
   const canPullToRefresh = Platform.OS !== 'web';
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(() => {

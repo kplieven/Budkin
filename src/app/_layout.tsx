@@ -46,14 +46,10 @@ export default function RootLayout() {
   // Re-check the server whenever the app comes back to the foreground (or the web
   // tab regains focus). `expo-network` only reports *device* connectivity and its
   // effect fires only on a change, so without this a stale `offline` set while
-  // backgrounded would stick until a full restart.
-  //
-  // `reconcileNow()` rides along for the same reason: `refresh()` only does
-  // anything for a live server connection, so local mode otherwise has no
-  // reconcile at all after `initScheduledReminderSync()`'s launch-time run.
-  // The scheduled reminders are one-shot triggers that need reschedule after
-  // each fire (see PUMP_AHEAD in scheduled.ts), so a foreground with no
-  // gated store write in between would otherwise let the chain run out.
+  // backgrounded would stick until a full restart. `reconcileNow()` rides along
+  // because `refresh()` only does anything for a live server connection: the
+  // scheduled reminders are one-shot triggers needing a reschedule after each fire
+  // (see PUMP_AHEAD in scheduled.ts), so local mode would let the chain run out.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -97,11 +93,10 @@ function RootLayoutNav() {
   const base = t.dark ? DarkTheme : DefaultTheme;
   const navTheme = { ...base, colors: { ...base.colors, background: t.bg } };
 
-  // On large screens, wrap the whole navigator in the sidebar shell so it
-  // persists across every route — including Settings, which lives outside the
-  // (tabs) group. Hidden on onboarding and welcome (full-screen, pre-app routes).
-  // Phone is untouched (useDesktopShell is false at phone widths), as is the
-  // Stack itself, so the cold-start deep-link nav structure is unchanged.
+  // On large screens, wrap the whole navigator in the sidebar shell so it persists
+  // across every route, including Settings, which lives outside the (tabs) group.
+  // Hidden on the full-screen pre-app routes. The Stack itself is untouched, so the
+  // cold-start deep-link nav structure is unchanged.
   const showShell =
     desktop && segments[0] !== 'onboarding' && segments[0] !== 'welcome' && segments[0] !== 'setup';
   const stack = (
@@ -112,11 +107,11 @@ function RootLayoutNav() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="settings" />
       {/* Timers is NOT here. It lives on a Stack inside the Home tab
-          (src/app/(tabs)/(home)/), which is what lets it be pushed — transition
-          and back entry — while the bottom bar, owned by the tab layout above
-          that Stack, stays put instead of sliding in with it. On the root Stack
-          it could have one or the other, never both. The URL is /timers either
-          way: group segments never appear in the path. */}
+          (src/app/(tabs)/(home)/), which is what lets it be pushed, transition and
+          back entry, while the bottom bar owned by the tab layout above that Stack
+          stays put instead of sliding in with it. On the root Stack it could have
+          one or the other, never both. The URL is /timers either way: group
+          segments never appear in the path. */}
       <Stack.Screen name="metric/[kind]" />
     </Stack>
   );
