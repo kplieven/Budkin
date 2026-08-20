@@ -21,7 +21,10 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "BUDKIN_VERSION": "0.16.0"
+      }
     }
   },
   "submit": {

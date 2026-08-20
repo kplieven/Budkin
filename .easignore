@@ -6,3 +6,4 @@ ios/
 web-build/
 .git/
 *.log
+assets/store/
