@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -48,9 +49,9 @@ function CenteredState({ title, subtitle, action }: {
       <Txt weight={700} size={16}>{title}</Txt>
       <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>{subtitle}</Txt>
       {action ? (
-        <Pressable onPress={action.onPress} accessibilityRole="button" style={{ marginTop: 4, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22 }}>
+        <Tappable onPress={action.onPress} accessibilityRole="button" style={(s) => [{ marginTop: 4, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22 }]}>
           <Txt weight={700} size={14} color={t.onPrimary}>{action.label}</Txt>
-        </Pressable>
+        </Tappable>
       ) : null}
     </View>
   );
@@ -181,7 +182,7 @@ export default function Insights() {
           {LAYERS.map((L) => {
             const color = L.key === 'feeds' ? t.activity.feeding : L.key === 'diapers' ? t.activity.diaper : t.activity.sleep;
             return (
-              <Pressable key={L.key} onPress={() => setRhythmLayer(L.key, !L.on)} accessibilityRole="button" accessibilityState={{ selected: L.on }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: L.on ? 1 : 0.4, backgroundColor: t.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }}>
+              <Tappable key={L.key} onPress={() => setRhythmLayer(L.key, !L.on)} accessibilityRole="button" accessibilityState={{ selected: L.on }} style={(s) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, opacity: L.on ? 1 : 0.4, backgroundColor: t.chip, borderRadius: 999, paddingVertical: 5, paddingHorizontal: 10 }]}>
                 {L.key === 'sleep' ? (
                   <View style={{ flexDirection: 'row', width: 14, height: 9, borderRadius: 3, overflow: 'hidden' }}>
                     <View style={{ flex: 1, backgroundColor: t.activity.sleep }} />
@@ -191,7 +192,7 @@ export default function Insights() {
                   <View style={{ width: 9, height: 9, borderRadius: 9, backgroundColor: color }} />
                 )}
                 <Txt weight={600} size={11.5} color={t.dim}>{L.label}</Txt>
-              </Pressable>
+              </Tappable>
             );
           })}
         </View>
@@ -206,9 +207,9 @@ export default function Insights() {
       </View>
       <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 6 }}>
         {RANGES.map(([lbl, d]) => (
-          <Pressable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" accessibilityState={{ selected: rangeDays === d }} style={{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }}>
+          <Tappable key={d} onPress={() => setRangeDays(d)} accessibilityRole="button" accessibilityState={{ selected: rangeDays === d }} style={(s) => [{ flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: rangeDays === d ? t.surface : 'transparent', alignItems: 'center' }]}>
             <Txt weight={rangeDays === d ? 700 : 600} size={13} color={rangeDays === d ? t.text : t.dim}>{lbl}</Txt>
-          </Pressable>
+          </Tappable>
         ))}
       </View>
       <Txt weight={500} size={11} color={t.faint} style={{ marginLeft: 4, marginBottom: 14 }}>Applies to trend charts</Txt>
@@ -292,9 +293,9 @@ export default function Insights() {
   const head = (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2, paddingTop: 4, paddingBottom: 16 }}>
       <Txt weight={800} size={27} tracking={-0.6}>Insights</Txt>
-      <Pressable onPress={openSwitcher} accessibilityRole="button" accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'} style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}>
+      <Tappable onPress={openSwitcher} accessibilityRole="button" accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'} style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}>
         <Avatar child={child} size={38} radius={12} fontSize={16} />
-      </Pressable>
+      </Tappable>
     </View>
   );
   const frame = (inner: ReactNode) =>

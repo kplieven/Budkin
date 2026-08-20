@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
 import { referenceCurves, hasWhoAgeOverlap, MONTH_MS } from '@/features/measurements/whoReference';
@@ -113,7 +114,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             <Txt weight={700} size={20} color={t.dim}>No data yet</Txt>
           )}
         </View>
-        <Pressable
+        <Tappable
           onPress={() => openMeasurement(kind)}
           accessibilityRole="button"
           accessibilityLabel={`Add ${meta.label.toLowerCase()}`}
@@ -123,7 +124,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
           ]}
         >
           <Txt unselectable weight={800} size={14.5} color={t.onActivity}>+ Add</Txt>
-        </Pressable>
+        </Tappable>
       </View>
       {change ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 16 }}>
@@ -139,7 +140,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 20, padding: 16, marginBottom: 22 }}>
         {refAll ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8, marginBottom: 6 }}>
-            <Pressable
+            <Tappable
               onPress={() => setRef(!showRef)}
               accessibilityRole="switch"
               accessibilityState={{ checked: showRef }}
@@ -153,10 +154,10 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
                 <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: t.surface }} />
               </View>
               <Txt unselectable weight={700} size={12} color={showRef ? t.text : t.dim}>WHO reference</Txt>
-            </Pressable>
-            <Pressable onPress={() => setRefInfo(true)} accessibilityRole="button" accessibilityLabel="About the WHO reference" style={{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.2, borderColor: t.faint, alignItems: 'center', justifyContent: 'center' }}>
+            </Tappable>
+            <Tappable onPress={() => setRefInfo(true)} accessibilityRole="button" accessibilityLabel="About the WHO reference" style={(s) => [{ width: 26, height: 26, borderRadius: 13, borderWidth: 1.2, borderColor: t.faint, alignItems: 'center', justifyContent: 'center' }]}>
               <Txt weight={700} size={12} color={t.faint}>i</Txt>
-            </Pressable>
+            </Tappable>
           </View>
         ) : null}
         {points.length >= 2 ? (
@@ -210,7 +211,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       ) : (
         <View style={{ gap: 8, marginBottom: 20 }}>
           {history.map((mm) => (
-            <Pressable
+            <Tappable
               key={mm.id}
               onPress={() => openEditMeasurement(mm.id)}
               accessibilityRole="button"
@@ -224,7 +225,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
                 {mm.notes ? <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 1 }}>{mm.notes}</Txt> : null}
               </View>
               <Txt weight={600} size={13} color={t.faint} style={{ fontVariant: ['tabular-nums'] }}>{rowDate(mm.date)}</Txt>
-            </Pressable>
+            </Tappable>
           ))}
         </View>
       )}
@@ -251,14 +252,14 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4, marginBottom: 14 }}>
         <IconButton name="chevron-left" color={t.text} onPress={() => backOr('/growth')} accessibilityLabel="Back" />
         <Txt weight={800} size={27} tracking={-0.6} style={{ flex: 1 }}>{meta.label}</Txt>
-        <Pressable
+        <Tappable
           onPress={openSwitcher}
           accessibilityRole="button"
           accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
         >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
-        </Pressable>
+        </Tappable>
       </View>
       {body}
     </ScrollView>

@@ -6,10 +6,11 @@
  */
 
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { addMonths, monthGrid, monthLabel, startOfDay, startOfMonth, WEEKDAY_INITIALS, withDate } from '@/lib/calendarMonth';
 import { hexA } from '@/lib/color';
@@ -62,18 +63,18 @@ export function DayPicker({ value, now, color, onChange }: DayPickerProps) {
   return (
     <View style={{ gap: 8 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Pressable
+        <Tappable
           onPress={() => setMonth(addMonths(month, -1))}
           accessibilityRole="button"
           accessibilityLabel="Previous month"
           style={(s) => [navBtn, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
         >
           <Icon name="chevron-left" color={t.text} size={16} />
-        </Pressable>
+        </Tappable>
         <Txt unselectable weight={700} size={13.5} style={{ flex: 1, textAlign: 'center' }}>
           {monthLabel(month)}
         </Txt>
-        <Pressable
+        <Tappable
           onPress={() => setMonth(addMonths(month, 1))}
           disabled={atCurrentMonth}
           accessibilityRole="button"
@@ -86,7 +87,7 @@ export function DayPicker({ value, now, color, onChange }: DayPickerProps) {
           ]}
         >
           <Icon name="chevron-right" color={t.text} size={16} />
-        </Pressable>
+        </Tappable>
       </View>
 
       <View style={{ flexDirection: 'row' }}>
@@ -104,7 +105,7 @@ export function DayPicker({ value, now, color, onChange }: DayPickerProps) {
             const isToday = c.ms === today;
             const future = c.ms > today;
             return (
-              <Pressable
+              <Tappable
                 key={c.ms}
                 onPress={() => onChange(Math.min(now, withDate(value, c.ms)))}
                 disabled={future}
@@ -136,7 +137,7 @@ export function DayPicker({ value, now, color, onChange }: DayPickerProps) {
                 >
                   {c.day}
                 </Txt>
-              </Pressable>
+              </Tappable>
             );
           })}
         </View>

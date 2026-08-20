@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { DateFields } from '@/components/DateFields';
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { clampBirth } from '@/lib/birthDate';
 import { hexA } from '@/lib/color';
@@ -62,7 +63,7 @@ function Inner({ id }: { id: string }) {
           />
         </View>
 
-        <Pressable
+        <Tappable
           onPress={onConfirm}
           disabled={saving}
           accessibilityRole="button"
@@ -85,7 +86,7 @@ function Inner({ id }: { id: string }) {
           <Txt unselectable weight={800} size={17} color={t.onPrimary}>
             Confirm birth
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </BottomSheet>
   );

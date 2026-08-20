@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { DateFields } from '@/components/DateFields';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { SetupButton } from '@/features/setup/SetupButton';
 import { useFinishSetup } from '@/features/setup/useFinishSetup';
@@ -113,7 +114,7 @@ export default function SetupBaby() {
       }}
       keyboardShouldPersistTaps="handled"
     >
-      <Pressable
+      <Tappable
         onPress={onBack}
         accessibilityRole="button"
         accessibilityLabel="Back"
@@ -124,7 +125,7 @@ export default function SetupBaby() {
         ]}
       >
         <Icon name="chevron-left" color={t.text} size={22} />
-      </Pressable>
+      </Tappable>
 
       {step === 'ask' && (
         <>
@@ -209,7 +210,7 @@ export default function SetupBaby() {
             style={{ marginTop: 24 }}
           />
 
-          <Pressable
+          <Tappable
             onPress={finish}
             accessibilityRole="button"
             style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
@@ -217,7 +218,7 @@ export default function SetupBaby() {
             <Txt unselectable weight={600} size={13.5} color={t.dim}>
               Skip for now
             </Txt>
-          </Pressable>
+          </Tappable>
         </>
       )}
 
@@ -268,7 +269,7 @@ export default function SetupBaby() {
             style={{ marginTop: 24 }}
           />
 
-          <Pressable
+          <Tappable
             onPress={finish}
             accessibilityRole="button"
             style={(s) => [{ marginTop: 18, alignItems: 'center', cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
@@ -276,7 +277,7 @@ export default function SetupBaby() {
             <Txt unselectable weight={600} size={13.5} color={t.dim}>
               Skip for now
             </Txt>
-          </Pressable>
+          </Tappable>
         </>
       )}
     </ScrollView>

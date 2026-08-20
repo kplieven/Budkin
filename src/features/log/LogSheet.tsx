@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
@@ -9,6 +9,7 @@ import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { LevelScale } from '@/components/LevelScale';
+import { Tappable } from '@/components/press';
 import { Stepper } from '@/components/Stepper';
 import { Txt } from '@/components/Txt';
 import { TimeEntry } from '@/features/log/TimeEntry';
@@ -54,7 +55,7 @@ const MED_UNITS = ['mg', 'ml', 'µg', 'IU', 'drops', 'tablet', 'puff'];
 function AddTagPill({ onPress }: { onPress: () => void }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel="Add a new tag"
@@ -76,7 +77,7 @@ function AddTagPill({ onPress }: { onPress: () => void }) {
       <Txt unselectable weight={700} size={13.5} color={t.faint}>
         + New tag
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }
 
@@ -140,7 +141,7 @@ function TagInputRow({
           color: t.text,
         }}
       />
-      <Pressable
+      <Tappable
         onPress={submit}
         accessibilityRole="button"
         accessibilityLabel="Add tag"
@@ -161,7 +162,7 @@ function TagInputRow({
         <Txt unselectable weight={700} size={14} color={color}>
           Add
         </Txt>
-      </Pressable>
+      </Tappable>
     </View>
   );
 }
@@ -375,7 +376,7 @@ function MedicationField({
           <Chip key={u} label={u} color={color} selected={unit === u} onPress={() => pickPreset(u)} padH={13} padV={8} fontSize={13.5} />
         ))}
         {!otherOpen && (
-          <Pressable
+          <Tappable
             onPress={() => setOtherOpen(true)}
             accessibilityRole="button"
             accessibilityLabel="Enter a custom unit"
@@ -397,7 +398,7 @@ function MedicationField({
             <Txt unselectable weight={700} size={13.5} color={t.faint}>
               + Other
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
       </View>
       {otherOpen && (
@@ -548,18 +549,18 @@ export function LogSheet() {
             {editingId ? 'Edit' : 'Log'} {label.toLowerCase()}
           </Txt>
           {targetLabel && canRetarget ? (
-            <Pressable
+            <Tappable
               onPress={() => setPickerOpen((v) => !v)}
               accessibilityRole="button"
               accessibilityState={{ expanded: pickerOpen }}
               accessibilityLabel={`Logging for ${targetLabel}. Change who this is for`}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', cursor: 'pointer' }}
+              style={(s) => [{ flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', cursor: 'pointer' }]}
             >
               <Txt unselectable weight={600} size={13} color={t.primary}>
                 for {targetLabel}
               </Txt>
               <Icon name={pickerOpen ? 'chevron-down' : 'chevron-right'} color={t.primary} size={13} />
-            </Pressable>
+            </Tappable>
           ) : targetLabel ? (
             <Txt weight={500} size={13} color={t.dim}>
               for {targetLabel}
@@ -608,7 +609,7 @@ export function LogSheet() {
             is always the tinted one. */}
         {shortcut && (
           <View style={{ flexDirection: 'row', gap: 9, marginBottom: 8 }}>
-            <Pressable
+            <Tappable
               onPress={() => setEnded(0)}
               accessibilityRole="button"
               accessibilityState={{ selected: !te.ongoing }}
@@ -632,8 +633,8 @@ export function LogSheet() {
               <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
                 {shortcut.doneSub}
               </Txt>
-            </Pressable>
-            <Pressable
+            </Tappable>
+            <Tappable
               onPress={() => setOngoing()}
               accessibilityRole="button"
               accessibilityState={{ selected: !!te.ongoing }}
@@ -657,7 +658,7 @@ export function LogSheet() {
               <Txt unselectable weight={500} size={12} color={t.dim} style={{ marginTop: 1 }}>
                 {shortcut.liveSub}
               </Txt>
-            </Pressable>
+            </Tappable>
           </View>
         )}
 
@@ -721,7 +722,7 @@ export function LogSheet() {
           <>
             <FieldLabel>Contents</FieldLabel>
             <View style={{ flexDirection: 'row', gap: 9, marginBottom: 16 }}>
-              <Pressable
+              <Tappable
                 onPress={toggleWet}
                 accessibilityRole="button"
                 accessibilityState={{ selected: te.wet }}
@@ -734,8 +735,8 @@ export function LogSheet() {
                 <Txt unselectable weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Wet
                 </Txt>
-              </Pressable>
-              <Pressable
+              </Tappable>
+              <Tappable
                 onPress={toggleSolid}
                 accessibilityRole="button"
                 accessibilityState={{ selected: te.solid }}
@@ -748,7 +749,7 @@ export function LogSheet() {
                 <Txt unselectable weight={700} size={14.5} style={{ marginTop: 2 }}>
                   Solid
                 </Txt>
-              </Pressable>
+              </Tappable>
             </View>
             {te.solid && (
               <>
@@ -789,7 +790,7 @@ export function LogSheet() {
               {([true, false] as const).map((isNap) => {
                 const selected = (te.nap ?? true) === isNap;
                 return (
-                  <Pressable
+                  <Tappable
                     key={String(isNap)}
                     onPress={() => setNap(isNap)}
                     accessibilityRole="button"
@@ -802,7 +803,7 @@ export function LogSheet() {
                     <Txt unselectable weight={700} size={14.5}>
                       {isNap ? 'Nap' : 'Night sleep'}
                     </Txt>
-                  </Pressable>
+                  </Tappable>
                 );
               })}
             </View>
@@ -817,7 +818,7 @@ export function LogSheet() {
               {(['quick', 'full'] as const).map((w) => {
                 const selected = (te.wash ?? 'quick') === w;
                 return (
-                  <Pressable
+                  <Tappable
                     key={w}
                     onPress={() => setWash(w)}
                     accessibilityRole="button"
@@ -830,7 +831,7 @@ export function LogSheet() {
                     <Txt unselectable weight={700} size={14.5}>
                       {w === 'quick' ? 'Quick wash' : 'Full bath'}
                     </Txt>
-                  </Pressable>
+                  </Tappable>
                 );
               })}
             </View>
@@ -998,7 +999,7 @@ export function LogSheet() {
       {/* save bar */}
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
         {editingId && (
-          <Pressable
+          <Tappable
             onPress={() => deleteEntry(editingId)}
             accessibilityRole="button"
             style={(s) => [
@@ -1009,10 +1010,10 @@ export function LogSheet() {
             <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
         {confirmMode && (
-          <Pressable
+          <Tappable
             onPress={expandMedicationLog}
             accessibilityRole="button"
             accessibilityLabel="Edit the dose details"
@@ -1024,9 +1025,9 @@ export function LogSheet() {
             <Txt unselectable weight={800} size={16} color={t.text}>
               Edit
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
-        <Pressable
+        <Tappable
           onPress={save}
           accessibilityRole="button"
           style={(s) => [
@@ -1037,7 +1038,7 @@ export function LogSheet() {
           <Txt unselectable weight={800} size={17.5} color={t.onActivity}>
             {saveLabel}
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </BottomSheet>
   );

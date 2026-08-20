@@ -1,8 +1,9 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { TABS, TAB_NAMES, type TabName } from '@/components/tabs';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
@@ -40,7 +41,7 @@ export function AppTabBar({ activeName, onSelect }: TabBarProps) {
         const active = activeName === name;
         const color = active ? t.primary : t.faint;
         return (
-          <Pressable
+          <Tappable
             key={name}
             onPress={() => onSelect(name)}
             accessibilityRole="button"
@@ -60,7 +61,7 @@ export function AppTabBar({ activeName, onSelect }: TabBarProps) {
             <Txt unselectable weight={700} size={11} color={color}>
               {meta.label}
             </Txt>
-          </Pressable>
+          </Tappable>
         );
       })}
     </View>

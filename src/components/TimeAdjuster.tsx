@@ -6,11 +6,12 @@
  */
 
 import { useState } from 'react';
-import { Pressable, TextInput, useWindowDimensions, View } from 'react-native';
+import { TextInput, useWindowDimensions, View } from 'react-native';
 
 import { DayPicker } from '@/components/DayPicker';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { dayGroupLabel, fmtAgo, fmtClock, fmtDur } from '@/lib/format';
 import { parseClockInput, parseDurationInput, resolveClock } from '@/lib/timeParse';
@@ -130,7 +131,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
 
       <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
         {STEPS.map((d) => (
-          <Pressable
+          <Tappable
             key={d}
             onPress={() => step(d)}
             accessibilityRole="button"
@@ -140,13 +141,13 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             <Txt weight={700} size={13} style={{ fontVariant: ['tabular-nums'] }}>
               {d > 0 ? `+${d}m` : `−${-d}m`}
             </Txt>
-          </Pressable>
+          </Tappable>
         ))}
       </View>
 
       {mode === 'clock' && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Pressable
+          <Tappable
             onPress={() => stepDay(-1)}
             accessibilityRole="button"
             accessibilityLabel="Previous day"
@@ -156,8 +157,8 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             ]}
           >
             <Icon name="chevron-left" color={t.text} size={18} />
-          </Pressable>
-          <Pressable
+          </Tappable>
+          <Tappable
             onPress={() => {
               setText(null);
               setCalendar((c) => !c);
@@ -186,8 +187,8 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
               {dayGroupLabel(value, now)}
             </Txt>
             <Icon name={calendar ? 'chevron-up' : 'chevron-down'} color={t.dim} size={15} />
-          </Pressable>
-          <Pressable
+          </Tappable>
+          <Tappable
             onPress={() => stepDay(1)}
             disabled={isToday}
             accessibilityRole="button"
@@ -210,7 +211,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             ]}
           >
             <Icon name="chevron-right" color={t.text} size={18} />
-          </Pressable>
+          </Tappable>
         </View>
       )}
 

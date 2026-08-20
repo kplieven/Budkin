@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { groupByDay, isTimer } from '@/features/activity/groupByDay';
@@ -59,7 +60,7 @@ export function TimelineRail() {
         <Txt weight={800} size={16} tracking={-0.3}>
           Recent activity
         </Txt>
-        <Pressable
+        <Tappable
           onPress={() => router.navigate('/history')}
           accessibilityRole="button"
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
@@ -67,7 +68,7 @@ export function TimelineRail() {
           <Txt unselectable weight={700} size={13} color={t.primary}>
             All
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 24 }}>

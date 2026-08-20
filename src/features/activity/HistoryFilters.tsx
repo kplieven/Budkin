@@ -1,10 +1,11 @@
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
@@ -93,7 +94,7 @@ export function HistoryFilterChips({
         />
       )}
       {showFilters && filtered && (
-        <Pressable
+        <Tappable
           // Deliberately does NOT clear the household toggle: `TimelineFilter`
           // is the whole of what "filters" means here, and the toggle is not in it.
           onPress={() => onChange({ day: null, types: [] })}
@@ -113,7 +114,7 @@ export function HistoryFilterChips({
           ]}
         >
           <Icon name="close" color={t.dim} size={15} />
-        </Pressable>
+        </Tappable>
       )}
     </View>
   );
@@ -237,7 +238,7 @@ function DropdownChip({
 }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -263,7 +264,7 @@ function DropdownChip({
         {label}
       </Txt>
       <Icon name="chevron-down" color={active ? t.primary : t.faint} size={16} />
-    </Pressable>
+    </Tappable>
   );
 }
 
@@ -287,7 +288,7 @@ function ToggleChip({
 }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="switch"
       accessibilityLabel={accessibilityLabel}
@@ -315,7 +316,7 @@ function ToggleChip({
       <Txt unselectable weight={700} size={13.5} color={on ? t.primary : t.text}>
         {label}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }
 
@@ -346,7 +347,7 @@ function DayRow({
 }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected }}
@@ -374,6 +375,6 @@ function DayRow({
         {count}
       </Txt>
       {selected ? <Icon name="check" color={t.primary} size={17} /> : null}
-    </Pressable>
+    </Tappable>
   );
 }

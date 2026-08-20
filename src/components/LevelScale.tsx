@@ -1,6 +1,7 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import type { LevelSet } from '@/lib/activities';
 import { useTheme } from '@/theme/useTheme';
@@ -28,7 +29,7 @@ export function LevelScale({ levels, value, color, onSelect }: LevelScaleProps) 
         const n = i + 1;
         const sel = selected === n;
         return (
-          <Pressable
+          <Tappable
             key={label}
             onPress={() => onSelect(n)}
             accessibilityRole="button"
@@ -51,7 +52,7 @@ export function LevelScale({ levels, value, color, onSelect }: LevelScaleProps) 
             <Txt unselectable weight={700} size={13.5} color={sel ? t.onActivity : t.text}>
               {label}
             </Txt>
-          </Pressable>
+          </Tappable>
         );
       })}
     </View>

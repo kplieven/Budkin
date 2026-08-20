@@ -3,7 +3,6 @@ import { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   View,
@@ -16,6 +15,7 @@ import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -101,7 +101,7 @@ export default function Home() {
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       {offline && (
-        <Pressable
+        <Tappable
           onPress={onBannerPress}
           accessibilityRole="button"
           accessibilityLabel={offlineBannerA11yLabel(bannerAction)}
@@ -125,7 +125,6 @@ export default function Home() {
               cursor: 'pointer',
             },
             isHovered(pstate) && { borderColor: hexA('#E2B554', 0.9) },
-            pstate.pressed && { opacity: 0.85 },
           ]}
         >
           <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
@@ -144,7 +143,7 @@ export default function Home() {
               Retry
             </Txt>
           )}
-        </Pressable>
+        </Tappable>
       )}
 
       {webPull.enabled && (
@@ -208,15 +207,15 @@ export default function Home() {
       >
         {/* child header (phone only, the desktop sidebar carries the child card) */}
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 4, paddingTop: 6, paddingBottom: 18 }}>
-          <Pressable
+          <Tappable
             onPress={openSwitcher}
             accessibilityRole="button"
             accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
             style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
           >
             <Avatar child={child} size={50} radius={16} fontSize={21} />
-          </Pressable>
-          <Pressable
+          </Tappable>
+          <Tappable
             onPress={openSwitcher}
             accessibilityRole="button"
             style={(s) => [{ flex: 1, cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
@@ -230,7 +229,7 @@ export default function Home() {
             <Txt weight={500} size={13.5} color={t.dim} style={{ marginTop: 1 }}>
               {child ? ageOrDueLabel(child.birth, !!child.expected, now) : ''}
             </Txt>
-          </Pressable>
+          </Tappable>
           <IconButton name="settings" onPress={() => router.push('/settings')} accessibilityLabel="Open settings" />
         </View>
 

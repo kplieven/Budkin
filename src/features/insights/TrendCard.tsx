@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Modal, Pressable, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
@@ -45,7 +46,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
           <Txt weight={700} size={11} color={t.dim} style={{ letterSpacing: 0.6, textTransform: 'uppercase' }}>{label}</Txt>
         </View>
         {statusLabel || caption ? (
-          <Pressable onPress={() => setInfo(true)} accessibilityRole="button" accessibilityLabel={`${label} typical range info`} style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Tappable onPress={() => setInfo(true)} accessibilityRole="button" accessibilityLabel={`${label} typical range info`} style={(s) => [{ flexDirection: 'row', alignItems: 'center', gap: 5 }]}>
             {statusLabel ? (
               <>
                 {status === 'in' ? <Icon name="check" size={12} color={statusColor} /> : null}
@@ -57,7 +58,7 @@ export function TrendCard({ label, color, unit, value, delta, deltaGood, deltaNo
             <View style={{ width: 15, height: 15, borderRadius: 15, borderWidth: 1.2, borderColor: t.faint, alignItems: 'center', justifyContent: 'center' }}>
               <Txt weight={700} size={9.5} color={t.faint}>i</Txt>
             </View>
-          </Pressable>
+          </Tappable>
         ) : null}
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'baseline', flexWrap: 'wrap', gap: 8, marginTop: 8, marginBottom: 6 }}>

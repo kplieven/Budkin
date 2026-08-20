@@ -1,6 +1,7 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 import { toDisplay, unitLabel, type UnitSystem } from '@/lib/units';
@@ -44,7 +45,7 @@ export function Stepper({ value, system, onMinus, onPlus }: StepperProps) {
         padding: 8,
       }}
     >
-      <Pressable
+      <Tappable
         onPress={onMinus}
         accessibilityRole="button"
         accessibilityLabel={`Decrease ${unit}`}
@@ -53,7 +54,7 @@ export function Stepper({ value, system, onMinus, onPlus }: StepperProps) {
         <Txt unselectable weight={700} size={26} color={t.text}>
           −
         </Txt>
-      </Pressable>
+      </Tappable>
       <View style={{ flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'baseline' }}>
         <Txt weight={800} size={24} style={{ fontVariant: ['tabular-nums'] }}>
           {text}
@@ -62,7 +63,7 @@ export function Stepper({ value, system, onMinus, onPlus }: StepperProps) {
           {unit}
         </Txt>
       </View>
-      <Pressable
+      <Tappable
         onPress={onPlus}
         accessibilityRole="button"
         accessibilityLabel={`Increase ${unit}`}
@@ -71,7 +72,7 @@ export function Stepper({ value, system, onMinus, onPlus }: StepperProps) {
         <Txt unselectable weight={700} size={26} color={t.text}>
           +
         </Txt>
-      </Pressable>
+      </Tappable>
     </View>
   );
 }

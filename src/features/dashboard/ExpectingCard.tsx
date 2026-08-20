@@ -1,7 +1,8 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { ageOrDueLabel } from '@/lib/format';
@@ -52,7 +53,7 @@ export function ExpectingCard({ child }: { child: Child }) {
         Everything is ready for {child.first}. Tracking starts the day they arrive.
       </Txt>
 
-      <Pressable
+      <Tappable
         onPress={() => openConfirmBirth(child.id)}
         accessibilityRole="button"
         style={(s) => [
@@ -75,7 +76,7 @@ export function ExpectingCard({ child }: { child: Child }) {
         <Txt unselectable weight={800} size={16} color={t.onPrimary}>
           They have arrived
         </Txt>
-      </Pressable>
+      </Tappable>
     </View>
   );
 }

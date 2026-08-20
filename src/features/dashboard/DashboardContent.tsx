@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
-import { Pressable, View, type ViewStyle } from 'react-native';
+import { View, type ViewStyle } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { PulsingDot } from '@/components/PulsingDot';
 import { SyncBadge } from '@/components/SyncBadge';
 import { Txt } from '@/components/Txt';
@@ -230,7 +231,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           // exactly the case the name is here to disambiguate.
           const who = childAttribution(tm.childId, children);
           return (
-            <Pressable
+            <Tappable
               key={tm.id}
               onPress={() => router.push('/timers')}
               accessibilityRole="button"
@@ -275,11 +276,11 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
                 </Txt>
                 <Icon name="chevron-right" color={t.dim} size={16} />
               </View>
-            </Pressable>
+            </Tappable>
           );
         })}
 
-        <Pressable
+        <Tappable
           onPress={() => {
             startQuickTimer();
             router.push('/timers');
@@ -315,14 +316,14 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
             </Txt>
           </View>
           <Icon name="plus" color={t.primary} size={20} />
-        </Pressable>
+        </Tappable>
       </View>
 
       <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 18, marginBottom: 12, marginHorizontal: 4 }}>
         <Txt weight={700} size={13} color={t.faint} tracking={0.8} style={{ textTransform: 'uppercase' }}>
           Log activity
         </Txt>
-        <Pressable
+        <Tappable
           onPress={() => router.push('/timers')}
           accessibilityRole="button"
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.75 }]}
@@ -330,7 +331,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
           <Txt unselectable weight={600} size={13.5} color={t.primary}>
             Timers
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
@@ -374,7 +375,7 @@ function ActivityTile({
 }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={done === undefined ? undefined : { checked: done }}
@@ -420,6 +421,6 @@ function ActivityTile({
       <Txt unselectable weight={500} size={12.5} color={t.dim}>
         {hint}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }

@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import type { TrendPoint } from '@/features/insights/compute';
 import { hexA } from '@/lib/color';
@@ -28,7 +29,7 @@ export function MetricCard({ kind, points, onPress }: {
   const latest = points.length ? points[points.length - 1] : null;
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={latest ? `${meta.label}, view history` : `${meta.label}, add measurement`}
@@ -57,6 +58,6 @@ export function MetricCard({ kind, points, onPress }: {
       ) : (
         <Txt weight={600} size={13.5} color={meta.color} style={{ marginTop: 4 }}>+ Tap to add</Txt>
       )}
-    </Pressable>
+    </Tappable>
   );
 }

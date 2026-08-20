@@ -1,9 +1,10 @@
 import { router, usePathname, type Href } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { ageOrDueLabel } from '@/lib/format';
 import { hexA } from '@/lib/color';
@@ -72,7 +73,7 @@ export function Sidebar() {
         {NAV.map((item) => {
           const active = item.match(pathname);
           return (
-            <Pressable
+            <Tappable
               key={item.label}
               onPress={() => router.navigate(item.href)}
               accessibilityRole="button"
@@ -98,7 +99,7 @@ export function Sidebar() {
               <Txt weight={active ? 700 : 600} size={15} color={active ? t.text : t.dim}>
                 {item.label}
               </Txt>
-            </Pressable>
+            </Tappable>
           );
         })}
       </View>
@@ -106,7 +107,7 @@ export function Sidebar() {
       {/* spacer pushes the child card to the bottom */}
       <View style={{ flex: 1 }} />
 
-      <Pressable
+      <Tappable
         onPress={openSwitcher}
         accessibilityRole="button"
         accessibilityLabel={child ? `${child.first} ${child.last}, switch child` : 'Switch child'}
@@ -135,7 +136,7 @@ export function Sidebar() {
           </Txt>
         </View>
         <Icon name="chevron-down" color={t.dim} size={18} />
-      </Pressable>
+      </Tappable>
     </View>
   );
 }

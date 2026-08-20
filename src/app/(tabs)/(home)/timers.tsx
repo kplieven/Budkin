@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { PulsingDot } from '@/components/PulsingDot';
 import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
@@ -136,7 +137,7 @@ export default function Timers() {
                   ['−5m', -5],
                   ['+5m', 5],
                 ] as const).map(([lbl, d]) => (
-                  <Pressable
+                  <Tappable
                     key={lbl}
                     onPress={() => adjustTimerStart(tm.id, d)}
                     accessibilityRole="button"
@@ -149,9 +150,9 @@ export default function Timers() {
                     <Txt unselectable weight={700} size={13}>
                       {lbl}
                     </Txt>
-                  </Pressable>
+                  </Tappable>
                 ))}
-                <Pressable
+                <Tappable
                   onPress={() => setExactFor(exactFor === tm.id ? null : tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel="Set exact start time"
@@ -172,7 +173,7 @@ export default function Timers() {
                   <Txt unselectable weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
                     Exact…
                   </Txt>
-                </Pressable>
+                </Tappable>
               </View>
 
               {exactFor === tm.id && (
@@ -182,7 +183,7 @@ export default function Timers() {
               )}
 
               <View style={{ flexDirection: 'row', gap: 9, marginTop: 14 }}>
-                <Pressable
+                <Tappable
                   onPress={() => discardTimer(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Discard ${tm.name} timer${who.spoken}`}
@@ -194,8 +195,8 @@ export default function Timers() {
                   <Txt unselectable weight={700} size={14.5} color={t.dim}>
                     Discard
                   </Txt>
-                </Pressable>
-                <Pressable
+                </Tappable>
+                <Tappable
                   onPress={() => openTimerEdit(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Edit ${tm.name} timer${who.spoken}`}
@@ -207,8 +208,8 @@ export default function Timers() {
                   <Txt unselectable weight={800} size={14.5} color={color}>
                     Edit
                   </Txt>
-                </Pressable>
-                <Pressable
+                </Tappable>
+                <Tappable
                   onPress={() => stopTimer(tm.id)}
                   accessibilityRole="button"
                   accessibilityLabel={`Stop and save ${tm.name} timer${who.spoken}`}
@@ -220,14 +221,14 @@ export default function Timers() {
                   <Txt unselectable weight={800} size={14.5} color={t.onActivity} style={{ textAlign: 'center' }}>
                     Stop &amp; save
                   </Txt>
-                </Pressable>
+                </Tappable>
               </View>
 
               <View style={{ flexDirection: 'row', gap: 7, marginTop: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
                 {TIMER_SAVE_OPTIONS.map((o) => {
                   const sel = tm.saveAs === o;
                   return (
-                    <Pressable
+                    <Tappable
                       key={o}
                       onPress={() => setTimerSaveAs(tm.id, o)}
                       accessibilityRole="button"
@@ -248,7 +249,7 @@ export default function Timers() {
                       <Txt unselectable weight={700} size={12.5} color={sel ? t.onActivity : t.text}>
                         {ACTIVITY_LABEL[o]}
                       </Txt>
-                    </Pressable>
+                    </Tappable>
                   );
                 })}
               </View>
@@ -264,7 +265,7 @@ export default function Timers() {
           </Txt>
         </View>
       ) : (
-        <Pressable
+        <Tappable
           onPress={startQuickTimer}
           accessibilityRole="button"
           style={(s) => [
@@ -289,7 +290,7 @@ export default function Timers() {
           <Txt unselectable weight={700} size={15.5} color={t.primary}>
             New timer
           </Txt>
-        </Pressable>
+        </Tappable>
       )}
     </>
   );

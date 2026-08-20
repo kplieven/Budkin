@@ -1,6 +1,7 @@
-import { Pressable, type ViewStyle } from 'react-native';
+import type { ViewStyle } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
@@ -25,7 +26,7 @@ export function SetupButton({
   const primary = variant === 'primary';
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
@@ -55,6 +56,6 @@ export function SetupButton({
       >
         {label}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }

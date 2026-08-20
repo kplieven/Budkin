@@ -2,11 +2,12 @@ import Constants from 'expo-constants';
 import { openBrowserAsync } from 'expo-web-browser';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { versionLabel } from '@/lib/appVersion';
 import { fontFamily } from '@/theme/fonts';
@@ -87,7 +88,7 @@ export default function Onboarding() {
       keyboardShouldPersistTaps="handled"
     >
       {router.canGoBack() && (
-        <Pressable
+        <Tappable
           onPress={() => router.back()}
           accessibilityRole="button"
           accessibilityLabel="Back"
@@ -98,7 +99,7 @@ export default function Onboarding() {
           ]}
         >
           <Icon name="chevron-left" color={t.text} size={22} />
-        </Pressable>
+        </Tappable>
       )}
       <View
         style={[
@@ -132,7 +133,7 @@ export default function Onboarding() {
             const host = srv.serverUrl.replace(/^https?:\/\//, '');
             const busy = pendingUrl === srv.serverUrl && connecting;
             return (
-              <Pressable
+              <Tappable
                 key={srv.serverUrl}
                 onPress={() => tryServer(srv)}
                 disabled={connecting}
@@ -169,7 +170,7 @@ export default function Onboarding() {
                 {busy ? (
                   <ActivityIndicator color={t.dim} />
                 ) : (
-                  <Pressable
+                  <Tappable
                     onPress={() => forgetServer(srv.serverUrl)}
                     hitSlop={10}
                     accessibilityRole="button"
@@ -177,9 +178,9 @@ export default function Onboarding() {
                     style={(s) => [{ padding: 6, borderRadius: 8, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.chip }]}
                   >
                     <Icon name="close" color={t.faint} size={18} />
-                  </Pressable>
+                  </Tappable>
                 )}
-              </Pressable>
+              </Tappable>
             );
           })}
         </View>
@@ -243,7 +244,7 @@ export default function Onboarding() {
         </Txt>
       </View>
 
-      <Pressable
+      <Tappable
         onPress={() => { setPendingUrl(null); connect(url, token); }}
         disabled={connecting}
         accessibilityRole="button"
@@ -271,7 +272,7 @@ export default function Onboarding() {
             Connect
           </Txt>
         )}
-      </Pressable>
+      </Tappable>
 
       <Txt weight={500} size={13.5} color={t.faint} style={{ textAlign: 'center', marginTop: 14 }}>
         Don&apos;t have a server?{' '}

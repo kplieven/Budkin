@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
-import { ScrollView, View, Pressable } from 'react-native';
+import { ScrollView, View,} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { WaitingForBirth } from '@/features/dashboard/WaitingForBirth';
 import { MetricCard } from '@/features/measurements/MetricCard';
@@ -62,14 +63,14 @@ export default function Growth() {
         <Txt weight={800} size={27} tracking={-0.6}>
           Growth
         </Txt>
-        <Pressable
+        <Tappable
           onPress={openSwitcher}
           accessibilityRole="button"
           accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
           style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
         >
           <Avatar child={child} size={38} radius={12} fontSize={16} />
-        </Pressable>
+        </Tappable>
       </View>
       {body}
     </ScrollView>
