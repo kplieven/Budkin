@@ -1,9 +1,10 @@
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { treatmentScheduleLabel, treatmentDosageLabel } from '@/features/treatments/treatmentLabels';
@@ -59,7 +60,7 @@ export function TreatmentPickerSheet() {
         {active.map(({ treatment: c, due }) => {
           const isDue = due > 0;
           return (
-            <Pressable
+            <Tappable
               key={c.id}
               onPress={() => logMedicationFromTreatment(c.id)}
               accessibilityRole="button"
@@ -103,11 +104,11 @@ export function TreatmentPickerSheet() {
                 </Txt>
               </View>
               <Icon name="chevron-right" color={t.faint} size={18} />
-            </Pressable>
+            </Tappable>
           );
         })}
 
-        <Pressable
+        <Tappable
           onPress={logManually}
           accessibilityRole="button"
           style={(s) => [
@@ -131,7 +132,7 @@ export function TreatmentPickerSheet() {
           <Txt weight={700} size={15} color={t.primary}>
             Log manually
           </Txt>
-        </Pressable>
+        </Tappable>
       </ScrollView>
     </BottomSheet>
   );

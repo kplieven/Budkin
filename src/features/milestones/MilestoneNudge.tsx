@@ -1,7 +1,8 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { ageMonths } from '@/lib/format';
@@ -65,7 +66,7 @@ export function MilestoneNudge() {
         <Txt weight={700} size={11.5} color={t.dim} style={{ flex: 1, textTransform: 'uppercase' }} tracking={0.6}>
           Did they already?
         </Txt>
-        <Pressable
+        <Tappable
           onPress={onNotYet}
           accessibilityRole="button"
           accessibilityLabel={`Dismiss ${def.title} prompt`}
@@ -73,7 +74,7 @@ export function MilestoneNudge() {
           style={(state) => [{ cursor: 'pointer', padding: 2 }, isHovered(state) && { opacity: 0.7 }]}
         >
           <Icon name="close" color={t.faint} size={16} />
-        </Pressable>
+        </Tappable>
       </View>
 
       <Txt weight={700} size={16} color={t.text} style={{ marginTop: 9 }}>
@@ -84,7 +85,7 @@ export function MilestoneNudge() {
       </Txt>
 
       <View style={{ flexDirection: 'row', gap: 9, marginTop: 12 }}>
-        <Pressable
+        <Tappable
           onPress={onYes}
           accessibilityRole="button"
           accessibilityLabel={`Yes, ${child.first} has reached ${def.title}`}
@@ -103,8 +104,8 @@ export function MilestoneNudge() {
           <Txt unselectable weight={700} size={14} color={t.onActivity}>
             Yes, log it
           </Txt>
-        </Pressable>
-        <Pressable
+        </Tappable>
+        <Tappable
           onPress={onNotYet}
           accessibilityRole="button"
           accessibilityLabel={`Not yet for ${def.title}`}
@@ -125,7 +126,7 @@ export function MilestoneNudge() {
           <Txt unselectable weight={700} size={14} color={t.dim}>
             Not yet
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
 
       {moreCount > 0 ? (

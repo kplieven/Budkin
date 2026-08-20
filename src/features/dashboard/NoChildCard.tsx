@@ -1,7 +1,8 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { shadowStyle } from '@/theme/shadow';
@@ -47,7 +48,7 @@ export function NoChildCard() {
         Budkin starts tracking feeds, naps, diapers and growth as soon as you add them.
       </Txt>
 
-      <Pressable
+      <Tappable
         onPress={openAddChild}
         accessibilityRole="button"
         style={(s) => [
@@ -70,7 +71,7 @@ export function NoChildCard() {
         <Txt unselectable weight={800} size={16} color={t.onPrimary}>
           Add your baby
         </Txt>
-      </Pressable>
+      </Tappable>
     </View>
   );
 }

@@ -1,7 +1,8 @@
-import { Pressable, type ViewStyle } from 'react-native';
+import type { ViewStyle } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { useTheme } from '@/theme/useTheme';
 
 interface IconButtonProps {
@@ -17,7 +18,7 @@ interface IconButtonProps {
 export function IconButton({ name, accessibilityLabel, onPress, color, size = 22, style }: IconButtonProps) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -39,6 +40,6 @@ export function IconButton({ name, accessibilityLabel, onPress, color, size = 22
       ]}
     >
       <Icon name={name} color={color ?? t.dim} size={size} />
-    </Pressable>
+    </Tappable>
   );
 }

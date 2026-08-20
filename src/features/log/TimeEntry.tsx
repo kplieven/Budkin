@@ -12,11 +12,12 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { ANCHOR_LABEL, anchorLabel, dayGroupLabel, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
@@ -60,7 +61,7 @@ function ValuePill({
 }) {
   const t = useTheme();
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
@@ -89,7 +90,7 @@ function ValuePill({
       >
         {label}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }
 

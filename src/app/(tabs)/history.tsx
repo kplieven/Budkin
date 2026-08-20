@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { childAttribution } from '@/features/activity/childAttribution';
@@ -154,7 +155,7 @@ export default function History() {
             <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
               Nothing here matches the current filter.
             </Txt>
-            <Pressable
+            <Tappable
               // Spelled out in full, as the twin literal in `HistoryFilterChips` is, so
               // neither touches the household toggle: clearing a day and an activity must
               // not also throw the user back to one child. That is why the toggle is not
@@ -169,7 +170,7 @@ export default function History() {
               <Txt unselectable weight={700} size={14} color={t.onPrimary}>
                 Clear filters
               </Txt>
-            </Pressable>
+            </Tappable>
           </View>
         ) : (
           groups.map((g) => (
@@ -279,14 +280,14 @@ export default function History() {
           <Txt weight={800} size={27} tracking={-0.6}>
             History
           </Txt>
-          <Pressable
+          <Tappable
             onPress={openSwitcher}
             accessibilityRole="button"
             accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
             style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
           >
             <Avatar child={child} size={38} radius={12} fontSize={16} />
-          </Pressable>
+          </Tappable>
         </View>
         {body}
       </ScrollView>

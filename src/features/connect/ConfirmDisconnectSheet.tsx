@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { loadPendingOps } from '@/data/pendingOps';
 import { DISCONNECT_BASE_LINE, disconnectLossLine } from '@/features/queue/disconnectWarning';
@@ -74,7 +75,7 @@ export function ConfirmDisconnectSheet({
           </Txt>
         )}
         <View style={{ flexDirection: 'row', gap: 10, marginTop: 22 }}>
-          <Pressable
+          <Tappable
             onPress={onCancel}
             accessibilityRole="button"
             accessibilityLabel="Cancel"
@@ -96,8 +97,8 @@ export function ConfirmDisconnectSheet({
             <Txt unselectable weight={800} size={15.5} color={t.text}>
               Cancel
             </Txt>
-          </Pressable>
-          <Pressable
+          </Tappable>
+          <Tappable
             onPress={confirm}
             disabled={leaving}
             accessibilityRole="button"
@@ -122,7 +123,7 @@ export function ConfirmDisconnectSheet({
             <Txt unselectable weight={800} size={15.5} color={REMOVE_COLOR}>
               Sign out
             </Txt>
-          </Pressable>
+          </Tappable>
         </View>
       </View>
     </BottomSheet>

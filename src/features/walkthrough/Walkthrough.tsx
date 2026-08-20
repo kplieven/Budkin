@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { pageFromOffset } from '@/features/walkthrough/pager';
 import { WALKTHROUGH_SLIDES } from '@/features/walkthrough/slides';
@@ -73,7 +74,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
     >
       <View style={{ height: 48, justifyContent: 'center', alignItems: 'flex-end', paddingHorizontal: 20 }}>
         {!last && (
-          <Pressable
+          <Tappable
             onPress={onDone}
             accessibilityRole="button"
             accessibilityLabel="Skip"
@@ -82,7 +83,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
             <Txt unselectable weight={600} size={15} color={t.dim}>
               Skip
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
       </View>
 
@@ -141,7 +142,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
       </View>
 
       <View style={{ paddingHorizontal: 24, paddingBottom: 8 }}>
-        <Pressable
+        <Tappable
           onPress={next}
           accessibilityRole="button"
           accessibilityLabel={last ? 'Get started' : 'Next'}
@@ -161,7 +162,7 @@ export function Walkthrough({ onDone }: { onDone: () => void }) {
           <Txt unselectable weight={800} size={17} color={t.onPrimary}>
             {last ? 'Get started' : 'Next'}
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </View>
   );

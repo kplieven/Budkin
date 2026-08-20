@@ -1,9 +1,10 @@
 import { useEffect } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { ACTIVITY_LABEL } from '@/lib/activities';
 import { hexA } from '@/lib/color';
@@ -138,7 +139,7 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
   const detail = detailFor(item);
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       // Nothing the row draws may go unannounced, and the chip's name comes from the same
@@ -278,6 +279,6 @@ export function TimelineEntry({ item, now, onPress, isFirst, isLast, queued = fa
           ) : null}
         </View>
       </View>
-    </Pressable>
+    </Tappable>
   );
 }

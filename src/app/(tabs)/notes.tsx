@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { groupByDay } from '@/features/activity/groupByDay';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
@@ -23,7 +24,7 @@ function NoteRow({ note, now, onPress }: { note: NoteEntry; now: number; onPress
   const color = t.activity.note;
   const ts = entryTimestamp(note);
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel="Edit note"
@@ -71,7 +72,7 @@ function NoteRow({ note, now, onPress }: { note: NoteEntry; now: number; onPress
           ))}
         </View>
       ) : null}
-    </Pressable>
+    </Tappable>
   );
 }
 
@@ -108,7 +109,7 @@ export default function Notes() {
   const groups = groupByDay(notes, now);
 
   const addButton = (
-    <Pressable
+    <Tappable
       onPress={() => openSheet('note')}
       accessibilityRole="button"
       accessibilityLabel="Add note"
@@ -134,7 +135,7 @@ export default function Notes() {
       <Txt unselectable weight={700} size={15.5} color={t.primary}>
         Add note
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 
   const body = (
@@ -226,14 +227,14 @@ export default function Notes() {
           <Txt weight={800} size={27} tracking={-0.6}>
             Notes
           </Txt>
-          <Pressable
+          <Tappable
             onPress={openSwitcher}
             accessibilityRole="button"
             accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
             style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
           >
             <Avatar child={child} size={38} radius={12} fontSize={16} />
-          </Pressable>
+          </Tappable>
         </View>
         {body}
       </ScrollView>

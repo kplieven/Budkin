@@ -6,10 +6,12 @@
  */
 
 import { useState } from 'react';
-import { Pressable, TextInput, useWindowDimensions, View } from 'react-native';
+import { TextInput, useWindowDimensions, View } from 'react-native';
 
+import { DayPicker } from '@/components/DayPicker';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { dayGroupLabel, fmtAgo, fmtClock, fmtDur } from '@/lib/format';
 import { parseClockInput, parseDurationInput, resolveClock } from '@/lib/timeParse';
@@ -35,6 +37,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
   // Only for the nudge cap below. react-native-web pins this to 1, so web layout is unaffected.
   const { fontScale } = useWindowDimensions();
   const [text, setText] = useState<string | null>(null); // null = not editing
+  const [calendar, setCalendar] = useState(false);
 
   const display = mode === 'clock' ? fmtClock(value) : fmtDur(value);
 
@@ -128,7 +131,7 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
 
       <View style={{ flexDirection: 'row', gap: 4, justifyContent: 'center', flexWrap: 'wrap' }}>
         {STEPS.map((d) => (
-          <Pressable
+          <Tappable
             key={d}
             onPress={() => step(d)}
             accessibilityRole="button"
@@ -138,13 +141,13 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             <Txt weight={700} size={13} style={{ fontVariant: ['tabular-nums'] }}>
               {d > 0 ? `+${d}m` : `−${-d}m`}
             </Txt>
-          </Pressable>
+          </Tappable>
         ))}
       </View>
 
       {mode === 'clock' && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Pressable
+          <Tappable
             onPress={() => stepDay(-1)}
             accessibilityRole="button"
             accessibilityLabel="Previous day"
@@ -154,13 +157,38 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             ]}
           >
             <Icon name="chevron-left" color={t.text} size={18} />
-          </Pressable>
-          <View style={{ flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 11 }}>
-            <Txt weight={700} size={13.5}>
+          </Tappable>
+          <Tappable
+            onPress={() => {
+              setText(null);
+              setCalendar((c) => !c);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={`${dayGroupLabel(value, now)}. Pick a date`}
+            accessibilityState={{ expanded: calendar }}
+            style={(s) => [
+              {
+                flex: 1,
+                height: 38,
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+                backgroundColor: t.surface,
+                borderWidth: 1.5,
+                borderColor: calendar ? color : t.line,
+                borderRadius: 11,
+                cursor: 'pointer',
+              },
+              !calendar && isHovered(s) && { borderColor: t.line2 },
+            ]}
+          >
+            <Txt unselectable weight={700} size={13.5}>
               {dayGroupLabel(value, now)}
             </Txt>
-          </View>
-          <Pressable
+            <Icon name={calendar ? 'chevron-up' : 'chevron-down'} color={t.dim} size={15} />
+          </Tappable>
+          <Tappable
             onPress={() => stepDay(1)}
             disabled={isToday}
             accessibilityRole="button"
@@ -183,7 +211,15 @@ export function TimeAdjuster({ mode, value, now, color, onChange, showRelative =
             ]}
           >
             <Icon name="chevron-right" color={t.text} size={18} />
-          </Pressable>
+          </Tappable>
+        </View>
+      )}
+
+      {mode === 'clock' && calendar && (
+        // The rule keeps the month chevrons from reading as a second row of the
+        // day stepper directly above them.
+        <View style={{ borderTopWidth: 1.5, borderTopColor: t.line, paddingTop: 8 }}>
+          <DayPicker value={value} now={now} color={color} onChange={onChange} />
         </View>
       )}
     </View>

@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
@@ -186,7 +187,7 @@ function Inner() {
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
         {screen === 'form' && (
-          <Pressable
+          <Tappable
             onPress={() => attempt()}
             disabled={!canSubmit || busy}
             accessibilityRole="button"
@@ -214,12 +215,12 @@ function Inner() {
                 Connect & upload
               </Txt>
             )}
-          </Pressable>
+          </Tappable>
         )}
 
         {screen === 'guard' && (
           <>
-            <Pressable
+            <Tappable
               onPress={useServerData}
               disabled={busy}
               accessibilityRole="button"
@@ -243,8 +244,8 @@ function Inner() {
               <Txt unselectable weight={800} size={15} color={t.text}>
                 Use only the server&apos;s data
               </Txt>
-            </Pressable>
-            <Pressable
+            </Tappable>
+            <Tappable
               onPress={() => attempt({ uploadAnyway: true })}
               disabled={busy}
               accessibilityRole="button"
@@ -271,12 +272,12 @@ function Inner() {
                   Upload anyway
                 </Txt>
               )}
-            </Pressable>
+            </Tappable>
           </>
         )}
 
         {screen === 'partial' && (
-          <Pressable
+          <Tappable
             onPress={() => attempt(uploadAnyway ? { uploadAnyway: true } : undefined)}
             disabled={busy}
             accessibilityRole="button"
@@ -303,7 +304,7 @@ function Inner() {
                 Retry
               </Txt>
             )}
-          </Pressable>
+          </Tappable>
         )}
       </View>
     </BottomSheet>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
@@ -7,6 +7,7 @@ import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_META } from '@/lib/measurements';
@@ -124,7 +125,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           Date
         </Txt>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: isToday ? 16 : 8 }}>
-          <Pressable
+          <Tappable
             onPress={() => stepDay(-1)}
             accessibilityRole="button"
             accessibilityLabel="Previous day"
@@ -134,13 +135,13 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             ]}
           >
             <Icon name="chevron-left" color={t.text} size={22} />
-          </Pressable>
+          </Tappable>
           <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
             <Txt weight={700} size={15.5}>
               {dateLabel}
             </Txt>
           </View>
-          <Pressable
+          <Tappable
             onPress={() => stepDay(1)}
             disabled={isToday}
             accessibilityRole="button"
@@ -163,10 +164,10 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             ]}
           >
             <Icon name="chevron-right" color={t.text} size={22} />
-          </Pressable>
+          </Tappable>
         </View>
         {!isToday && (
-          <Pressable
+          <Tappable
             onPress={() => setDateMs(today)}
             accessibilityRole="button"
             style={(s) => [
@@ -177,7 +178,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             <Txt unselectable weight={600} size={13} color={meta.color}>
               Jump to today
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
@@ -194,7 +195,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
         {editingId && (
-          <Pressable
+          <Tappable
             onPress={() => deleteMeasurement(editingId)}
             accessibilityRole="button"
             style={(s) => [
@@ -205,9 +206,9 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             <Txt unselectable weight={800} size={16} color="#E2725B">
               Delete
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
-        <Pressable
+        <Tappable
           onPress={onSave}
           accessibilityRole="button"
           style={(s) => [
@@ -218,7 +219,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           <Txt unselectable weight={800} size={17.5} color={t.onActivity}>
             {editingId ? 'Save changes' : `Save ${meta.short.toLowerCase()}`}
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </BottomSheet>
   );

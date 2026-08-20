@@ -1,8 +1,9 @@
 import { router, usePathname } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import {
   QUEUE_ROUTE,
@@ -61,7 +62,7 @@ export function TopBar() {
 
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         {offline && (
-          <Pressable
+          <Tappable
             onPress={() => {
               if (pillAction === 'open-queue') {
                 router.navigate(QUEUE_ROUTE);
@@ -90,7 +91,6 @@ export function TopBar() {
                 cursor: 'pointer',
               },
               isHovered(pstate) && { borderColor: 'rgba(226,181,84,0.9)' },
-              pstate.pressed && { opacity: 0.85 },
             ]}
           >
             <View style={{ width: 8, height: 8, borderRadius: 99, backgroundColor: '#E2B554' }} />
@@ -100,14 +100,14 @@ export function TopBar() {
             {/* Nothing else here says the pill opens a screen, so the chevron does.
                 It is dropped in the cases where the press opens nothing. */}
             {pillAction === 'open-queue' && <Icon name="chevron-right" color="#E2B554" size={16} />}
-          </Pressable>
+          </Tappable>
         )}
 
         <Txt weight={700} size={14.5} color={t.dim} style={{ fontVariant: ['tabular-nums'] }}>
           {clock}
         </Txt>
 
-        <Pressable
+        <Tappable
           onPress={toggleTheme}
           accessibilityRole="button"
           accessibilityLabel="Toggle theme"
@@ -125,7 +125,7 @@ export function TopBar() {
           ]}
         >
           <Icon name={t.dark ? 'moon' : 'sun'} color={t.text} size={20} />
-        </Pressable>
+        </Tappable>
       </View>
     </View>
   );

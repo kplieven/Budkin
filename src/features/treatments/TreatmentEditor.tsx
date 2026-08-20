@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
@@ -8,6 +8,7 @@ import { DateFields } from '@/components/DateFields';
 import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
@@ -196,7 +197,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
             ['timesOfDay', 'Times of day'],
             ['everyHours', 'Every X hours'],
           ] as const).map(([mode, text]) => (
-            <Pressable
+            <Tappable
               key={mode}
               onPress={() => setScheduleMode(mode)}
               accessibilityRole="button"
@@ -219,7 +220,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
               <Txt unselectable weight={700} size={14} color={scheduleMode === mode ? t.primary : t.text}>
                 {text}
               </Txt>
-            </Pressable>
+            </Tappable>
           ))}
         </View>
 
@@ -286,7 +287,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
             <Chip key={u} label={u} color={t.primary} selected={unit === u} onPress={() => pickUnit(u)} padH={13} padV={8} fontSize={13.5} />
           ))}
           {!otherOpen && (
-            <Pressable
+            <Tappable
               onPress={() => setOtherOpen(true)}
               accessibilityRole="button"
               accessibilityLabel="Enter a custom unit"
@@ -298,7 +299,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
               <Txt unselectable weight={700} size={13.5} color={t.faint}>
                 + Other
               </Txt>
-            </Pressable>
+            </Tappable>
           )}
         </View>
         {otherOpen && (
@@ -326,7 +327,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
           <Txt weight={700} size={13} color={t.dim}>
             Until (optional)
           </Txt>
-          <Pressable
+          <Tappable
             onPress={() => setToEnabled((v) => !v)}
             accessibilityRole="switch"
             accessibilityLabel="Set an end date"
@@ -336,7 +337,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
             <Txt unselectable weight={700} size={13.5} color={t.primary}>
               {toEnabled ? 'Remove end date' : 'Add end date'}
             </Txt>
-          </Pressable>
+          </Tappable>
         </View>
         {toEnabled && (
           <View style={{ marginBottom: 16 }}>
@@ -364,7 +365,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
             ['Active', true],
             ['Paused', false],
           ] as const).map(([text, value]) => (
-            <Pressable
+            <Tappable
               key={text}
               onPress={() => setActive(value)}
               accessibilityRole="button"
@@ -387,7 +388,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
               <Txt unselectable weight={700} size={14} color={active === value ? t.primary : t.text}>
                 {text}
               </Txt>
-            </Pressable>
+            </Tappable>
           ))}
         </View>
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 4 }}>
@@ -396,7 +397,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
 
         {editing ? (
           <View style={{ marginTop: 22, paddingTop: 18, borderTopWidth: 1, borderTopColor: t.line }}>
-            <Pressable
+            <Tappable
               onPress={onDelete}
               accessibilityRole="button"
               accessibilityLabel={confirmDelete ? `Confirm delete ${editing.name}` : `Delete ${editing.name}`}
@@ -417,13 +418,13 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
               <Txt unselectable weight={800} size={15} color={REMOVE_COLOR}>
                 {confirmDelete ? 'Tap again to delete' : 'Delete treatment'}
               </Txt>
-            </Pressable>
+            </Tappable>
           </View>
         ) : null}
       </ScrollView>
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
-        <Pressable
+        <Tappable
           onPress={onSave}
           disabled={!canSave}
           accessibilityRole="button"
@@ -445,7 +446,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
           <Txt unselectable weight={800} size={17} color={t.onPrimary}>
             {editing ? 'Save changes' : 'Add treatment'}
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </BottomSheet>
   );

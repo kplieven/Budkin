@@ -1,11 +1,12 @@
 import { useFocusEffect } from 'expo-router';
 import { Fragment, useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, View } from 'react-native';
+import { ActivityIndicator, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { loadQueue } from '@/data/queue';
 import { detailFor } from '@/features/activity/detail';
@@ -159,7 +160,7 @@ export default function OfflineQueue() {
       {/* Labelled "Retry connection" to a screen reader: announced on its own with
           none of the card around it, a bare "Retry" says nothing about what is
           being retried. */}
-      <Pressable
+      <Tappable
         onPress={() => void onSync()}
         disabled={block != null || syncing}
         accessibilityRole="button"
@@ -186,7 +187,7 @@ export default function OfflineQueue() {
               uploads second, so "Retry" names the whole of it. */}
           {syncing ? 'Retrying…' : 'Retry'}
         </Txt>
-      </Pressable>
+      </Tappable>
 
       {blockedHint != null && (
         <Txt weight={500} size={12.5} color={t.dim} style={{ marginTop: 8, lineHeight: 18 }}>

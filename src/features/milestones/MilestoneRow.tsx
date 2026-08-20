@@ -1,7 +1,8 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
@@ -25,7 +26,7 @@ export function MilestoneRow({
   const color = t.activity.note;
   const reached = reachedAt != null;
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ checked: reached }}
@@ -68,6 +69,6 @@ export function MilestoneRow({
           {reached ? reachedDateLabel(reachedAt as number) : `typically ${def.minMonths} to ${def.maxMonths} months`}
         </Txt>
       </View>
-    </Pressable>
+    </Tappable>
   );
 }

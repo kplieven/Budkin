@@ -1,12 +1,13 @@
 import { router } from 'expo-router';
 import { Fragment, type ReactNode, useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, View } from 'react-native';
+import { Platform, ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { hasReminderPermission, requestReminderPermission } from '@/notifications/permission';
@@ -155,7 +156,7 @@ export default function NotificationSettings() {
     <>
       {Platform.OS === 'android' ? (
         !granted && (
-          <Pressable
+          <Tappable
             onPress={() =>
               void requestReminderPermission().then((g) => {
                 setGranted(g);
@@ -181,7 +182,7 @@ export default function NotificationSettings() {
               </Txt>
             </View>
             <Icon name="chevron-right" color={t.faint} size={18} />
-          </Pressable>
+          </Tappable>
         )
       ) : (
         // Off Android there is no permission to grant and nothing here ever
@@ -218,7 +219,7 @@ export default function NotificationSettings() {
               const showSub = r.sub != null && r.on;
               return (
                 <Fragment key={r.key}>
-                  <Pressable
+                  <Tappable
                     onPress={() => setReminderPref(r.key, !r.on)}
                     accessibilityRole="switch"
                     accessibilityLabel={r.label}
@@ -240,7 +241,7 @@ export default function NotificationSettings() {
                       </Txt>
                     </View>
                     <Toggle on={r.on} />
-                  </Pressable>
+                  </Tappable>
 
                   {showSub && (
                     <View

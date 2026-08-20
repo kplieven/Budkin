@@ -1,6 +1,7 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { useTheme } from '@/theme/useTheme';
@@ -40,7 +41,7 @@ export function Chip({
 
   if (dashed) {
     return (
-      <Pressable
+      <Tappable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
@@ -65,12 +66,12 @@ export function Chip({
         <Txt unselectable weight={700} size={fontSize} color={t.primary}>
           {label}
         </Txt>
-      </Pressable>
+      </Tappable>
     );
   }
 
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
@@ -106,6 +107,6 @@ export function Chip({
       <Txt unselectable weight={700} size={fontSize} color={selected ? t.onActivity : t.text}>
         {label}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }

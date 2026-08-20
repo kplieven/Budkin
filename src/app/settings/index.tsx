@@ -1,13 +1,14 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { Platform, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { ConfirmDisconnectSheet } from '@/features/connect/ConfirmDisconnectSheet';
@@ -163,7 +164,7 @@ function CountField({
         {label}
       </Txt>
       <View style={{ flexDirection: 'row', gap: 10 }}>
-        <Pressable
+        <Tappable
           onPress={() => step(-1)}
           disabled={atMin}
           accessibilityRole="button"
@@ -174,7 +175,7 @@ function CountField({
           <Txt unselectable weight={700} size={22} color={t.text}>
             −
           </Txt>
-        </Pressable>
+        </Tappable>
         {/* Sizing View for the same react-native-web reason as in ClockField. */}
         <View style={{ flex: 1, minWidth: 0 }}>
           <TextInput
@@ -205,7 +206,7 @@ function CountField({
             }}
           />
         </View>
-        <Pressable
+        <Tappable
           onPress={() => step(1)}
           disabled={atMax}
           accessibilityRole="button"
@@ -216,7 +217,7 @@ function CountField({
           <Txt unselectable weight={700} size={22} color={t.text}>
             +
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </View>
   );
@@ -309,7 +310,7 @@ export default function Settings() {
         Appearance
       </Txt>
       <View style={group}>
-        <Pressable
+        <Tappable
           onPress={toggleTheme}
           accessibilityRole="switch"
           accessibilityLabel="Night mode"
@@ -324,7 +325,7 @@ export default function Settings() {
             Night mode
           </Txt>
           <Toggle on={themeMode === 'dark'} />
-        </Pressable>
+        </Tappable>
         <View style={[row, { borderBottomWidth: __DEV__ ? 1 : 0, borderBottomColor: t.line }]}>
           <Txt weight={600} size={16} style={{ flex: 1 }}>
             Units
@@ -345,7 +346,7 @@ export default function Settings() {
           </View>
         </View>
         {__DEV__ && (
-          <Pressable
+          <Tappable
             onPress={toggleOffline}
             accessibilityRole="switch"
             accessibilityLabel="Simulate offline"
@@ -356,7 +357,7 @@ export default function Settings() {
               Simulate offline
             </Txt>
             <Toggle on={simulateOffline} />
-          </Pressable>
+          </Tappable>
         )}
       </View>
 
@@ -467,7 +468,7 @@ export default function Settings() {
           </Txt>
           <View style={group}>
             {childTreatments.map((c, i) => (
-              <Pressable
+              <Tappable
                 key={c.id}
                 onPress={() => openTreatmentEditor(c.id)}
                 accessibilityRole="button"
@@ -496,9 +497,9 @@ export default function Settings() {
                   </Txt>
                 </View>
                 <Icon name="chevron-right" color={t.faint} size={18} />
-              </Pressable>
+              </Tappable>
             ))}
-            <Pressable
+            <Tappable
               onPress={() => openTreatmentEditor()}
               accessibilityRole="button"
               accessibilityLabel="Add a treatment"
@@ -508,7 +509,7 @@ export default function Settings() {
               <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
                 Add a treatment
               </Txt>
-            </Pressable>
+            </Tappable>
           </View>
           <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
             Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
@@ -526,7 +527,7 @@ export default function Settings() {
             Reminders
           </Txt>
           <View style={group}>
-            <Pressable
+            <Tappable
               onPress={() => router.navigate('/settings/notifications')}
               accessibilityRole="button"
               accessibilityLabel="Notifications"
@@ -536,7 +537,7 @@ export default function Settings() {
                 Notifications
               </Txt>
               <Icon name="chevron-right" color={t.faint} size={18} />
-            </Pressable>
+            </Tappable>
           </View>
         </>
       )}
@@ -594,7 +595,7 @@ export default function Settings() {
             renders there with its own empty state, so a typed /settings/queue
             does not dead-end. */}
         {selectServerMode({ connection }) && (
-          <Pressable
+          <Tappable
             onPress={() => router.navigate('/settings/queue')}
             accessibilityRole="button"
             accessibilityLabel="Offline queue"
@@ -616,10 +617,10 @@ export default function Settings() {
               </Txt>
             </View>
             <Icon name="chevron-right" color={t.faint} size={18} />
-          </Pressable>
+          </Tappable>
         )}
         {connection?.mode === 'local' && (
-          <Pressable
+          <Tappable
             onPress={openAdopt}
             accessibilityRole="button"
             style={(s) => [row, { borderBottomWidth: connection?.mode === 'local' ? 0 : 1, borderBottomColor: t.line, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
@@ -633,13 +634,13 @@ export default function Settings() {
                 {entries.length === 1 ? 'entry' : 'entries'} stored on this device
               </Txt>
             </View>
-          </Pressable>
+          </Tappable>
         )}
         {/* Confirms instead of disconnecting on the spot: disconnect() clears the
             write queue and the offline op-log, which exist nowhere else, so the
             loss has to be stated with counts before it can happen. */}
         {connection?.mode !== 'local' && (
-          <Pressable
+          <Tappable
             onPress={() => setConfirmDisconnect(true)}
             accessibilityRole="button"
             accessibilityLabel="Reconnect / change server"
@@ -648,7 +649,7 @@ export default function Settings() {
             <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1 }}>
               Reconnect / change server
             </Txt>
-          </Pressable>
+          </Tappable>
         )}
       </View>
 
@@ -656,7 +657,7 @@ export default function Settings() {
         Help
       </Txt>
       <View style={group}>
-        <Pressable
+        <Tappable
           onPress={() => router.push('/tour')}
           accessibilityRole="button"
           style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
@@ -665,7 +666,7 @@ export default function Settings() {
             How Budkin works
           </Txt>
           <Icon name="chevron-right" color={t.faint} size={18} />
-        </Pressable>
+        </Tappable>
       </View>
 
       {/* Which build this is. Nothing else in the app can answer that, and a stale

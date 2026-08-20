@@ -1,10 +1,11 @@
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
 import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { ageOrDueLabel } from '@/lib/format';
 import { hexA } from '@/lib/color';
@@ -34,7 +35,7 @@ export function ChildSwitcher() {
         {children.map((c) => {
           const selected = c.id === selectedId;
           return (
-            <Pressable
+            <Tappable
               key={c.id}
               onPress={() => selectChild(c.id)}
               accessibilityRole="button"
@@ -64,7 +65,7 @@ export function ChildSwitcher() {
                   {ageOrDueLabel(c.birth, !!c.expected, now)}
                 </Txt>
               </View>
-              <Pressable
+              <Tappable
                 onPress={() => openEditChild(c.id)}
                 hitSlop={10}
                 accessibilityRole="button"
@@ -75,13 +76,13 @@ export function ChildSwitcher() {
                 ]}
               >
                 <Icon name="edit" color={t.faint} size={16} />
-              </Pressable>
+              </Tappable>
               {selected && <Icon name="check" color={t.primary} size={22} />}
-            </Pressable>
+            </Tappable>
           );
         })}
 
-        <Pressable
+        <Tappable
           onPress={openAddChild}
           accessibilityRole="button"
           style={(s) => [
@@ -105,7 +106,7 @@ export function ChildSwitcher() {
           <Txt weight={700} size={15} color={t.primary}>
             Add a child
           </Txt>
-        </Pressable>
+        </Tappable>
       </ScrollView>
     </BottomSheet>
   );

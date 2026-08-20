@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pressable, ScrollView, TextInput, View } from 'react-native';
+import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Avatar } from '@/components/Avatar';
@@ -7,6 +7,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { isHovered } from '@/components/hover';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { clampBirth, clampDueDate } from '@/lib/birthDate';
 import { hexA } from '@/lib/color';
@@ -40,7 +41,7 @@ function PhotoPill({
   const t = useTheme();
   const color = tone === 'danger' ? REMOVE_COLOR : t.text;
   return (
-    <Pressable
+    <Tappable
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
@@ -64,7 +65,7 @@ function PhotoPill({
       <Txt unselectable weight={700} size={14} color={color}>
         {label}
       </Txt>
-    </Pressable>
+    </Tappable>
   );
 }
 
@@ -252,7 +253,7 @@ function Inner({ editingId }: { editingId: string | null }) {
                 ['Born', false],
                 ['Expecting', true],
               ] as const).map(([label, value]) => (
-                <Pressable
+                <Tappable
                   key={label}
                   onPress={() => setExpecting(value)}
                   accessibilityRole="button"
@@ -275,7 +276,7 @@ function Inner({ editingId }: { editingId: string | null }) {
                   <Txt unselectable weight={700} size={14} color={expecting === value ? t.primary : t.text}>
                     {label}
                   </Txt>
-                </Pressable>
+                </Tappable>
               ))}
             </View>
           </>
@@ -287,7 +288,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           {GENDER_OPTIONS.map(([label, value]) => {
             const selected = gender === value;
             return (
-              <Pressable
+              <Tappable
                 key={label}
                 onPress={() => setGender(value)}
                 accessibilityRole="button"
@@ -310,7 +311,7 @@ function Inner({ editingId }: { editingId: string | null }) {
                 <Txt unselectable weight={700} size={13} color={selected ? t.primary : t.text}>
                   {label}
                 </Txt>
-              </Pressable>
+              </Tappable>
             );
           })}
         </View>
@@ -389,7 +390,7 @@ function Inner({ editingId }: { editingId: string | null }) {
               editable={!deleteBlocked}
               style={{ ...inputStyle, marginBottom: 12, opacity: deleteBlocked ? 0.5 : 1 }}
             />
-            <Pressable
+            <Tappable
               onPress={onDelete}
               disabled={!canDelete}
               accessibilityRole="button"
@@ -413,7 +414,7 @@ function Inner({ editingId }: { editingId: string | null }) {
               <Txt unselectable weight={800} size={15.5} color={REMOVE_COLOR}>
                 Delete {editing.first}
               </Txt>
-            </Pressable>
+            </Tappable>
             {deleteBlocked ? (
               <Txt weight={600} size={12} color={t.faint} style={{ marginTop: 10, textAlign: 'center' }}>
                 Reconnect to delete {editing.first}
@@ -424,7 +425,7 @@ function Inner({ editingId }: { editingId: string | null }) {
       </ScrollView>
 
       <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 20, paddingTop: 12, paddingBottom: insets.bottom + 8, borderTopWidth: 1, borderTopColor: t.line, flexShrink: 0 }}>
-        <Pressable
+        <Tappable
           onPress={onSave}
           disabled={!canSave}
           accessibilityRole="button"
@@ -447,7 +448,7 @@ function Inner({ editingId }: { editingId: string | null }) {
           <Txt unselectable weight={800} size={17.5} color={t.onPrimary}>
             {editingId ? 'Save changes' : 'Add child'}
           </Txt>
-        </Pressable>
+        </Tappable>
       </View>
     </BottomSheet>
   );

@@ -28,6 +28,7 @@ export type IconName =
   | 'info'
   | 'clock'
   | 'chevron-down'
+  | 'chevron-up'
   | 'chevron-right'
   | 'chevron-left'
   | 'chart'
@@ -240,6 +241,12 @@ export function Icon({ name, color, size = 24, strokeWidth = 2, fill }: IconProp
       return (
         <Svg {...common}>
           <Path d="M7 10l5 5 5-5" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      );
+    case 'chevron-up':
+      return (
+        <Svg {...common}>
+          <Path d="M7 14l5-5 5 5" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
       );
     case 'chevron-right':

@@ -1,8 +1,8 @@
-import { Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
 
 import { isHovered } from '@/components/hover';
+import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { useTheme } from '@/theme/useTheme';
 import { useAppStore } from '@/store/useAppStore';
@@ -42,17 +42,17 @@ export function Toast() {
         {toast}
       </Txt>
       {action && (
-        <Pressable
+        <Tappable
           onPress={action.run}
           accessibilityRole="button"
           accessibilityLabel={action.label}
           hitSlop={10}
-          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.7 }, s.pressed && { opacity: 0.6 }]}
+          style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.7 }]}
         >
           <Txt weight={800} size={14.5} color={fg} style={{ textDecorationLine: 'underline' }}>
             {action.label}
           </Txt>
-        </Pressable>
+        </Tappable>
       )}
     </Animated.View>
   );
