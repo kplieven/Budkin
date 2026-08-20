@@ -78,4 +78,4 @@ export function Tappable({ style, onPressIn, onPressOut, onTouchEnd, onTouchCanc
  */
 const MIN_VISIBLE_MS = 70;
 
-const PRESSED: ViewStyle = { opacity: 0.65, transform: [{ scale: 0.97 }] };
+const PRESSED: ViewStyle = { opacity: 0.65, transform: [{ scale: 0.985 }] };
