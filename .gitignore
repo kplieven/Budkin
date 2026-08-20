@@ -46,3 +46,6 @@ example
 # generated native folders
 /ios
 /android
+
+# the store-asset scripts import each other
+__pycache__/
