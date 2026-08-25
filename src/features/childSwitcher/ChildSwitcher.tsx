@@ -16,6 +16,7 @@ export function ChildSwitcher() {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const open = useAppStore((s) => s.showChildSwitcher);
+  const anchorRect = useAppStore((s) => s.switcherAnchor);
   const children = useAppStore((s) => s.children);
   const selectedId = useAppStore((s) => s.selectedChildId);
   const now = useAppStore((s) => s.now);
@@ -27,7 +28,7 @@ export function ChildSwitcher() {
   if (!open) return null;
 
   return (
-    <BottomSheet onClose={closeSwitcher} anchor="bottom-left">
+    <BottomSheet onClose={closeSwitcher} anchor="bottom-left" anchorRect={anchorRect}>
       <Txt weight={800} size={18} style={{ paddingHorizontal: 22, paddingTop: 10, paddingBottom: 14, flexShrink: 0 }}>
         Who are you logging for?
       </Txt>

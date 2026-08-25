@@ -193,6 +193,9 @@ interface AppState {
   toast: string | null;
   toastAction: ToastAction | null;
   showChildSwitcher: boolean;
+  /** Where the switcher's trigger measured on screen, so the desktop popover can open
+   *  next to it instead of the fixed corner used when no trigger reports a position. */
+  switcherAnchor: { x: number; y: number; width: number; height: number } | null;
   childSheet: boolean;
   editingChildId: string | null;
   confirmBirthFor: string | null;
@@ -313,6 +316,9 @@ interface AppActions {
 
   selectChild: (id: string) => void;
   openSwitcher: () => void;
+  /** Same as `openSwitcher`, but opens the desktop popover next to `anchor`
+   *  (a trigger's `measureInWindow` rect) instead of the fixed corner. */
+  openSwitcherAt: (anchor: { x: number; y: number; width: number; height: number }) => void;
   closeSwitcher: () => void;
 
   openAddChild: () => void;
@@ -1247,6 +1253,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   toast: null,
   toastAction: null,
   showChildSwitcher: false,
+  switcherAnchor: null,
   childSheet: false,
   editingChildId: null,
   confirmBirthFor: null,
@@ -2197,7 +2204,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       insightsError: false,
     });
   },
-  openSwitcher: () => set({ showChildSwitcher: true }),
+  openSwitcher: () => set({ showChildSwitcher: true, switcherAnchor: null }),
+  openSwitcherAt: (anchor) => set({ showChildSwitcher: true, switcherAnchor: anchor }),
   closeSwitcher: () => set({ showChildSwitcher: false }),
 
   openAddChild: () => set({ childSheet: true, editingChildId: null }),

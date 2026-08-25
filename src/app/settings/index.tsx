@@ -1,9 +1,10 @@
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Avatar } from '@/components/Avatar';
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
@@ -263,8 +264,12 @@ export default function Settings() {
   const treatments = useAppStore((s) => s.treatments);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
   const openTreatmentEditor = useAppStore((s) => s.openTreatmentEditor);
+  const openSwitcherAt = useAppStore((s) => s.openSwitcherAt);
 
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  // Always lands on General: per-baby settings are one tap away via the pill, but
+  // there's no single "current baby" that's right to jump to when Settings opens.
+  const [activeTab, setActiveTab] = useState<'general' | 'baby'>('general');
 
   useEffect(() => {
     loadProfile();
@@ -304,7 +309,187 @@ export default function Settings() {
   const selectedChild = children.find((c) => c.id === selectedChildId);
   const childTreatments = treatments.filter((c) => c.childId === selectedChildId);
 
-  const body = (
+  const babyLabel = selectedChild?.first ?? 'Baby';
+
+  // Same pill switcher as the range control on the insights screen
+  // ((tabs)/insights.tsx), reused inline rather than extracted since it's the
+  // only other place this shape shows up.
+  const tabPill = (
+    <View style={{ flexDirection: 'row', backgroundColor: t.chip, borderRadius: 12, padding: 3, marginBottom: 18 }}>
+      {(['general', 'baby'] as const).map((tab) => (
+        <Tappable
+          key={tab}
+          onPress={() => setActiveTab(tab)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: activeTab === tab }}
+          style={(s) => [
+            { flex: 1, paddingVertical: 8, borderRadius: 10, backgroundColor: activeTab === tab ? t.surface : 'transparent', alignItems: 'center' },
+            isHovered(s) && activeTab !== tab && { backgroundColor: t.elevated },
+          ]}
+        >
+          <Txt unselectable weight={activeTab === tab ? 700 : 600} size={13} color={activeTab === tab ? t.text : t.dim}>
+            {tab === 'general' ? 'General' : babyLabel}
+          </Txt>
+        </Tappable>
+      ))}
+    </View>
+  );
+
+  // Doubles as the baby tab's switcher trigger, same avatar+name+chevron shape
+  // as the Home screen header, so switching babies here feels like switching
+  // them anywhere else in the app. Desktop opens the switcher as a popover next
+  // to THIS row (see BottomSheet's anchorRect) rather than the screen's actual
+  // bottom-left corner, which is only right for the sidebar's own child card.
+  const babyHeaderRef = useRef<View>(null);
+  const openSwitcherHere = () => {
+    babyHeaderRef.current?.measureInWindow((x, y, width, height) => openSwitcherAt({ x, y, width, height }));
+  };
+  const babyHeader = (
+    <View ref={babyHeaderRef} style={{ flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 18 }}>
+      <Tappable
+        onPress={openSwitcherHere}
+        accessibilityRole="button"
+        accessibilityLabel={selectedChild ? `${selectedChild.first}, switch baby` : 'Switch baby'}
+        style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
+      >
+        <Avatar child={selectedChild} size={50} radius={16} fontSize={21} />
+      </Tappable>
+      <Tappable
+        onPress={openSwitcherHere}
+        accessibilityRole="button"
+        style={(s) => [{ flex: 1, cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+          <Txt weight={700} size={21} tracking={-0.3} numberOfLines={1} style={{ flexShrink: 1 }}>
+            {selectedChild ? selectedChild.first : 'No baby yet'}
+          </Txt>
+          <Icon name="chevron-down" color={t.text} size={18} />
+        </View>
+      </Tappable>
+    </View>
+  );
+
+  const bathSection = selectedChild && (() => {
+    const rhythm = rhythmForChild(bathRhythms, selectedChild.id, legacyRhythm);
+    return (
+      <>
+        <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+          Bath
+        </Txt>
+        <View style={group}>
+          <View style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11 }]}>
+            <Txt weight={500} size={13} color={t.dim}>
+              Full bath {bathCadencePhrase(rhythm.fullEveryDays)}, quick wash {bathCadencePhrase(rhythm.quickEveryDays)}
+            </Txt>
+            <CountField
+              label="Full bath days"
+              value={rhythm.fullEveryDays}
+              min={BATH_INTERVAL_MIN}
+              max={BATH_INTERVAL_MAX}
+              onCommit={(n) => setBathRhythm(selectedChild.id, { fullEveryDays: n })}
+            />
+            <CountField
+              label="Quick wash days"
+              value={rhythm.quickEveryDays}
+              min={BATH_INTERVAL_MIN}
+              max={BATH_INTERVAL_MAX}
+              onCommit={(n) => setBathRhythm(selectedChild.id, { quickEveryDays: n })}
+            />
+            <Txt weight={500} size={12} color={t.faint}>
+              Type a number or use − and +, anywhere from {BATH_INTERVAL_MIN} to {BATH_INTERVAL_MAX}. Set one to 0 to turn
+              that reminder off. The rhythm is read off the baths already logged, so a change shows up straight away in
+              what&apos;s due next.
+            </Txt>
+          </View>
+        </View>
+      </>
+    );
+  })();
+
+  const treatmentsSection = selectedChild && (
+    <>
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Treatments
+      </Txt>
+      <View style={group}>
+        {childTreatments.map((c, i) => (
+          <Tappable
+            key={c.id}
+            onPress={() => openTreatmentEditor(c.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${c.name}`}
+            style={(s) => [
+              row,
+              { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.elevated },
+            ]}
+          >
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Txt unselectable weight={600} size={16}>
+                  {c.name}
+                </Txt>
+                {!c.active && (
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: t.elevated }}>
+                    <Txt unselectable weight={700} size={11} color={t.dim}>
+                      Paused
+                    </Txt>
+                  </View>
+                )}
+              </View>
+              <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+                {[treatmentDosageLabel(c), treatmentScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
+              </Txt>
+            </View>
+            <Icon name="chevron-right" color={t.faint} size={18} />
+          </Tappable>
+        ))}
+        <Tappable
+          onPress={() => openTreatmentEditor()}
+          accessibilityRole="button"
+          accessibilityLabel="Add a treatment"
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <Icon name="plus" color={t.primary} size={18} />
+          <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
+            Add a treatment
+          </Txt>
+        </Tappable>
+      </View>
+      <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
+        Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
+        save as ordinary medication entries and are matched to a treatment by name, so renaming
+        one leaves its earlier doses behind.
+      </Txt>
+    </>
+  );
+
+  // Only reachable in local mode with zero children: onboarding otherwise
+  // guarantees a selected child. The switcher sheet's own "Add a child" row
+  // is the way out, so this just points at the same trigger.
+  const noBabyState = !selectedChild && (
+    <View style={[group, { padding: 20, alignItems: 'center', gap: 12 }]}>
+      <Txt weight={600} size={15} color={t.dim} style={{ textAlign: 'center' }}>
+        Add a baby to see their bath rhythm and treatments here.
+      </Txt>
+      <Tappable onPress={openSwitcherHere} accessibilityRole="button" accessibilityLabel="Add a baby" style={(s) => [isHovered(s) && { opacity: 0.85 }]}>
+        <Txt unselectable weight={700} size={15} color={t.primary}>
+          Add a baby
+        </Txt>
+      </Tappable>
+    </View>
+  );
+
+  const babyBody = (
+    <>
+      {babyHeader}
+      {noBabyState}
+      {bathSection}
+      {treatmentsSection}
+    </>
+  );
+
+  const generalBody = (
     <>
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, marginTop: 4, textTransform: 'uppercase' }}>
         Appearance
@@ -362,47 +547,9 @@ export default function Settings() {
       </View>
 
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-        Rhythm
+        Sleep
       </Txt>
       <View style={group}>
-        {children.map((child) => {
-          const rhythm = rhythmForChild(bathRhythms, child.id, legacyRhythm);
-          return (
-            <View
-              key={child.id}
-              style={[row, { flexDirection: 'column', alignItems: 'stretch', gap: 11, borderBottomWidth: 1, borderBottomColor: t.line }]}
-            >
-              <View>
-                <Txt weight={600} size={16}>
-                  Bath rhythm for {child.first}
-                </Txt>
-                <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-                  Full bath {bathCadencePhrase(rhythm.fullEveryDays)}, quick wash {bathCadencePhrase(rhythm.quickEveryDays)}
-                </Txt>
-              </View>
-              <CountField
-                label="Full bath days"
-                value={rhythm.fullEveryDays}
-                min={BATH_INTERVAL_MIN}
-                max={BATH_INTERVAL_MAX}
-                onCommit={(n) => setBathRhythm(child.id, { fullEveryDays: n })}
-              />
-              <CountField
-                label="Quick wash days"
-                value={rhythm.quickEveryDays}
-                min={BATH_INTERVAL_MIN}
-                max={BATH_INTERVAL_MAX}
-                onCommit={(n) => setBathRhythm(child.id, { quickEveryDays: n })}
-              />
-              <Txt weight={500} size={12} color={t.faint}>
-                Type a number or use − and +, anywhere from {BATH_INTERVAL_MIN} to {BATH_INTERVAL_MAX}. Set one to 0 to turn
-                that reminder off. The rhythm is read off the baths already logged, so a change shows up straight away in
-                what&apos;s due next.
-              </Txt>
-            </View>
-          );
-        })}
-
         {/* A sleep is pre-set to Nap when it STARTS inside this window. Start
             inclusive, end exclusive, and a start later than the end wraps
             midnight, so an "inverted" pair still means something. */}
@@ -460,64 +607,6 @@ export default function Settings() {
           </View>
         </View>
       </View>
-
-      {selectedChild && (
-        <>
-          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
-            Treatments for {selectedChild.first}
-          </Txt>
-          <View style={group}>
-            {childTreatments.map((c, i) => (
-              <Tappable
-                key={c.id}
-                onPress={() => openTreatmentEditor(c.id)}
-                accessibilityRole="button"
-                accessibilityLabel={`Edit ${c.name}`}
-                style={(s) => [
-                  row,
-                  { borderBottomWidth: 1, borderBottomColor: t.line, cursor: 'pointer' },
-                  isHovered(s) && { backgroundColor: t.elevated },
-                ]}
-              >
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Txt unselectable weight={600} size={16}>
-                      {c.name}
-                    </Txt>
-                    {!c.active && (
-                      <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, backgroundColor: t.elevated }}>
-                        <Txt unselectable weight={700} size={11} color={t.dim}>
-                          Paused
-                        </Txt>
-                      </View>
-                    )}
-                  </View>
-                  <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
-                    {[treatmentDosageLabel(c), treatmentScheduleLabel(c), c.condition].filter(Boolean).join(' · ') || 'No schedule set'}
-                  </Txt>
-                </View>
-                <Icon name="chevron-right" color={t.faint} size={18} />
-              </Tappable>
-            ))}
-            <Tappable
-              onPress={() => openTreatmentEditor()}
-              accessibilityRole="button"
-              accessibilityLabel="Add a treatment"
-              style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
-            >
-              <Icon name="plus" color={t.primary} size={18} />
-              <Txt unselectable weight={600} size={16} color={t.primary} style={{ flex: 1, marginLeft: 10 }}>
-                Add a treatment
-              </Txt>
-            </Tappable>
-          </View>
-          <Txt weight={500} size={12} color={t.faint} style={{ marginTop: 8, marginHorizontal: 4 }}>
-            Treatments sync to Baby Buddy as tagged notes, so they follow you across devices. Doses
-            save as ordinary medication entries and are matched to a treatment by name, so renaming
-            one leaves its earlier doses behind.
-          </Txt>
-        </>
-      )}
 
       {/* Scheduled reminders only fire on Android (permission.ts's stub is a
           permanent no off it), so elsewhere the row would link to a dead screen. */}
@@ -674,6 +763,13 @@ export default function Settings() {
       <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 18, marginBottom: 4 }}>
         {versionLabel(Constants.expoConfig?.extra?.version)}
       </Txt>
+    </>
+  );
+
+  const body = (
+    <>
+      {tabPill}
+      {activeTab === 'general' ? generalBody : babyBody}
     </>
   );
 

@@ -85,9 +85,19 @@ interface BottomSheetProps {
   maxHeightRatio?: number;
   /** Desktop dialog placement; ignored in phone sheet mode. */
   anchor?: 'center' | 'bottom-left';
+  /** Measured on-screen rect (from the trigger's `measureInWindow`) to open a
+   *  'bottom-left' popover next to, instead of the screen's actual bottom-left
+   *  corner. Ignored for `anchor="center"` and in phone sheet mode. */
+  anchorRect?: { x: number; y: number; width: number; height: number } | null;
 }
 
-export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor = 'center' }: BottomSheetProps) {
+export function BottomSheet({
+  onClose,
+  children,
+  maxHeightRatio = 0.92,
+  anchor = 'center',
+  anchorRect = null,
+}: BottomSheetProps) {
   const t = useTheme();
   const { width, height } = useWindowDimensions();
   const dialog = useDesktopShell();
@@ -162,6 +172,21 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
 
   if (dialog) {
     const popover = anchor === 'bottom-left';
+    const popoverWidth = 340;
+    const popoverMaxHeight = height * 0.7;
+    // A rect to open next to beats the corner: the corner is only ever right for
+    // the one trigger that happens to sit there (the desktop sidebar's child
+    // card), and looks disconnected from anywhere else a popover trigger lives.
+    // Clamped into the viewport so a trigger near an edge can't push the panel
+    // off-screen.
+    const positioned =
+      popover && anchorRect
+        ? {
+            left: Math.min(Math.max(anchorRect.x, 12), width - popoverWidth - 12),
+            top: Math.min(Math.max(anchorRect.y + anchorRect.height + 8, 12), height - popoverMaxHeight - 12),
+          }
+        : null;
+
     return (
       <View
         style={{
@@ -171,9 +196,10 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
           right: 0,
           bottom: 0,
           zIndex: 40,
-          alignItems: popover ? 'flex-start' : 'center',
-          justifyContent: popover ? 'flex-end' : 'center',
-          padding: 24,
+          ...(positioned
+            ? {}
+            : { alignItems: popover ? 'flex-start' : 'center', justifyContent: popover ? 'flex-end' : 'center' }),
+          padding: positioned ? 0 : 24,
         }}
       >
         {scrimNode}
@@ -184,13 +210,14 @@ export function BottomSheet({ onClose, children, maxHeightRatio = 0.92, anchor =
           aria-modal
           style={[
             { borderRadius: 26, borderWidth: 1, borderColor: t.line, boxShadow: t.shadow, backgroundColor: t.bg },
+            positioned && { position: 'absolute', left: positioned.left, top: positioned.top },
             dialogPanelStyle,
           ]}
         >
           <View
             style={{
-              width: popover ? 340 : Math.min(560, width - 48),
-              maxHeight: height * (popover ? 0.7 : 0.88),
+              width: popover ? popoverWidth : Math.min(560, width - 48),
+              maxHeight: popover ? popoverMaxHeight : height * 0.88,
               borderRadius: 26,
               overflow: 'hidden',
               backgroundColor: t.bg,
