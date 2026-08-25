@@ -84,217 +84,225 @@ export default function Onboarding() {
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: t.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 24, paddingHorizontal: 24, paddingBottom: insets.bottom + 24 }}
+      contentContainerStyle={{
+        alignItems: 'center',
+        paddingTop: insets.top + 24,
+        paddingHorizontal: 24,
+        paddingBottom: insets.bottom + 24,
+      }}
       keyboardShouldPersistTaps="handled"
     >
-      {router.canGoBack() && (
-        <Tappable
-          onPress={() => router.back()}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={10}
-          style={(s) => [
-            { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginLeft: -8, marginBottom: 8, cursor: 'pointer' },
-            isHovered(s) && { backgroundColor: t.chip },
+      {/* Capped so the form isn't full-bleed on wide desktop/web viewports. */}
+      <View style={{ width: '100%', maxWidth: 460 }}>
+        {router.canGoBack() && (
+          <Tappable
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={10}
+            style={(s) => [
+              { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginLeft: -8, marginBottom: 8, cursor: 'pointer' },
+              isHovered(s) && { backgroundColor: t.chip },
+            ]}
+          >
+            <Icon name="chevron-left" color={t.text} size={22} />
+          </Tappable>
+        )}
+        <View
+          style={[
+            {
+              width: 60,
+              height: 60,
+              borderRadius: 19,
+              backgroundColor: t.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+            },
+            shadowStyle(`0px 8px 24px ${hexA(t.primary, 0.4)}`),
           ]}
         >
-          <Icon name="chevron-left" color={t.text} size={22} />
-        </Tappable>
-      )}
-      <View
-        style={[
-          {
-            width: 60,
-            height: 60,
-            borderRadius: 19,
-            backgroundColor: t.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-          },
-          shadowStyle(`0px 8px 24px ${hexA(t.primary, 0.4)}`),
-        ]}
-      >
-        <Icon name="budkin" color={t.onPrimary} size={30} />
-      </View>
+          <Icon name="budkin" color={t.onPrimary} size={30} />
+        </View>
 
-      <Txt weight={800} size={28} tracking={-0.6} style={{ marginTop: 22, lineHeight: 34 }}>
-        Connect your{'\n'}Baby Buddy server
-      </Txt>
-      <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, lineHeight: 22 }}>
-        Baby Buddy runs on your own server. Paste its address and an access token to start logging.
-      </Txt>
+        <Txt weight={800} size={28} tracking={-0.6} style={{ marginTop: 22, lineHeight: 34 }}>
+          Connect your{'\n'}Baby Buddy server
+        </Txt>
+        <Txt weight={500} size={15} color={t.dim} style={{ marginTop: 10, lineHeight: 22 }}>
+          Baby Buddy runs on your own server. Paste its address and an access token to start logging.
+        </Txt>
 
-      {savedServers.length > 0 && (
+        {savedServers.length > 0 && (
+          <View style={{ marginTop: 26 }}>
+            <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
+              PREVIOUSLY CONNECTED
+            </Txt>
+            {savedServers.map((srv) => {
+              const host = srv.serverUrl.replace(/^https?:\/\//, '');
+              const busy = pendingUrl === srv.serverUrl && connecting;
+              return (
+                <Tappable
+                  key={srv.serverUrl}
+                  onPress={() => tryServer(srv)}
+                  disabled={connecting}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: connecting }}
+                  style={(s) => [
+                    {
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 12,
+                      minHeight: 60,
+                      borderRadius: 15,
+                      backgroundColor: t.surface,
+                      borderWidth: 1.5,
+                      borderColor: t.line2,
+                      paddingHorizontal: 14,
+                      paddingVertical: 10,
+                      marginBottom: 10,
+                      cursor: connecting ? 'auto' : 'pointer',
+                    },
+                    !connecting && isHovered(s) && { borderColor: t.line },
+                  ]}
+                >
+                  <Icon name="clock" color={t.dim} size={20} />
+                  <View style={{ flex: 1 }}>
+                    <Txt unselectable weight={600} size={15} numberOfLines={1}>
+                      {host}
+                    </Txt>
+                    <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
+                      {'••••'}
+                      {srv.token.slice(-4)}
+                    </Txt>
+                  </View>
+                  {busy ? (
+                    <ActivityIndicator color={t.dim} />
+                  ) : (
+                    <Tappable
+                      onPress={() => forgetServer(srv.serverUrl)}
+                      hitSlop={10}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${host}`}
+                      style={(s) => [{ padding: 6, borderRadius: 8, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.chip }]}
+                    >
+                      <Icon name="close" color={t.faint} size={18} />
+                    </Tappable>
+                  )}
+                </Tappable>
+              );
+            })}
+          </View>
+        )}
+
         <View style={{ marginTop: 26 }}>
           <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
-            PREVIOUSLY CONNECTED
+            SERVER URL
           </Txt>
-          {savedServers.map((srv) => {
-            const host = srv.serverUrl.replace(/^https?:\/\//, '');
-            const busy = pendingUrl === srv.serverUrl && connecting;
-            return (
-              <Tappable
-                key={srv.serverUrl}
-                onPress={() => tryServer(srv)}
-                disabled={connecting}
-                accessibilityRole="button"
-                accessibilityState={{ disabled: connecting }}
-                style={(s) => [
-                  {
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    gap: 12,
-                    minHeight: 60,
-                    borderRadius: 15,
-                    backgroundColor: t.surface,
-                    borderWidth: 1.5,
-                    borderColor: t.line2,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
-                    marginBottom: 10,
-                    cursor: connecting ? 'auto' : 'pointer',
-                  },
-                  !connecting && isHovered(s) && { borderColor: t.line },
-                ]}
-              >
-                <Icon name="clock" color={t.dim} size={20} />
-                <View style={{ flex: 1 }}>
-                  <Txt unselectable weight={600} size={15} numberOfLines={1}>
-                    {host}
-                  </Txt>
-                  <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
-                    {'••••'}
-                    {srv.token.slice(-4)}
-                  </Txt>
-                </View>
-                {busy ? (
-                  <ActivityIndicator color={t.dim} />
-                ) : (
-                  <Tappable
-                    onPress={() => forgetServer(srv.serverUrl)}
-                    hitSlop={10}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${host}`}
-                    style={(s) => [{ padding: 6, borderRadius: 8, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.chip }]}
-                  >
-                    <Icon name="close" color={t.faint} size={18} />
-                  </Tappable>
-                )}
-              </Tappable>
-            );
-          })}
+          <TextInput
+            value={url}
+            onChangeText={setUrl}
+            placeholder="https://babybuddy.home.lan"
+            placeholderTextColor={t.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            style={input}
+          />
         </View>
-      )}
 
-      <View style={{ marginTop: 26 }}>
-        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
-          SERVER URL
-        </Txt>
-        <TextInput
-          value={url}
-          onChangeText={setUrl}
-          placeholder="https://babybuddy.home.lan"
-          placeholderTextColor={t.faint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          style={input}
-        />
-      </View>
-
-      <View style={{ marginTop: 16 }}>
-        <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
-          API TOKEN
-        </Txt>
-        <TextInput
-          value={token}
-          onChangeText={setToken}
-          placeholder="Paste your token…"
-          placeholderTextColor={t.faint}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={input}
-        />
-        {connectError && (
-          <Txt weight={600} size={13} color="#E2725B" style={{ marginTop: 8 }}>
-            {connectError}
+        <View style={{ marginTop: 16 }}>
+          <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
+            API TOKEN
           </Txt>
-        )}
-      </View>
-
-      <View
-        style={{
-          marginTop: 20,
-          backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
-          borderWidth: 1,
-          borderColor: hexA(t.primary, 0.3),
-          borderRadius: 16,
-          padding: 16,
-        }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <Icon name="info" color={t.primary} size={18} />
-          <Txt weight={700} size={14} color={t.primary}>
-            Where do I find my token?
-          </Txt>
+          <TextInput
+            value={token}
+            onChangeText={setToken}
+            placeholder="Paste your token…"
+            placeholderTextColor={t.faint}
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={input}
+          />
+          {connectError && (
+            <Txt weight={600} size={13} color="#E2725B" style={{ marginTop: 8 }}>
+              {connectError}
+            </Txt>
+          )}
         </View>
-        <Txt weight={500} size={13.5} color={t.dim} style={{ lineHeight: 20 }}>
-          On your server, open <Txt weight={700} size={13.5} color={t.text}>Settings → User → API</Txt>. Copy
-          the long token string and paste it above. Never your password.
-        </Txt>
-      </View>
 
-      <Tappable
-        onPress={() => { setPendingUrl(null); connect(url, token); }}
-        disabled={connecting}
-        accessibilityRole="button"
-        accessibilityLabel="Connect"
-        accessibilityState={{ disabled: connecting }}
-        style={(s) => [
-          {
-            marginTop: 24,
-            height: 56,
-            borderRadius: 17,
-            backgroundColor: t.primary,
-            alignItems: 'center',
-            justifyContent: 'center',
-            opacity: connecting ? 0.85 : 1,
-            cursor: connecting ? 'auto' : 'pointer',
-          },
-          shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
-          !connecting && isHovered(s) && { opacity: 0.9 },
-        ]}
-      >
-        {connecting ? (
-          <ActivityIndicator color={t.onPrimary} />
-        ) : (
-          <Txt unselectable weight={800} size={17} color={t.onPrimary}>
-            Connect
-          </Txt>
-        )}
-      </Tappable>
-
-      <Txt weight={500} size={13.5} color={t.faint} style={{ textAlign: 'center', marginTop: 14 }}>
-        Don&apos;t have a server?{' '}
-        <Txt
-          weight={600}
-          size={13.5}
-          color={t.primary}
-          accessibilityRole="link"
-          onPress={() => openBrowserAsync('https://docs.baby-buddy.net/setup/deployment/')}
-          style={{ textDecorationLine: 'underline' }}
+        <View
+          style={{
+            marginTop: 20,
+            backgroundColor: hexA(t.primary, t.dark ? 0.1 : 0.08),
+            borderWidth: 1,
+            borderColor: hexA(t.primary, 0.3),
+            borderRadius: 16,
+            padding: 16,
+          }}
         >
-          Learn how to host one
-        </Txt>
-      </Txt>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <Icon name="info" color={t.primary} size={18} />
+            <Txt weight={700} size={14} color={t.primary}>
+              Where do I find my token?
+            </Txt>
+          </View>
+          <Txt weight={500} size={13.5} color={t.dim} style={{ lineHeight: 20 }}>
+            On your server, open <Txt weight={700} size={13.5} color={t.text}>Settings → User → API</Txt>. Copy
+            the long token string and paste it above. Never your password.
+          </Txt>
+        </View>
 
-      {/* Repeated from Settings deliberately. Settings sits behind the
-          connection gate, so a disconnected or fresh install routes here and
-          can never reach it, which is exactly the state in which someone needs
-          to know what they are running. */}
-      <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 22 }}>
-        {versionLabel(Constants.expoConfig?.extra?.version)}
-      </Txt>
+        <Tappable
+          onPress={() => { setPendingUrl(null); connect(url, token); }}
+          disabled={connecting}
+          accessibilityRole="button"
+          accessibilityLabel="Connect"
+          accessibilityState={{ disabled: connecting }}
+          style={(s) => [
+            {
+              marginTop: 24,
+              height: 56,
+              borderRadius: 17,
+              backgroundColor: t.primary,
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: connecting ? 0.85 : 1,
+              cursor: connecting ? 'auto' : 'pointer',
+            },
+            shadowStyle(`0px 8px 22px ${hexA(t.primary, 0.35)}`),
+            !connecting && isHovered(s) && { opacity: 0.9 },
+          ]}
+        >
+          {connecting ? (
+            <ActivityIndicator color={t.onPrimary} />
+          ) : (
+            <Txt unselectable weight={800} size={17} color={t.onPrimary}>
+              Connect
+            </Txt>
+          )}
+        </Tappable>
+
+        <Txt weight={500} size={13.5} color={t.faint} style={{ textAlign: 'center', marginTop: 14 }}>
+          Don&apos;t have a server?{' '}
+          <Txt
+            weight={600}
+            size={13.5}
+            color={t.primary}
+            accessibilityRole="link"
+            onPress={() => openBrowserAsync('https://docs.baby-buddy.net/setup/deployment/')}
+            style={{ textDecorationLine: 'underline' }}
+          >
+            Learn how to host one
+          </Txt>
+        </Txt>
+
+        {/* Repeated from Settings deliberately. Settings sits behind the
+            connection gate, so a disconnected or fresh install routes here and
+            can never reach it, which is exactly the state in which someone needs
+            to know what they are running. */}
+        <Txt weight={500} size={12.5} color={t.faint} style={{ textAlign: 'center', marginTop: 22 }}>
+          {versionLabel(Constants.expoConfig?.extra?.version)}
+        </Txt>
+      </View>
     </ScrollView>
   );
 }
