@@ -3,6 +3,7 @@ import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
+import { DayPicker } from '@/components/DayPicker';
 import { noFocusRing } from '@/components/focusRing';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
@@ -38,6 +39,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const insets = useSafeAreaInsets();
   const measurements = useAppStore((s) => s.measurements);
   const unitSystem = useAppStore((s) => s.unitSystem);
+  const now = useAppStore((s) => s.now);
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
   const saveMeasurement = useAppStore((s) => s.saveMeasurement);
   const deleteMeasurement = useAppStore((s) => s.deleteMeasurement);
@@ -52,6 +54,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const [valueFocused, setValueFocused] = useState(false);
   const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
   const [notes, setNotes] = useState(editing?.notes ?? '');
+  const [calendar, setCalendar] = useState(false);
 
   const today = midnight(0);
   const isToday = dateMs === today;
@@ -136,11 +139,21 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           >
             <Icon name="chevron-left" color={t.text} size={22} />
           </Tappable>
-          <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
-            <Txt weight={700} size={15.5}>
+          <Tappable
+            onPress={() => setCalendar((c) => !c)}
+            accessibilityRole="button"
+            accessibilityLabel={`${dateLabel}. Pick a date`}
+            accessibilityState={{ expanded: calendar }}
+            style={(s) => [
+              { flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: t.surface, borderWidth: 1.5, borderColor: calendar ? meta.color : t.line, borderRadius: 14, cursor: 'pointer' },
+              !calendar && isHovered(s) && { borderColor: t.line2 },
+            ]}
+          >
+            <Txt unselectable weight={700} size={15.5}>
               {dateLabel}
             </Txt>
-          </View>
+            <Icon name={calendar ? 'chevron-up' : 'chevron-down'} color={t.dim} size={16} />
+          </Tappable>
           <Tappable
             onPress={() => stepDay(1)}
             disabled={isToday}
@@ -166,12 +179,18 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
             <Icon name="chevron-right" color={t.text} size={22} />
           </Tappable>
         </View>
+
+        {calendar && (
+          <View style={{ marginBottom: 16, marginTop: -8, padding: 12, backgroundColor: t.bg, borderWidth: 1.5, borderColor: t.line, borderRadius: 16 }}>
+            <DayPicker value={dateMs} now={now} color={meta.color} onChange={setDateMs} />
+          </View>
+        )}
         {!isToday && (
           <Tappable
             onPress={() => setDateMs(today)}
             accessibilityRole="button"
             style={(s) => [
-              { alignSelf: 'flex-start', marginBottom: 16, cursor: 'pointer' },
+              { alignSelf: 'center', marginBottom: 16, cursor: 'pointer' },
               isHovered(s) && { opacity: 0.75 },
             ]}
           >

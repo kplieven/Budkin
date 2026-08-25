@@ -3,6 +3,7 @@ import { ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BottomSheet } from '@/components/BottomSheet';
+import { DayPicker } from '@/components/DayPicker';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -57,6 +58,7 @@ function Inner({ target, onClose }: { target: MilestoneTarget; onClose: () => vo
   const insets = useSafeAreaInsets();
   const color = t.activity.note;
   const childFirst = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId)?.first);
+  const now = useAppStore((s) => s.now);
   const logMilestone = useAppStore((s) => s.logMilestone);
   const editMilestone = useAppStore((s) => s.editMilestone);
   const deleteEntry = useAppStore((s) => s.deleteEntry);
@@ -66,6 +68,7 @@ function Inner({ target, onClose }: { target: MilestoneTarget; onClose: () => vo
 
   const [dateMs, setDateMs] = useState(target.mode === 'edit' ? target.entry.time : midnight(0));
   const [note, setNote] = useState(target.mode === 'edit' ? (target.entry.note ?? '') : '');
+  const [calendar, setCalendar] = useState(false);
 
   const today = midnight(0);
   const isToday = dateMs >= today;
@@ -122,11 +125,21 @@ function Inner({ target, onClose }: { target: MilestoneTarget; onClose: () => vo
           >
             <Icon name="chevron-left" color={t.text} size={22} />
           </Tappable>
-          <View style={{ flex: 1, height: 48, alignItems: 'center', justifyContent: 'center', backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, borderRadius: 14 }}>
-            <Txt weight={700} size={15.5}>
+          <Tappable
+            onPress={() => setCalendar((c) => !c)}
+            accessibilityRole="button"
+            accessibilityLabel={`${dateLabel}. Pick a date`}
+            accessibilityState={{ expanded: calendar }}
+            style={(s) => [
+              { flex: 1, height: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: t.surface, borderWidth: 1.5, borderColor: calendar ? color : t.line, borderRadius: 14, cursor: 'pointer' },
+              !calendar && isHovered(s) && { borderColor: t.line2 },
+            ]}
+          >
+            <Txt unselectable weight={700} size={15.5}>
               {dateLabel}
             </Txt>
-          </View>
+            <Icon name={calendar ? 'chevron-up' : 'chevron-down'} color={t.dim} size={16} />
+          </Tappable>
           <Tappable
             onPress={() => stepDay(1)}
             disabled={isToday}
@@ -141,6 +154,26 @@ function Inner({ target, onClose }: { target: MilestoneTarget; onClose: () => vo
             <Icon name="chevron-right" color={t.text} size={22} />
           </Tappable>
         </View>
+
+        {calendar && (
+          <View style={{ marginBottom: 16, marginTop: -8, padding: 12, backgroundColor: t.bg, borderWidth: 1.5, borderColor: t.line, borderRadius: 16 }}>
+            <DayPicker value={dateMs} now={now} color={color} onChange={setDateMs} />
+          </View>
+        )}
+        {!isToday && (
+          <Tappable
+            onPress={() => setDateMs(today)}
+            accessibilityRole="button"
+            style={(s) => [
+              { alignSelf: 'center', marginBottom: 16, cursor: 'pointer' },
+              isHovered(s) && { opacity: 0.75 },
+            ]}
+          >
+            <Txt unselectable weight={600} size={13} color={color}>
+              Jump to today
+            </Txt>
+          </Tappable>
+        )}
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>
           Note (optional)
