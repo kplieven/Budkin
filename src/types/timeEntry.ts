@@ -84,6 +84,9 @@ export interface TimeEntryState {
   /** whole seconds, seeded from an interval treatment so the saved dose carries Baby
    *  Buddy's `next_dose_interval` */
   medNextDoseIntervalSec?: number;
+  /** UI-only, seeded from a sporadic treatment still in its cooldown; never saved onto
+   *  the entry. Empty when there's nothing to warn about. */
+  medCooldownWarning?: string;
   /** the note BODY, distinct from `notes`, the secondary per-entry annotation */
   noteText?: string;
   /** free-text notes (feeding/sleep/diaper/pumping/tummy/temperature, not bath/note) */

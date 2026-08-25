@@ -117,7 +117,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
       name: name.trim(),
       scheduleMode,
       timesOfDay: scheduleMode === 'timesOfDay' ? times : undefined,
-      everyHours: scheduleMode === 'everyHours' ? parsedHours : undefined,
+      everyHours: scheduleMode === 'everyHours' || scheduleMode === 'sporadic' ? parsedHours : undefined,
       dosage: Number.isFinite(parsedDose) ? parsedDose : undefined,
       dosageUnit: unit?.trim() || undefined,
       fromDate: toMidnightMs(fromD, fromM, fromY),
@@ -196,6 +196,7 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
           {([
             ['timesOfDay', 'Times of day'],
             ['everyHours', 'Every X hours'],
+            ['sporadic', 'As needed'],
           ] as const).map(([mode, text]) => (
             <Tappable
               key={mode}
@@ -239,21 +240,28 @@ function Inner({ editingId, openedAt }: { editingId: string | null; openedAt: nu
             ))}
           </View>
         ) : (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-            <TextInput
-              value={everyHours}
-              onChangeText={setEveryHours}
-              keyboardType="number-pad"
-              maxLength={3}
-              placeholder="6"
-              placeholderTextColor={t.faint}
-              accessibilityLabel="Hours between doses"
-              style={{ width: 90, height: 50, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, textAlign: 'center', fontSize: 19, fontFamily: fontFamily(800), color: t.text }}
-            />
-            <Txt weight={600} size={15} color={t.dim}>
-              hours between doses
-            </Txt>
-          </View>
+          <>
+            {scheduleMode === 'sporadic' && (
+              <Txt weight={600} size={13.5} color={t.dim} style={{ marginBottom: 9 }}>
+                Minimum time between doses
+              </Txt>
+            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <TextInput
+                value={everyHours}
+                onChangeText={setEveryHours}
+                keyboardType="number-pad"
+                maxLength={3}
+                placeholder="6"
+                placeholderTextColor={t.faint}
+                accessibilityLabel={scheduleMode === 'sporadic' ? 'Minimum hours between doses' : 'Hours between doses'}
+                style={{ width: 90, height: 50, borderRadius: 14, backgroundColor: t.surface, borderWidth: 1.5, borderColor: t.line, textAlign: 'center', fontSize: 19, fontFamily: fontFamily(800), color: t.text }}
+              />
+              <Txt weight={600} size={15} color={t.dim}>
+                {scheduleMode === 'sporadic' ? 'hours' : 'hours between doses'}
+              </Txt>
+            </View>
+          </>
         )}
 
         <Txt weight={700} size={13} color={t.dim} style={label}>

@@ -209,6 +209,12 @@ const TREATMENT_TAG = 'treatment';
 const TREATMENT_TOD_PREFIX = 'treatment:tod:';
 const TREATMENT_EVERY_PREFIX = 'treatment:every:';
 const TREATMENT_PAUSED_TAG = 'treatment:paused';
+const TREATMENT_SPORADIC_TAG = 'treatment:sporadic';
+/** Sporadic's own tag for its cooldown hours, distinct from `every:` on purpose: an
+ *  older client that has never heard of `treatment:sporadic` must not mistake a
+ *  cooldown for a recurring interval and start nagging about a dose that isn't due -
+ *  it should instead degrade to a harmless no-times-chosen `timesOfDay` treatment. */
+const TREATMENT_COOLDOWN_PREFIX = 'treatment:cooldown:';
 
 const isStructuralTreatmentTag = (t: string): boolean => t === TREATMENT_TAG || t.startsWith('treatment:');
 
@@ -348,7 +354,11 @@ function treatmentSummary(treatment: Treatment): string {
       ? treatment.everyHours == null
         ? ''
         : `every ${treatment.everyHours} ${treatment.everyHours === 1 ? 'hour' : 'hours'}`
-      : TREATMENT_TIMES_OF_DAY.filter((tod) => treatment.timesOfDay?.includes(tod)).join(', ');
+      : treatment.scheduleMode === 'sporadic'
+        ? treatment.everyHours == null
+          ? 'as needed'
+          : `as needed, min ${treatment.everyHours} ${treatment.everyHours === 1 ? 'hour' : 'hours'} apart`
+        : TREATMENT_TIMES_OF_DAY.filter((tod) => treatment.timesOfDay?.includes(tod)).join(', ');
   return [treatment.name.trim(), dose, schedule].filter(Boolean).join(', ');
 }
 
@@ -363,6 +373,9 @@ export function treatmentToNoteBody(treatment: Treatment, childServerId: number)
   const tags = [TREATMENT_TAG];
   if (treatment.scheduleMode === 'everyHours') {
     if (treatment.everyHours != null) tags.push(`${TREATMENT_EVERY_PREFIX}${treatment.everyHours}`);
+  } else if (treatment.scheduleMode === 'sporadic') {
+    tags.push(TREATMENT_SPORADIC_TAG);
+    if (treatment.everyHours != null) tags.push(`${TREATMENT_COOLDOWN_PREFIX}${treatment.everyHours}`);
   } else {
     for (const tod of TREATMENT_TIMES_OF_DAY) if (treatment.timesOfDay?.includes(tod)) tags.push(`${TREATMENT_TOD_PREFIX}${tod}`);
   }
@@ -402,8 +415,11 @@ export function noteToTreatment(n: any, childId: string): Treatment {
   const payload = treatmentNotePayload(String(n.note ?? '')) ?? {};
   const everyTag = tags.find((t) => t.startsWith(TREATMENT_EVERY_PREFIX));
   const everyHours = everyTag ? Number(everyTag.slice(TREATMENT_EVERY_PREFIX.length)) : Number.NaN;
+  const cooldownTag = tags.find((t) => t.startsWith(TREATMENT_COOLDOWN_PREFIX));
+  const cooldownHours = cooldownTag ? Number(cooldownTag.slice(TREATMENT_COOLDOWN_PREFIX.length)) : Number.NaN;
   const timesOfDay = TREATMENT_TIMES_OF_DAY.filter((tod) => tags.includes(`${TREATMENT_TOD_PREFIX}${tod}`));
   const isInterval = Number.isFinite(everyHours);
+  const isSporadic = tags.includes(TREATMENT_SPORADIC_TAG);
   const fromDate = asString(payload.fromDate);
   const toDate = asString(payload.toDate);
 
@@ -412,8 +428,8 @@ export function noteToTreatment(n: any, childId: string): Treatment {
     serverId: n.id,
     childId,
     name: asString(payload.name) ?? String(n.note ?? '').split('\n')[0]?.trim() ?? '',
-    scheduleMode: isInterval ? 'everyHours' : 'timesOfDay',
-    ...(isInterval ? { everyHours } : { timesOfDay }),
+    scheduleMode: isSporadic ? 'sporadic' : isInterval ? 'everyHours' : 'timesOfDay',
+    ...(isSporadic ? (Number.isFinite(cooldownHours) ? { everyHours: cooldownHours } : {}) : isInterval ? { everyHours } : { timesOfDay }),
     dosage: asNumber(payload.dosage),
     dosageUnit: asString(payload.dosageUnit),
     // Lossless fallback: `treatmentToNoteBody` wrote `time` from this same date.

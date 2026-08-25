@@ -109,8 +109,10 @@ import {
   startOfDay,
   teEnd,
   teStart,
+  treatmentCooldownState,
   washDueState,
 } from '@/store/selectors';
+import { treatmentCooldownLabel } from '@/features/treatments/treatmentLabels';
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -3047,9 +3049,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     else get().openSheet('medication');
   },
   logMedicationFromTreatment: (treatmentId) => {
-    const treatment = get().treatments.find((c) => c.id === treatmentId);
+    const s0 = get();
+    const treatment = s0.treatments.find((c) => c.id === treatmentId);
     if (!treatment) return;
     if (!treatment.name.trim()) return;
+    // Warn-but-allow: a sporadic dose logged inside its cooldown still goes through,
+    // it just carries a warning onto the confirm sheet. Computed here, before
+    // openSheet resets the draft, from the SAME child-scoped entries the picker used.
+    const cooldown = treatmentCooldownState(treatment, entriesForChild(s0.entries, treatment.childId), s0.now);
     // Confirm-before-log: no entry is written here, save() commits it once the user
     // confirms. openSheet resets the draft, so seed it afterwards.
     get().openSheet('medication');
@@ -3060,6 +3067,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Only an interval treatment carries a next-dose interval onto the dose.
       medNextDoseIntervalSec:
         treatment.scheduleMode === 'everyHours' && treatment.everyHours != null ? treatment.everyHours * 3600 : undefined,
+      medCooldownWarning: treatmentCooldownLabel(cooldown, s0.now) || undefined,
     };
     set((s) => ({ treatmentPicker: null, sheet: { type: 'medication', confirm: true }, te: { ...s.te, ...patch } }));
   },

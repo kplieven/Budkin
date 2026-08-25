@@ -1412,6 +1412,24 @@ describe('treatment <-> note serialization', () => {
     expect(out.everyHours).toBe(6);
   });
 
+  it('round-trips a sporadic treatment on its own cooldown tag, distinct from an interval one', () => {
+    const out = roundTrip({ ...baseTreatment, scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined });
+    expect(out.scheduleMode).toBe('sporadic');
+    expect(out.everyHours).toBe(6);
+  });
+
+  it('never writes the `every:` tag for a sporadic treatment, so an older client cannot mistake its cooldown for a recurring interval', () => {
+    const body = treatmentToNoteBody({ ...baseTreatment, scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined }, 5) as any;
+    expect(body.tags).not.toContain('treatment:every:6');
+    expect(body.tags).toContain('treatment:cooldown:6');
+  });
+
+  it('round-trips a sporadic treatment with no cooldown hours set', () => {
+    const out = roundTrip({ ...baseTreatment, scheduleMode: 'sporadic', everyHours: undefined, timesOfDay: undefined });
+    expect(out.scheduleMode).toBe('sporadic');
+    expect(out.everyHours).toBeUndefined();
+  });
+
   it('round-trips a paused treatment', () => {
     expect(roundTrip({ ...baseTreatment, active: false }).active).toBe(false);
     expect(roundTrip(baseTreatment).active).toBe(true);
@@ -1430,6 +1448,8 @@ describe('treatment <-> note serialization', () => {
     expect(body.child).toBe(5);
     expect(treatmentToNoteBody({ ...baseTreatment, scheduleMode: 'everyHours', everyHours: 8, timesOfDay: undefined }, 5) as any)
       .toMatchObject({ tags: ['treatment', 'treatment:every:8'] });
+    expect(treatmentToNoteBody({ ...baseTreatment, scheduleMode: 'sporadic', everyHours: 8, timesOfDay: undefined }, 5) as any)
+      .toMatchObject({ tags: ['treatment', 'treatment:sporadic', 'treatment:cooldown:8'] });
     expect((treatmentToNoteBody({ ...baseTreatment, active: false }, 5) as any).tags).toContain('treatment:paused');
   });
 
@@ -1490,7 +1510,7 @@ describe('treatment <-> note serialization', () => {
   });
 
   it('hides every treatment structural tag from the tag picker', () => {
-    for (const t of ['treatment', 'treatment:tod:morning', 'treatment:every:6', 'treatment:paused']) {
+    for (const t of ['treatment', 'treatment:tod:morning', 'treatment:every:6', 'treatment:paused', 'treatment:sporadic', 'treatment:cooldown:6']) {
       expect(isHiddenTag(t)).toBe(true);
     }
     expect(isHiddenTag('treatmentwash')).toBe(false);

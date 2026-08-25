@@ -1215,6 +1215,34 @@ describe('treatments (medication regimens)', () => {
     expect(s().te.medNextDoseIntervalSec).toBeUndefined();
   });
 
+  it('logMedicationFromTreatment from a sporadic treatment past its cooldown seeds no warning', () => {
+    useAppStore.setState({
+      treatments: [treatment({ scheduleMode: 'sporadic', everyHours: 6 })],
+      entries: [{ id: 'm1', childId: 'c1', type: 'medication', time: NOW - 7 * 3600000, name: 'Paracetamol', tags: [] }],
+    });
+    s().logMedicationFromTreatment('treatment-1');
+    expect(s().te.medNextDoseIntervalSec).toBeUndefined(); // sporadic never stamps a next-dose interval
+    expect(s().te.medCooldownWarning).toBeUndefined();
+  });
+
+  it('logMedicationFromTreatment from a sporadic treatment still in cooldown seeds a warning', () => {
+    useAppStore.setState({
+      treatments: [treatment({ scheduleMode: 'sporadic', everyHours: 6 })],
+      entries: [{ id: 'm1', childId: 'c1', type: 'medication', time: NOW - 2 * 3600000, name: 'Paracetamol', tags: [] }],
+    });
+    s().logMedicationFromTreatment('treatment-1');
+    expect(s().te.medCooldownWarning).toBe('Can give again in 4h');
+  });
+
+  it('logMedicationFromTreatment ignores a sibling\'s dose when computing the cooldown', () => {
+    useAppStore.setState({
+      treatments: [treatment({ scheduleMode: 'sporadic', everyHours: 6 })],
+      entries: [{ id: 'm1', childId: 'c2', type: 'medication', time: NOW - 2 * 3600000, name: 'Paracetamol', tags: [] }],
+    });
+    s().logMedicationFromTreatment('treatment-1');
+    expect(s().te.medCooldownWarning).toBeUndefined();
+  });
+
   it('saving from the confirm sheet writes a dose carrying nextDoseIntervalSec', () => {
     useAppStore.setState({ treatments: [treatment({ everyHours: 8 })] });
     s().logMedicationFromTreatment('treatment-1');

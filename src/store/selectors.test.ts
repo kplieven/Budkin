@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Connection } from '@/data/repository';
-import { activeTreatmentsForChildToday, bathGivenToday, BATH_RHYTHM_DEFAULT, clampBathInterval, clampMinuteOfDay, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedForChild, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, legacyBathRhythm, minuteOfDayIsNap, nextStartSide, measurementsForChild, overruleLasted, parseMinuteOfDay, rhythmForChild, runningTimer, selectServerMode, startOfDay, teDurationMin, teEnd, teStart, timersForChild, washDueState } from '@/store/selectors';
+import { activeTreatmentsForChildToday, bathGivenToday, BATH_RHYTHM_DEFAULT, clampBathInterval, clampMinuteOfDay, treatmentCooldownState, treatmentDoseScalars, treatmentDueHint, treatmentDueList, treatmentDueState, treatmentsAllGiven, endAnchorVisible, entriesForChild, fmtDayStartHour, fmtMinuteOfDay, isTreatmentActiveToday, isNapStart, lastDiaperMinAgo, lastFeedEndMinAgo, lastFeedForChild, lastFeedStartMinAgo, lastSleepStartMinAgo, lastWakeMinAgo, legacyBathRhythm, minuteOfDayIsNap, nextStartSide, measurementsForChild, overruleLasted, parseMinuteOfDay, rhythmForChild, runningTimer, selectServerMode, startOfDay, teDurationMin, teEnd, teStart, timersForChild, washDueState } from '@/store/selectors';
 import type { BathRhythm, Treatment, Entry, LastFeed, Measurement, Timer } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
@@ -841,6 +841,47 @@ describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAl
     });
   });
 
+  describe('sporadic (as-needed) treatments', () => {
+    const sporadic = treatment({ scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined });
+
+    it('is never due, however long since the last dose', () => {
+      expect(treatmentDueState(sporadic, [], at(1))).toMatchObject({ due: 0 });
+      expect(treatmentDueState(sporadic, [dose(dayAt(3, 8))], at(23))).toMatchObject({ due: 0 });
+    });
+
+    it('never counts a dose as expected, unlike a scheduled treatment - an as-needed dose must not turn "All doses given" on by itself', () => {
+      expect(treatmentDueState(sporadic, [dose(at(8))], at(9))).toMatchObject({ due: 0, expected: 0 });
+      expect(treatmentDueState(sporadic, [], at(9))).toMatchObject({ due: 0, expected: 0 });
+    });
+  });
+
+  describe('treatmentCooldownState', () => {
+    const sporadic = treatment({ scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined });
+
+    it('is not in cooldown when never dosed', () => {
+      expect(treatmentCooldownState(sporadic, [], at(9))).toEqual({ inCooldown: false, readyAt: null });
+    });
+
+    it('is in cooldown until the minimum gap elapses, then clears', () => {
+      const doses = [dose(at(8))];
+      expect(treatmentCooldownState(sporadic, doses, at(13, 59))).toMatchObject({ inCooldown: true, readyAt: at(14) });
+      expect(treatmentCooldownState(sporadic, doses, at(14))).toMatchObject({ inCooldown: false, readyAt: at(14) });
+    });
+
+    it('counts from the LATEST dose, not the first', () => {
+      const doses = [dose(at(8)), dose(at(11))];
+      expect(treatmentCooldownState(sporadic, doses, at(16))).toMatchObject({ inCooldown: true });
+      expect(treatmentCooldownState(sporadic, doses, at(17, 1))).toMatchObject({ inCooldown: false });
+    });
+
+    it('is never in cooldown when the mode is not sporadic, or no hours are set', () => {
+      const doses = [dose(at(8))];
+      expect(treatmentCooldownState(treatment({ scheduleMode: 'everyHours', everyHours: 6, timesOfDay: undefined }), doses, at(9)))
+        .toEqual({ inCooldown: false, readyAt: null });
+      expect(treatmentCooldownState({ ...sporadic, everyHours: undefined }, doses, at(9))).toEqual({ inCooldown: false, readyAt: null });
+    });
+  });
+
   describe('treatmentDueList', () => {
     const owed = treatment({ id: 'owed', name: 'Omeprazol', timesOfDay: ['morning'] });
     const settled = treatment({ id: 'settled', name: 'Nurofen', timesOfDay: ['morning'] });
@@ -904,6 +945,25 @@ describe('treatmentDueState / treatmentDueList / treatmentDueHint / treatmentsAl
 
     it('shows no check while a dose is still owed', () => {
       expect(treatmentsAllGiven(treatmentDueList([morning], 'c1', [], at(9)))).toBe(false);
+    });
+
+    it('a sporadic treatment given today does NOT trigger "All doses given" on its own', () => {
+      const sporadic = treatment({ id: 'c', name: 'Paracetamol', scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined });
+      const list = treatmentDueList([sporadic], 'c1', [dose(at(8), 'Paracetamol')], at(9));
+      expect(treatmentDueHint(list)).toBe('Nothing due');
+      expect(treatmentsAllGiven(list)).toBe(false);
+    });
+
+    it('still reports all given from the scheduled treatments alone, with a sporadic one given alongside', () => {
+      const sporadic = treatment({ id: 'c', name: 'Paracetamol', scheduleMode: 'sporadic', everyHours: 6, timesOfDay: undefined });
+      const list = treatmentDueList(
+        [morning, sporadic],
+        'c1',
+        [dose(at(8, 10)), dose(at(8, 20), 'Paracetamol')],
+        at(9),
+      );
+      expect(treatmentDueHint(list)).toBe('All doses given');
+      expect(treatmentsAllGiven(list)).toBe(true);
     });
   });
 

@@ -262,7 +262,7 @@ export interface BathRhythm {
 
 export type TreatmentTimeOfDay = 'morning' | 'noon' | 'evening' | 'night';
 
-export type TreatmentScheduleMode = 'timesOfDay' | 'everyHours';
+export type TreatmentScheduleMode = 'timesOfDay' | 'everyHours' | 'sporadic';
 
 /** A medication regimen: a per-child TEMPLATE a dose is filled from. Baby Buddy has no
  *  regimen resource, so it syncs as a `treatment`-tagged Note, the channel baths and
@@ -275,8 +275,11 @@ export interface Treatment {
   name: string;
   scheduleMode: TreatmentScheduleMode;
   timesOfDay?: TreatmentTimeOfDay[];
-  /** the interval in whole hours. A dose logged from an interval treatment stamps
-   *  `next_dose_interval` = everyHours*3600. */
+  /** For `everyHours`, the recurring interval: due once this many hours have passed
+   *  since the last dose. For `sporadic`, the SAME field instead means the minimum gap
+   *  before another dose is safe - a floor, not a schedule, so a sporadic treatment is
+   *  never "due". A dose logged from an interval treatment stamps
+   *  `next_dose_interval` = everyHours*3600; a sporadic one does not. */
   everyHours?: number;
   /** a plain number, paired with `dosageUnit` */
   dosage?: number;

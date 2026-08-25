@@ -443,8 +443,35 @@ export function treatmentDueState(treatment: Treatment, entries: Entry[], now: n
     return { treatment, due, expected: dosesToday + due };
   }
 
+  // As-needed: never owed, and `expected` stays 0 even once dosed today - there is no
+  // schedule it was called for, so a sporadic dose must never turn "Nothing due" into
+  // "All doses given". See `treatmentCooldownState` for the gate that instead blocks
+  // logging too soon.
+  if (treatment.scheduleMode === 'sporadic') return { treatment, due: 0, expected: 0 };
+
   const reached = (treatment.timesOfDay ?? []).filter((tod) => now >= timeOfDaySlotMs(todayMidnight, tod)).length;
   return { treatment, due: Math.max(0, reached - dosesToday), expected: reached };
+}
+
+export interface TreatmentCooldown {
+  /** a dose was logged more recently than `everyHours` ago */
+  inCooldown: boolean;
+  /** epoch ms the cooldown lifts; `null` when never dosed or no cooldown is set */
+  readyAt: number | null;
+}
+
+/** Sporadic-only gate: unlike `treatmentDueState`, this never makes a treatment "due" -
+ *  it only flags a dose logged too soon after the last one, for a non-blocking warning
+ *  at the moment of logging. */
+export function treatmentCooldownState(treatment: Treatment, entries: Entry[], now: number): TreatmentCooldown {
+  if (treatment.scheduleMode !== 'sporadic' || treatment.everyHours == null) return { inCooldown: false, readyAt: null };
+  const last = dosesForTreatment(entries, treatment).reduce<number | null>(
+    (max, e) => (e.time <= now && (max == null || e.time > max) ? e.time : max),
+    null,
+  );
+  if (last == null) return { inCooldown: false, readyAt: null };
+  const readyAt = last + treatment.everyHours * 3600000;
+  return { inCooldown: now < readyAt, readyAt };
 }
 
 /** Lives here rather than in the notifications layer so dose-to-treatment name

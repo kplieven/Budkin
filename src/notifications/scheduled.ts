@@ -413,6 +413,9 @@ function treatmentReminders(input: ScheduleInput, now: number): ScheduledNotific
     if (!isTreatmentActiveToday(treatment, todayMidnight, treatment.childId)) continue;
     // `logMedicationFromTreatment` gates on the name too: this would be a dead tap.
     if (!treatment.name.trim()) continue;
+    // As-needed: never reminded, since there is no schedule to be late against - only
+    // a cooldown that gates the NEXT dose, surfaced at log time instead.
+    if (treatment.scheduleMode === 'sporadic') continue;
     out.push(
       ...(treatment.scheduleMode === 'everyHours'
         ? treatmentEveryHoursReminders(treatment, child, input, now)

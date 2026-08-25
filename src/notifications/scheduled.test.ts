@@ -1042,6 +1042,14 @@ describe('desiredScheduled: treatments, every N hours', () => {
     ).toEqual([]);
   });
 
+  it('schedules nothing for a sporadic (as-needed) treatment, dosed or not', () => {
+    const sporadic = treatment({ scheduleMode: 'sporadic', everyHours: 6 });
+    expect(run({ treatments: [sporadic], treatmentDoses: {} }, at(2026, 9, 2, 7))).toEqual([]);
+    expect(
+      run({ treatments: [sporadic], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } }, at(2026, 9, 2, 7)),
+    ).toEqual([]);
+  });
+
   it('moves an existing grid forward when the resync stamp is later than the last dose', () => {
     const out = run(
       { treatments: [treatment()], treatmentDoses: { treatment1: { today: 1, lastAt: at(2026, 9, 2, 6) } } },

@@ -910,6 +910,11 @@ export function LogSheet() {
                     {medDoseLabel}
                   </Txt>
                 ) : null}
+                {te.medCooldownWarning ? (
+                  <Txt weight={700} size={13.5} color="#E2725B" style={{ marginTop: 6 }}>
+                    {te.medCooldownWarning}
+                  </Txt>
+                ) : null}
               </View>
             </>
           ) : (

@@ -7,8 +7,8 @@ import { Icon } from '@/components/Icon';
 import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
-import { treatmentScheduleLabel, treatmentDosageLabel } from '@/features/treatments/treatmentLabels';
-import { treatmentDueList, entriesForChild } from '@/store/selectors';
+import { treatmentScheduleLabel, treatmentDosageLabel, treatmentCooldownLabel } from '@/features/treatments/treatmentLabels';
+import { treatmentCooldownState, treatmentDueList, entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -39,7 +39,8 @@ export function TreatmentPickerSheet() {
   // Entries must be child-scoped before the due maths: the store's `entries` is a flat
   // all-children array, so a sibling's dose of the same medication would otherwise
   // settle this child's treatment.
-  const active = treatmentDueList(treatments, selectedChildId, entriesForChild(entries, selectedChildId), now);
+  const childEntries = entriesForChild(entries, selectedChildId);
+  const active = treatmentDueList(treatments, selectedChildId, childEntries, now);
 
   const logManually = () => {
     closeTreatmentPicker();
@@ -59,14 +60,19 @@ export function TreatmentPickerSheet() {
       <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: insets.bottom + 10, gap: 8 }}>
         {active.map(({ treatment: c, due }) => {
           const isDue = due > 0;
+          // Warn-but-allow: a sporadic treatment inside its cooldown still logs on tap,
+          // it just gets a non-blocking "too soon" indication instead of the DUE pill
+          // due can never carry (see `treatmentDueState`, sporadic is never due).
+          const cooldownLabel = treatmentCooldownLabel(treatmentCooldownState(c, childEntries, now), now);
+          const tooSoon = !!cooldownLabel;
           return (
             <Tappable
               key={c.id}
               onPress={() => logMedicationFromTreatment(c.id)}
               accessibilityRole="button"
-              // The due state rides in the label too, so it reaches a screen reader
-              // that never sees the pill.
-              accessibilityLabel={isDue ? `Log a dose of ${c.name}, due` : `Log a dose of ${c.name}`}
+              // The due/cooldown state rides in the label too, so it reaches a screen
+              // reader that never sees the pill.
+              accessibilityLabel={isDue ? `Log a dose of ${c.name}, due` : tooSoon ? `Log a dose of ${c.name}, ${cooldownLabel}` : `Log a dose of ${c.name}`}
               style={(s) => [
                 {
                   flexDirection: 'row',
@@ -97,10 +103,16 @@ export function TreatmentPickerSheet() {
                         DUE
                       </Txt>
                     </View>
+                  ) : tooSoon ? (
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: t.chip, borderWidth: 1, borderColor: t.line2 }}>
+                      <Txt unselectable weight={800} size={11} tracking={0.2} color={t.dim}>
+                        TOO SOON
+                      </Txt>
+                    </View>
                   ) : null}
                 </View>
                 <Txt weight={500} size={13} color={t.dim}>
-                  {[treatmentDosageLabel(c), treatmentScheduleLabel(c)].filter(Boolean).join(' · ')}
+                  {[treatmentDosageLabel(c), cooldownLabel || treatmentScheduleLabel(c)].filter(Boolean).join(' · ')}
                 </Txt>
               </View>
               <Icon name="chevron-right" color={t.faint} size={18} />
