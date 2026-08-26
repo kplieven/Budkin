@@ -521,7 +521,7 @@ export function diffScheduled(
   return { toSchedule, toCancel };
 }
 
-interface ParsedReminderId {
+export interface ParsedReminderId {
   kind: string;
   /** everything between the kind and the trailing fire time */
   head: string;
@@ -530,7 +530,7 @@ interface ParsedReminderId {
 
 /** Split `budkin:{kind}:{head}:{fireAt}` apart. The fire time is read off the
  *  END, not by position: `head` may itself contain colons. */
-function parseReminderId(id: string): ParsedReminderId | null {
+export function parseReminderId(id: string): ParsedReminderId | null {
   const rest = id.slice(REMINDER_PREFIX.length);
   const kindEnd = rest.indexOf(':');
   if (kindEnd <= 0) return null;
