@@ -54,6 +54,12 @@ export async function runBackgroundSync(now: number): Promise<void> {
   // A failed refresh must not abort the reconcile: local data may still have
   // moved since the last one, and skipping the stamp below is what makes an
   // unreachable server retry at the next wake instead of waiting out the floor.
+  // "Failed" here means the ordinary case — an unreachable server, a 401 — which
+  // `refresh()` reports through state rather than by throwing, so the reconcile
+  // below still runs. An EXOTIC throw (only `loadTimers()` rejecting, or
+  // `clearConnection()` rejecting inside refresh's own catch) does skip it; the
+  // task-level catch then warns, returns Success and leaves the stamp unwritten,
+  // so the gate stays open and the next wake retries within ~15 minutes.
   //
   // The success signal is `offline`, NOT a try/catch. `refresh()` swallows every
   // failure and never rethrows — a 401/403 clears the connection, anything else sets
