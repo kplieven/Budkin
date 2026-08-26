@@ -29,6 +29,8 @@ const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: []
 const listChildTreatments = vi.fn(async () => [] as any[]);
 const listGenders = vi.fn(async () => new Map<number, string>());
 const setChildGender = vi.fn(async () => undefined);
+const listBathRhythms = vi.fn(async () => new Map<number, { fullEveryDays?: number; quickEveryDays?: number }>());
+const setChildBathRhythm = vi.fn(async () => undefined);
 const listMeasurements = vi.fn(async () => []);
 const listTimers = vi.fn(async () => [] as any[]);
 const createTimer = vi.fn(async () => 11);
@@ -53,6 +55,8 @@ vi.mock('@/api/client', async (importOriginal) => ({
     listChildTreatments,
     listGenders,
     setChildGender,
+    listBathRhythms,
+    setChildBathRhythm,
     listMeasurements,
     listTimers,
     createTimer,
@@ -411,6 +415,46 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     expect([...(result.incompleteSlices?.['7'] ?? [])].sort()).toEqual(
       [...Object.keys(ALL_ACTIVITIES), ...Object.keys(ALL_MEASUREMENT_KINDS), 'treatment'].sort(),
     );
+  });
+
+  describe('bath rhythms', () => {
+    it('keys the answer by SERVER child id, as a string', async () => {
+      answerEverything();
+      listBathRhythms.mockResolvedValueOnce(new Map([[7, { fullEveryDays: 5, quickEveryDays: 1 }]]));
+
+      const result = await loadFromServer(conn);
+
+      expect(result.bathRhythms).toEqual({ '7': { fullEveryDays: 5, quickEveryDays: 1 } });
+    });
+
+    it('answers {} when the account has no rhythm notes at all', async () => {
+      answerEverything();
+
+      const result = await loadFromServer(conn);
+
+      expect(result.bathRhythms).toEqual({});
+    });
+
+    // Not {}: an empty answer makes the local rhythms eligible for the seed-the-server
+    // upload, and doing that on a timeout would push a stale value over a newer one.
+    it('degrades to null (unknown), not to an empty answer, when the fetch fails', async () => {
+      answerEverything();
+      listBathRhythms.mockRejectedValueOnce(new Error('down'));
+
+      const result = await loadFromServer(conn);
+
+      expect(result.bathRhythms).toBeNull();
+    });
+
+    // Account-wide like `listGenders`, so it belongs to no single child's slice.
+    it('does not report its failure as a degraded slice', async () => {
+      answerEverything();
+      listBathRhythms.mockRejectedValueOnce(new Error('down'));
+
+      const result = await loadFromServer(conn);
+
+      expect(result.incompleteSlices).toEqual({});
+    });
   });
 
   it('names nothing when the account has no children to fetch', async () => {

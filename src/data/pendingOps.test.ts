@@ -81,6 +81,19 @@ describe('pendingOps persistence', () => {
     expect(await loadPendingOps()).toEqual(ops);
   });
 
+  it('round-trips a bath rhythm op keyed by LOCAL child id', async () => {
+    // Local id, not server id: the child may not be on the server yet when the rhythm
+    // is edited, and the replay resolves the server id from state at flush time.
+    const op: PendingOp = {
+      op: 'update',
+      entity: 'bathRhythm',
+      childId: 'child123',
+      rhythm: { fullEveryDays: 4, quickEveryDays: 0 },
+    };
+    await addPendingOp(op);
+    expect(await loadPendingOps()).toEqual([op]);
+  });
+
   it('round-trips timer update and delete ops', async () => {
     const timer = { id: 't1', activity: 'sleep', saveAs: 'sleep', name: 'Sleep', start: 0, serverId: 5 } as const;
     await addPendingOp({ op: 'update', entity: 'timer', payload: timer });

@@ -66,6 +66,8 @@ const h = vi.hoisted(() => ({
   treatmentDeleted: [] as unknown[],
   treatmentPushFails: false,
   genderWritten: [] as unknown[],
+  bathRhythmWritten: [] as unknown[],
+  bathRhythmWriteFails: false,
   genderWriteFails: false,
   childPushed: [] as unknown[],
   childUpdated: [] as unknown[],
@@ -259,6 +261,10 @@ vi.mock('@/data/repository', () => ({
     if (h.genderWriteFails) throw new Error('net');
     h.genderWritten.push({ childServerId, gender });
   }),
+  setChildBathRhythmOnServer: vi.fn(async (_c: unknown, childServerId: unknown, rhythm: unknown) => {
+    if (h.bathRhythmWriteFails) throw new Error('net');
+    h.bathRhythmWritten.push({ childServerId, rhythm });
+  }),
   pushTreatmentToServer: vi.fn(async (_c: unknown, treatment: unknown) => {
     if (h.treatmentPushFails) throw new Error('net');
     h.treatmentPushed.push(treatment);
@@ -447,6 +453,8 @@ beforeEach(() => {
   h.treatmentDeleted = [];
   h.treatmentPushFails = false;
   h.genderWritten = [];
+  h.bathRhythmWritten = [];
+  h.bathRhythmWriteFails = false;
   h.genderWriteFails = false;
   h.measDeleted = [];
   h.childPushed = [];
@@ -481,6 +489,11 @@ beforeEach(() => {
   h.treatments = [];
   h.bathRhythms = {};
   h.entityOrigin = null;
+  // `mockClear` does NOT drain queued `*Once` values: a test that arms one for a fetch
+  // that never happens hands it to whichever later test calls `loadFromServer` next,
+  // silently shifting every subsequent queued value by one. Reset restores the module
+  // mock's own implementation (Vitest 3), so the shared default survives.
+  vi.mocked(loadFromServer).mockReset();
   vi.mocked(enqueueEntry).mockClear();
   vi.mocked(enqueueEntries).mockClear();
   vi.mocked(loadProfileFromServer).mockClear();
@@ -7186,6 +7199,176 @@ describe('bath rhythm persistence', () => {
     useAppStore.setState({ bathRhythms: {} });
     useAppStore.getState().setBathRhythm('c1', { fullEveryDays: 900, quickEveryDays: -3 });
     expect(useAppStore.getState().bathRhythms.c1).toEqual({ fullEveryDays: 30, quickEveryDays: 0 });
+  });
+});
+
+describe('bath rhythm sync (a `bath:rhythm`-tagged note, one per child)', () => {
+  it('writes the whole rhythm to the server when a half of it is edited', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 3, quickEveryDays: 1 } } });
+    s().setBathRhythm('c1', { fullEveryDays: 5 });
+    await flush();
+    // The note carries both intervals, so the unedited half rides along.
+    expect(h.bathRhythmWritten).toEqual([{ childServerId: 501, rhythm: { fullEveryDays: 5, quickEveryDays: 1 } }]);
+  });
+
+  it('writes nothing for a child that has never been pushed', async () => {
+    s().setBathRhythm('c1', { fullEveryDays: 5 });
+    await flush();
+    expect(h.bathRhythmWritten).toHaveLength(0);
+  });
+
+  it('queues an offline edit instead of writing, then replays it on flush', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], offline: true });
+    s().setBathRhythm('c1', { fullEveryDays: 4, quickEveryDays: 2 });
+    await flush();
+    expect(h.bathRhythmWritten).toHaveLength(0);
+    expect(h.pendingOps).toContainEqual({
+      op: 'update',
+      entity: 'bathRhythm',
+      childId: 'c1',
+      rhythm: { fullEveryDays: 4, quickEveryDays: 2 },
+    });
+
+    useAppStore.setState({ offline: false });
+    await s().flushPendingOps();
+    expect(h.bathRhythmWritten).toEqual([{ childServerId: 501, rhythm: { fullEveryDays: 4, quickEveryDays: 2 } }]);
+    expect(h.pendingOps).toHaveLength(0);
+  });
+
+  // Local id at enqueue time, server id resolved at replay time: the child may have been
+  // pushed in between, and a frozen server id would have been null for it.
+  it('replays a rhythm queued before its child was ever pushed', async () => {
+    h.pendingOps = [
+      { op: 'update', entity: 'bathRhythm', childId: 'c1', rhythm: { fullEveryDays: 6, quickEveryDays: 1 } },
+    ];
+    useAppStore.setState({ children: [SYNCED_C1] });
+    await s().flushPendingOps();
+    expect(h.bathRhythmWritten).toEqual([{ childServerId: 501, rhythm: { fullEveryDays: 6, quickEveryDays: 1 } }]);
+  });
+
+  it('keeps the op queued while its child is still unsynced', async () => {
+    h.pendingOps = [
+      { op: 'update', entity: 'bathRhythm', childId: 'c1', rhythm: { fullEveryDays: 6, quickEveryDays: 1 } },
+    ];
+    await s().flushPendingOps();
+    expect(h.bathRhythmWritten).toHaveLength(0);
+    expect(h.pendingOps).toHaveLength(1);
+  });
+
+  it('queues a failed online write so the change is retried rather than lost', async () => {
+    h.bathRhythmWriteFails = true;
+    useAppStore.setState({ children: [SYNCED_C1] });
+    s().setBathRhythm('c1', { fullEveryDays: 5, quickEveryDays: 1 });
+    await flush();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 5, quickEveryDays: 1 });
+    expect(h.pendingOps).toContainEqual({
+      op: 'update',
+      entity: 'bathRhythm',
+      childId: 'c1',
+      rhythm: { fullEveryDays: 5, quickEveryDays: 1 },
+    });
+  });
+
+  // The wire keys rhythms by SERVER child id (a server child's `id` is `String(serverId)`),
+  // so the merge has to translate them into the local id space the map is keyed by.
+  const serverLoad = (bathRhythms: unknown) =>
+    ({
+      children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000 }],
+      entries: [],
+      timers: [],
+      selectedChildId: '501',
+      lastFeed: {},
+      measurements: [],
+      treatments: [],
+      bathRhythms,
+    }) as any;
+
+  it('applies the server rhythm over the local one, keyed by LOCAL child id', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 3, quickEveryDays: 1 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({ '501': { fullEveryDays: 7, quickEveryDays: 2 } }));
+    await s().refresh();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 7, quickEveryDays: 2 });
+    // Under the local id, never the server one.
+    expect(s().bathRhythms['501']).toBeUndefined();
+  });
+
+  it('leaves a child the server holds no rhythm note for on its local value', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 9, quickEveryDays: 1 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({}));
+    await s().refresh();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 9, quickEveryDays: 1 });
+  });
+
+  // Distinct from {}: an empty answer says nobody has a rhythm recorded, a failed fetch
+  // says nothing at all, and reading the second as the first would let a timeout seed
+  // the server with this device's stale value.
+  it('leaves every local rhythm alone when the rhythm fetch failed', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 9, quickEveryDays: 1 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad(null));
+    await s().refresh();
+    await flush();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 9, quickEveryDays: 1 });
+    expect(h.bathRhythmWritten).toHaveLength(0);
+  });
+
+  // A half the server carries wins; a half it does not is filled from the value this
+  // device already had, so a note written by a build that knows only one of them cannot
+  // silently reset the other to the default.
+  it('takes only the halves the server actually carries', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 9, quickEveryDays: 2 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({ '501': { fullEveryDays: 4 } }));
+    await s().refresh();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 4, quickEveryDays: 2 });
+  });
+
+  it('clamps an out-of-range interval arriving from the server', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: {} });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({ '501': { fullEveryDays: 900, quickEveryDays: -3 } }));
+    await s().refresh();
+    expect(s().bathRhythms.c1).toEqual({ fullEveryDays: 30, quickEveryDays: 0 });
+  });
+
+  it('persists the merged map, so the server rhythm survives going offline', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: {} });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({ '501': { fullEveryDays: 7, quickEveryDays: 2 } }));
+    await s().refresh();
+    await flush();
+    expect(h.bathRhythms).toEqual({ c1: { fullEveryDays: 7, quickEveryDays: 2 } });
+  });
+
+  // Existing installs set their rhythm before it synced at all, so the first load after
+  // upgrading has to seed the server from what the device already holds.
+  it('uploads a local rhythm the server has no note for', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 9, quickEveryDays: 1 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({}));
+    await s().refresh();
+    await flush();
+    expect(h.bathRhythmWritten).toEqual([{ childServerId: 501, rhythm: { fullEveryDays: 9, quickEveryDays: 1 } }]);
+  });
+
+  it('uploads nothing for a child still on the untouched default', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: {} });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({}));
+    await s().refresh();
+    await flush();
+    expect(h.bathRhythmWritten).toHaveLength(0);
+  });
+
+  it('does not re-upload a rhythm the server already has a note for', async () => {
+    useAppStore.setState({ children: [SYNCED_C1], bathRhythms: { c1: { fullEveryDays: 7, quickEveryDays: 2 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({ '501': { fullEveryDays: 7, quickEveryDays: 2 } }));
+    await s().refresh();
+    await flush();
+    expect(h.bathRhythmWritten).toHaveLength(0);
+  });
+
+  it('uploads nothing for a child that is not on the server yet', async () => {
+    // The default `c1` has no serverId, so the note has nothing to reference.
+    useAppStore.setState({ bathRhythms: { c1: { fullEveryDays: 9, quickEveryDays: 1 } } });
+    vi.mocked(loadFromServer).mockResolvedValueOnce(serverLoad({}));
+    await s().refresh();
+    await flush();
+    expect(h.bathRhythmWritten).toHaveLength(0);
   });
 });
 

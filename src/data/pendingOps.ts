@@ -3,7 +3,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import type { ActivityType, Child, Treatment, Entry, Measurement, MeasurementKind, Timer } from '@/types/models';
+import type { ActivityType, BathRhythm, Child, Treatment, Entry, Measurement, MeasurementKind, Timer } from '@/types/models';
 
 export type PendingOp =
   | { op: 'update'; entity: 'child'; payload: Child }
@@ -11,6 +11,11 @@ export type PendingOp =
   | { op: 'update'; entity: 'entry'; payload: Entry }
   | { op: 'update'; entity: 'timer'; payload: Timer }
   | { op: 'update'; entity: 'treatment'; payload: Treatment }
+  // Carries the whole rhythm, not a patch, and is keyed by LOCAL child id: the child
+  // may still be unsynced at enqueue time, so the replay resolves the server id from
+  // state. Two queued edits therefore replay in order to the later one, which is why
+  // this needs no dedup.
+  | { op: 'update'; entity: 'bathRhythm'; childId: string; rhythm: BathRhythm }
   | { op: 'delete'; entity: 'entry'; entryType: ActivityType; serverId: number }
   | { op: 'delete'; entity: 'measurement'; kind: MeasurementKind; serverId: number }
   | { op: 'delete'; entity: 'timer'; serverId: number }

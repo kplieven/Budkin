@@ -11,6 +11,7 @@ import { normalizeWash } from '@/lib/wash';
 import type {
   ActivityType,
   BathEntry,
+  BathRhythm,
   Child,
   ChildGender,
   Treatment,
@@ -171,6 +172,17 @@ export function secToDuration(sec: number): string {
 // full bath.
 const BATH_STRUCTURAL_TAGS = ['bath', 'bath:quick', 'bath:full', 'small', 'big'];
 
+// The wash CADENCE, not a wash: a per-child attribute riding as its own note, the
+// channel gender already uses. Deliberately namespaced under `bath:` but never carrying
+// the bare `bath` tag, which `isBathNote` keys off: a rhythm note misread as a wash
+// would put a phantom bath on the timeline and reset the very cadence it describes.
+const BATH_RHYTHM_TAG = 'bath:rhythm';
+const BATH_RHYTHM_FULL_PREFIX = 'bath:rhythm:full:';
+const BATH_RHYTHM_QUICK_PREFIX = 'bath:rhythm:quick:';
+
+const isStructuralBathRhythmTag = (t: string): boolean =>
+  t === BATH_RHYTHM_TAG || t.startsWith(`${BATH_RHYTHM_TAG}:`);
+
 /** Gates the UI (display and creation) only, never serialization: entries that
  *  legitimately carry these must round-trip untouched. */
 export const HIDDEN_TAGS = new Set<string>([...BATH_STRUCTURAL_TAGS, 'left', 'right']);
@@ -232,7 +244,8 @@ export function isHiddenTag(name: string): boolean {
     isStructuralMilestoneTag(name) ||
     isIntakeTag(name) ||
     isStructuralTreatmentTag(name) ||
-    isStructuralGenderTag(name)
+    isStructuralGenderTag(name) ||
+    isStructuralBathRhythmTag(name)
   );
 }
 
@@ -467,6 +480,61 @@ export function genderFromNote(n: any): ChildGender | undefined {
   const tag = tags.find((t) => t.startsWith(GENDER_PREFIX));
   const value = tag?.slice(GENDER_PREFIX.length);
   return CHILD_GENDERS.find((g) => g === value);
+}
+
+// One note per child, tagged `bath:rhythm` + an interval tag per wash kind. Like gender
+// it is an attribute rather than an event, so `time` means nothing beyond recency and
+// the newest note wins.
+
+/** Days as English, because the body is what a non-Budkin client shows. `0` is the OFF
+ *  switch for that wash, so it reads as "off" rather than "every 0 days". */
+const cadenceCopy = (label: string, days: number): string =>
+  days <= 0 ? `${label} off` : days === 1 ? `${label} daily` : `${label} every ${days} days`;
+
+export function isBathRhythmNote(n: any): boolean {
+  return tagNames(n?.tags).includes(BATH_RHYTHM_TAG);
+}
+
+export function bathRhythmToNoteBody(
+  rhythm: BathRhythm,
+  childServerId: number,
+  atMs: number,
+): Record<string, unknown> {
+  return {
+    child: childServerId,
+    time: toISO(atMs),
+    note: `Bath rhythm: ${cadenceCopy('full bath', rhythm.fullEveryDays)}, ${cadenceCopy('quick wash', rhythm.quickEveryDays)}`,
+    tags: [
+      BATH_RHYTHM_TAG,
+      `${BATH_RHYTHM_FULL_PREFIX}${rhythm.fullEveryDays}`,
+      `${BATH_RHYTHM_QUICK_PREFIX}${rhythm.quickEveryDays}`,
+    ],
+  };
+}
+
+const intervalFromTag = (tags: string[], prefix: string): number | undefined => {
+  const tag = tags.find((t) => t.startsWith(prefix));
+  if (tag == null) return undefined;
+  const n = Number(tag.slice(prefix.length));
+  return Number.isFinite(n) ? n : undefined;
+};
+
+/**
+ * PARTIAL on purpose, and undefined when neither interval parses. Clamping needs the
+ * fallback rhythm this device would otherwise use, which only the store knows, so the
+ * numbers go up raw and `clampBathRhythm` owns the range. A half this build cannot read
+ * is left out rather than defaulted, so a note from a future build still contributes
+ * the half it does understand.
+ */
+export function bathRhythmFromNote(n: any): Partial<BathRhythm> | undefined {
+  const tags = tagNames(n?.tags);
+  const fullEveryDays = intervalFromTag(tags, BATH_RHYTHM_FULL_PREFIX);
+  const quickEveryDays = intervalFromTag(tags, BATH_RHYTHM_QUICK_PREFIX);
+  if (fullEveryDays === undefined && quickEveryDays === undefined) return undefined;
+  return {
+    ...(fullEveryDays !== undefined ? { fullEveryDays } : {}),
+    ...(quickEveryDays !== undefined ? { quickEveryDays } : {}),
+  };
 }
 
 /** Treatment dates are stored at local midnight, so a timestamp fallback has to be
@@ -891,7 +959,7 @@ export class BabybuddyClient {
     for (const n of data.results) {
       if (isMilestoneNote(n)) milestones.push(noteToMilestoneEntry(n, childId));
       else if (isBathNote(n)) baths.push(noteToBathEntry(n, childId));
-      else if (isTreatmentNote(n) || isGenderNote(n)) continue;
+      else if (isTreatmentNote(n) || isGenderNote(n) || isBathRhythmNote(n)) continue;
       else notes.push(noteToNoteEntry(n, childId));
     }
     return { baths, milestones, notes };
@@ -943,6 +1011,39 @@ export class BabybuddyClient {
       return;
     }
     const body = JSON.stringify(genderToNoteBody(gender, childServerId, atMs));
+    if (existing) await this.request(`/notes/${existing.id}/`, { method: 'PATCH', body });
+    else await this.request('/notes/', { method: 'POST', body });
+  }
+
+  /** Keyed by the child's SERVER id, one account-wide request, newest note per child
+   *  wins: the same shape as `listGenders`, for the same reasons. Values stay PARTIAL;
+   *  the caller clamps them against the rhythm it would otherwise have used. */
+  async listBathRhythms(limit = 200): Promise<Map<number, Partial<BathRhythm>>> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?tags=${encodeURIComponent(BATH_RHYTHM_TAG)}&ordering=-time&limit=${limit}`,
+    );
+    const out = new Map<number, Partial<BathRhythm>>();
+    for (const n of data.results) {
+      // Re-check locally: an instance that ignores the tag filter would otherwise read
+      // every plain note as a rhythm and flatten every child to the default cadence.
+      if (!isBathRhythmNote(n)) continue;
+      const childServerId = typeof n.child === 'number' ? n.child : Number(n.child);
+      const rhythm = bathRhythmFromNote(n);
+      if (!Number.isFinite(childServerId) || !rhythm || out.has(childServerId)) continue;
+      out.set(childServerId, rhythm);
+    }
+    return out;
+  }
+
+  /** Reads before writing rather than caching the note id locally, as gender does: the
+   *  id would be one more thing to keep in sync across devices, and a rhythm changes
+   *  rarely enough that the extra GET costs nothing. */
+  async setChildBathRhythm(childServerId: number, rhythm: BathRhythm, atMs: number): Promise<void> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?child=${childServerId}&tags=${encodeURIComponent(BATH_RHYTHM_TAG)}&ordering=-time&limit=1`,
+    );
+    const existing = data.results.find((n: any) => isBathRhythmNote(n));
+    const body = JSON.stringify(bathRhythmToNoteBody(rhythm, childServerId, atMs));
     if (existing) await this.request(`/notes/${existing.id}/`, { method: 'PATCH', body });
     else await this.request('/notes/', { method: 'POST', body });
   }

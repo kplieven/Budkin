@@ -25,6 +25,7 @@ import {
   loadTagsFromServer,
   pushChildToServer,
   pushTreatmentToServer,
+  setChildBathRhythmOnServer,
   setChildGenderOnServer,
   pushEntryToServer,
   pushMeasurementToServer,
@@ -61,6 +62,7 @@ import {
   loadPendingOps,
   removePendingOp,
   savePendingOps,
+  type PendingOp,
 } from '@/data/pendingOps';
 import {
   clearPendingPhoto,
@@ -311,6 +313,9 @@ interface AppActions {
   /** Push offline-created children/measurements up on reconnect. Ordinary entries are
    *  excluded: they flow through flushQueue, and mixing the two would double-push. */
   flushUnsynced: () => Promise<void>;
+  /** Seed the server from this device for every synced child whose rhythm it has no note
+   *  for. Takes the load's answer verbatim, null included; call it with that. */
+  seedServerBathRhythms: (fromServer: Record<string, Partial<BathRhythm>> | null | undefined) => Promise<void>;
   commitWrite: (entry: Entry) => void;
   /** `commitWrite` for a whole save at once: everything bound for the queue is handed
    *  over in ONE batched call. */
@@ -641,6 +646,36 @@ function mergeLastFeed(
   return merged;
 }
 
+/**
+ * Lay the server's bath rhythms over the local ones, translating their keys out of the
+ * SERVER's child id space. Merged, never replaced, for the same reason as `mergeLastFeed`:
+ * the load answers only for children that have a rhythm note, and a local-only child has
+ * none by definition.
+ *
+ * Each incoming rhythm is PARTIAL and is clamped against the value this device would
+ * otherwise have used for that child, so a half the server does not carry keeps its local
+ * value instead of snapping back to the default.
+ */
+function mergeBathRhythms(
+  local: Record<string, BathRhythm>,
+  incoming: Record<string, Partial<BathRhythm>>,
+  children: Child[],
+  legacyRhythm: BathRhythm,
+): Record<string, BathRhythm> {
+  const entries = Object.entries(incoming);
+  if (entries.length === 0) return local;
+  const localIdByServerId = new Map<string, string>();
+  for (const c of children) {
+    if (c.serverId != null) localIdByServerId.set(String(c.serverId), c.id);
+  }
+  const merged = { ...local };
+  for (const [childId, rhythm] of entries) {
+    const localId = localIdByServerId.get(childId) ?? childId;
+    merged[localId] = clampBathRhythm(rhythm, rhythmForChild(local, localId, legacyRhythm));
+  }
+  return merged;
+}
+
 /** The server id of the child a record belongs to, or null when that child has never been
  *  pushed. Such a record MUST NOT be sent: the server rejects it and the retry queue
  *  replays it verbatim forever. */
@@ -827,6 +862,8 @@ function applyServerLoad(
     selectedChildId: string;
     timers: Timer[];
     lastFeed: Record<string, LastFeed>;
+    bathRhythms: Record<string, BathRhythm>;
+    legacyRhythm: BathRhythm;
     q: Entry[];
     /** Pre-fetch snapshots, which only `refresh` has: what tells a record created
      *  mid-request apart from one deleted server-side. */
@@ -841,7 +878,9 @@ function applyServerLoad(
   const remappedEntries = remapChildIds(data.entries, reconciledChildren);
   const remappedMeasurements = remapChildIds(data.measurements, reconciledChildren);
   // `incompleteSlices` is not an `AppState` key and must not ride the spread below.
-  const { incompleteSlices, ...applied } = data;
+  // `bathRhythms` is one, but it is nullable and PARTIAL on the wire, so it is merged
+  // below instead: spread as-is it would put a null (or a half-rhythm) into state.
+  const { incompleteSlices, bathRhythms: _bathRhythms, ...applied } = data;
   const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
   // Checked against the RECONCILED list, not just the server's, so a local child kept
   // visible by reconcileChildren above doesn't get silently deselected.
@@ -887,7 +926,42 @@ function applyServerLoad(
     // It names only the children that have ever been fed, so spreading it wholesale
     // would drop the prefill of every child who has not.
     lastFeed: mergeLastFeed(local.lastFeed, data.lastFeed, reconciledChildren),
+    // Same shape of partial answer, plus a null case: a FAILED rhythm fetch must leave
+    // every local rhythm exactly as it was rather than read as "nobody has one".
+    bathRhythms:
+      data.bathRhythms == null
+        ? local.bathRhythms
+        : mergeBathRhythms(local.bathRhythms, data.bathRhythms, reconciledChildren, local.legacyRhythm),
   });
+}
+
+/**
+ * Mirror a rhythm edit to the child's `bath:rhythm` note, queueing it when that cannot
+ * happen now. The op carries the WHOLE rhythm, so two queued edits replay in order to
+ * the later one and need no dedup.
+ *
+ * A child that has never been pushed queues nothing: the note references it by SERVER
+ * id, and `uploadUnsynced` does not carry rhythms, so the op could not drain until the
+ * child synced. `seedServerBathRhythms` covers that case on the next load instead.
+ */
+async function pushBathRhythm(get: Get, childId: string, rhythm: BathRhythm): Promise<void> {
+  const s = get();
+  const conn = s.connection;
+  if (!conn || conn.mode !== 'server') return;
+  const childServerId = childServerIdFor(s.children, childId);
+  if (childServerId == null) return;
+  const op: PendingOp = { op: 'update', entity: 'bathRhythm', childId, rhythm };
+  if (s.offline) {
+    await addPendingOp(op);
+    return;
+  }
+  try {
+    await setChildBathRhythmOnServer(conn, childServerId, rhythm, Date.now());
+  } catch {
+    // Queued rather than swallowed: the rhythm is not re-read from anywhere until the
+    // next load, so a dropped write would leave the two devices disagreeing silently.
+    await addPendingOp(op);
+  }
 }
 
 /** Mirror a freshly-created local timer to the server. If the timer was stopped or
@@ -1350,7 +1424,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const next = clampBathRhythm({ ...current, ...patch }, current);
     const map = { ...s.bathRhythms, [childId]: next };
     set({ bathRhythms: map });
-    void saveBathRhythms(map);
+    void pushBathRhythm(get, childId, next);
   },
   setNapWindow: (startMin, endMin) => {
     // Both endpoints written as a unit: two independent setters would each do a
@@ -1560,10 +1634,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
           selectedChildId: cur.selectedChildId,
           timers: localTimers,
           lastFeed: cur.lastFeed,
+          bathRhythms: cur.bathRhythms,
+          legacyRhythm: cur.legacyRhythm,
           q,
         },
         { connected: true, offline: false, networkOnline: true },
       );
+      void get().seedServerBathRhythms(data.bathRhythms);
       void get().flushQueue();
       void get().flushPendingOps();
       void get().flushUnsynced();
@@ -1642,6 +1719,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // Another origin's timers must not reconcile against this server's, EXCEPT
           // when the timers fetch failed (null): that is about the fetch, not id space.
           timers: sameOrigin || data.timers == null ? localTimers : [],
+          // Kept across origins, unlike timers: a rhythm is keyed by CHILD id, so a
+          // foreign one is an inert orphan key rather than a wrong answer, and the same
+          // reasoning already keeps them through a disconnect purge.
+          bathRhythms: s.bathRhythms,
+          legacyRhythm: s.legacyRhythm,
           q,
         },
         {
@@ -1672,6 +1754,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Re-stamp the origin label the gate above reads.
       void saveEntityOrigin(normalizeServerUrl(serverUrl));
       void persistServers(savedServers);
+      void get().seedServerBathRhythms(data.bathRhythms);
       void get().flushQueue();
       void get().flushPendingOps();
       void get().flushUnsynced();
@@ -1787,8 +1870,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const mergedEntries = mergeHeldBackEntries(remappedEntries, localEntries, reconciledChildren);
     // The partial-load guard: without it one degraded request deletes the history this
     // adopt just uploaded. `incompleteSlices` is not an `AppState` key and must not ride
-    // the spread below into the store.
-    const { incompleteSlices, ...applied } = data;
+    // the spread below into the store, and `bathRhythms` is nullable and PARTIAL on the
+    // wire, so it is merged below rather than spread.
+    const { incompleteSlices, bathRhythms: _adoptedRhythms, ...applied } = data;
     const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
     // Checked against the RECONCILED list, not just the server's, so an expecting child
     // kept visible above doesn't get silently deselected.
@@ -1812,6 +1896,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // AFTER the spread: the answer names only the children that have ever been fed,
       // so taking it wholesale would drop the prefill of every child who has not.
       lastFeed: mergeLastFeed(get().lastFeed, data.lastFeed, reconciledChildren),
+      // Same partial answer, plus the null "fetch failed" case.
+      bathRhythms:
+        data.bathRhythms == null
+          ? get().bathRhythms
+          : mergeBathRhythms(get().bathRhythms, data.bathRhythms, reconciledChildren, get().legacyRhythm),
       selectedChildId,
       // a newly-adopted server's profile hasn't been fetched yet
       profile: null,
@@ -1819,6 +1908,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       profileError: false,
       profileLoading: false,
     });
+    // An adopted server is new to this data, so its children have no rhythm notes yet:
+    // this is the write that carries them up, now that the adopt has stamped server ids.
+    void get().seedServerBathRhythms(data.bathRhythms);
     await clearAdoptTarget();
     return { status: 'done' };
   },
@@ -2005,6 +2097,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
             const childServerId = childServerIdFor(s.children, op.payload.childId);
             if (childServerId == null) throw new Error('child not synced');
             await updateTreatmentOnServer(conn, op.payload, childServerId);
+          } else if (op.op === 'update' && op.entity === 'bathRhythm') {
+            // The server id is resolved HERE, not frozen at enqueue time: the child may
+            // have been pushed in the meantime.
+            const childServerId = childServerIdFor(s.children, op.childId);
+            if (childServerId == null) throw new Error('child not synced');
+            await setChildBathRhythmOnServer(conn, childServerId, op.rhythm, Date.now());
           } else if (op.op === 'delete' && op.entity === 'treatment') await deleteTreatmentFromServer(conn, op.serverId);
           else if (op.op === 'delete' && op.entity === 'measurement') await deleteMeasurementFromServer(conn, op.kind, op.serverId);
           else if (op.op === 'delete' && op.entity === 'entry') await deleteEntryFromServer(conn, op.entryType, op.serverId);
@@ -2039,6 +2137,27 @@ export const useAppStore = create<AppStore>((set, get) => ({
       await run;
     } finally {
       flushPendingOpsInFlight = null;
+    }
+  },
+  seedServerBathRhythms: async (fromServer) => {
+    // null is "the rhythm fetch failed", not "nobody has one": seeding on that would
+    // push a stale local value over whatever another device had already written.
+    if (fromServer == null) return;
+    const s = get();
+    const conn = s.connection;
+    if (!conn || conn.mode !== 'server' || s.offline) return;
+    for (const child of s.children) {
+      if (child.serverId == null || fromServer[String(child.serverId)]) continue;
+      // Presence in the map, not a compare against the default: the key is only ever
+      // written by `setBathRhythm`, so having one means the user chose this cadence,
+      // default-valued or not.
+      const local = s.bathRhythms[child.id];
+      if (!local) continue;
+      // Not queued on failure, unlike an edit: the server still has no note afterwards,
+      // so the next load runs this again. An op would race that retry.
+      await setChildBathRhythmOnServer(conn, child.serverId, clampBathRhythm(local, s.legacyRhythm), Date.now()).catch(
+        () => {},
+      );
     }
   },
   flushUnsynced: async () => {
@@ -3602,6 +3721,13 @@ useAppStore.subscribe((state, prev) => {
 // NOT cleared on disconnect.
 useAppStore.subscribe((state, prev) => {
   if (state.treatments !== prev.treatments) void saveTreatments(state.treatments);
+});
+
+// Persistence ONLY, like treatments above: the server mirror is `pushBathRhythm`'s job.
+// A subscribe rather than a call in `setBathRhythm`, because a rhythm now arrives from
+// the server load too, and that path has no business knowing about the local file.
+useAppStore.subscribe((state, prev) => {
+  if (state.bathRhythms !== prev.bathRhythms) void saveBathRhythms(state.bathRhythms);
 });
 
 // Reference-equality checks so each key is written only on an actual change.
