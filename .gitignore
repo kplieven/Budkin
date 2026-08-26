@@ -52,3 +52,6 @@ __pycache__/
 
 # Generated dev-only demo-data seeder (scripts/devSeedPage.mjs)
 public/__seed.html
+
+# superpowers SDD scratch (ledger, briefs, review packages)
+.superpowers/
