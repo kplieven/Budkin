@@ -26,6 +26,7 @@ import { FONTS_TO_LOAD } from '@/theme/fonts';
 import { requestPersistentStorage } from '@/lib/persistentStorage';
 import { initTimerNotificationSync } from '@/notifications/sync';
 import { initScheduledReminderSync, reconcileNow } from '@/notifications/scheduleSync';
+import { initBackgroundSync } from '@/notifications/backgroundSync';
 import { initWidgetSync } from '@/widgets/sync';
 
 SplashScreen.preventAutoHideAsync();
@@ -64,6 +65,9 @@ export default function RootLayout() {
     initWidgetSync();
     initTimerNotificationSync();
     initScheduledReminderSync();
+    // Registers the periodic WorkManager job. No-ops off Android. `void`: the
+    // registration is fire-and-forget, and it already swallows its own failures.
+    void initBackgroundSync();
     // Web only (no-ops on native): keep the browser from evicting localStorage,
     // which is where the entity store, the offline queue and the op-log all live.
     void requestPersistentStorage();
