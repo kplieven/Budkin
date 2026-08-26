@@ -66,7 +66,8 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const feedColor = t.activity.feeding;
   const diaperColor = t.activity.diaper;
   // Wider gutter than the trend charts so the full "Today" row label fits.
-  const gutter = 40, rightPad = 6, top = 8, axisH = 20, pitch = 8.5, rowH = 6.6;
+  // `top` leaves headroom for the "now" caption sitting above the plot.
+  const gutter = 40, rightPad = 6, top = 14, axisH = 20, pitch = 8.5, rowH = 6.6;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
@@ -92,6 +93,12 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   };
   const liveSleep = showSleep ? liveGeom(runningSince) : null;
   const liveFeed = showFeeds ? liveGeom(runningFeedSince) : null;
+
+  // The "now" rule runs the full height, not just the Today row: its whole point is
+  // reading the current clock position against the same position on every past day.
+  // At the window's edges it would sit on the frame, so it is dropped there.
+  const nowX = todayFrac > 0 && todayFrac < 1 ? xAt(todayFrac * 24) : null;
+  const nowLabelRight = nowX != null && nowX - gx < 24;
 
   // Scrub guide geometry: its x, the clock it points at (origin + fraction of the
   // 24h window), and a clamped left for the floating time label.
@@ -172,6 +179,16 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
             </Fragment>
           );
         })}
+        {/* Over the rows so it stays legible across a filled sleep bar, but under the
+            scrub guide, which is solid and full-opacity to stay the louder of the two. */}
+        {nowX != null ? (
+          <>
+            <Line x1={nowX} y1={top} x2={nowX} y2={top + gh} stroke={t.text} strokeWidth={1.25} strokeDasharray="3 3" opacity={0.45} />
+            <SvgText x={nowX + (nowLabelRight ? 3 : -3)} y={top - 4} fontSize={8} fontWeight="700" fontFamily={fontFamily(700)} fill={t.faint} textAnchor={nowLabelRight ? 'start' : 'end'}>
+              now
+            </SvgText>
+          </>
+        ) : null}
         {TICK_HS.map((h) => {
           // Drop a tick label that would collide with the standalone midnight label.
           if (!midnightOnTick && Math.abs(xAt(h) - xAt(midnightH)) < 20) return null;

@@ -13,7 +13,7 @@ import type { Band } from './norms';
 const numLabel = (v: number) => v.toFixed(2).replace(/\.?0+$/, '');
 const DAY_MS = 86400000;
 
-export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false, curves, xMax }: {
+export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, width, xMode = 'index', xStartLabel = 'Start', xEndLabel = 'Today', xTicks, fmtX, dots = 'last', hover = false, unit, fmtValue, fmtHoverDate, calendarBands = false, dashGaps = false, curves, xMax, now }: {
   points: TrendPoint[]; band: Band | null; color: string; ruleOfThumb?: boolean;
   yTicks: number[]; fmtY: (v: number) => string; width: number;
   xMode?: 'index' | 'time'; xStartLabel?: string; xEndLabel?: string;
@@ -28,6 +28,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   /** Time mode only: right edge of the time domain, defaulting to the last
    *  point's t, so the plot can extend past the last datum. */
   xMax?: number;
+  /** Time mode only: draws a dashed "now" rule at this timestamp. Ignored when it
+   *  falls outside the plotted domain — the caller widens `xMax` to make room. */
+  now?: number;
 }) {
   const t = useTheme();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -50,6 +53,10 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
   const xv = (i: number) => gx + xFrac(i) * gw;
   const xAtT = (ts: number) => (tMax > tMin ? gx + ((ts - tMin) / (tMax - tMin)) * gw : gx + gw / 2);
   const dotR = points.length > 40 ? 2 : points.length > 20 ? 2.6 : 3.2;
+  // "Now" rule, drawn only where it lands inside the domain. Its label hugs the line's
+  // left, flipping right when the line is too close to the y-axis for the text to fit.
+  const nowX = xMode === 'time' && now != null && tMax > tMin && now >= tMin && now <= tMax ? xAtT(now) : null;
+  const nowLabelRight = nowX != null && nowX - gx < 26;
 
   const area = (hi: number[], lo: number[]) => {
     let d = '';
@@ -133,6 +140,10 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
       {yTicks.map((v, i) => (
         <Line key={i} x1={gx} y1={yv(v)} x2={gx + gw} y2={yv(v)} stroke={t.line} strokeWidth={1} opacity={0.6} />
       ))}
+      {/* Under the data so it never breaks up the trend line it crosses. */}
+      {nowX != null ? (
+        <Line x1={nowX} y1={top} x2={nowX} y2={top + plotH} stroke={t.text} strokeWidth={1.25} strokeDasharray="3 3" opacity={0.45} />
+      ) : null}
       {daily ? (
         <>
           <Path d={solidD} fill="none" stroke={color} strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" />
@@ -152,6 +163,9 @@ export function TrendChart({ points, band, color, ruleOfThumb, yTicks, fmtY, wid
         <Circle cx={xv(hoverIdx)} cy={yv(points[hoverIdx].value)} r={dotR + 2.6} fill={color} stroke={t.surface} strokeWidth={2} />
       ) : null}
       {/* Axis labels paint LAST so the trend line never covers the text. */}
+      {nowX != null ? (
+        <SvgText x={nowX + (nowLabelRight ? 3 : -3)} y={top + 7} fontSize={8} fontWeight="700" fontFamily={fontFamily(700)} fill={t.faint} textAnchor={nowLabelRight ? 'start' : 'end'}>now</SvgText>
+      ) : null}
       {yTicks.map((v, i) => (
         <SvgText key={`y${i}`} x={gx - 6} y={yv(v) + 3.5} fontSize={9.5} fontWeight="600" fontFamily={fontFamily(600)} fill={t.faint} textAnchor="end">{fmtY(v)}</SvgText>
       ))}
