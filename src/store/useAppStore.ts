@@ -299,7 +299,10 @@ interface AppActions {
   setNetworkOnline: (online: boolean) => void;
 
   hydrate: () => Promise<void>;
-  refresh: () => Promise<void>;
+  /** Pull server state, then push whatever is pending. `push: false` takes the pull
+   *  alone — for callers that must not write, namely the Android background reminder
+   *  worker, whose headless context can be torn down mid-flush. */
+  refresh: (opts?: { push?: boolean }) => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
   /** `opts.uploadAnyway` overrides the non-empty-server guard, attaching to matching
    *  server children instead of duplicating them. Safe to call again after a `partial`. */
@@ -1279,7 +1282,21 @@ export function resetQueueRetryForTests(): void {
   queueRetryAttempt = 0;
 }
 
-let refreshInFlight = false;
+// Holds the PROMISE rather than a boolean, like `flushQueueInFlight` below: a second
+// caller JOINS the running refresh instead of getting an instant resolve. `hydrate()`
+// starts a refresh it does not await, so a boolean made `await refresh()` mean "someone
+// else is fetching" rather than "a refresh has finished" — the background reminder
+// worker awaited it right after `hydrate()` and reconciled against stale cached data.
+let refreshInFlight: Promise<void> | null = null;
+
+/** The PUSH half of `refresh()`. Fire-and-forget by design — each flush owns its own
+ *  in-flight latch, so triggering one that is already running joins it rather than
+ *  pushing anything twice. Callers gate this on `!offline`. */
+function pushPending(get: () => AppStore): void {
+  void get().flushQueue();
+  void get().flushPendingOps();
+  void get().flushUnsynced();
+}
 // Overlapping flushes would both POST the same serverId==null child.
 let flushUnsyncedInFlight = false;
 // Overlapping flushQueue calls would both read the same stored queue before either saves,
@@ -1592,80 +1609,115 @@ export const useAppStore = create<AppStore>((set, get) => ({
     });
     // refresh() reads `s.children`/`s.selectedChildId` to nominate the preferred child,
     // which the set() above just populated, so keep that ordering. Not awaited:
-    // hydrate's contract is "the UI can render", not "the server has answered".
+    // hydrate's contract is "the UI can render", not "the server has answered". A caller
+    // that DOES need the answer (the Android background reminder worker) calls refresh()
+    // itself and joins this one, since refresh() hands back the in-flight promise.
     void get().refresh();
     void sweepChildPhotos(get().children);
   },
-  refresh: async () => {
+  refresh: async (opts) => {
     const s = get();
     const conn = s.connection;
-    if (!conn || conn.mode !== 'server' || s.simulateOffline || refreshInFlight) return;
-    refreshInFlight = true;
-    // Timers can be mutated out-of-band by the home-screen widget while the app is warm,
-    // so re-read the on-device copy. Done up front so a widget-stopped nap reconciles
-    // even when the server is unreachable.
-    const localTimers = await loadTimers();
-    try {
-      // Every child's records come back, not just the selected one's. The id passed here
-      // does not steer the fetch, it only nominates the answer's `selectedChildId`.
-      const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
-      // This reload replaces `entries` wholesale, and an entry that has not flushed yet is
-      // not in the server data. Read AFTER the fetch so an entry logged mid-request is
-      // included; `flushQueue` drops one from the file the moment the server accepts it,
-      // so nothing here can duplicate a loaded row.
-      const q = await loadQueue();
-      // Read at APPLY time, not from the pre-fetch `s`: everything written mid-request is
-      // missing from that snapshot, and applying the answer over it silently undoes the
-      // write. Returning from the OS image picker is exactly this window, since it
-      // backgrounds the app and AppState 'active' fires this refresh.
-      const cur = get();
-      applyServerLoad(
-        set,
-        data,
-        {
-          children: cur.children,
-          // Pre-fetch snapshots: the difference is the mid-flight write to preserve, such
-          // as a measurement whose push stamped a `serverId` before the apply.
-          childrenBefore: s.children,
-          entries: cur.entries,
-          measurements: cur.measurements,
-          measurementsBefore: s.measurements,
-          treatments: cur.treatments,
-          selectedChildId: cur.selectedChildId,
-          timers: localTimers,
-          lastFeed: cur.lastFeed,
-          bathRhythms: cur.bathRhythms,
-          legacyRhythm: cur.legacyRhythm,
-          q,
-        },
-        { connected: true, offline: false, networkOnline: true },
-      );
-      void get().seedServerBathRhythms(data.bathRhythms);
-      void get().flushQueue();
-      void get().flushPendingOps();
-      void get().flushUnsynced();
-    } catch (e) {
-      if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-        await clearConnection();
-        set({
-          connection: null,
-          connected: false,
-          connectError: 'Session expired — please reconnect.',
-          profile: null,
-          profileLoaded: false,
-          profileError: false,
-          profileLoading: false,
-          tags: [],
-          tagsLoaded: false,
-          tagsLoading: false,
-        });
-      } else {
-        // Still reconcile local timers so a widget start/stop shows while offline.
-        set({ offline: true, timers: localTimers });
-      }
-    } finally {
-      refreshInFlight = false;
+    if (!conn || conn.mode !== 'server' || s.simulateOffline) return;
+    // refresh() is the foreground "sync now": it PULLS server state and then
+    // opportunistically PUSHES whatever is pending. `push: false` takes the pull alone.
+    //
+    // The Android background reminder worker is the only caller that wants that, and it
+    // must: a headless context is torn down the moment its task promise resolves, while
+    // `flushQueue` drops an entry from the durable queue only AFTER the server has
+    // accepted it. A teardown between those two steps re-pushes the entry on the next
+    // wake and duplicates it on the server — unattended, every time the gate opens.
+    // Nothing in the reminder path needs the push half: `applyServerLoad` already merges
+    // the queue file back into `entries`, so a still-queued row is visible to
+    // `desiredScheduled` either way.
+    const push = opts?.push !== false;
+    // JOIN the refresh already running rather than resolving instantly. Awaiting
+    // refresh() has to mean "a refresh has finished" for EVERY caller: `hydrate()`
+    // starts one it does not await, so an instant resolve handed the next awaiting
+    // caller a false "done" — the Android background reminder worker awaits a refresh
+    // right after hydrate() and would otherwise reconcile against stale cached data.
+    if (refreshInFlight) {
+      await refreshInFlight;
+      // Falls through to the push below rather than returning: a pushing caller that
+      // joined a NON-pushing run still owes its own flush.
+      if (push && !get().offline) pushPending(get);
+      return;
     }
+    const run = (async () => {
+      // Timers can be mutated out-of-band by the home-screen widget while the app is warm,
+      // so re-read the on-device copy. Done up front so a widget-stopped nap reconciles
+      // even when the server is unreachable.
+      const localTimers = await loadTimers();
+      try {
+        // Every child's records come back, not just the selected one's. The id passed here
+        // does not steer the fetch, it only nominates the answer's `selectedChildId`.
+        const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
+        // This reload replaces `entries` wholesale, and an entry that has not flushed yet is
+        // not in the server data. Read AFTER the fetch so an entry logged mid-request is
+        // included; `flushQueue` drops one from the file the moment the server accepts it,
+        // so nothing here can duplicate a loaded row.
+        const q = await loadQueue();
+        // Read at APPLY time, not from the pre-fetch `s`: everything written mid-request is
+        // missing from that snapshot, and applying the answer over it silently undoes the
+        // write. Returning from the OS image picker is exactly this window, since it
+        // backgrounds the app and AppState 'active' fires this refresh.
+        const cur = get();
+        applyServerLoad(
+          set,
+          data,
+          {
+            children: cur.children,
+            // Pre-fetch snapshots: the difference is the mid-flight write to preserve, such
+            // as a measurement whose push stamped a `serverId` before the apply.
+            childrenBefore: s.children,
+            entries: cur.entries,
+            measurements: cur.measurements,
+            measurementsBefore: s.measurements,
+            treatments: cur.treatments,
+            selectedChildId: cur.selectedChildId,
+            timers: localTimers,
+            lastFeed: cur.lastFeed,
+            bathRhythms: cur.bathRhythms,
+            legacyRhythm: cur.legacyRhythm,
+            q,
+          },
+          { connected: true, offline: false, networkOnline: true },
+        );
+        // Seeding is a WRITE, so it rides `push` too. Skipping a round costs nothing:
+        // it only seeds children the server has no rhythm note for, and hydrate,
+        // connect and adopt all seed as well.
+        if (push) void get().seedServerBathRhythms(data.bathRhythms);
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
+          await clearConnection();
+          set({
+            connection: null,
+            connected: false,
+            connectError: 'Session expired — please reconnect.',
+            profile: null,
+            profileLoaded: false,
+            profileError: false,
+            profileLoading: false,
+            tags: [],
+            tagsLoaded: false,
+            tagsLoading: false,
+          });
+        } else {
+          // Still reconcile local timers so a widget start/stop shows while offline.
+          set({ offline: true, timers: localTimers });
+        }
+      }
+    })();
+    refreshInFlight = run;
+    try {
+      await run;
+    } finally {
+      refreshInFlight = null;
+    }
+    // AFTER the pull settles, not inside it. `offline` is false only on the success
+    // path, so a failed pull pushes nothing, and a 401 has cleared the connection that
+    // every flush re-checks.
+    if (push && !get().offline) pushPending(get);
   },
   connect: async (serverUrl, token) => {
     set({ connecting: true, connectError: null });

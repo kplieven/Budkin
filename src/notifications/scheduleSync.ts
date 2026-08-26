@@ -83,16 +83,51 @@ function toInput(s: State, now: number): ScheduleInput {
 // with nothing to reschedule it. Module-scoped so `reconcileNow` shares the latch.
 let busy = false;
 let queued: State | null = null;
+// Resolves when the CHAIN drains, not when one `applyScheduled` does: a queued
+// follow-up is part of the same reconcile as far as an awaiting caller cares.
+let idle: Promise<void> | null = null;
+let settleIdle: (() => void) | null = null;
+
+// Clears the handles BEFORE resolving, so a caller woken by this resolution
+// starts a fresh chain instead of adopting a spent one.
+function settleChain(): void {
+  const done = settleIdle;
+  idle = null;
+  settleIdle = null;
+  done?.();
+}
+
 function run(s: State): void {
   if (busy) {
     queued = s;
     return;
   }
+  if (!idle) {
+    idle = new Promise<void>((resolve) => {
+      settleIdle = resolve;
+    });
+  }
   // Built before `busy` flips, so a throw cannot latch it true. One `now` for
   // all three, so nothing here straddles a local midnight.
-  const now = Date.now();
-  const input = toInput(s, now);
-  const desired = desiredScheduled(input, now);
+  //
+  // Caught rather than left to escape: this function also runs as a recursive,
+  // un-awaited continuation from inside the `.finally` below (the queued
+  // follow-up). A throw there would surface only as an unhandled rejection,
+  // with `idle` left dangling forever — the exact hang a headless background
+  // awaiter can never recover from. So a build failure here still settles the
+  // chain, same as a settled `applyScheduled` call would.
+  let now: number;
+  let input: ScheduleInput;
+  let desired: ReturnType<typeof desiredScheduled>;
+  try {
+    now = Date.now();
+    input = toInput(s, now);
+    desired = desiredScheduled(input, now);
+  } catch (e) {
+    console.warn('[scheduleSync] failed to build desired schedule:', e);
+    settleChain();
+    return;
+  }
   busy = true;
   void applyScheduled(desired, input, now).finally(() => {
     busy = false;
@@ -100,16 +135,29 @@ function run(s: State): void {
       const next = queued;
       queued = null;
       run(next);
+      return;
     }
+    settleChain();
   });
 }
 
 /** For the two call sites that change what Android should hold WITHOUT touching
  *  a gated store slice: granting permission, and returning to the foreground. */
 export function reconcileNow(): void {
+  void reconcileAndWait().catch((e) => console.warn('[scheduleSync] reconcileNow failed:', e));
+}
+
+/** `reconcileNow` for callers that must not return until the OS's pending set is
+ *  actually settled — specifically the background task, whose headless context is
+ *  torn down the moment its promise resolves. */
+export async function reconcileAndWait(): Promise<void> {
   const state = useAppStore.getState();
   if (state.hydrating) return;
   run(state);
+  // Read after `run`, which sets `idle` synchronously; `.finally` cannot have
+  // fired yet, since it is at best a microtask away.
+  const chain = idle;
+  if (chain) await chain;
 }
 
 export function initScheduledReminderSync(): void {

@@ -93,6 +93,7 @@
           "defaultChannel": "timers"
         }
       ],
+      "expo-background-task",
       "./plugins/withQuickLogShortcuts"
     ],
     "experiments": {
