@@ -9,8 +9,8 @@ import { isHovered } from '@/components/hover';
 import { IconButton } from '@/components/IconButton';
 import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
-import { changeSince, seriesFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
-import { referenceCurves, hasWhoAgeOverlap, MONTH_MS } from '@/features/measurements/whoReference';
+import { changeSince, seriesFor, xDomainFor, xTicksFor, yTicksFor } from '@/features/measurements/growthChart';
+import { referenceCurves, hasWhoAgeOverlap } from '@/features/measurements/whoReference';
 import { DISCLAIMER } from '@/features/insights/norms';
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
@@ -53,6 +53,9 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const openEditMeasurement = useAppStore((s) => s.openEditMeasurement);
   const showRef = useAppStore((s) => s.showGrowthReference);
   const setRef = useAppStore((s) => s.setGrowthReference);
+  // Hour granularity is far finer than a chart spanning weeks needs, and keeps the
+  // store's per-second tick from re-rendering the whole page.
+  const nowH = useAppStore((s) => Math.floor(s.now / 3600000) * 3600000);
   const [refInfo, setRefInfo] = useState(false);
 
   // Reachable only via a typed or bookmarked /metric/<kind> URL while the selected
@@ -82,22 +85,28 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
   const overlap = !!child && points.length >= 2 && hasWhoAgeOverlap(child.birth, tMin, tMax);
   const isSexed = child?.gender === 'girl' || child?.gender === 'boy';
   const refAvailable = overlap && isSexed && !!child;
-  // Capped at WHO's 60-month limit so the curves never run past where the
-  // standard ends.
-  const refXMax = refAvailable && showRef && child
-    ? Math.max(tMax, Math.min(tMax + (tMax - tMin) * REF_X_HEADROOM, child.birth + 60 * MONTH_MS))
-    : tMax;
+  // The plot always runs out to now, so the "now" rule stays on-chart when the last
+  // measurement is weeks old; the reference stretches with it, capped at WHO's
+  // 60-month limit so the curves never run past where the standard ends.
+  const { xMax: domainMax, refXMax } = xDomainFor({
+    tMin,
+    tMax,
+    now: nowH,
+    reference: refAvailable && showRef && child ? { birth: child.birth, headroom: REF_X_HEADROOM } : null,
+  });
   const refAll = refAvailable && child
     ? referenceCurves(kind, child.gender, child.birth, tMin, refXMax, unitSystem)
     : null;
   const curves = showRef ? refAll : null;
-  const extended = curves != null && refXMax > tMax;
+  // Needs two points for a domain to extend from; without them tMin/tMax are 0 and
+  // every timestamp looks like an extension.
+  const extended = points.length >= 2 && domainMax > tMax;
   const refValues = curves?.flatMap((c) => c.points.map((p) => p.value)) ?? [];
   const { ticks, fmtY } = yTicksFor(points, refValues);
   const chartW = width - 32; // card horizontal padding (16 * 2), matches the width prop below
   const maxXTicks = Math.max(2, Math.min(7, Math.floor((chartW - 36) / 56) + 1)); // ~56px per label; 36 = svg gutter+right
   // With the axis extended, add the far edge to the tick domain so a label lands there.
-  const xTickPoints = extended ? [...points, { t: refXMax, value: points[points.length - 1].value }] : points;
+  const xTickPoints = extended ? [...points, { t: domainMax, value: points[points.length - 1].value }] : points;
   const { ticks: xTicks, fmtX } = xTicksFor(xTickPoints, maxXTicks);
   const history = childMeasurements.filter((x) => x.kind === kind).sort((a, b) => b.date - a.date);
 
@@ -165,7 +174,8 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
             points={points}
             band={null}
             curves={curves ?? undefined}
-            xMax={extended ? refXMax : undefined}
+            xMax={extended ? domainMax : undefined}
+            now={nowH}
             color={meta.color}
             yTicks={ticks}
             fmtY={fmtY}

@@ -1,5 +1,6 @@
 import type { TrendPoint } from '@/features/insights/compute';
 import type { Measurement, MeasurementKind } from '@/types/models';
+import { MONTH_MS } from './whoReference';
 
 /** Measurements of one kind, oldest first, as chart points. */
 export function seriesFor(measurements: Measurement[], kind: MeasurementKind): TrendPoint[] {
@@ -90,6 +91,28 @@ export function xTicksFor(points: TrendPoint[], maxTicks: number): { ticks: numb
   }
   if (ticks.length < 2) ticks = [tMin, tMax];
   return { ticks, fmtX };
+}
+
+/**
+ * Right edge of the plotted time domain, and of the WHO reference span inside it.
+ *
+ * The domain always reaches `now` so the "now" marker stays on-chart when the last
+ * measurement is weeks old — the empty stretch to the right of the last point is the
+ * gap since it was taken. The reference stretches to match rather than stopping short
+ * of the marker, whichever of its own headroom or `now` reaches further, still capped
+ * at WHO's 60-month limit. Past that cap the curves end early and only the data domain
+ * runs on to `now`.
+ */
+export function xDomainFor({ tMin, tMax, now, reference }: {
+  tMin: number; tMax: number; now: number;
+  /** Non-null only while the reference is actually being drawn. */
+  reference: { birth: number; headroom: number } | null;
+}): { xMax: number; refXMax: number } {
+  const nowMax = Math.max(tMax, now);
+  if (!reference) return { xMax: nowMax, refXMax: tMax };
+  const want = Math.max(tMax + (tMax - tMin) * reference.headroom, nowMax);
+  const refXMax = Math.max(tMax, Math.min(want, reference.birth + 60 * MONTH_MS));
+  return { xMax: Math.max(nowMax, refXMax), refXMax };
 }
 
 /** Change from the previous measurement to the latest, and the previous date. */

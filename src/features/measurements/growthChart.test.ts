@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { changeSince, seriesFor, xTicksFor, yTicksFor } from './growthChart';
+import { changeSince, seriesFor, xDomainFor, xTicksFor, yTicksFor } from './growthChart';
+import { MONTH_MS } from './whoReference';
 import type { Measurement } from '@/types/models';
 
 const DAY = 86400000;
@@ -135,5 +136,55 @@ describe('changeSince', () => {
   it('returns null for fewer than two points', () => {
     expect(changeSince([])).toBeNull();
     expect(changeSince([{ t: 1, value: 5 }])).toBeNull();
+  });
+});
+
+describe('xDomainFor', () => {
+  const tMin = base;
+  const tMax = base + 60 * DAY;
+
+  it('stretches the domain to now when the last measurement is in the past', () => {
+    const now = tMax + 20 * DAY;
+    expect(xDomainFor({ tMin, tMax, now, reference: null })).toEqual({ xMax: now, refXMax: tMax });
+  });
+
+  it('ends at the last measurement when now is not past it', () => {
+    const now = tMax - 5 * DAY;
+    expect(xDomainFor({ tMin, tMax, now, reference: null })).toEqual({ xMax: tMax, refXMax: tMax });
+  });
+
+  it('leaves the reference span at the last measurement when the reference is off', () => {
+    const r = xDomainFor({ tMin, tMax, now: tMax + 400 * DAY, reference: null });
+    expect(r.refXMax).toBe(tMax);
+  });
+
+  it('extends the reference by its headroom when that reaches past now', () => {
+    const now = tMax + DAY;
+    const r = xDomainFor({ tMin, tMax, now, reference: { birth: base - 30 * DAY, headroom: 1 } });
+    expect(r.refXMax).toBe(tMax + (tMax - tMin)); // headroom wins over now
+    expect(r.xMax).toBe(r.refXMax);
+  });
+
+  it('stretches the reference to reach now when now is past the headroom', () => {
+    const now = tMax + 300 * DAY;
+    const r = xDomainFor({ tMin, tMax, now, reference: { birth: base - 30 * DAY, headroom: 1 } });
+    expect(r.refXMax).toBe(now);
+    expect(r.xMax).toBe(now);
+  });
+
+  it('caps the reference at 60 months of age but still plots out to now', () => {
+    const birth = base - 30 * DAY;
+    const cap = birth + 60 * MONTH_MS;
+    const now = cap + 200 * DAY;
+    const r = xDomainFor({ tMin, tMax, now, reference: { birth, headroom: 1 } });
+    expect(r.refXMax).toBe(cap);
+    expect(r.xMax).toBe(now);
+  });
+
+  it('never pulls the reference back before the last measurement', () => {
+    const birth = base - 80 * MONTH_MS; // already past the 60-month cap
+    const r = xDomainFor({ tMin, tMax, now: tMax, reference: { birth, headroom: 1 } });
+    expect(r.refXMax).toBe(tMax);
+    expect(r.xMax).toBe(tMax);
   });
 });
