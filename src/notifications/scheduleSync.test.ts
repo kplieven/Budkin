@@ -711,6 +711,10 @@ describe('reconcileAndWait', () => {
     const { useAppStore } = await import('@/store/useAppStore');
     useAppStore.setState({ hydrating: false });
     vi.mocked(applyScheduled).mockClear();
+    // Cleared so "call #2" below is unambiguous: this describe block does not
+    // go through setup()'s vi.resetModules(), so mock call counts otherwise
+    // carry over from whichever test ran before this one.
+    vi.mocked(desiredScheduled).mockClear();
 
     let release!: () => void;
     const blocked = new Promise<void>((r) => {
@@ -719,19 +723,31 @@ describe('reconcileAndWait', () => {
     vi.mocked(applyScheduled).mockImplementationOnce(async () => {
       await blocked;
     });
-    // The coalesced follow-up's build (not the first run's) throws.
-    vi.mocked(desiredScheduled).mockImplementationOnce(() => {
-      throw new Error('boom');
+    // Throws on the SECOND call within this test, not the first: call #1 is
+    // `a`'s own synchronous build, which must succeed so `a`'s applyScheduled
+    // actually starts and has something to coalesce behind. Call #2 is the
+    // coalesced follow-up's build, made un-awaited from inside run()'s
+    // `.finally` continuation once the first applyScheduled settles — the
+    // exact spot this fix guards. A plain mockImplementationOnce would instead
+    // consume on call #1, proving nothing about the follow-up path.
+    let desiredCalls = 0;
+    vi.mocked(desiredScheduled).mockImplementation(() => {
+      desiredCalls += 1;
+      if (desiredCalls === 2) throw new Error('boom');
+      return [];
     });
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
       const a = reconcileAndWait();
-      const b = reconcileAndWait(); // queued; this becomes the run that throws
+      const b = reconcileAndWait(); // coalesces behind `a`; its build is call #2
       release();
 
       await expect(a).resolves.toBeUndefined();
       await expect(b).resolves.toBeUndefined();
+      // Only `a`'s (non-throwing) build ever reached applyScheduled; the
+      // coalesced follow-up's build failed before it could call applyScheduled.
+      expect(vi.mocked(applyScheduled).mock.calls.length).toBe(1);
       expect(warn).toHaveBeenCalledWith('[scheduleSync] failed to build desired schedule:', expect.any(Error));
     } finally {
       warn.mockRestore();
