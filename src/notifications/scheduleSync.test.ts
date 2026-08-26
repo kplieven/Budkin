@@ -589,3 +589,67 @@ describe('delivered-sweep projection', () => {
     expect(applied[2]).toBe(built[1]);
   });
 });
+
+describe('reconcileAndWait', () => {
+  it('resolves only after applyScheduled has settled', async () => {
+    const { applyScheduled } = await import('@/notifications/applySchedule');
+    const { reconcileAndWait } = await import('@/notifications/scheduleSync');
+    const { useAppStore } = await import('@/store/useAppStore');
+    useAppStore.setState({ hydrating: false });
+
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    let settled = false;
+    vi.mocked(applyScheduled).mockImplementationOnce(async () => {
+      await blocked;
+    });
+
+    const waiting = reconcileAndWait().then(() => {
+      settled = true;
+    });
+
+    // Give the microtask queue a turn: without the fix, `reconcileAndWait`
+    // resolves here because `run()` never awaited `applyScheduled`.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    release();
+    await waiting;
+    expect(settled).toBe(true);
+  });
+
+  it('coalesces a second call into the in-flight run rather than starting a third', async () => {
+    const { applyScheduled } = await import('@/notifications/applySchedule');
+    const { reconcileAndWait } = await import('@/notifications/scheduleSync');
+    const { useAppStore } = await import('@/store/useAppStore');
+    useAppStore.setState({ hydrating: false });
+    vi.mocked(applyScheduled).mockClear();
+
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.mocked(applyScheduled).mockImplementationOnce(async () => {
+      await blocked;
+    });
+
+    const a = reconcileAndWait();
+    const b = reconcileAndWait();
+    release();
+    await Promise.all([a, b]);
+
+    // One run for the first call, one for the queued follow-up. Never three.
+    expect(vi.mocked(applyScheduled).mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+  it('resolves rather than hanging when the store is still hydrating', async () => {
+    const { reconcileAndWait } = await import('@/notifications/scheduleSync');
+    const { useAppStore } = await import('@/store/useAppStore');
+    useAppStore.setState({ hydrating: true });
+    await expect(reconcileAndWait()).resolves.toBeUndefined();
+    useAppStore.setState({ hydrating: false });
+  });
+});
