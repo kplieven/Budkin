@@ -1459,6 +1459,57 @@ describe('save', () => {
   });
 });
 
+// The Android background reminder worker needs the PULL half of refresh() so the
+// reminder set is computed against fresh server data, but it must never take the PUSH
+// half: its headless context is torn down the moment its task resolves, and flushQueue
+// drops an entry from the durable queue only AFTER the server has accepted it. A
+// teardown between those two steps re-pushes the entry on the next wake, duplicating it
+// on the server — unattended, every time the gate opens.
+describe('refresh({ push: false })', () => {
+  const conn = { mode: 'server', serverUrl: 'http://x', token: 't' } as const;
+  const queued: Entry = {
+    id: 'x', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [],
+  };
+
+  function arrangeQueued() {
+    useAppStore.setState({ connection: conn, offline: false, children: [SYNCED_C1], queueCount: 1, queuedIds: ['x'] });
+    h.q = [queued];
+  }
+
+  it('pulls server state without pushing the queue', async () => {
+    arrangeQueued();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [SYNCED_C1], entries: [], measurements: [], treatments: [],
+      selectedChildId: 'c1', lastFeed: {}, timers: [],
+    });
+
+    await s().refresh({ push: false });
+    await flush();
+
+    // The pull landed...
+    expect(vi.mocked(loadFromServer)).toHaveBeenCalled();
+    expect(s().offline).toBe(false);
+    // ...and the queue is untouched, still durable for the foreground to flush.
+    expect(h.pushed).toHaveLength(0);
+    expect(h.q).toHaveLength(1);
+    expect(s().queueCount).toBe(1);
+  });
+
+  it('still pushes on the default call, so the foreground is unchanged', async () => {
+    arrangeQueued();
+    vi.mocked(loadFromServer).mockResolvedValueOnce({
+      children: [SYNCED_C1], entries: [], measurements: [], treatments: [],
+      selectedChildId: 'c1', lastFeed: {}, timers: [],
+    });
+
+    await s().refresh();
+    await flush();
+
+    expect(h.pushed).toHaveLength(1);
+    expect(h.q).toHaveLength(0);
+  });
+});
+
 describe('flushQueue', () => {
   it('pushes queued entries and clears on success', async () => {
     useAppStore.setState({ children: [SYNCED_C1] });
@@ -2841,6 +2892,97 @@ describe('cache-first hydrate (server mode)', () => {
     rejectLoad(new Error('network'));
     await flush();
     expect(s().offline).toBe(true);
+  });
+
+  // `hydrate()` starts a refresh it deliberately does not await. A caller that awaits
+  // `refresh()` straight afterwards must therefore JOIN that one, not be told "already
+  // busy, you are done": the Android background reminder worker does exactly this on a
+  // cold wake, and an instant resolve had it reconcile the OS alarm set against the
+  // stale cached data, stamp the sync as successful, and then tear the headless JS
+  // context down on top of hydrate's own in-flight fetch.
+  describe('a refresh awaited while one is in flight', () => {
+    /** Resolves on a MACROTASK, so a caller that only drains microtasks cannot
+     *  accidentally observe the answer and pass for the wrong reason. */
+    function slowServerLoad(delayMs = 5) {
+      vi.mocked(loadFromServer).mockImplementationOnce(
+        () =>
+          new Promise((res) =>
+            setTimeout(
+              () =>
+                res({
+                  treatments: [],
+                  children: [{ id: '501', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
+                  entries: [{ id: 'srv-1', serverId: 5, childId: '501', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] }],
+                  timers: [],
+                  selectedChildId: '501',
+                  lastFeed: {},
+                  measurements: [],
+                  incompleteSlices: {},
+                }),
+              delayMs,
+            ),
+          ) as never,
+      );
+    }
+
+    it('waits for the server answer instead of resolving instantly (background worker cold path)', async () => {
+      useAppStore.setState({ hydrating: true, connection: null, connected: false, children: [], entries: [], selectedChildId: '' });
+      vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+      vi.mocked(loadEntities).mockResolvedValueOnce({
+        children: [storedChild],
+        entries: [storedEntry],
+        measurements: [],
+        selectedChildId: 'c1',
+        lastFeed: {},
+        legacyLastFeed: null,
+      });
+      slowServerLoad();
+
+      // Verbatim the worker's two lines.
+      await useAppStore.getState().hydrate();
+      await useAppStore.getState().refresh();
+
+      // Server data, not the cache: the awaited refresh really fetched.
+      expect(s().entries.map((e) => e.id)).toEqual(['srv-1']);
+      expect(s().offline).toBe(false);
+      expect(vi.mocked(loadFromServer)).toHaveBeenCalledTimes(1); // joined, not a second fetch
+    });
+
+    it('reports the FAILURE of the joined refresh through `offline`', async () => {
+      // The same cold path with an unreachable server. `refresh()` never rethrows, so
+      // `offline` is the only signal the worker has that it must not stamp the sync.
+      useAppStore.setState({ hydrating: true, connection: null, connected: false, offline: false, children: [], entries: [] });
+      vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+      vi.mocked(loadFromServer).mockImplementationOnce(
+        () => new Promise((_res, rej) => setTimeout(() => rej(new Error('network')), 5)) as never,
+      );
+
+      await useAppStore.getState().hydrate();
+      await expect(useAppStore.getState().refresh()).resolves.toBeUndefined();
+
+      expect(s().offline).toBe(true);
+    });
+
+    it('joins two concurrent callers onto a single fetch, both awaiting the answer', async () => {
+      useAppStore.setState({ hydrating: false, connection: { mode: 'server', serverUrl: 'http://x', token: 't' }, connected: true, children: [], entries: [], selectedChildId: '' });
+      slowServerLoad();
+
+      const first = s().refresh();
+      const second = s().refresh();
+      await Promise.all([first, second]);
+
+      expect(vi.mocked(loadFromServer)).toHaveBeenCalledTimes(1);
+      expect(s().entries.map((e) => e.id)).toEqual(['srv-1']);
+    });
+
+    it('releases the join so the NEXT refresh fetches again', async () => {
+      useAppStore.setState({ hydrating: false, connection: { mode: 'server', serverUrl: 'http://x', token: 't' }, connected: true, children: [], entries: [], selectedChildId: '' });
+      slowServerLoad();
+      await s().refresh();
+      slowServerLoad();
+      await s().refresh();
+      expect(vi.mocked(loadFromServer)).toHaveBeenCalledTimes(2);
+    });
   });
 });
 
