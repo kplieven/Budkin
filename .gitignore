@@ -49,3 +49,6 @@ example
 
 # the store-asset scripts import each other
 __pycache__/
+
+# Generated dev-only demo-data seeder (scripts/devSeedPage.mjs)
+public/__seed.html
