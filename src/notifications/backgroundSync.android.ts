@@ -54,13 +54,26 @@ export async function runBackgroundSync(now: number): Promise<void> {
   // A failed refresh must not abort the reconcile: local data may still have
   // moved since the last one, and skipping the stamp below is what makes an
   // unreachable server retry at the next wake instead of waiting out the floor.
-  let refreshed = true;
-  try {
-    await useAppStore.getState().refresh();
-  } catch (e) {
-    refreshed = false;
-    console.warn('[backgroundSync] refresh failed:', e);
-  }
+  //
+  // The success signal is `offline`, NOT a try/catch. `refresh()` swallows every
+  // failure and never rethrows — a 401/403 clears the connection, anything else sets
+  // `offline: true` — so a catch here can only be dead code that reports success on
+  // every wake. The success path applies the server load with `offline: false`, so
+  // reading the flag AFTER the awaited refresh separates the two, including when it
+  // was already true on entry: a successful refresh clears it.
+  //
+  // Awaited, and this is the whole point of `refresh()` joining an in-flight one
+  // rather than bailing: `hydrate()` above starts a refresh it does not await.
+  //
+  // `push: false` — the PULL half only. This context is torn down the moment the task
+  // promise resolves, and `flushQueue` drops an entry from the durable queue only AFTER
+  // the server accepts it, so a teardown between those two steps re-pushes the entry on
+  // the next wake and duplicates it on the server. Reconciling reminders needs no write:
+  // `applyServerLoad` merges the queue file back into `entries`, so a still-queued row is
+  // visible to `desiredScheduled` regardless. The foreground still flushes as it always did.
+  await useAppStore.getState().refresh({ push: false });
+  const refreshed = !useAppStore.getState().offline;
+  if (!refreshed) console.warn('[backgroundSync] refresh left the store offline; not stamping');
 
   // Awaited, not fired and forgotten: this context is torn down the moment the
   // task's promise resolves, and a partial reconcile persists across launches.

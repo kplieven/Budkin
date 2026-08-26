@@ -33,6 +33,13 @@ export function shouldBackgroundSync(g: BackgroundSyncGate): boolean {
   if (g.lastSyncAt == null) return true;
   if (g.now - g.lastSyncAt >= SYNC_FLOOR_H * 3_600_000) return true;
 
+  // Throttle the pre-fire branch to at most one sync per window. Two things need it:
+  // ~15-minute wakes put about TWO of them inside a 30-minute window, and a reminder
+  // whose `fireAt` is already past — a Doze-deferred alarm — matches the cutoff on
+  // EVERY wake thereafter, which is the ~1000 req/day profile this design exists to
+  // avoid. The idle floor above still guarantees a sync every SYNC_FLOOR_H.
+  if (g.now - g.lastSyncAt < PREFIRE_WINDOW_MIN * 60_000) return false;
+
   const cutoff = g.now + PREFIRE_WINDOW_MIN * 60_000;
   for (const id of g.pendingIds) {
     // `parseReminderId` assumes a pre-filtered id and does not check the prefix
