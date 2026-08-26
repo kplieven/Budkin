@@ -638,11 +638,104 @@ describe('reconcileAndWait', () => {
 
     const a = reconcileAndWait();
     const b = reconcileAndWait();
+    // The second call must coalesce into the in-flight run rather than start a
+    // second OS call of its own while the first is still pending.
+    expect(vi.mocked(applyScheduled).mock.calls.length).toBe(1);
+
     release();
     await Promise.all([a, b]);
 
-    // One run for the first call, one for the queued follow-up. Never three.
-    expect(vi.mocked(applyScheduled).mock.calls.length).toBeLessThanOrEqual(2);
+    // Exactly one run for the first call, one for the queued follow-up it
+    // coalesced with. Never a third.
+    expect(vi.mocked(applyScheduled).mock.calls.length).toBe(2);
+  });
+
+  it('does not resolve while a coalesced follow-up run is still in flight', async () => {
+    const { applyScheduled } = await import('@/notifications/applySchedule');
+    const { reconcileAndWait } = await import('@/notifications/scheduleSync');
+    const { useAppStore } = await import('@/store/useAppStore');
+    useAppStore.setState({ hydrating: false });
+    vi.mocked(applyScheduled).mockClear();
+
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((r) => {
+      releaseFirst = r;
+    });
+    let releaseSecond!: () => void;
+    const second = new Promise<void>((r) => {
+      releaseSecond = r;
+    });
+    vi.mocked(applyScheduled)
+      .mockImplementationOnce(async () => {
+        await first;
+      })
+      .mockImplementationOnce(async () => {
+        await second;
+      });
+
+    let settledA = false;
+    let settledB = false;
+    const a = reconcileAndWait().then(() => {
+      settledA = true;
+    });
+    const b = reconcileAndWait().then(() => {
+      settledB = true;
+    });
+
+    await flush();
+    expect(vi.mocked(applyScheduled).mock.calls.length).toBe(1);
+    expect(settledA).toBe(false);
+    expect(settledB).toBe(false);
+
+    releaseFirst();
+    await flush();
+
+    // The coalesced follow-up (call #2, from `b`) must now be in flight, and
+    // BOTH awaiters must still be pending: `a` resolving here (before the
+    // follow-up it coalesced with has settled) is exactly the "torn down
+    // mid-reconcile" failure this task exists to prevent.
+    expect(vi.mocked(applyScheduled).mock.calls.length).toBe(2);
+    expect(settledA).toBe(false);
+    expect(settledB).toBe(false);
+
+    releaseSecond();
+    await Promise.all([a, b]);
+    expect(settledA).toBe(true);
+    expect(settledB).toBe(true);
+  });
+
+  it('settles rather than hanging when a coalesced follow-up run throws while building its desired set', async () => {
+    const { applyScheduled } = await import('@/notifications/applySchedule');
+    const { desiredScheduled } = await import('@/notifications/scheduled');
+    const { reconcileAndWait } = await import('@/notifications/scheduleSync');
+    const { useAppStore } = await import('@/store/useAppStore');
+    useAppStore.setState({ hydrating: false });
+    vi.mocked(applyScheduled).mockClear();
+
+    let release!: () => void;
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    vi.mocked(applyScheduled).mockImplementationOnce(async () => {
+      await blocked;
+    });
+    // The coalesced follow-up's build (not the first run's) throws.
+    vi.mocked(desiredScheduled).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      const a = reconcileAndWait();
+      const b = reconcileAndWait(); // queued; this becomes the run that throws
+      release();
+
+      await expect(a).resolves.toBeUndefined();
+      await expect(b).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalledWith('[scheduleSync] failed to build desired schedule:', expect.any(Error));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('resolves rather than hanging when the store is still hydrating', async () => {

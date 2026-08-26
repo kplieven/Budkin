@@ -88,22 +88,47 @@ let queued: State | null = null;
 let idle: Promise<void> | null = null;
 let settleIdle: (() => void) | null = null;
 
+// Clears the handles BEFORE resolving, so a caller woken by this resolution
+// starts a fresh chain instead of adopting a spent one.
+function settleChain(): void {
+  const done = settleIdle;
+  idle = null;
+  settleIdle = null;
+  done?.();
+}
+
 function run(s: State): void {
   if (busy) {
     queued = s;
     return;
   }
-  // Built before `busy` flips, so a throw cannot latch it true. One `now` for
-  // all three, so nothing here straddles a local midnight.
-  const now = Date.now();
-  const input = toInput(s, now);
-  const desired = desiredScheduled(input, now);
-  busy = true;
   if (!idle) {
     idle = new Promise<void>((resolve) => {
       settleIdle = resolve;
     });
   }
+  // Built before `busy` flips, so a throw cannot latch it true. One `now` for
+  // all three, so nothing here straddles a local midnight.
+  //
+  // Caught rather than left to escape: this function also runs as a recursive,
+  // un-awaited continuation from inside the `.finally` below (the queued
+  // follow-up). A throw there would surface only as an unhandled rejection,
+  // with `idle` left dangling forever — the exact hang a headless background
+  // awaiter can never recover from. So a build failure here still settles the
+  // chain, same as a settled `applyScheduled` call would.
+  let now: number;
+  let input: ScheduleInput;
+  let desired: ReturnType<typeof desiredScheduled>;
+  try {
+    now = Date.now();
+    input = toInput(s, now);
+    desired = desiredScheduled(input, now);
+  } catch (e) {
+    console.warn('[scheduleSync] failed to build desired schedule:', e);
+    settleChain();
+    return;
+  }
+  busy = true;
   void applyScheduled(desired, input, now).finally(() => {
     busy = false;
     if (queued) {
@@ -112,12 +137,7 @@ function run(s: State): void {
       run(next);
       return;
     }
-    // Chain drained. Clear the handles BEFORE resolving, so a caller woken by
-    // this resolution starts a fresh chain instead of adopting a spent one.
-    const done = settleIdle;
-    idle = null;
-    settleIdle = null;
-    done?.();
+    settleChain();
   });
 }
 
