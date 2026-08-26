@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiError,
   BabybuddyClient,
+  bathRhythmFromNote,
+  bathRhythmToNoteBody,
   bathToNoteBody,
   childBody,
   treatmentToNoteBody,
@@ -15,6 +17,7 @@ import {
   genderToNoteBody,
   HIDDEN_TAGS,
   isBathNote,
+  isBathRhythmNote,
   isTreatmentNote,
   isGenderNote,
   isHiddenTag,
@@ -1729,6 +1732,178 @@ describe('gender <-> note serialization', () => {
     vi.stubGlobal('fetch', fetchMock);
     await new BabybuddyClient('https://example.com', 'tok').setChildGender(5, undefined, AT);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('bath rhythm <-> note serialization', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const AT = new Date(2026, 2, 4, 10, 0).getTime();
+
+  it('encodes the rhythm as a tagged note with readable body', () => {
+    const body = bathRhythmToNoteBody({ fullEveryDays: 3, quickEveryDays: 1 }, 5, AT) as any;
+    expect(body.child).toBe(5);
+    expect(body.tags).toEqual(['bath:rhythm', 'bath:rhythm:full:3', 'bath:rhythm:quick:1']);
+    expect(body.note).toBe('Bath rhythm: full bath every 3 days, quick wash daily');
+    expect(new Date(body.time).getTime()).toBe(AT);
+  });
+
+  it('spells a 0 interval out as off rather than as every 0 days', () => {
+    const body = bathRhythmToNoteBody({ fullEveryDays: 7, quickEveryDays: 0 }, 5, AT) as any;
+    expect(body.tags).toEqual(['bath:rhythm', 'bath:rhythm:full:7', 'bath:rhythm:quick:0']);
+    expect(body.note).toBe('Bath rhythm: full bath every 7 days, quick wash off');
+  });
+
+  it('round-trips a rhythm, 0 included', () => {
+    for (const r of [
+      { fullEveryDays: 3, quickEveryDays: 1 },
+      { fullEveryDays: 0, quickEveryDays: 2 },
+      { fullEveryDays: 30, quickEveryDays: 0 },
+    ]) {
+      expect(bathRhythmFromNote(bathRhythmToNoteBody(r, 5, AT))).toEqual(r);
+    }
+  });
+
+  // The whole reason the marker is `bath:rhythm` and not `bath`: a rhythm note read as
+  // a wash would land a phantom bath on the timeline and reset the cadence it describes.
+  it('is never mistaken for a bath entry', () => {
+    const body = bathRhythmToNoteBody({ fullEveryDays: 3, quickEveryDays: 1 }, 5, AT);
+    expect(isBathNote(body)).toBe(false);
+    expect(isBathRhythmNote(body)).toBe(true);
+  });
+
+  it('isBathRhythmNote keys off the marker tag only', () => {
+    expect(isBathRhythmNote({ tags: ['bath:rhythm'] })).toBe(true);
+    expect(isBathRhythmNote({ tags: ['bath:rhythm:full:3'] })).toBe(false);
+    expect(isBathRhythmNote({ tags: ['bath'] })).toBe(false);
+    expect(isBathRhythmNote({ tags: [] })).toBe(false);
+  });
+
+  // Halves are read independently so a note written by a future build that renamed one
+  // of them still yields the half this build understands.
+  it('reads each interval independently, omitting one it cannot parse', () => {
+    expect(bathRhythmFromNote({ tags: ['bath:rhythm', 'bath:rhythm:full:4'] })).toEqual({ fullEveryDays: 4 });
+    expect(bathRhythmFromNote({ tags: ['bath:rhythm', 'bath:rhythm:quick:2'] })).toEqual({ quickEveryDays: 2 });
+    expect(bathRhythmFromNote({ tags: ['bath:rhythm', 'bath:rhythm:full:soon'] })).toBeUndefined();
+  });
+
+  it('reads a note with no interval tags as nothing recorded', () => {
+    expect(bathRhythmFromNote({ tags: ['bath:rhythm'] })).toBeUndefined();
+    expect(bathRhythmFromNote({})).toBeUndefined();
+  });
+
+  it('hides the rhythm structural tags from the tag picker', () => {
+    expect(isHiddenTag('bath:rhythm')).toBe(true);
+    expect(isHiddenTag('bath:rhythm:full:3')).toBe(true);
+    expect(isHiddenTag('bath:rhythmic')).toBe(false);
+  });
+
+  it('listChildNotes drops rhythm notes instead of showing them in the Notes tab', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+          {
+            id: 2,
+            time: '2026-03-04T10:00:00.000Z',
+            note: 'Bath rhythm: full bath every 3 days, quick wash daily',
+            tags: ['bath:rhythm', 'bath:rhythm:full:3', 'bath:rhythm:quick:1'],
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await new BabybuddyClient('https://example.com', 'tok').listChildNotes('5');
+    expect(res.notes.map((n) => n.text)).toEqual(['plain note']);
+    expect(res.baths).toEqual([]);
+  });
+
+  it('listBathRhythms keys the whole account by child server id in one request', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 3,
+        next: null,
+        previous: null,
+        results: [
+          { id: 1, child: 5, time: '2026-03-04T10:00:00.000Z', tags: ['bath:rhythm', 'bath:rhythm:full:3', 'bath:rhythm:quick:1'] },
+          { id: 2, child: 7, time: '2026-03-03T10:00:00.000Z', tags: ['bath:rhythm', 'bath:rhythm:full:5', 'bath:rhythm:quick:0'] },
+          { id: 3, child: 9, time: '2026-03-02T10:00:00.000Z', tags: [] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listBathRhythms();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('tags=bath%3Arhythm');
+    expect(map.get(5)).toEqual({ fullEveryDays: 3, quickEveryDays: 1 });
+    expect(map.get(7)).toEqual({ fullEveryDays: 5, quickEveryDays: 0 });
+    expect(map.has(9)).toBe(false);
+  });
+
+  it('listBathRhythms lets the newest note win when a child has a stale duplicate', async () => {
+    // Results come back newest-first, so the first one seen per child wins.
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 2,
+        next: null,
+        previous: null,
+        results: [
+          { id: 2, child: 5, time: '2026-03-04T10:00:00.000Z', tags: ['bath:rhythm', 'bath:rhythm:full:2', 'bath:rhythm:quick:1'] },
+          { id: 1, child: 5, time: '2026-03-01T10:00:00.000Z', tags: ['bath:rhythm', 'bath:rhythm:full:9', 'bath:rhythm:quick:1'] },
+        ],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listBathRhythms();
+    expect(map.get(5)).toEqual({ fullEveryDays: 2, quickEveryDays: 1 });
+  });
+
+  it('setChildBathRhythm PATCHes the existing note rather than adding a second one', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ count: 1, next: null, previous: null, results: [{ id: 44, child: 5, tags: ['bath:rhythm'] }] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({}));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildBathRhythm(5, { fullEveryDays: 4, quickEveryDays: 1 }, AT);
+    expect(fetchMock.mock.calls[1][0]).toContain('/notes/44/');
+    expect(fetchMock.mock.calls[1][1].method).toBe('PATCH');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).tags).toEqual([
+      'bath:rhythm',
+      'bath:rhythm:full:4',
+      'bath:rhythm:quick:1',
+    ]);
+  });
+
+  it('setChildBathRhythm POSTs when the child has no rhythm note yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ count: 0, next: null, previous: null, results: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 99 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await new BabybuddyClient('https://example.com', 'tok').setChildBathRhythm(5, { fullEveryDays: 3, quickEveryDays: 1 }, AT);
+    expect(fetchMock.mock.calls[1][1].method).toBe('POST');
+  });
+
+  // A plain note the user hand-tagged `bath:rhythm` in Baby Buddy's own UI passes the
+  // server-side tag filter, so the read has to reject it on its missing interval tags
+  // rather than treat it as a rhythm that turns every cadence into the default.
+  it('ignores a marker-only note that carries no intervals', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        count: 1,
+        next: null,
+        previous: null,
+        results: [{ id: 1, child: 5, time: '2026-03-04T10:00:00.000Z', tags: ['bath:rhythm'] }],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const map = await new BabybuddyClient('https://example.com', 'tok').listBathRhythms();
+    expect(map.has(5)).toBe(false);
   });
 });
 

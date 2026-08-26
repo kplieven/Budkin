@@ -7,6 +7,7 @@ import { encodeTimerName, serverTimerToTimer } from '@/data/serverTimers';
 import {
   entryTimestamp,
   type ActivityType,
+  type BathRhythm,
   type Child,
   type ChildGender,
   type Treatment,
@@ -42,6 +43,17 @@ export interface LoadResult {
   measurements: Measurement[];
   /** Read from each child's `treatment`-tagged notes. Empty in local mode. */
   treatments: Treatment[];
+  /** Keyed by SERVER child id, read from the `bath:rhythm` notes. PARTIAL values: the
+   *  consumer clamps them against the rhythm it would otherwise have used, since only
+   *  it knows that fallback. A child with no note is ABSENT rather than keyed to a
+   *  default, so the device keeps whatever it already had.
+   *
+   *  null when the fetch FAILED, which is distinct from {} the same way `timers` is:
+   *  {} means "no child has one recorded", which is what makes the local rhythms
+   *  eligible for the seed-the-server upload, and doing that on a timeout would push a
+   *  stale local value over a newer one another device had written. Absent reads as
+   *  null, so a result built without one fails closed. */
+  bathRhythms?: Record<string, Partial<BathRhythm>> | null;
   /** SERVER child id -> the record slices whose fetch DEGRADED to [] for that
    *  child. Nothing else in the shape says so, which makes a listed slice a FLOOR
    *  and not an answer: consumers must keep the rows they already hold instead of
@@ -69,7 +81,7 @@ const ENTRY_SLICES = [
 const MEASUREMENT_KINDS = ['weight', 'height', 'head', 'bmi'] as const satisfies readonly MeasurementKind[];
 
 /** Cap on requests in flight across the WHOLE load, siblings included. A load
- *  costs 3 account-wide requests plus 13 per child, so a per-child `Promise.all`
+ *  costs 4 account-wide requests plus 13 per child, so a per-child `Promise.all`
  *  would peak at 13N, and peak concurrency is what kills a self-hosted instance:
  *  gunicorn defaults to `2*cores+1` workers, so a Pi serves 9 at a time. */
 const FETCH_CONCURRENCY = 8;
@@ -113,6 +125,7 @@ export async function loadFromServer(
       lastFeed: {},
       measurements: [],
       treatments: [],
+      bathRhythms: {},
     };
   }
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
@@ -122,6 +135,11 @@ export async function loadFromServer(
   const rawChildren = await client.listChildren();
   // Baby Buddy's Child model has no gender field: it lives in `gender`-tagged notes.
   const genders = await client.listGenders().catch(() => new Map<number, ChildGender>());
+  // Bath rhythm rides the same channel, and degrades to null (unknown) rather than to
+  // an empty answer: see `LoadResult.bathRhythms`.
+  const rhythmMap = await client.listBathRhythms().catch(() => null);
+  const bathRhythms =
+    rhythmMap && Object.fromEntries([...rhythmMap].map(([serverId, r]) => [String(serverId), r]));
   const children = rawChildren.map((c) =>
     c.serverId != null && genders.has(c.serverId) ? { ...c, gender: genders.get(c.serverId) } : c,
   );
@@ -223,6 +241,7 @@ export async function loadFromServer(
     lastFeed,
     measurements,
     treatments,
+    bathRhythms,
     incompleteSlices,
   };
 }
@@ -312,6 +331,19 @@ export async function setChildGenderOnServer(
   if (conn.mode !== 'server') return;
   const client = new BabybuddyClient(conn.serverUrl, conn.token);
   await client.setChildGender(childServerId, gender, atMs);
+}
+
+/** The bath rhythm is a `bath:rhythm`-tagged note, not a Child field. Baby Buddy has no
+ *  notion of wash cadence, so this is the only channel it has. */
+export async function setChildBathRhythmOnServer(
+  conn: Connection,
+  childServerId: number,
+  rhythm: BathRhythm,
+  atMs: number,
+): Promise<void> {
+  if (conn.mode !== 'server') return;
+  const client = new BabybuddyClient(conn.serverUrl, conn.token);
+  await client.setChildBathRhythm(childServerId, rhythm, atMs);
 }
 
 /** A treatment is stored as a `treatment`-tagged note. */

@@ -66,8 +66,8 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const feedColor = t.activity.feeding;
   const diaperColor = t.activity.diaper;
   // Wider gutter than the trend charts so the full "Today" row label fits.
-  // `top` leaves headroom for the "now" caption sitting above the plot.
-  const gutter = 40, rightPad = 6, top = 14, axisH = 20, pitch = 8.5, rowH = 6.6;
+  // `top` leaves headroom for the "now" chip sitting above the plot.
+  const gutter = 40, rightPad = 6, top = 17, axisH = 20, pitch = 8.5, rowH = 6.6;
   const gx = gutter, gw = Math.max(0, width - gutter - rightPad);
   const gh = rows.length * pitch;
   const height = top + gh + axisH;
@@ -98,7 +98,11 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   // reading the current clock position against the same position on every past day.
   // At the window's edges it would sit on the frame, so it is dropped there.
   const nowX = todayFrac > 0 && todayFrac < 1 ? xAt(todayFrac * 24) : null;
-  const nowLabelRight = nowX != null && nowX - gx < 24;
+  // A filled chip, not bare text: the plot is dense with saturated marks, and a faint
+  // caption reads as unrelated floating text next to the line rather than its label.
+  // Centred on the rule, then clamped so it cannot overhang either edge of the svg.
+  const NOW_W = 26, NOW_H = 13;
+  const nowChipX = nowX == null ? 0 : Math.min(Math.max(0, nowX - NOW_W / 2), Math.max(0, width - NOW_W));
 
   // Scrub guide geometry: its x, the clock it points at (origin + fraction of the
   // 24h window), and a clamped left for the floating time label.
@@ -179,12 +183,14 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
             </Fragment>
           );
         })}
-        {/* Over the rows so it stays legible across a filled sleep bar, but under the
-            scrub guide, which is solid and full-opacity to stay the louder of the two. */}
+        {/* Over the rows so it stays legible across a filled sleep bar. Dashed and
+            chip-filled where the scrub guide is solid and chip-outlined: the pair reads
+            as "placed automatically" against "you put this here". */}
         {nowX != null ? (
           <>
-            <Line x1={nowX} y1={top} x2={nowX} y2={top + gh} stroke={t.text} strokeWidth={1.25} strokeDasharray="3 3" opacity={0.45} />
-            <SvgText x={nowX + (nowLabelRight ? 3 : -3)} y={top - 4} fontSize={8} fontWeight="700" fontFamily={fontFamily(700)} fill={t.faint} textAnchor={nowLabelRight ? 'start' : 'end'}>
+            <Line x1={nowX} y1={top} x2={nowX} y2={top + gh} stroke={t.text} strokeWidth={1.5} strokeDasharray="3 3" opacity={0.85} />
+            <Rect x={nowChipX} y={2} width={NOW_W} height={NOW_H} rx={4} fill={t.text} />
+            <SvgText x={nowChipX + NOW_W / 2} y={11.4} fontSize={8.5} fontWeight="700" fontFamily={fontFamily(700)} fill={t.surface} textAnchor="middle">
               now
             </SvgText>
           </>

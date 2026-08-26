@@ -3,8 +3,12 @@
  * Deliberately NOT part of `Prefs`, whose every entry is global, so it gets its
  * own key rather than making that file carry an exception.
  *
- * Keying by child id is only safe because child ids do not mutate on push. Local
- * only: Baby Buddy has no notion of wash cadence, so nothing here is ever sent.
+ * Keying by LOCAL child id is only safe because child ids do not mutate on push.
+ *
+ * This file is the offline cache, not the source of truth. Baby Buddy has no notion of
+ * wash cadence, so the rhythm syncs as a `bath:rhythm`-tagged note (the channel gender
+ * uses) and the server's copy wins on load; see `LoadResult.bathRhythms`. Written by a
+ * store subscription, never by a caller here.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
