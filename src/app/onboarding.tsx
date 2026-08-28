@@ -16,6 +16,8 @@ import { shadowStyle } from '@/theme/shadow';
 import { useAppStore } from '@/store/useAppStore';
 import type { SavedServer } from '@/data/servers';
 import { useTheme } from '@/theme/useTheme';
+import { SavedServerList } from '@/features/connect/SavedServerList';
+import { SetupButton } from '@/features/setup/SetupButton';
 import { nextAfterConnect } from '@/features/setup/routing';
 import { useFinishSetup } from '@/features/setup/useFinishSetup';
 
@@ -29,10 +31,10 @@ export default function Onboarding() {
   const connecting = useAppStore((s) => s.connecting);
   const connectError = useAppStore((s) => s.connectError);
   const connect = useAppStore((s) => s.connect);
-  const savedServers = useAppStore((s) => s.savedServers);
-  const forgetServer = useAppStore((s) => s.forgetServer);
   const connection = useAppStore((s) => s.connection);
+  const enterLocal = useAppStore((s) => s.enterLocal);
   const [pendingUrl, setPendingUrl] = useState<string | null>(null);
+  const [entering, setEntering] = useState(false);
   const finish = useFinishSetup();
 
   // Local mode also sets `connected`, so this screen keys off a real SERVER
@@ -47,6 +49,12 @@ export default function Onboarding() {
   // add-baby step rather than dropping the user on an empty Home.
   useFocusEffect(
     useCallback(() => {
+      // Released here rather than in a `finally` after the push: push leaves this
+      // screen mounted under /setup/baby, so coming back re-focuses this same
+      // instance, and a finally would instead reopen the double-tap window while
+      // the push animates. Setting it doesn't touch this effect's deps, so there
+      // is no re-run loop.
+      setEntering(false);
       if (!serverConnected) return;
       if (
         !offeredBabyStep.current &&
@@ -59,6 +67,25 @@ export default function Onboarding() {
       finish();
     }, [serverConnected, finish]),
   );
+
+  // The way out of this screen without a server. It has to live here and not only on
+  // /welcome: signing out replaces the stack with this form, and /welcome then
+  // redirects away on `tutorialSeen`, so without this the user is stuck on a form
+  // they may have no server for. Guarded against a double tap the same way as
+  // /welcome, since enterLocal does async storage work before the navigation.
+  const goLocal = async () => {
+    if (entering || connecting) return;
+    setEntering(true);
+    await enterLocal();
+    // A local store with children already on it (backing out of the connect form on
+    // first run) goes straight to Home; the empty one a sign-out leaves behind takes
+    // the add-baby step, which finishes setup itself.
+    if (nextAfterConnect(useAppStore.getState().children.length) === '/setup/baby') {
+      router.push('/setup/baby');
+      return;
+    }
+    finish();
+  };
 
   // Tapping a saved row prefills the inputs (so a failed reconnect leaves the
   // fields ready to fix) and reuses the normal connect action.
@@ -131,67 +158,12 @@ export default function Onboarding() {
           Baby Buddy runs on your own server. Paste its address and an access token to start logging.
         </Txt>
 
-        {savedServers.length > 0 && (
-          <View style={{ marginTop: 26 }}>
-            <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
-              PREVIOUSLY CONNECTED
-            </Txt>
-            {savedServers.map((srv) => {
-              const host = srv.serverUrl.replace(/^https?:\/\//, '');
-              const busy = pendingUrl === srv.serverUrl && connecting;
-              return (
-                <Tappable
-                  key={srv.serverUrl}
-                  onPress={() => tryServer(srv)}
-                  disabled={connecting}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: connecting }}
-                  style={(s) => [
-                    {
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 12,
-                      minHeight: 60,
-                      borderRadius: 15,
-                      backgroundColor: t.surface,
-                      borderWidth: 1.5,
-                      borderColor: t.line2,
-                      paddingHorizontal: 14,
-                      paddingVertical: 10,
-                      marginBottom: 10,
-                      cursor: connecting ? 'auto' : 'pointer',
-                    },
-                    !connecting && isHovered(s) && { borderColor: t.line },
-                  ]}
-                >
-                  <Icon name="clock" color={t.dim} size={20} />
-                  <View style={{ flex: 1 }}>
-                    <Txt unselectable weight={600} size={15} numberOfLines={1}>
-                      {host}
-                    </Txt>
-                    <Txt unselectable weight={500} size={12.5} color={t.dim} style={{ marginTop: 2 }}>
-                      {'••••'}
-                      {srv.token.slice(-4)}
-                    </Txt>
-                  </View>
-                  {busy ? (
-                    <ActivityIndicator color={t.dim} />
-                  ) : (
-                    <Tappable
-                      onPress={() => forgetServer(srv.serverUrl)}
-                      hitSlop={10}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Remove ${host}`}
-                      style={(s) => [{ padding: 6, borderRadius: 8, cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.chip }]}
-                    >
-                      <Icon name="close" color={t.faint} size={18} />
-                    </Tappable>
-                  )}
-                </Tappable>
-              );
-            })}
-          </View>
-        )}
+        <SavedServerList
+          onPick={tryServer}
+          busyUrl={connecting ? pendingUrl : null}
+          disabled={connecting}
+          style={{ marginTop: 26 }}
+        />
 
         <View style={{ marginTop: 26 }}>
           <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
@@ -294,6 +266,16 @@ export default function Onboarding() {
             Learn how to host one
           </Txt>
         </Txt>
+
+        {/* Same label and secondary styling as the fork on /welcome, so the choice
+            reads as the same one wherever it is met. */}
+        <SetupButton
+          label="Just use this device"
+          variant="secondary"
+          onPress={goLocal}
+          disabled={entering || connecting}
+          style={{ marginTop: 16 }}
+        />
 
         {/* Repeated from Settings deliberately. Settings sits behind the
             connection gate, so a disconnected or fresh install routes here and
