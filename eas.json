@@ -23,7 +23,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "BUDKIN_VERSION": "0.16.0"
+        "BUDKIN_VERSION": "0.18.0"
       }
     }
   },
@@ -31,7 +31,7 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "../play-service-account.json",
-        "track": "internal",
+        "track": "alpha",
         "releaseStatus": "draft"
       }
     }
