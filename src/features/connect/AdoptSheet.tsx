@@ -8,6 +8,8 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
+import { SavedServerList } from '@/features/connect/SavedServerList';
+import type { SavedServer } from '@/data/servers';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore, type AdoptResult } from '@/store/useAppStore';
@@ -71,6 +73,16 @@ function Inner() {
     }
   };
 
+  // A remembered row PREFILLS and stops there, unlike onboarding where the same tap
+  // connects. The button it fills the form for uploads this device's data and can
+  // duplicate what is already on the server, which is what the guard card exists to
+  // ask about: a tap on a history row must not answer that question by itself.
+  const pick = (srv: SavedServer) => {
+    setUrl(srv.serverUrl);
+    setToken(srv.token);
+    setError(null);
+  };
+
   // Guard card's "Use the server's data": switch to the server WITHOUT uploading local
   // data, so the normal connect() flow and not adopt().
   const useServerData = () => {
@@ -118,6 +130,8 @@ function Inner() {
             <Txt weight={500} size={14} color={t.dim} style={{ marginBottom: 20, lineHeight: 20 }}>
               Connect a Baby Buddy server to upload everything on this device and keep it in sync.
             </Txt>
+
+            <SavedServerList onPick={pick} disabled={busy} style={{ marginBottom: 20 }} />
 
             <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 8 }}>
               SERVER URL
