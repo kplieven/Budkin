@@ -27,6 +27,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { keyboardInset, raisesKeyboard } from '@/components/keyboardInset';
+import { useKeyboardHeight } from '@/components/useKeyboardHeight';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useTheme } from '@/theme/useTheme';
 
@@ -104,6 +105,11 @@ export function BottomSheet({
   // Applied as the phone wrapper's layout `bottom`, deliberately not via the animated
   // transform, so the correction never depends on a React-state-in-worklet round trip.
   const keyboardInset = useKeyboardInset();
+  // Android only. The root's own box already shrank by this much (src/app/_layout.tsx), so
+  // this sheet's containing block did too and the panel needs no lift of its own here —
+  // but `height` did NOT shrink with it, and an uncapped maxHeight would let a tall sheet
+  // run off the top of what is left.
+  const nativeKeyboard = useKeyboardHeight();
   // Separate shared values so none is mutated both inside and outside an effect.
   const enter = useSharedValue(height);
   const pop = useSharedValue(0);
@@ -244,8 +250,9 @@ export function BottomSheet({
           style={[
             {
               // react-native-web derives `height` from visualViewport.height, which
-              // already excludes the keyboard. Subtracting keyboardInset double-counts.
-              maxHeight: height * maxHeightRatio,
+              // already excludes the keyboard, so `keyboardInset` must NOT come off here as
+              // well. `nativeKeyboard` is the Android counterpart and is 0 on web.
+              maxHeight: Math.max(0, height - nativeKeyboard) * maxHeightRatio,
               backgroundColor: t.bg,
               borderTopLeftRadius: 28,
               borderTopRightRadius: 28,

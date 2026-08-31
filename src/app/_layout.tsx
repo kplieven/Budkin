@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { Toast } from '@/components/Toast';
+import { useKeyboardHeight } from '@/components/useKeyboardHeight';
 import { ChildSheet } from '@/features/childSwitcher/ChildSheet';
 import { ChildSwitcher } from '@/features/childSwitcher/ChildSwitcher';
 import { AdoptSheet } from '@/features/connect/AdoptSheet';
@@ -94,6 +95,11 @@ function RootLayoutNav() {
   const t = useTheme();
   const desktop = useDesktopShell();
   const segments = useSegments();
+  // Android draws edge-to-edge, so the IME covers the window instead of resizing it and
+  // `adjustResize` does nothing. Shrinking the root here is that resize, done in JS: every
+  // screen, sheet and overlay below is laid out into the space the keyboard leaves, and
+  // ScrollView's own onSizeChanged brings the focused field back into view. 0 elsewhere.
+  const keyboardHeight = useKeyboardHeight();
   const base = t.dark ? DarkTheme : DefaultTheme;
   const navTheme = { ...base, colors: { ...base.colors, background: t.bg } };
 
@@ -121,10 +127,17 @@ function RootLayoutNav() {
   );
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: t.bg }}>
       <SafeAreaProvider>
         <ThemeProvider value={navTheme}>
-          <View style={{ flex: 1, backgroundColor: t.bg }}>
+          {/* MARGIN, not padding. Padding would shrink the content box and move the flow
+              children (the navigator, the tab bar) while leaving every absolutely
+              positioned one where it was: an abspos child is laid out against its
+              container's PADDING box, whose bottom edge sits below the padding. That is
+              exactly the bug it produced — the tab bar rose above the keyboard and the
+              bottom sheets, which are abspos, stayed pinned behind it. A margin shrinks
+              the root's own box instead, so both kinds of child follow. */}
+          <View style={{ flex: 1, backgroundColor: t.bg, marginBottom: keyboardHeight }}>
             {showShell ? <DesktopShell>{stack}</DesktopShell> : stack}
 
             {/* overlays rendered above the navigator and tab bar */}
