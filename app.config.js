@@ -22,9 +22,12 @@ const IS_DEV = process.env.APP_VARIANT === 'development';
  * The build's version, resolved once here and published as `extra.version` for
  * `versionLabel` (src/lib/appVersion.ts) to draw.
  *
- * It cannot come from `package.json` or `app.json`: both stay at 1.0.0
- * permanently, because Budkin's release version is a lightweight git tag on a
- * merge commit on `main`.
+ * It cannot come from `package.json`, which stays at 1.0.0 permanently and is
+ * read by nothing. `app.json`'s `version` DOES track the release now — it is
+ * the Android `versionName` and the iOS `CFBundleShortVersionString`, i.e. the
+ * only one of these numbers a buyer ever sees — so bump it with each tag. It
+ * still cannot be the source here, because a dev build wants the precise
+ * `git describe` (`1.3.0-4-gabc123-dirty`), not the flat release number.
  *
  * It cannot be read from git inside a build either. `.dockerignore` and
  * `.easignore` both exclude `.git`, and when building from a git WORKTREE
