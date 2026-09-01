@@ -11,7 +11,7 @@ import { IconButton } from '@/components/IconButton';
 import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
-import { MEAS_META } from '@/lib/measurements';
+import { MEAS_META, lowerLabel } from '@/lib/measurements';
 import { fmtValue, resolveMetricInput, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
@@ -86,7 +86,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         </View>
         <View style={{ flex: 1 }}>
           <Txt weight={800} size={20} tracking={-0.3}>
-            {editingId ? 'Edit' : 'Log'} {meta.label.toLowerCase()}
+            {editingId ? 'Edit' : 'Log'} {lowerLabel(meta.label)}
           </Txt>
           {childFirst ? (
             <Txt weight={500} size={13} color={t.dim}>
@@ -236,7 +236,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
           ]}
         >
           <Txt unselectable weight={800} size={17.5} color={t.onActivity}>
-            {editingId ? 'Save changes' : `Save ${meta.short.toLowerCase()}`}
+            {editingId ? 'Save changes' : `Save ${lowerLabel(meta.short)}`}
           </Txt>
         </Tappable>
       </View>

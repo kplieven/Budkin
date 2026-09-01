@@ -15,4 +15,11 @@ export const MEAS_META: Record<
   bmi: { label: 'BMI', short: 'BMI', color: '#6FC0A6' },
 };
 
+/**
+ * A label put mid-sentence: "Log weight", "Save head circ.". Acronyms are left alone,
+ * because a plain toLowerCase() turns the BMI sheet into "Log bmi".
+ */
+export const lowerLabel = (label: string): string =>
+  label === label.toUpperCase() ? label : label.toLowerCase();
+
 export const MEAS_KINDS: MeasurementKind[] = ['weight', 'height', 'head', 'bmi'];
