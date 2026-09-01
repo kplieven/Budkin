@@ -46,6 +46,7 @@ export function yTicksFor(points: TrendPoint[], extraValues: number[] = []): { t
 const DAY_MS = 86400000;
 const fmtMonthDay = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const fmtMonth = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short' });
+const fmtMonthYear = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
 const fmtYear = (t: number) => String(new Date(t).getFullYear());
 
 type XStep = { unit: 'day' | 'month'; n: number };
@@ -81,15 +82,23 @@ export function xTicksFor(points: TrendPoint[], maxTicks: number): { ticks: numb
   const tMax = points[points.length - 1].t;
   if (points.length < 2 || tMax <= tMin) return { ticks: [tMin], fmtX: fmtMonthDay };
 
-  const spanDays = (tMax - tMin) / DAY_MS;
-  const fmtX = spanDays <= 62 ? fmtMonthDay : spanDays <= 730 ? fmtMonth : fmtYear;
-
   let ticks: number[] = [];
+  let chosen: XStep | null = null;
   for (const step of X_STEPS) {
     const t = genXTicks(tMin, tMax, step);
-    if (t.length <= budget) { ticks = t; break; }
+    if (t.length <= budget) { ticks = t; chosen = step; break; }
   }
   if (ticks.length < 2) ticks = [tMin, tMax];
+
+  // The label granularity follows the STEP, not the span. A 3-month span stepped
+  // every 14 days is still day-spaced, and labelling those by month alone prints
+  // "Jun Jun Jul Jul Aug" — the same name over and over on adjacent ticks.
+  const spanDays = (tMax - tMin) / DAY_MS;
+  const fmtX = !chosen ? (spanDays <= 62 ? fmtMonthDay : spanDays <= 730 ? fmtMonth : fmtYear)
+    : chosen.unit === 'day' ? fmtMonthDay
+    : chosen.n >= 12 ? fmtYear
+    // Month names repeat once the ticks cross into another year, so carry the year too.
+    : spanDays <= 365 ? fmtMonth : fmtMonthYear;
   return { ticks, fmtX };
 }
 

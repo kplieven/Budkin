@@ -119,6 +119,21 @@ describe('xTicksFor', () => {
     expect(label).toMatch(/[A-Za-z]/);
   });
 
+  it('never repeats a label across the ticks of a 3-month span', () => {
+    // 14-day ticks over 90 days used to be labelled by month alone: "Jun Jun Jul Jul Aug".
+    const points = [{ t: base, value: 1 }, { t: base + 89 * DAY, value: 2 }];
+    const { ticks, fmtX } = xTicksFor(points, 7);
+    const labels = ticks.map(fmtX);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it('keeps month labels distinct when month-stepped ticks cross a year', () => {
+    const points = [{ t: base, value: 1 }, { t: base + 900 * DAY, value: 2 }];
+    const { ticks, fmtX } = xTicksFor(points, 6);
+    const labels = ticks.map(fmtX);
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
   it('formats a long span (multi-year) as a 4-digit year', () => {
     const points = [{ t: base, value: 1 }, { t: base + 1100 * DAY, value: 2 }];
     const { fmtX } = xTicksFor(points, 5);
