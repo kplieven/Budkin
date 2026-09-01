@@ -55,3 +55,7 @@ public/__seed.html
 
 # superpowers SDD scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Locally downloaded EAS build artifacts (~110 MB each)
+*.apk
+*.aab
