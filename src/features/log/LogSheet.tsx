@@ -700,8 +700,10 @@ export function LogSheet() {
                   <Stepper
                     value={te.amount ?? 0}
                     system={unitSystem}
+                    color={color}
                     onMinus={() => adjustAmount(-1)}
                     onPlus={() => adjustAmount(1)}
+                    onChange={(amount) => setTE({ amount })}
                   />
                 </View>
               </>
@@ -846,8 +848,10 @@ export function LogSheet() {
               <Stepper
                 value={te.amount ?? 0}
                 system={unitSystem}
+                color={color}
                 onMinus={() => adjustAmount(-1)}
                 onPlus={() => adjustAmount(1)}
+                onChange={(amount) => setTE({ amount })}
               />
             </View>
           </>
