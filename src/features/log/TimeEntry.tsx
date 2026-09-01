@@ -11,13 +11,14 @@
  * store setters.
  */
 
-import { useState, type ReactNode } from 'react';
-import { ScrollView, View } from 'react-native';
+import { useState } from 'react';
+import { View } from 'react-native';
 
 import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { Tappable } from '@/components/press';
+import { QuickSetStrip } from '@/components/QuickSetStrip';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
 import { ANCHOR_LABEL, anchorLabel, dayGroupLabel, fmtClock, fmtDur, relDayLabel } from '@/lib/format';
@@ -91,26 +92,6 @@ function ValuePill({
         {label}
       </Txt>
     </Tappable>
-  );
-}
-
-/**
- * Order is load-bearing: with the strip below the exact editor, the panel handed you a
- * finished answer at the top, so the task ended before your eye reached the chips and the
- * anchors went unused.
- *
- * One line tall regardless of anchor count. When the chips overflow, the trailing one
- * peeks at the right edge as the "swipe for more" cue.
- */
-function QuickSetStrip({ children }: { children: ReactNode }) {
-  return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ gap: 8, paddingRight: 4 }}
-    >
-      {children}
-    </ScrollView>
   );
 }
 
