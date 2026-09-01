@@ -14,7 +14,7 @@ import { referenceCurves, hasWhoAgeOverlap } from '@/features/measurements/whoRe
 import { DISCLAIMER } from '@/features/insights/norms';
 import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
-import { MEAS_KINDS, MEAS_META } from '@/lib/measurements';
+import { MEAS_KINDS, MEAS_META, lowerLabel } from '@/lib/measurements';
 import { backOr } from '@/lib/nav';
 import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -126,7 +126,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
         <Tappable
           onPress={() => openMeasurement(kind)}
           accessibilityRole="button"
-          accessibilityLabel={`Add ${meta.label.toLowerCase()}`}
+          accessibilityLabel={`Add ${lowerLabel(meta.label)}`}
           style={(s) => [
             { flexDirection: 'row', alignItems: 'center', height: 38, paddingHorizontal: 15, borderRadius: 13, backgroundColor: meta.color, boxShadow: `0px 5px 14px ${hexA(meta.color, 0.32)}`, cursor: 'pointer' },
             isHovered(s) && { boxShadow: `0px 5px 16px ${hexA(meta.color, 0.5)}` },
