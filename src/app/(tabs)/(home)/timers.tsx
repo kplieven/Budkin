@@ -3,11 +3,13 @@ import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'r
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Chip } from '@/components/Chip';
 import { isHovered } from '@/components/hover';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Tappable } from '@/components/press';
 import { PulsingDot } from '@/components/PulsingDot';
+import { QuickSetStrip } from '@/components/QuickSetStrip';
 import { SyncBadge } from '@/components/SyncBadge';
 import { TimeAdjuster } from '@/components/TimeAdjuster';
 import { Txt } from '@/components/Txt';
@@ -19,6 +21,7 @@ import { fmtAgo, fmtElapsedClock } from '@/lib/format';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
+import { timerQuickSets } from '@/store/timerQuickSets';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
 
@@ -43,6 +46,9 @@ export default function Timers() {
   // Raw select (stable reference); the naming is derived per card in the render
   // body, never in the selector, which would hand zustand v5 a fresh array.
   const children = useAppStore((s) => s.children);
+  // Raw select for the same reason: the per-timer Quick set chips are derived in the
+  // render body, never in a selector.
+  const entries = useAppStore((s) => s.entries);
 
   // Native uses the platform RefreshControl, touch-capable web the custom gesture.
   // A refresh() also pulls and reconciles server timers, so a timer started on
@@ -129,7 +135,7 @@ export default function Timers() {
                 </Txt>
                 {/* These carry the "m" so they agree with the TimeAdjuster nudges on the
                     same card. Unlike those nudges these chips do not grow, so
-                    paddingHorizontal is real width: at 8 (matched on "Exact…" below) the
+                    paddingHorizontal is real width: at 8 (matched on "Change…" below) the
                     label plus these three measures 255px, and holds line one against the
                     281px a 360dp card gives it. At 12 it is 279px, and a nudge wraps. */}
                 {([
@@ -155,7 +161,7 @@ export default function Timers() {
                 <Tappable
                   onPress={() => setExactFor(exactFor === tm.id ? null : tm.id)}
                   accessibilityRole="button"
-                  accessibilityLabel="Set exact start time"
+                  accessibilityLabel="Change start time"
                   accessibilityState={{ selected: exactFor === tm.id }}
                   style={(s) => [
                     {
@@ -171,13 +177,30 @@ export default function Timers() {
                   ]}
                 >
                   <Txt unselectable weight={700} size={13} color={exactFor === tm.id ? color : t.text}>
-                    Exact…
+                    Change…
                   </Txt>
                 </Tappable>
               </View>
 
               {exactFor === tm.id && (
-                <View style={{ marginTop: 12, marginBottom: 12 }}>
+                <View style={{ marginTop: 12, marginBottom: 12, gap: 14 }}>
+                  {/* Quick sets lead, exact editor follows: see QuickSetStrip on why that
+                      order is load-bearing. Both live behind the toggle, so a card nobody
+                      is editing keeps the height it always had. */}
+                  <QuickSetStrip>
+                    {timerQuickSets(entries, tm.childId, now).map((q) => (
+                      <Chip
+                        key={q.key}
+                        label={q.label}
+                        accessibilityLabel={q.spoken}
+                        color={color}
+                        onPress={() => setTimerStart(tm.id, q.at)}
+                        padH={12}
+                        padV={8}
+                        fontSize={13}
+                      />
+                    ))}
+                  </QuickSetStrip>
                   <TimeAdjuster mode="clock" value={tm.start} now={now} color={color} onChange={(ms) => setTimerStart(tm.id, ms)} />
                 </View>
               )}
