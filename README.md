@@ -1,56 +1,101 @@
-# Welcome to your Expo app 👋
+# Budkin
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A native Android baby tracker: feeds, sleep, diapers, pumping, growth and
+milestones. It needs no account and no network, and it doubles as a full client
+for [Baby Buddy](https://github.com/babybuddy/babybuddy) if you host one.
 
-## Get started
+Budkin is an unofficial client, built independently. It is not affiliated with
+or endorsed by the Baby Buddy project.
 
-1. Install dependencies
+- **Android:** [Google Play](https://play.google.com/store/apps/details?id=dev.karellievens.budkin)
+- **Web:** self-host the web build with Docker (see below)
+- **Site:** <https://budkin.karellievens.dev/>
 
-   ```bash
-   npm install
-   ```
+## What it does
 
-2. Start the app
+- Logs feeding, sleep, diapers, pumping, tummy time, bath, temperature,
+  medication, notes and milestones. The common ones sit on the launcher icon as
+  long-press shortcuts.
+- Timers are flexible: fill in the details first, then start the timer. You can
+  nudge either end by 5 or 15 minutes, set a duration outright, edit one that is
+  already running, or turn a finished entry back into a timer when the nap
+  resumes.
+- History puts every entry on one timeline, filtered by child, day or activity.
+- Insights shows four weeks of sleep, feeds and diapers side by side, with total
+  sleep, longest night stretch, average wake window and per-day counts.
+- Growth plots weight, height, head circumference and BMI against the WHO
+  reference percentiles.
+- 27 milestones, each with the age range it usually falls in, and a prompt when
+  a window passes with nothing logged.
+- Several children, one tap to switch, each with their own history.
+- Home-screen widgets for the last feed, diaper and nap, plus a one-tap nap
+  toggle that starts or stops a sleep timer without opening the app.
+- Reminders for nap suggestions as the wake window closes, pumping intervals,
+  treatment doses, due date, age milestones, and a timer left running. Each one
+  is switched on or off on its own.
+- Everything runs from the device, so losing signal changes nothing. With a
+  server connected, whatever you log offline is queued and sent on reconnect,
+  and the queue is inspectable in settings.
+- Night and Daylight themes, metric or imperial units, and a configurable
+  "day starts at" hour.
 
-   ```bash
-   npx expo start
-   ```
+## Using it with Baby Buddy
 
-In the output, you'll find options to open the app in a
+On the welcome screen, tap **"Yes, I have a server"** and enter:
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+- your Baby Buddy URL (e.g. `https://baby.example.com` or `http://192.168.1.10:8000`)
+- an API token, from Baby Buddy under **Settings > User > API**
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+Sync is two-way and automatic, with a manual refresh when you want it. Several
+devices can work at once, so you can start a timer on one and end it on another.
 
-## Get a fresh project
+The phone needs to reach the server: same LAN, VPN or a public hostname. Plain
+`http://` LAN servers work on Android. iOS requires HTTPS or an ATS exception.
 
-When you're ready, run:
+Tapping **"Just use this device"** skips all of that and keeps everything on the
+phone. You can connect a server later, and you choose what happens to the
+entries you already logged.
 
-```bash
-npm run reset-project
+There is no Budkin account and no Budkin server. Your entries are only ever sent
+to the address you type in. The app has no analytics, telemetry or third-party
+SDKs.
+
+## Self-hosting the web build
+
+```sh
+TAG=1.4.0 docker compose up -d --build
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Serves the Expo web export on port `1235` behind nginx. `TAG` is required. It is
+both the published image tag and the version the app reports on its settings
+screen. The compose file points at a private registry by default, so change
+`image:` to your own or just build locally as above.
 
-### Other setup steps
+I will look into building and pushing the built container to a registry and put a
+compose file here instead. For now you'll have to build it yourself from the repo.
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+## Development
 
-## Learn more
+Node 22 (pinned in `.node-version`).
 
-To learn more about developing your project with Expo, look at the following resources:
+```sh
+npm install
+npm start          # Expo dev server
+npm test           # vitest
+npm run lint
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+`npx expo start --go` runs it in Expo Go, which is the fastest way onto a real
+phone. Widgets, launcher shortcuts and background sync need a native build:
 
-## Join the community
+```sh
+npm run prebuild:dev
+npm run android:dev
+```
 
-Join our community of developers creating universal apps.
+Android release builds go through EAS (`eas.json`). `BUDKIN_VERSION` in the
+production profile is what the app reports as its version.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## License
+
+MIT, see [LICENSE](LICENSE).
