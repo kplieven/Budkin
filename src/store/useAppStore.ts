@@ -91,7 +91,7 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
 import { anchorChildId, isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
-import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
+import { stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
 import {
   activeTreatmentsForChildToday,
@@ -1097,20 +1097,6 @@ function mirrorTimerDelete(get: Get, timer: Timer): void {
 /** Does this draft's `amount` hold a VOLUME the stepper edits? A feeding's `amount` is
  *  dual-purpose: a breast feed records a dimensionless intake level that must never be
  *  treated as a measurement. */
-function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
-  if (type === 'pumping') return true;
-  if (type === 'feeding') return feedAmountIsVolume(te.feedType, te.method);
-  return false;
-}
-
-/** Snap a draft's volume amount onto the active unit system's step grid. The stepper
- *  shows imperial to one decimal, so a stored value just off a grid point renders
- *  identically to the one below it and the press that closes the gap looks dead. */
-function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSystem): TimeEntryState {
-  if (te.amount == null || !draftAmountIsVolume(type, te)) return te;
-  return { ...te, amount: snapVolume(te.amount, system) };
-}
-
 /** The three CHILD-scoped seeds a feeding draft opens on, in one function so `openSheet`,
  *  `openTimerEdit` and a re-aim cannot disagree. `method` is the ALTERNATED side. */
 function feedingSeeds(
@@ -1407,11 +1393,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void savePrefs({ tutorialSeen: true });
   },
   setUnitSystem: (system) => {
-    // Re-align an open sheet's draft amount onto the new system's grid.
-    set((s) => ({
-      unitSystem: system,
-      te: s.sheet ? snapDraftAmount(s.sheet.type, s.te, system) : s.te,
-    }));
+    set({ unitSystem: system });
     void savePrefs({ unitSystem: system });
   },
   toggleUnitSystem: () => {
@@ -2840,7 +2822,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Aimed HERE, at open, not read off the selection at save time: a warm notification
       // tap for a sibling moves the selection under a sheet that survives the navigation.
       sheetChildIds: aimedAt,
-      te: snapDraftAmount(type, te, s.unitSystem),
+      te,
       editingId: null,
       fromTimerId: null,
     });
@@ -2927,7 +2909,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Whoever the record was about, never the selection: the edit path PATCHes
       // `child:`, so a wrong seed would move the server row too.
       sheetChildIds: [entry.childId],
-      te: snapDraftAmount(entry.type, te, s.unitSystem),
+      te,
       editingId: entryId,
       fromTimerId: null,
     });
@@ -2971,7 +2953,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // An unattributable timer seeds nothing, so `save()` applies its own fallback
       // rather than this sheet inventing an owner.
       sheetChildIds: tm.childId ? [tm.childId] : [],
-      te: snapDraftAmount(type, te, s.unitSystem),
+      te,
       editingId: null,
       fromTimerId: timerId,
     });

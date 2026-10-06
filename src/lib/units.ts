@@ -119,20 +119,3 @@ export function stepVolume(metricMl: number, dir: 1 | -1, system: UnitSystem): n
   const next = dir > 0 ? Math.floor(grid + GRID_EPS) + 1 : Math.ceil(grid - GRID_EPS) - 1;
   return toMetric('volume', Math.max(0, next * step), system);
 }
-
-/**
- * The display lens rounds to one decimal, which can hide a press: stored 90 ml is 3.043
- * fl oz and shows as "3.0", and pressing minus correctly moves it to exactly 3.0 fl oz,
- * which also shows as "3.0". Snapping the draft on open makes shown and stored agree.
- * Only the in-memory draft is snapped; persisted entries stay as stored.
- *
- * An exact midpoint rounds up, and it takes the same `GRID_EPS` slack as `stepVolume` to
- * actually mean it: the ml round-trip lands a couple of imperial midpoints a hair below
- * their true value (5.75 fl oz is 170.0476…ml, back to 5.749999999999999), so a bare
- * `Math.round` would send those two down while the other 38 went up.
- */
-export function snapVolume(metricMl: number, system: UnitSystem): number {
-  const step = VOLUME_STEP[system];
-  const grid = toDisplay('volume', metricMl, system) / step;
-  return toMetric('volume', Math.max(0, Math.round(grid + GRID_EPS) * step), system);
-}
