@@ -63,7 +63,7 @@ SDKs.
 ## Self-hosting the web build
 
 ```sh
-TAG=1.4.0 docker compose up -d --build
+TAG=1.5.0 docker compose up -d --build
 ```
 
 Serves the Expo web export on port `1235` behind nginx. `TAG` is required. It is
