@@ -24,7 +24,8 @@
       "autoIncrement": true,
       "env": {
         "BUDKIN_VERSION": "1.5.1"
-      }
+      },
+      "buildArtifactPaths": ["android/app/build/outputs/mapping/release/mapping.txt"]
     }
   },
   "submit": {

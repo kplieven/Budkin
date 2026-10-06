@@ -98,6 +98,11 @@ npm run android:dev
 Android release builds go through EAS (`eas.json`). `BUDKIN_VERSION` in the
 production profile is what the app reports as its version.
 
+Release builds run R8, so the native code is shrunk and obfuscated. Each
+production build keeps its `mapping.txt` as a build artifact; upload it for
+that version in Play Console's App bundle explorer, or crash stack traces there
+stay unreadable.
+
 ## License
 
 MIT, see [LICENSE](LICENSE).
