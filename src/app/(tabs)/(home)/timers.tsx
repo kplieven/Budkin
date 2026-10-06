@@ -24,6 +24,7 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { timerQuickSets } from '@/store/timerQuickSets';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+import type { ActivityType } from '@/types/models';
 
 export default function Timers() {
   const t = useTheme();
@@ -38,6 +39,7 @@ export default function Timers() {
   const adjustTimerStart = useAppStore((s) => s.adjustTimerStart);
   const setTimerStart = useAppStore((s) => s.setTimerStart);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  const hiddenActivities = useAppStore((s) => s.hiddenActivities);
   const refresh = useAppStore((s) => s.refresh);
   // Only meaningful when connected to a server: a timer's serverId tells us
   // whether its mirror has reached Baby Buddy yet. Hidden in local mode.
@@ -70,6 +72,15 @@ export default function Timers() {
   // guarded below; the list itself always renders. Each card therefore names its
   // child once the household has two, or two siblings napping gives two cards
   // identical down to their button labels.
+  // Activities hidden from Home are dropped from the save-as row too, except on a
+  // timer already set to one, which keeps its selected chip.
+  const saveOptionsFor = (saveAs: ActivityType | null) =>
+    TIMER_SAVE_OPTIONS.filter((o) => o === saveAs || !hiddenActivities.includes(o));
+  const saveOptions = saveOptionsFor(null);
+  const saveAsWords = saveOptions.map((o) => ACTIVITY_LABEL[o].toLowerCase());
+  const saveAsPhrase =
+    saveAsWords.length > 1 ? `${saveAsWords.slice(0, -1).join(', ')} or ${saveAsWords[saveAsWords.length - 1]}` : saveAsWords[0];
+
   const body = (
     <>
       {timers.length === 0 && (
@@ -81,7 +92,9 @@ export default function Timers() {
             No timers running
           </Txt>
           <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 250, lineHeight: 20 }}>
-            Start a timer and save it later as a feeding, sleep, pumping or tummy time — even back-dated.
+            {saveAsPhrase
+              ? `Start a timer and save it later as a ${saveAsPhrase} — even back-dated.`
+              : 'Start a timer and save it later — even back-dated.'}
           </Txt>
         </View>
       )}
@@ -248,7 +261,7 @@ export default function Timers() {
               </View>
 
               <View style={{ flexDirection: 'row', gap: 7, marginTop: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                {TIMER_SAVE_OPTIONS.map((o) => {
+                {saveOptionsFor(tm.saveAs).map((o) => {
                   const sel = tm.saveAs === o;
                   return (
                     <Tappable

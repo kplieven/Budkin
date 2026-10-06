@@ -64,6 +64,7 @@ function toInput(s: State, now: number): ScheduleInput {
       treatmentReminders: s.treatmentReminders,
       treatmentRemindersEnabledAt: s.treatmentRemindersEnabledAt,
       milestoneCatchUp: s.milestoneCatchUp,
+      hiddenActivities: s.hiddenActivities,
     },
     lastPumpAt,
     lastSleepEndByChild,
@@ -188,6 +189,7 @@ export function initScheduledReminderSync(): void {
       state.treatmentReminders === previous.treatmentReminders &&
       state.treatmentRemindersEnabledAt === previous.treatmentRemindersEnabledAt &&
       state.milestoneCatchUp === previous.milestoneCatchUp &&
+      state.hiddenActivities === previous.hiddenActivities &&
       // Answering the nudge retires a milestone and must cancel its alert.
       state.answeredMilestonePrompts === previous.answeredMilestonePrompts
     ) {

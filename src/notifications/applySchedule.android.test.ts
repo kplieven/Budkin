@@ -68,6 +68,7 @@ function scheduleInput(overrides: Partial<ScheduleInput> = {}): ScheduleInput {
       treatmentReminders: false,
       treatmentRemindersEnabledAt: null,
       milestoneCatchUp: false,
+      hiddenActivities: [],
     },
     lastPumpAt: null,
     lastSleepEndByChild: {},

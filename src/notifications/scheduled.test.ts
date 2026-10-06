@@ -34,6 +34,7 @@ const prefs = (over: Partial<ReminderPrefs> = {}): ReminderPrefs => ({
   treatmentReminders: false,
   treatmentRemindersEnabledAt: null,
   milestoneCatchUp: false,
+  hiddenActivities: [],
   ...over,
 });
 
@@ -360,6 +361,17 @@ describe('desiredScheduled: pumping', () => {
     expect(out[0].body).toBe('Tap to log a session.');
     // Deliberately childless: pumping is parent-side, so nobody to select.
     expect(out[0].data.url).toBe('/timers');
+  });
+
+  it('schedules nothing while pumping is hidden from Home, toggle left on', () => {
+    const out = desiredScheduled(
+      input({
+        prefs: only({ pumpingReminders: true, pumpingEnabledAt: at(2026, 9, 1, 0), hiddenActivities: ['pumping'] }),
+        lastPumpAt: at(2026, 9, 1, 6),
+      }),
+      at(2026, 9, 1, 7),
+    );
+    expect(out).toEqual([]);
   });
 
   it('re-anchors when a newer pump is logged', () => {
@@ -753,6 +765,10 @@ describe('desiredScheduled: treatments, fixed times of day', () => {
 
   const run = (over: Partial<ScheduleInput>, now: number, p: Partial<ReminderPrefs> = {}) =>
     desiredScheduled(input({ prefs: only(p), children: [child()], ...over }), now);
+
+  it('schedules nothing while medication is hidden from Home', () => {
+    expect(run({ treatments: [treatment()] }, at(2026, 9, 2, 6), { hiddenActivities: ['medication'] })).toEqual([]);
+  });
 
   it('schedules each chosen slot at its mapped wall-clock hour', () => {
     const out = run({ treatments: [treatment()] }, at(2026, 9, 2, 6));

@@ -17,6 +17,7 @@ import { useDesktopShell } from '@/shell/useDesktopShell';
 import { useAppStore } from '@/store/useAppStore';
 import { makeSettingsListStyles } from '@/theme/settingsList';
 import { useTheme } from '@/theme/useTheme';
+import type { ActivityType } from '@/types/models';
 
 type ReminderKey =
   | 'dueDateReminders'
@@ -34,6 +35,8 @@ interface ReminderRow {
   on: boolean;
   /** Settings this reminder owns, revealed directly beneath it while it is on. */
   sub?: ReactNode;
+  /** The Home tile this reminder belongs to; hiding that tile hides the row too. */
+  activity?: ActivityType;
 }
 
 /** Grouped by what drives them, the same split as `scheduled.ts`: `Routine` off the
@@ -61,6 +64,7 @@ export default function NotificationSettings() {
   const milestoneCatchUp = useAppStore((s) => s.milestoneCatchUp);
   const setReminderPref = useAppStore((s) => s.setReminderPref);
   const setPumpingInterval = useAppStore((s) => s.setPumpingInterval);
+  const hiddenActivities = useAppStore((s) => s.hiddenActivities);
 
   const [granted, setGranted] = useState(true);
   useEffect(() => {
@@ -89,7 +93,7 @@ export default function NotificationSettings() {
     </>
   );
 
-  const sections: ReminderSection[] = [
+  const allSections: ReminderSection[] = [
     {
       label: 'Routine',
       rows: [
@@ -105,12 +109,14 @@ export default function NotificationSettings() {
           hint: 'On a set interval from your last session.',
           on: pumpingReminders,
           sub: pumpingInterval,
+          activity: 'pumping',
         },
         {
           key: 'treatmentReminders',
           label: 'Treatments',
           hint: 'When a dose of a treatment is due.',
           on: treatmentReminders,
+          activity: 'medication',
         },
       ],
     },
@@ -149,6 +155,12 @@ export default function NotificationSettings() {
       ],
     },
   ];
+
+  // Filtered before rendering so each section's `last` row is the last one SHOWN.
+  const sections = allSections.map((section) => ({
+    ...section,
+    rows: section.rows.filter((r) => r.activity == null || !hiddenActivities.includes(r.activity)),
+  }));
 
   const divider = { borderBottomWidth: 1, borderBottomColor: t.line };
 

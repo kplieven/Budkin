@@ -92,6 +92,22 @@ export const DEFAULT_DURATION_MIN: Record<ActivityType, number> = {
 export const ALL_ACTIVITIES: ActivityType[] = ['feeding', 'sleep', 'diaper', 'pumping', 'tummy', 'bath', 'temperature', 'medication'];
 
 /**
+ * The Home tiles the user has switched off, cleaned up for use. Stored as a HIDDEN list
+ * so an activity added later shows by default. Unknown types and repeats are dropped,
+ * and a list that would hide every tile reads as hiding none: Home always keeps one.
+ */
+export function sanitizeHiddenActivities(raw: unknown): ActivityType[] {
+  if (!Array.isArray(raw)) return [];
+  const hidden = ALL_ACTIVITIES.filter((a) => raw.includes(a));
+  return hidden.length === ALL_ACTIVITIES.length ? [] : hidden;
+}
+
+/** The Home tiles still shown, in `ALL_ACTIVITIES` order. */
+export function visibleActivities(hidden: readonly ActivityType[]): ActivityType[] {
+  return ALL_ACTIVITIES.filter((a) => !hidden.includes(a));
+}
+
+/**
  * Activities a twin household can log for several children in one save, each getting its
  * own entry. An allow-list, so an activity added later has to be argued onto it rather
  * than inheriting the affordance. What is missing is missing on purpose: `pumping` is
