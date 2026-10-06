@@ -7,7 +7,7 @@ import { Tappable } from '@/components/press';
 import { PulsingDot } from '@/components/PulsingDot';
 import { SyncBadge } from '@/components/SyncBadge';
 import { Txt } from '@/components/Txt';
-import { ALL_ACTIVITIES, ACTIVITY_LABEL } from '@/lib/activities';
+import { ACTIVITY_LABEL, visibleActivities } from '@/lib/activities';
 import { hexA } from '@/lib/color';
 import { ExpectingCard } from '@/features/dashboard/ExpectingCard';
 import { NoChildCard } from '@/features/dashboard/NoChildCard';
@@ -29,7 +29,7 @@ const METHOD_LABEL: Record<FeedMethod, string> = {
   self: 'self',
 };
 
-const ICON_FOR: Record<ActivityType, IconName> = {
+export const ICON_FOR: Record<ActivityType, IconName> = {
   feeding: 'feeding',
   sleep: 'sleep',
   diaper: 'diaper',
@@ -61,6 +61,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const openSheet = useAppStore((s) => s.openSheet);
   const openMedicationLog = useAppStore((s) => s.openMedicationLog);
   const startQuickTimer = useAppStore((s) => s.startQuickTimer);
+  const hiddenActivities = useAppStore((s) => s.hiddenActivities);
   const bathRhythms = useAppStore((s) => s.bathRhythms);
   const legacyRhythm = useAppStore((s) => s.legacyRhythm);
   // Raw select (stable reference); the due list is derived in the render body
@@ -335,7 +336,7 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
       </View>
 
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 11 }}>
-        {ALL_ACTIVITIES.map((a) => (
+        {visibleActivities(hiddenActivities).map((a) => (
           <ActivityTile
             key={a}
             label={ACTIVITY_LABEL[a]}

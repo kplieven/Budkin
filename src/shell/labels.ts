@@ -28,6 +28,8 @@ export function screenTitleFor(pathname: string, childFirst?: string): string {
       return 'Settings';
     case '/settings/notifications':
       return 'Notifications';
+    case '/settings/home':
+      return 'Home cards';
     case '/settings/queue':
       return 'Offline queue';
     case '/insights':

@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { ALL_ACTIVITIES, DIAPER_LEVELS, INTAKE_LEVELS, allowsMultipleChildren, feedAmountIsVolume, intakeLevelLabel, type LevelSet } from '@/lib/activities';
+import {
+  ALL_ACTIVITIES,
+  DIAPER_LEVELS,
+  INTAKE_LEVELS,
+  allowsMultipleChildren,
+  feedAmountIsVolume,
+  intakeLevelLabel,
+  sanitizeHiddenActivities,
+  visibleActivities,
+  type LevelSet,
+} from '@/lib/activities';
 import type { ActivityType } from '@/types/models';
 
 describe('feedAmountIsVolume partitions the dual-purpose amount', () => {
@@ -99,5 +109,29 @@ describe('three-level scales', () => {
     const byThirds = (v: number) => (v <= 3 ? 1 : v <= 7 ? 2 : 3);
     const disagrees = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].filter((v) => INTAKE_LEVELS.bucket(v) !== byThirds(v));
     expect(disagrees).toEqual([2, 3]);
+  });
+});
+
+describe('Home tile visibility', () => {
+  it('visibleActivities drops the hidden ones and keeps Home order', () => {
+    expect(visibleActivities(['pumping', 'feeding'])).toEqual(['sleep', 'diaper', 'tummy', 'bath', 'temperature', 'medication']);
+    expect(visibleActivities([])).toEqual(ALL_ACTIVITIES);
+  });
+
+  it('sanitizeHiddenActivities keeps known tiles once each, in Home order', () => {
+    expect(sanitizeHiddenActivities(['bath', 'pumping', 'bath'])).toEqual(['pumping', 'bath']);
+  });
+
+  it('sanitizeHiddenActivities drops what is not a Home tile', () => {
+    // `note` and `milestone` are real ActivityTypes but never tiles.
+    expect(sanitizeHiddenActivities(['note', 'milestone', 'bogus', 42, 'tummy'])).toEqual(['tummy']);
+  });
+
+  it('sanitizeHiddenActivities never hides every tile', () => {
+    expect(sanitizeHiddenActivities([...ALL_ACTIVITIES])).toEqual([]);
+  });
+
+  it('sanitizeHiddenActivities reads anything but an array as nothing hidden', () => {
+    for (const raw of [undefined, null, 'pumping', { pumping: true }]) expect(sanitizeHiddenActivities(raw)).toEqual([]);
   });
 });

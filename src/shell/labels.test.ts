@@ -53,6 +53,7 @@ describe('screenTitleFor', () => {
 
   it('titles the notifications settings route', () => {
     expect(screenTitleFor('/settings/notifications')).toBe('Notifications');
+    expect(screenTitleFor('/settings/home')).toBe('Home cards');
   });
 
   it('titles the offline queue settings route', () => {

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { UnitSystem } from '@/lib/units';
 import type { ThemeMode } from '@/theme/tokens';
+import type { ActivityType } from '@/types/models';
 
 const KEY = 'budkin.prefs.v1';
 
@@ -37,6 +38,8 @@ export interface Prefs {
   rhythmShowFeeds: boolean;
   rhythmShowDiapers: boolean;
   showGrowthReference: boolean;
+  /** Home tiles switched off on this device; see `sanitizeHiddenActivities`. */
+  hiddenActivities: ActivityType[];
 }
 
 /** Fields Budkin no longer writes, kept readable so a stored value can be migrated

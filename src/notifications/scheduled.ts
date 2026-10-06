@@ -51,6 +51,9 @@ export interface ReminderPrefs {
   /** when the treatments toggle was last switched on, epoch ms */
   treatmentRemindersEnabledAt: number | null;
   milestoneCatchUp: boolean;
+  /** Home tiles switched off. Masks that activity's reminder without touching its own
+   *  toggle, so showing the tile again brings the reminder back as it was. */
+  hiddenActivities: ActivityType[];
 }
 
 export interface ScheduleInput {
@@ -488,13 +491,14 @@ export function desiredScheduled(input: ScheduleInput, now: number): ScheduledNo
   if (input.prefs.ageMilestones) {
     for (const c of input.children) out.push(...ageReminders(c, now));
   }
-  if (input.prefs.pumpingReminders) {
+  const hidden = input.prefs.hiddenActivities;
+  if (input.prefs.pumpingReminders && !hidden.includes('pumping')) {
     out.push(...pumpReminders(input, now));
   }
   if (input.prefs.napSuggestions) {
     for (const c of input.children) out.push(...napReminders(c, input, now));
   }
-  if (input.prefs.treatmentReminders) {
+  if (input.prefs.treatmentReminders && !hidden.includes('medication')) {
     out.push(...treatmentReminders(input, now));
   }
   if (input.prefs.milestoneCatchUp) {

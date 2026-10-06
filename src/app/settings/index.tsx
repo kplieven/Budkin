@@ -15,6 +15,7 @@ import { Txt } from '@/components/Txt';
 import { ConfirmDisconnectSheet } from '@/features/connect/ConfirmDisconnectSheet';
 import { entryCountLabel } from '@/features/queue/queueView';
 import { treatmentDosageLabel, treatmentScheduleLabel } from '@/features/treatments/treatmentLabels';
+import { ALL_ACTIVITIES, visibleActivities } from '@/lib/activities';
 import { versionLabel } from '@/lib/appVersion';
 import { backOr } from '@/lib/nav';
 import { DesktopPage } from '@/shell/DesktopPage';
@@ -246,6 +247,7 @@ export default function Settings() {
   const queueCount = useAppStore((s) => s.queueCount);
   const toggleTheme = useAppStore((s) => s.toggleTheme);
   const setUnitSystem = useAppStore((s) => s.setUnitSystem);
+  const hiddenActivities = useAppStore((s) => s.hiddenActivities);
   const children = useAppStore((s) => s.children);
   const bathRhythms = useAppStore((s) => s.bathRhythms);
   const legacyRhythm = useAppStore((s) => s.legacyRhythm);
@@ -544,6 +546,28 @@ export default function Settings() {
             <Toggle on={simulateOffline} />
           </Tappable>
         )}
+      </View>
+
+      <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>
+        Home
+      </Txt>
+      <View style={group}>
+        <Tappable
+          onPress={() => router.navigate('/settings/home')}
+          accessibilityRole="button"
+          accessibilityLabel="Home cards"
+          style={(s) => [row, { cursor: 'pointer' }, isHovered(s) && { backgroundColor: t.elevated }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Txt unselectable weight={600} size={16}>
+              Home cards
+            </Txt>
+            <Txt unselectable weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              {`${visibleActivities(hiddenActivities).length} of ${ALL_ACTIVITIES.length} shown`}
+            </Txt>
+          </View>
+          <Icon name="chevron-right" color={t.faint} size={18} />
+        </Tappable>
       </View>
 
       <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ ...sectionLabel, textTransform: 'uppercase' }}>

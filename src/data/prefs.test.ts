@@ -72,6 +72,11 @@ describe('prefs persistence', () => {
     expect(await loadPrefs()).toEqual({ showGrowthReference: false });
   });
 
+  it('round-trips hiddenActivities', async () => {
+    await savePrefs({ hiddenActivities: ['pumping', 'bath'] });
+    expect(await loadPrefs()).toEqual({ hiddenActivities: ['pumping', 'bath'] });
+  });
+
   it('a later save overwrites the same field but keeps the others', async () => {
     await savePrefs({ themeMode: 'light', unitSystem: 'imperial' });
     await savePrefs({ unitSystem: 'metric' });

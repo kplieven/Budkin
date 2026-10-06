@@ -9,6 +9,9 @@ import {
   allowsMultipleChildren,
   DEFAULT_DURATION_MIN,
   feedAmountIsVolume,
+  sanitizeHiddenActivities,
+  TIMER_SAVE_OPTIONS,
+  visibleActivities,
 } from '@/lib/activities';
 import {
   type Connection,
@@ -187,6 +190,9 @@ interface AppState {
   rhythmShowSleep: boolean;
   rhythmShowFeeds: boolean;
   rhythmShowDiapers: boolean;
+  /** Home tiles switched off on this device. Also trims the Timers save-as row and
+   *  pauses that activity's reminders; History and deep links ignore it. */
+  hiddenActivities: ActivityType[];
   /** effective offline flag = manual override OR no network */
   offline: boolean;
   /** real network reachability (from expo-network) */
@@ -294,6 +300,8 @@ interface AppActions {
   setRhythmOriginHour: (hour: number) => void;
   setRhythmLayer: (layer: 'sleep' | 'feeds' | 'diapers', on: boolean) => void;
   setGrowthReference: (on: boolean) => void;
+  /** A no-op when it would hide the last visible tile. */
+  setActivityVisible: (type: ActivityType, visible: boolean) => void;
   setOffline: (v: boolean) => void;
   toggleOffline: () => void;
   setNetworkOnline: (online: boolean) => void;
@@ -1339,6 +1347,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
   rhythmShowSleep: true,
   rhythmShowFeeds: true,
   rhythmShowDiapers: true,
+  hiddenActivities: [],
   offline: false,
   networkOnline: true,
   simulateOffline: false,
@@ -1473,6 +1482,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
     set({ showGrowthReference: on });
     void savePrefs({ showGrowthReference: on });
   },
+  setActivityVisible: (type, visible) => {
+    const current = get().hiddenActivities;
+    const next = visible ? current.filter((a) => a !== type) : [...current, type];
+    if (visibleActivities(next).length === 0) return;
+    const hiddenActivities = sanitizeHiddenActivities(next);
+    set({ hiddenActivities });
+    void savePrefs({ hiddenActivities });
+  },
   setOffline: (v) => {
     const offline = v || !get().networkOnline;
     set({ simulateOffline: v, offline });
@@ -1536,6 +1553,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (prefs.rhythmShowSleep != null) set({ rhythmShowSleep: prefs.rhythmShowSleep });
     if (prefs.rhythmShowFeeds != null) set({ rhythmShowFeeds: prefs.rhythmShowFeeds });
     if (prefs.rhythmShowDiapers != null) set({ rhythmShowDiapers: prefs.rhythmShowDiapers });
+    if (prefs.hiddenActivities != null) set({ hiddenActivities: sanitizeHiddenActivities(prefs.hiddenActivities) });
     set({ answeredMilestonePrompts: await loadMilestonePrompts() });
     set({ bathRhythms: await loadBathRhythms() });
     // Loaded unconditionally: treatments are user data that survives disconnect.
@@ -3671,12 +3689,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   startQuickTimer: () => {
     const s = get();
+    // Pre-selects the first save-as option still on Home; feeding when none of them is.
+    const saveAs = TIMER_SAVE_OPTIONS.find((a) => !s.hiddenActivities.includes(a)) ?? 'feeding';
     const timer: Timer = {
       id: 't' + Date.now(),
-      activity: 'feeding',
-      name: ACTIVITY_LABEL.feeding,
+      activity: saveAs,
+      name: ACTIVITY_LABEL[saveAs],
       start: Date.now(),
-      saveAs: 'feeding',
+      saveAs,
       childId: s.selectedChildId,
     };
     set({ timers: [...s.timers, timer] });

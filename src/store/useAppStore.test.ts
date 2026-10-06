@@ -553,6 +553,7 @@ beforeEach(() => {
     legacyRhythm: BATH_RHYTHM_DEFAULT,
     napWindowStartMin: 420,
     napWindowEndMin: 1140,
+    hiddenActivities: [],
   });
 });
 
@@ -7310,6 +7311,63 @@ describe('rhythm-layer persistence', () => {
     expect(s().rhythmShowSleep).toBe(true);
     expect(s().rhythmShowFeeds).toBe(true);
     expect(s().rhythmShowDiapers).toBe(true);
+  });
+});
+
+describe('home card visibility', () => {
+  const ALL_BUT_SLEEP = ['feeding', 'diaper', 'pumping', 'tummy', 'bath', 'temperature', 'medication'] as const;
+
+  it('setActivityVisible hides a tile and persists the hidden list', () => {
+    s().setActivityVisible('pumping', false);
+    expect(s().hiddenActivities).toEqual(['pumping']);
+    expect(savePrefs).toHaveBeenCalledWith({ hiddenActivities: ['pumping'] });
+  });
+
+  it('keeps the hidden list in Home order, whatever order tiles were hidden in', () => {
+    s().setActivityVisible('pumping', false);
+    s().setActivityVisible('feeding', false);
+    expect(s().hiddenActivities).toEqual(['feeding', 'pumping']);
+  });
+
+  it('setActivityVisible can show a tile again', () => {
+    useAppStore.setState({ hiddenActivities: ['pumping', 'bath'] });
+    s().setActivityVisible('pumping', true);
+    expect(s().hiddenActivities).toEqual(['bath']);
+    expect(savePrefs).toHaveBeenCalledWith({ hiddenActivities: ['bath'] });
+  });
+
+  it('refuses to hide the last visible tile', () => {
+    useAppStore.setState({ hiddenActivities: [...ALL_BUT_SLEEP] });
+    s().setActivityVisible('sleep', false);
+    expect(s().hiddenActivities).toEqual([...ALL_BUT_SLEEP]);
+    expect(savePrefs).not.toHaveBeenCalled();
+  });
+
+  it('hydrate restores a persisted list, dropping anything unknown', async () => {
+    h.prefs = { hiddenActivities: ['pumping', 'note', 'bogus', 'pumping'] };
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().hiddenActivities).toEqual(['pumping']);
+  });
+
+  it('hydrate shows every tile when nothing was persisted', async () => {
+    h.prefs = {};
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+    expect(s().hiddenActivities).toEqual([]);
+  });
+
+  it('a quick timer starts as the first save-as option still on Home', () => {
+    useAppStore.setState({ connection: { mode: 'local' }, hiddenActivities: ['feeding'] });
+    s().startQuickTimer();
+    expect(s().timers[0].saveAs).toBe('sleep');
+    expect(s().timers[0].name).toBe('Sleep');
+  });
+
+  it('a quick timer falls back to feeding when every save-as option is hidden', () => {
+    useAppStore.setState({ connection: { mode: 'local' }, hiddenActivities: ['feeding', 'sleep', 'pumping', 'tummy'] });
+    s().startQuickTimer();
+    expect(s().timers[0].saveAs).toBe('feeding');
   });
 });
 
