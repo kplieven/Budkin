@@ -13,7 +13,6 @@ import {
   visibleTags,
 } from '@/store/useAppStore';
 import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, LAST_FEED_DEFAULT, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
-import { toDisplay } from '@/lib/units';
 import { CHILD_COLORS } from '@/lib/color';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -680,7 +679,7 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 });
 
-describe('adjustAmount (stepper presses land in the display unit system)', () => {
+describe('adjustAmount (stepper presses step in the user units)', () => {
   // The units preference is not part of the shared beforeEach reset, so put it
   // back or an imperial case would leak into every test after it.
   afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
@@ -695,19 +694,14 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
     expect(s().te.amount).toBe(90);
   });
 
-  it('imperial: a press moves by half a fl oz, and stores canonical ml', () => {
+  it('imperial: a press moves the stored number by half a fl oz, unconverted', () => {
     useAppStore.setState({ unitSystem: 'imperial' });
     s().openSheet('pumping');
-    // The 90 ml seed is 3.0433 fl oz, off the half-ounce grid; the first press lands
-    // on the next mark up rather than adding half an ounce to the odd value.
-    expect(s().te.amount).toBe(90);
-
+    expect(s().te.amount).toBe(3); // the seed, in fl oz
     s().adjustAmount(1);
-    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3.5, 9);
+    expect(s().te.amount).toBe(3.5);
     s().adjustAmount(1);
-    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(4, 9);
-    // What is persisted and synced is millilitres, never the fl oz number.
-    expect(s().te.amount).toBeCloseTo(118.294, 3);
+    expect(s().te.amount).toBe(4); // what is saved and synced: 4, not 118.294
   });
 
   it('clamps at zero rather than going negative', () => {
@@ -715,6 +709,21 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
     s().openSheet('pumping');
     for (let i = 0; i < 10; i++) s().adjustAmount(-1);
     expect(s().te.amount).toBe(0);
+  });
+});
+
+describe('new sheets seed amounts in the user units', () => {
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  it.each([
+    ['metric', 90, 37],
+    ['imperial', 3, 98.6],
+  ] as const)('%s: pumping starts on %d, temperature on %d', (system, pump, temp) => {
+    useAppStore.setState({ unitSystem: system });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(pump);
+    s().openSheet('temperature');
+    expect(s().te.temperature).toBe(temp);
   });
 });
 

@@ -12,7 +12,7 @@ import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { MEAS_META, lowerLabel } from '@/lib/measurements';
-import { fmtValue, resolveMetricInput, unitLabel } from '@/lib/units';
+import { fmtValue, resolveInput, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
@@ -48,9 +48,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
   const editing = editingId ? measurements.find((m) => m.id === editingId) : null;
-  // The stored value is canonical metric; show it in the user's chosen system and (in
-  // onSave) convert what they type back to metric before persisting.
-  const [value, setValue] = useState(editing ? fmtValue(kind, editing.value, unitSystem) : '');
+  const [value, setValue] = useState(editing ? fmtValue(editing.value) : '');
   const [valueFocused, setValueFocused] = useState(false);
   const [dateMs, setDateMs] = useState(editing ? editing.date : midnight(0));
   const [notes, setNotes] = useState(editing?.notes ?? '');
@@ -67,15 +65,14 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
   const stepDay = (delta: number) => setDateMs((d) => Math.min(today, d + delta * ONE_DAY));
 
   const onSave = () => {
-    // Persist canonical metric regardless of the display system the user typed in. An
-    // unchanged edit keeps the exact stored value (no rounded-display drift), and a
+    // An unchanged edit keeps the exact stored value (no rounded-display drift), and a
     // blank or invalid value cancels.
-    const metric = resolveMetricInput(kind, value, unitSystem, editing?.value);
-    if (metric == null) {
+    const next = resolveInput(value, editing?.value);
+    if (next == null) {
       close();
       return;
     }
-    saveMeasurement(metric, dateMs, notes.trim() || undefined);
+    saveMeasurement(next, dateMs, notes.trim() || undefined);
   };
 
   return (
@@ -121,7 +118,7 @@ function Inner({ kind, editingId }: { kind: MeasurementKind; editingId: string |
         <Txt weight={500} size={12} color={t.faint} style={{ marginBottom: 16 }}>
           {kind === 'bmi'
             ? 'BMI is unitless.'
-            : `Shown in ${unitSystem} units — change in Settings.`}
+            : `In ${unit} — set the units your Baby Buddy uses in Settings.`}
         </Txt>
 
         <Txt weight={700} size={13} color={t.dim} style={{ marginBottom: 9 }}>

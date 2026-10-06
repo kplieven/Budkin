@@ -37,7 +37,9 @@ or endorsed by the Baby Buddy project.
   server connected, whatever you log offline is queued and sent on reconnect,
   and the queue is inspectable in settings.
 - Night and Daylight themes, metric or imperial units, and a configurable
-  "day starts at" hour.
+  "day starts at" hour. Baby Buddy stores bare numbers, so the units setting
+  names the units you record in and only changes labels; values are never
+  converted.
 
 ## Using it with Baby Buddy
 

@@ -20,11 +20,11 @@ const FEED_METHOD_LABEL: Record<string, string> = {
   self: 'self fed',
 };
 
-/** A feeding volume in canonical ml, converted to the user's units lens. Only ever
- *  called for amounts that really are volumes: see `feedAmountIsVolume`. */
+/** A feeding volume as stored, labeled in the user's units. Only ever called for
+ *  amounts that really are volumes: see `feedAmountIsVolume`. */
 function fmtAmount(amount: number): string {
   const system = useAppStore.getState().unitSystem;
-  return `${fmtValue('volume', amount, system)} ${unitLabel('volume', system)}`;
+  return `${fmtValue(amount)} ${unitLabel('volume', system)}`;
 }
 
 /**
@@ -102,11 +102,11 @@ export function detailFor(item: TimelineItem): string {
     case 'bath':
       return e.wash === 'full' ? 'Full bath' : 'Quick wash';
     case 'temperature': {
-      // `e.value` is canonical °C; convert to the user's units lens. Read
-      // non-reactively from the store: the timeline re-renders often (the per-second
-      // `now` tick, navigation) so a units toggle is reflected there anyway.
+      // Labeled in the user's units. Read non-reactively from the store: the timeline
+      // re-renders often (the per-second `now` tick, navigation) so a units toggle is
+      // reflected there anyway.
       const system = useAppStore.getState().unitSystem;
-      const base = `${fmtValue('temperature', e.value, system)} ${unitLabel('temperature', system)}`;
+      const base = `${fmtValue(e.value)} ${unitLabel('temperature', system)}`;
       return e.notes ? `${base} · ${e.notes}` : base;
     }
     case 'medication': {

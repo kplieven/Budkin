@@ -10,7 +10,8 @@ const KEY = 'budkin.prefs.v1';
 
 export interface Prefs {
   themeMode: ThemeMode;
-  /** Budkin-local display lens, not the server's unit setting (default 'metric'). */
+  /** The units the family records in Baby Buddy, which stores bare numbers. Picks
+   *  labels only, never converts (default 'metric'). */
   unitSystem: UnitSystem;
   tutorialSeen: boolean;
   dueDateReminders: boolean;

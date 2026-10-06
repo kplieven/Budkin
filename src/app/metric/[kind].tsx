@@ -16,7 +16,7 @@ import { TrendChart } from '@/features/insights/TrendChart';
 import { hexA } from '@/lib/color';
 import { MEAS_KINDS, MEAS_META, lowerLabel } from '@/lib/measurements';
 import { backOr } from '@/lib/nav';
-import { fmtValue, toDisplay, unitLabel } from '@/lib/units';
+import { fmtValue, unitLabel } from '@/lib/units';
 import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { measurementsForChild } from '@/store/selectors';
@@ -70,12 +70,8 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
 
   const meta = MEAS_META[kind];
   const unit = unitLabel(kind, unitSystem);
-  // Stored values are canonical metric. Convert the whole series up front so the
-  // hero, delta chip, chart and ticks all agree. These kinds (weight, height, head,
-  // bmi) have no additive offset, so a converted delta stays a true difference.
-  const rawPoints = seriesFor(childMeasurements, kind);
-  const points = rawPoints.map((p) => ({ ...p, value: toDisplay(kind, p.value, unitSystem) }));
-  const latest = rawPoints.length ? rawPoints[rawPoints.length - 1] : null;
+  const points = seriesFor(childMeasurements, kind);
+  const latest = points.length ? points[points.length - 1] : null;
   const change = changeSince(points);
   // WHO percentile reference: available only for a recorded girl/boy gender whose
   // visible age range overlaps WHO's 0..60 month window, and drawn only while the
@@ -116,7 +112,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
         <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexShrink: 1 }}>
           {latest ? (
             <>
-              <Txt weight={800} size={34} tracking={-0.6}>{fmtValue(kind, latest.value, unitSystem)}</Txt>
+              <Txt weight={800} size={34} tracking={-0.6}>{fmtValue(latest.value)}</Txt>
               {unit ? <Txt weight={600} size={16} color={t.dim}>{unit}</Txt> : null}
             </>
           ) : (
@@ -231,7 +227,7 @@ function MetricDetail({ kind }: { kind: MeasurementKind }) {
               ]}
             >
               <View style={{ flex: 1 }}>
-                <Txt weight={700} size={15.5} tracking={-0.2}>{fmtValue(kind, mm.value, unitSystem)}{unit ? ` ${unit}` : ''}</Txt>
+                <Txt weight={700} size={15.5} tracking={-0.2}>{fmtValue(mm.value)}{unit ? ` ${unit}` : ''}</Txt>
                 {mm.notes ? <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 1 }}>{mm.notes}</Txt> : null}
               </View>
               <Txt weight={600} size={13} color={t.faint} style={{ fontVariant: ['tabular-nums'] }}>{rowDate(mm.date)}</Txt>

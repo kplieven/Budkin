@@ -74,7 +74,7 @@ export interface TimeEntryState {
   wash?: WashKind;
   /** As `feedTypeEdited`, for the wash. */
   washEdited?: boolean;
-  /** °C */
+  /** °C or °F, per the user's units */
   temperature?: number;
   /** required to save a medication */
   medName?: string;

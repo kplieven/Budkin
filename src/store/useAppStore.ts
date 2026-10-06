@@ -91,7 +91,7 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
 import { anchorChildId, isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
-import { stepVolume, type UnitSystem } from '@/lib/units';
+import { DEFAULT_PUMP_AMOUNT, DEFAULT_TEMPERATURE, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
 import {
   activeTreatmentsForChildToday,
@@ -156,7 +156,7 @@ interface AppState {
   savedServers: SavedServer[];
 
   themeMode: ThemeMode;
-  /** Display lens only: stored values stay canonical metric. */
+  /** The units the family records in Baby Buddy: picks labels, never converts. */
   unitSystem: UnitSystem;
   tutorialSeen: boolean;
   /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
@@ -403,8 +403,8 @@ interface AppActions {
   logMedicationFromTreatment: (treatmentId: string) => void;
   expandMedicationLog: () => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
-  /** One press of the amount stepper: +1 or -1 step in the user's display units
-   *  (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
+  /** One press of the amount stepper: +1 or -1 step in the user's units (10 ml
+   *  metric, 0.5 fl oz imperial). */
   adjustAmount: (dir: 1 | -1) => void;
   toggleWet: () => void;
   toggleSolid: () => void;
@@ -2782,7 +2782,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.startSide = seeds.startSide;
     }
     if (type === 'pumping') {
-      te.amount = 90;
+      te.amount = DEFAULT_PUMP_AMOUNT[s.unitSystem];
       te.method = 'both';
     }
     if (type === 'diaper') {
@@ -2809,7 +2809,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ).nextKind;
     }
     if (type === 'temperature') {
-      te.temperature = 37.0;
+      te.temperature = DEFAULT_TEMPERATURE[s.unitSystem];
     }
     if (type === 'medication') {
       te.medName = '';
@@ -2898,7 +2898,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : undefined;
       }
       if (entry.type === 'pumping') {
-        te.amount = entry.amount ?? 90;
+        te.amount = entry.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem];
         te.method = entry.method ?? 'both';
       }
       if (entry.type === 'sleep') te.nap = entry.nap;
@@ -2938,7 +2938,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (tm.amount != null) te.amount = tm.amount;
     }
     if (type === 'pumping') {
-      te.amount = tm.amount ?? 90;
+      te.amount = tm.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem];
       te.method = tm.method ?? 'both';
     }
     if (type === 'sleep') {
@@ -3714,7 +3714,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : savedTags;
       entry = { ...base, tags, type: 'feeding', start: tm.start, end: resolvedEnd, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
-      entry = { ...base, type: 'pumping', start: tm.start, end: resolvedEnd, amount: tm.amount ?? 90, method: tm.method };
+      entry = { ...base, type: 'pumping', start: tm.start, end: resolvedEnd, amount: tm.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem], method: tm.method };
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {

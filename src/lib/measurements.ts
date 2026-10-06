@@ -2,8 +2,8 @@ import type { MeasurementKind } from '@/types/models';
 
 /**
  * The UNIT is deliberately NOT here: it depends on the user's metric/imperial
- * preference and comes from `unitLabel(kind, system)`. Stored values are always
- * canonical metric (kg/cm), and imperial is a display lens applied at render.
+ * preference and comes from `unitLabel(kind, system)`. Stored values are already in
+ * those units, so the preference only picks the label.
  */
 export const MEAS_META: Record<
   MeasurementKind,

@@ -24,18 +24,30 @@ const feed = (feedType: FeedType, method: FeedMethod, amount: number | null): En
   amount,
 });
 
+describe('detailFor: temperature', () => {
+  it('labels the reading in the user units without converting it', () => {
+    const reading = (value: number): Entry => ({ id: 't1', childId: 'c1', tags: [], type: 'temperature', time: NOW, value });
+    h.unitSystem = 'imperial';
+    expect(detailFor(reading(98.6))).toBe('98.6 °F');
+    h.unitSystem = 'metric';
+    expect(detailFor(reading(37.2))).toBe('37.2 °C');
+  });
+});
+
 describe('detailFor: feeding amount is dual-purpose', () => {
-  it('converts and labels a bottle volume', () => {
+  it('labels a bottle volume in the user units without converting it', () => {
     h.unitSystem = 'metric';
     expect(detailFor(feed('formula', 'bottle', 90))).toContain('90 ml');
 
+    // Baby Buddy stores bare numbers: an imperial family's 4 is 4 fl oz.
     h.unitSystem = 'imperial';
-    expect(detailFor(feed('formula', 'bottle', 90))).toContain('3 fl oz');
+    expect(detailFor(feed('formula', 'bottle', 4))).toContain('4 fl oz');
+    expect(detailFor(feed('formula', 'bottle', 90))).toContain('90 fl oz');
   });
 
-  it('converts a breast feed given by bottle (expressed milk is still a volume)', () => {
+  it('labels a breast feed given by bottle as a volume (expressed milk is still one)', () => {
     h.unitSystem = 'imperial';
-    expect(detailFor(feed('breast', 'bottle', 90))).toContain('3 fl oz');
+    expect(detailFor(feed('breast', 'bottle', 3.5))).toContain('3.5 fl oz');
   });
 
   it('names a breast feed at the breast by its intake level', () => {
@@ -100,7 +112,7 @@ describe('detailFor: medication', () => {
     expect(detailFor(med({ dosage: 400 }))).toBe('Paracetamol · 400');
   });
 
-  it('never routes the unit through the units converter (free text, verbatim)', () => {
+  it('never takes its unit from the units setting (free text, verbatim)', () => {
     // A 5 mL dose must read "5 mL", never a converted "0.2 fl oz".
     h.unitSystem = 'imperial';
     expect(detailFor(med({ dosage: 5, dosageUnit: 'mL' }))).toBe('Paracetamol · 5 mL');
@@ -155,9 +167,9 @@ describe('detailFor: a running timer', () => {
     expect(detailFor(timer({ saveAs: 'feeding' }))).toBe('');
   });
 
-  it('converts a pumping timer amount and shows a tummy milestone', () => {
+  it('labels a pumping timer amount and shows a tummy milestone', () => {
     h.unitSystem = 'imperial';
-    expect(detailFor(timer({ saveAs: 'pumping', amount: 90 }))).toBe('3 fl oz');
+    expect(detailFor(timer({ saveAs: 'pumping', amount: 3 }))).toBe('3 fl oz');
     expect(detailFor(timer({ saveAs: 'tummy', milestone: 'Rolled over' }))).toBe('Rolled over');
   });
 

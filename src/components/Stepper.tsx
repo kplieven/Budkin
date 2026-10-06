@@ -7,17 +7,16 @@ import { Tappable } from '@/components/press';
 import { Txt } from '@/components/Txt';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
-import { toDisplay, toMetric, unitLabel, type UnitSystem } from '@/lib/units';
+import { fmtValue, unitLabel, type UnitSystem } from '@/lib/units';
 
 interface StepperProps {
-  /** Canonical millilitres, as stored: imperial is a display lens only, so the
-   *  caller keeps handing us ml and we relabel and convert here. */
+  /** The amount as stored, already in the user's units: `system` only picks the label. */
   value: number;
   system: UnitSystem;
   onMinus: () => void;
   onPlus: () => void;
-  /** Typed-in amount, already converted back to canonical millilitres. */
-  onChange: (metricMl: number) => void;
+  /** Typed-in amount, as typed. */
+  onChange: (amount: number) => void;
   /** The activity's accent, used for the focus border while typing. */
   color: string;
 }
@@ -26,11 +25,10 @@ export function Stepper({ value, system, onMinus, onPlus, onChange, color }: Ste
   const t = useTheme();
   const [text, setText] = useState<string | null>(null); // null = not editing
   const unit = unitLabel('volume', system);
-  const shown = toDisplay('volume', value, system);
   // Imperial steps by halves, so hold one decimal to keep 3.0 / 3.5 / 4.0 an even
-  // column. Metric is whole millilitres, but an amount first entered in fl oz
-  // converts back to a fraction, so trim that to one decimal as well.
-  const display = system === 'imperial' ? shown.toFixed(1) : String(Math.round(shown * 10) / 10);
+  // column; anything finer, such as a typed 3.25, shows in full.
+  const display =
+    system === 'imperial' && Number.isInteger(value * 10) ? value.toFixed(1) : fmtValue(value);
 
   // The ± buttons are the fast path but a poor one for a 137 ml bottle, so the
   // reading itself is an input: tap it and type the amount in the shown unit.
@@ -39,7 +37,7 @@ export function Stepper({ value, system, onMinus, onPlus, onChange, color }: Ste
     setText(null);
     const v = parseFloat(raw.replace(',', '.'));
     if (Number.isNaN(v)) return;
-    onChange(toMetric('volume', Math.max(0, v), system));
+    onChange(Math.max(0, v));
   };
 
   const btn = {
