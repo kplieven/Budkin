@@ -3,7 +3,7 @@
  * drawn only for a recorded girl/boy gender and only for ages 0 to 60 months (WHO's
  * range), from the LMS parameters in `whoLms.ts`.
  */
-import { toDisplay, type UnitSystem } from '@/lib/units';
+import { fromMetric, type UnitSystem } from '@/lib/units';
 import type { ChildGender, MeasurementKind } from '@/types/models';
 
 import { WHO_LMS, type Sex } from './whoLms';
@@ -96,7 +96,7 @@ export function referenceCurves(
     emphasis,
     points: ts.map((t) => ({
       t,
-      value: toDisplay(kind, valueAtZ(lmsAtAge(table, (t - birthMs) / MONTH_MS), z), unitSystem),
+      value: fromMetric(kind, valueAtZ(lmsAtAge(table, (t - birthMs) / MONTH_MS), z), unitSystem),
     })),
   }));
 }

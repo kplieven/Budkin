@@ -17,7 +17,7 @@ import { ACTIVITY_LABEL, DIAPER_LEVELS, DURATION_SHORTCUTS, INTAKE_LEVELS, allow
 import { hexA } from '@/lib/color';
 import { fmtClock } from '@/lib/format';
 import { eligibleTargetChildren, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
-import { fmtValue, toMetric, unitLabel } from '@/lib/units';
+import { DEFAULT_TEMPERATURE, fmtValue, unitLabel } from '@/lib/units';
 import { fontFamily } from '@/theme/fonts';
 import { SOLID_COLORS } from '@/theme/tokens';
 import { useAppStore, visibleTags } from '@/store/useAppStore';
@@ -229,14 +229,14 @@ function FieldLabel({ children, hint }: { children: string; hint?: string }) {
 /**
  * Decimal temperature reading. The Stepper is integer-only and LevelScale has three
  * fixed steps, so neither fits 37.4. Local text state holds the raw string so a
- * trailing "." while typing "37." isn't dropped. The stored value is always canonical
- * °C: the field shows it in the user's units lens and converts back before pushing to
- * the store. Conditionally rendered, so it re-seeds from the store on every open.
+ * trailing "." while typing "37." isn't dropped. The value is in the user's units as
+ * stored; the units setting only picks the label. Conditionally rendered, so it re-seeds
+ * from the store on every open.
  */
 function TemperatureField({ value, color, onChange }: { value?: number; color: string; onChange: (v?: number) => void }) {
   const t = useTheme();
   const unitSystem = useAppStore((s) => s.unitSystem);
-  const [text, setText] = useState(value != null ? fmtValue('temperature', value, unitSystem) : '');
+  const [text, setText] = useState(value != null ? fmtValue(value) : '');
   const [focused, setFocused] = useState(false);
   return (
     <>
@@ -261,9 +261,9 @@ function TemperatureField({ value, color, onChange }: { value?: number; color: s
           onChangeText={(v) => {
             setText(v);
             const n = parseFloat(v.replace(',', '.'));
-            onChange(Number.isNaN(n) ? undefined : toMetric('temperature', n, unitSystem));
+            onChange(Number.isNaN(n) ? undefined : n);
           }}
-          placeholder={unitSystem === 'imperial' ? '98.6' : '37.0'}
+          placeholder={DEFAULT_TEMPERATURE[unitSystem].toFixed(1)}
           placeholderTextColor={t.faint}
           keyboardType="decimal-pad"
           style={{ flex: 1, height: 60, fontSize: 30, fontFamily: fontFamily(800), color: t.text, ...noFocusRing }}
@@ -278,7 +278,7 @@ function TemperatureField({ value, color, onChange }: { value?: number; color: s
 
 /**
  * Medication field block. The unit is Baby Buddy's free-text `dosage_unit`, so it is
- * stored as a plain string and never routed through the units.ts converter.
+ * stored as a plain string and never takes a label from the units setting.
  * Conditionally rendered, so it re-seeds from the store draft on every open.
  */
 function MedicationField({

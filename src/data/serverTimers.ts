@@ -29,12 +29,11 @@ export interface DecodedTimer {
 }
 
 /**
- * The `amt:` token is the draft's RAW `amount`, never a converted one: canonical
- * MILLILITRES for a pumping timer and any feed that measures a volume, or the
+ * The `amt:` token is the draft's RAW `amount`, never a converted one: a VOLUME in
+ * the family's units for a pumping timer and any feed that measures one, or the
  * unitless intake level (see `INTAKE_LEVELS`) for a feed at the breast. The
- * device's units preference must not touch it, since imperial is a display lens
- * only and this string is shared state that another device decodes when it picks
- * the timer up. The `ft:`/`m:` tokens ride alongside, so a decoder can always tell
+ * device's units preference must not touch it, since it only picks labels and this
+ * string is shared state that another device decodes when it picks the timer up. The `ft:`/`m:` tokens ride alongside, so a decoder can always tell
  * which of the two an `amt:` is, which is why the level needs no marker of its own.
  */
 export function encodeTimerName(t: Timer): string {

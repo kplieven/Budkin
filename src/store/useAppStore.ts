@@ -91,7 +91,7 @@ import { loadTimers, saveTimers } from '@/data/timers';
 import { loadBathRhythms, saveBathRhythms } from '@/data/bathRhythm';
 import { anchorChildId, isEligibleTarget, sheetTargetIds, targetChildrenLabel } from '@/lib/logTargets';
 import { MILESTONE_BY_KEY } from '@/lib/milestones';
-import { snapVolume, stepVolume, type UnitSystem } from '@/lib/units';
+import { DEFAULT_PUMP_AMOUNT, DEFAULT_TEMPERATURE, stepVolume, type UnitSystem } from '@/lib/units';
 import type { WashKind } from '@/lib/wash';
 import {
   activeTreatmentsForChildToday,
@@ -118,6 +118,7 @@ import {
   washDueState,
 } from '@/store/selectors';
 import { treatmentCooldownLabel } from '@/features/treatments/treatmentLabels';
+import { hideUnitsNotice, initUnitsNotice } from '@/features/unitsNotice/unitsNotice'; // UNITS NOTICE
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -156,7 +157,7 @@ interface AppState {
   savedServers: SavedServer[];
 
   themeMode: ThemeMode;
-  /** Display lens only: stored values stay canonical metric. */
+  /** The units the family records in Baby Buddy: picks labels, never converts. */
   unitSystem: UnitSystem;
   tutorialSeen: boolean;
   /** Scheduled reminder toggles. See src/notifications/scheduled.ts. */
@@ -403,8 +404,8 @@ interface AppActions {
   logMedicationFromTreatment: (treatmentId: string) => void;
   expandMedicationLog: () => void;
   setTE: (patch: Partial<TimeEntryState>) => void;
-  /** One press of the amount stepper: +1 or -1 step in the user's display units
-   *  (10 ml metric, 0.5 fl oz imperial). Stores canonical ml. */
+  /** One press of the amount stepper: +1 or -1 step in the user's units (10 ml
+   *  metric, 0.5 fl oz imperial). */
   adjustAmount: (dir: 1 | -1) => void;
   toggleWet: () => void;
   toggleSolid: () => void;
@@ -1097,20 +1098,6 @@ function mirrorTimerDelete(get: Get, timer: Timer): void {
 /** Does this draft's `amount` hold a VOLUME the stepper edits? A feeding's `amount` is
  *  dual-purpose: a breast feed records a dimensionless intake level that must never be
  *  treated as a measurement. */
-function draftAmountIsVolume(type: ActivityType, te: TimeEntryState): boolean {
-  if (type === 'pumping') return true;
-  if (type === 'feeding') return feedAmountIsVolume(te.feedType, te.method);
-  return false;
-}
-
-/** Snap a draft's volume amount onto the active unit system's step grid. The stepper
- *  shows imperial to one decimal, so a stored value just off a grid point renders
- *  identically to the one below it and the press that closes the gap looks dead. */
-function snapDraftAmount(type: ActivityType, te: TimeEntryState, system: UnitSystem): TimeEntryState {
-  if (te.amount == null || !draftAmountIsVolume(type, te)) return te;
-  return { ...te, amount: snapVolume(te.amount, system) };
-}
-
 /** The three CHILD-scoped seeds a feeding draft opens on, in one function so `openSheet`,
  *  `openTimerEdit` and a re-aim cannot disagree. `method` is the ALTERNATED side. */
 function feedingSeeds(
@@ -1407,12 +1394,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
     void savePrefs({ tutorialSeen: true });
   },
   setUnitSystem: (system) => {
-    // Re-align an open sheet's draft amount onto the new system's grid.
-    set((s) => ({
-      unitSystem: system,
-      te: s.sheet ? snapDraftAmount(s.sheet.type, s.te, system) : s.te,
-    }));
-    void savePrefs({ unitSystem: system });
+    set({ unitSystem: system });
+    // UNITS NOTICE: a choice made now is made under the label-only meaning, so it
+    // acks the notice too. One write, since concurrent `savePrefs` merges race.
+    hideUnitsNotice();
+    void savePrefs({ unitSystem: system, unitsLabelOnlyAck: true });
   },
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
@@ -1525,6 +1511,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    initUnitsNotice(prefs); // UNITS NOTICE
     if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
     if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });
@@ -2800,7 +2787,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       te.startSide = seeds.startSide;
     }
     if (type === 'pumping') {
-      te.amount = 90;
+      te.amount = DEFAULT_PUMP_AMOUNT[s.unitSystem];
       te.method = 'both';
     }
     if (type === 'diaper') {
@@ -2827,7 +2814,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       ).nextKind;
     }
     if (type === 'temperature') {
-      te.temperature = 37.0;
+      te.temperature = DEFAULT_TEMPERATURE[s.unitSystem];
     }
     if (type === 'medication') {
       te.medName = '';
@@ -2840,7 +2827,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Aimed HERE, at open, not read off the selection at save time: a warm notification
       // tap for a sibling moves the selection under a sheet that survives the navigation.
       sheetChildIds: aimedAt,
-      te: snapDraftAmount(type, te, s.unitSystem),
+      te,
       editingId: null,
       fromTimerId: null,
     });
@@ -2916,7 +2903,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             : undefined;
       }
       if (entry.type === 'pumping') {
-        te.amount = entry.amount ?? 90;
+        te.amount = entry.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem];
         te.method = entry.method ?? 'both';
       }
       if (entry.type === 'sleep') te.nap = entry.nap;
@@ -2927,7 +2914,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Whoever the record was about, never the selection: the edit path PATCHes
       // `child:`, so a wrong seed would move the server row too.
       sheetChildIds: [entry.childId],
-      te: snapDraftAmount(entry.type, te, s.unitSystem),
+      te,
       editingId: entryId,
       fromTimerId: null,
     });
@@ -2956,7 +2943,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (tm.amount != null) te.amount = tm.amount;
     }
     if (type === 'pumping') {
-      te.amount = tm.amount ?? 90;
+      te.amount = tm.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem];
       te.method = tm.method ?? 'both';
     }
     if (type === 'sleep') {
@@ -2971,7 +2958,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // An unattributable timer seeds nothing, so `save()` applies its own fallback
       // rather than this sheet inventing an owner.
       sheetChildIds: tm.childId ? [tm.childId] : [],
-      te: snapDraftAmount(type, te, s.unitSystem),
+      te,
       editingId: null,
       fromTimerId: timerId,
     });
@@ -3732,7 +3719,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           : savedTags;
       entry = { ...base, tags, type: 'feeding', start: tm.start, end: resolvedEnd, feedType, method, amount: tm.amount ?? null };
     } else if (saveAs === 'pumping') {
-      entry = { ...base, type: 'pumping', start: tm.start, end: resolvedEnd, amount: tm.amount ?? 90, method: tm.method };
+      entry = { ...base, type: 'pumping', start: tm.start, end: resolvedEnd, amount: tm.amount ?? DEFAULT_PUMP_AMOUNT[s.unitSystem], method: tm.method };
     } else if (saveAs === 'tummy') {
       entry = { ...base, type: 'tummy', start: tm.start, end: resolvedEnd, milestone: tm.milestone };
     } else {

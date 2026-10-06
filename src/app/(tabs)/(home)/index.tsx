@@ -20,6 +20,7 @@ import { Txt } from '@/components/Txt';
 import { DashboardContent } from '@/features/dashboard/DashboardContent';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { QUEUE_ROUTE, offlineBannerA11yLabel, offlineBannerAction } from '@/features/queue/offlineBanner';
+import { UnitsNotice } from '@/features/unitsNotice/UnitsNotice'; // UNITS NOTICE
 import { hexA } from '@/lib/color';
 import { ageOrDueLabel } from '@/lib/format';
 import { showRail } from '@/shell/breakpoints';
@@ -87,6 +88,7 @@ export default function Home() {
     return (
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: t.bg }}>
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 32 }}>
+          <UnitsNotice />
           <DashboardContent layout="desktop" />
         </ScrollView>
         {/* Hidden while expecting: a "Recent activity" rail inviting the parent to
@@ -233,6 +235,7 @@ export default function Home() {
           <IconButton name="settings" onPress={() => router.push('/settings')} accessibilityLabel="Open settings" />
         </View>
 
+        <UnitsNotice />
         <DashboardContent layout="phone" />
       </ScrollView>
     </View>

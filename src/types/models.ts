@@ -145,7 +145,7 @@ export interface BathEntry extends EntryBase {
 export interface TemperatureEntry extends EntryBase {
   type: 'temperature';
   time: number;
-  /** the reading (°C) */
+  /** the reading, in the user's units (°C or °F) */
   value: number;
   notes?: string;
 }

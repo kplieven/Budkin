@@ -514,9 +514,16 @@ export default function Settings() {
           <Toggle on={themeMode === 'dark'} />
         </Tappable>
         <View style={[row, { borderBottomWidth: __DEV__ ? 1 : 0, borderBottomColor: t.line }]}>
-          <Txt weight={600} size={16} style={{ flex: 1 }}>
-            Units
-          </Txt>
+          {/* Baby Buddy stores bare numbers, so this names their unit rather than
+              converting them: other clients write in whatever the family types. */}
+          <View style={{ flex: 1 }}>
+            <Txt weight={600} size={16}>
+              Units
+            </Txt>
+            <Txt weight={500} size={13} color={t.dim} style={{ marginTop: 2 }}>
+              What you record in Baby Buddy. Changes labels only.
+            </Txt>
+          </View>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             {(['metric', 'imperial'] as const).map((sys) => (
               <Chip

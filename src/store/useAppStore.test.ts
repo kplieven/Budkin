@@ -13,7 +13,7 @@ import {
   visibleTags,
 } from '@/store/useAppStore';
 import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, LAST_FEED_DEFAULT, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
-import { toDisplay } from '@/lib/units';
+import { useUnitsNotice } from '@/features/unitsNotice/unitsNotice';
 import { CHILD_COLORS } from '@/lib/color';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -680,7 +680,7 @@ describe('the feeding prefill is scoped to the sheet\'s child', () => {
   });
 });
 
-describe('adjustAmount (stepper presses land in the display unit system)', () => {
+describe('adjustAmount (stepper presses step in the user units)', () => {
   // The units preference is not part of the shared beforeEach reset, so put it
   // back or an imperial case would leak into every test after it.
   afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
@@ -695,21 +695,14 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
     expect(s().te.amount).toBe(90);
   });
 
-  it('imperial: a press moves by half a fl oz, and stores canonical ml', () => {
+  it('imperial: a press moves the stored number by half a fl oz, unconverted', () => {
     useAppStore.setState({ unitSystem: 'imperial' });
     s().openSheet('pumping');
-    // The 90 ml seed is 3.0433 fl oz, off the half-ounce grid, and would render as
-    // "3.0", the same string the first minus press produces. Opening the sheet snaps
-    // the draft to exactly 3.0 fl oz so no press looks dead.
-    expect(s().te.amount).toBe(88.7205);
-    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3, 9);
-
+    expect(s().te.amount).toBe(3); // the seed, in fl oz
     s().adjustAmount(1);
-    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(3.5, 9);
+    expect(s().te.amount).toBe(3.5);
     s().adjustAmount(1);
-    expect(toDisplay('volume', s().te.amount ?? 0, 'imperial')).toBeCloseTo(4, 9);
-    // What is persisted and synced is millilitres, never the fl oz number.
-    expect(s().te.amount).toBeCloseTo(118.294, 3);
+    expect(s().te.amount).toBe(4); // what is saved and synced: 4, not 118.294
   });
 
   it('clamps at zero rather than going negative', () => {
@@ -720,78 +713,68 @@ describe('adjustAmount (stepper presses land in the display unit system)', () =>
   });
 });
 
-describe('draft amounts snap to the step grid, so no stepper press looks dead', () => {
+describe('new sheets seed amounts in the user units', () => {
   afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
 
-  // What the Stepper actually paints for a canonical-ml draft amount.
-  const render = (ml: number | undefined, system: 'metric' | 'imperial') => {
-    const shown = toDisplay('volume', ml ?? 0, system);
-    return system === 'imperial' ? shown.toFixed(1) : String(Math.round(shown * 10) / 10);
-  };
+  it.each([
+    ['metric', 90, 37],
+    ['imperial', 3, 98.6],
+  ] as const)('%s: pumping starts on %d, temperature on %d', (system, pump, temp) => {
+    useAppStore.setState({ unitSystem: system });
+    s().openSheet('pumping');
+    expect(s().te.amount).toBe(pump);
+    s().openSheet('temperature');
+    expect(s().te.temperature).toBe(temp);
+  });
+});
 
-  const pumpingEntry = (amount: number): Entry => ({
-    id: 'p1',
+// Opening a sheet once rounded the draft amount onto the stepper grid, so a stored 4
+// came back as 0 and a stored 137 as 140, and saving the edit wrote that to the server.
+describe('opening a sheet keeps the stored amount exactly', () => {
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  const bottleFeed = (id: string, amount: number): Entry => ({
+    id,
+    serverId: 1,
     childId: 'c1',
-    type: 'pumping',
-    start: NOW - 20 * M,
-    end: NOW - 5 * M,
+    type: 'feeding',
+    start: NOW - 30 * M,
+    end: NOW - 10 * M,
+    feedType: 'formula',
+    method: 'bottle',
     amount,
-    method: 'both',
     tags: [],
   });
 
-  // Values verified to render identically before and after a minus press when
-  // the draft is left off-grid: each sits just above a half-ounce mark.
-  const DEAD_ON_MINUS = [15, 30, 45, 60, 75, 90];
-  // ...and these sit just below one, so a plus press was the swallowed one.
-  const DEAD_ON_PLUS = [250, 265, 280, 295];
-
-  it.each(DEAD_ON_MINUS)('imperial: minus visibly moves a %i ml draft', (ml) => {
-    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(ml)] });
-    s().openEdit('p1');
-    const before = render(s().te.amount, 'imperial');
-    s().adjustAmount(-1);
-    expect(render(s().te.amount, 'imperial')).not.toBe(before);
+  it.each(['metric', 'imperial'] as const)('%s: openEdit keeps a bottle amount below one step', (system) => {
+    useAppStore.setState({ unitSystem: system, entries: [bottleFeed('f1', 4)] });
+    s().openEdit('f1');
+    expect(s().te.amount).toBe(4);
   });
 
-  it.each(DEAD_ON_PLUS)('imperial: plus visibly moves a %i ml draft', (ml) => {
-    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(ml)] });
-    s().openEdit('p1');
-    const before = render(s().te.amount, 'imperial');
-    s().adjustAmount(1);
-    expect(render(s().te.amount, 'imperial')).not.toBe(before);
+  it.each(['metric', 'imperial'] as const)('%s: openEdit keeps a bottle amount between steps', (system) => {
+    useAppStore.setState({ unitSystem: system, entries: [bottleFeed('f1', 137)] });
+    s().openEdit('f1');
+    expect(s().te.amount).toBe(137);
   });
 
-  it('metric: the same amounts step visibly too', () => {
-    for (const ml of [...DEAD_ON_MINUS, ...DEAD_ON_PLUS]) {
-      useAppStore.setState({ unitSystem: 'metric', entries: [pumpingEntry(ml)] });
-      s().openEdit('p1');
-      const before = render(s().te.amount, 'metric');
-      s().adjustAmount(1);
-      expect(render(s().te.amount, 'metric')).not.toBe(before);
-    }
-  });
+  it.each(['metric', 'imperial'] as const)(
+    '%s: saving an edit that leaves the amount alone sends the stored amount back',
+    async (system) => {
+      for (const amount of [4, 137]) {
+        h.updated = [];
+        useAppStore.setState({ unitSystem: system, children: [SYNCED_C1], entries: [bottleFeed('f1', amount)] });
+        s().openEdit('f1');
+        s().setTE({ notes: 'fixed the time' });
+        s().save();
+        await flush();
+        expect(h.updated).toHaveLength(1);
+        expect((h.updated[0] as Extract<Entry, { type: 'feeding' }>).amount).toBe(amount);
+      }
+    },
+  );
 
-  it('openSheet snaps the pumping seed onto the active grid', () => {
-    useAppStore.setState({ unitSystem: 'imperial' });
-    s().openSheet('pumping');
-    expect(s().te.amount).toBe(88.7205); // exactly 3.0 fl oz
-
-    useAppStore.setState({ unitSystem: 'metric' });
-    s().openSheet('pumping');
-    expect(s().te.amount).toBe(90); // already on the 10 ml grid
-  });
-
-  it('openEdit snaps the draft of an existing entry without rewriting the stored entry', () => {
-    useAppStore.setState({ unitSystem: 'imperial', entries: [pumpingEntry(90)] });
-    s().openEdit('p1');
-    expect(s().te.amount).toBe(88.7205);
-    // The persisted entry keeps its canonical millilitres until a save.
-    const stored = s().entries[0];
-    expect(stored.type === 'pumping' && stored.amount).toBe(90);
-  });
-
-  it('openTimerEdit snaps the draft amount of a running timer', () => {
+  it('openTimerEdit keeps the amount of a running timer', () => {
     useAppStore.setState({
       unitSystem: 'imperial',
       timers: [
@@ -802,119 +785,22 @@ describe('draft amounts snap to the step grid, so no stepper press looks dead', 
           name: 'Pumping',
           saveAs: 'pumping',
           start: NOW - 10 * M,
-          amount: 90,
+          amount: 95,
           method: 'both',
         },
       ],
     });
     s().openTimerEdit('t1');
-    expect(s().te.amount).toBe(88.7205);
+    expect(s().te.amount).toBe(95);
   });
 
-  it('toggling the unit system re-snaps the draft of an open sheet', () => {
-    useAppStore.setState({ unitSystem: 'metric' });
-    s().openSheet('pumping');
-    expect(s().te.amount).toBe(90);
-
-    s().toggleUnitSystem();
-    expect(s().unitSystem).toBe('imperial');
-    expect(s().te.amount).toBe(88.7205); // now on the half-ounce grid
-
-    s().toggleUnitSystem();
-    expect(s().unitSystem).toBe('metric');
-    expect(s().te.amount).toBe(90); // 3.0 fl oz is 88.72 ml, nearest 10 ml is 90
-  });
-
-  it('setUnitSystem leaves the draft alone when no sheet is open', () => {
-    useAppStore.setState({ unitSystem: 'metric', sheet: null, te: { shape: 'interval', tags: [], amount: 90 } });
-    s().setUnitSystem('imperial');
-    expect(s().te.amount).toBe(90);
-  });
-
-  it('never snaps the intake level of a breast feed, which is dimensionless', () => {
-    useAppStore.setState({
-      unitSystem: 'imperial',
-      entries: [
-        {
-          id: 'f1',
-          childId: 'c1',
-          type: 'feeding',
-          start: NOW - 30 * M,
-          end: NOW - 10 * M,
-          feedType: 'breast',
-          method: 'left',
-          amount: 3, // an intake level ("A lot"), NOT millilitres
-          tags: [],
-        },
-      ],
-    });
+  it('switching units leaves the draft of an open sheet alone', () => {
+    useAppStore.setState({ unitSystem: 'metric', entries: [bottleFeed('f1', 137)] });
     s().openEdit('f1');
-    expect(s().te.amount).toBe(3);
-
     s().toggleUnitSystem();
-    expect(s().te.amount).toBe(3);
-  });
-
-  it('never snaps a level picked in an open sheet, on either unit system', () => {
-    // The grid snap rounds to whole ml (metric) or 0.1 fl oz (imperial), so a
-    // level that leaked into the volume branch would come back as 10 ml.
-    for (const system of ['metric', 'imperial'] as const) {
-      useAppStore.setState({ unitSystem: system });
-      s().openSheet('feeding');
-      s().setTE({ feedType: 'breast', method: 'left' });
-      for (const level of [1, 2, 3]) {
-        s().setTE({ amount: level });
-        s().toggleUnitSystem();
-        expect(s().te.amount).toBe(level);
-        s().toggleUnitSystem();
-        expect(s().te.amount).toBe(level);
-      }
-    }
-  });
-
-  it('a level cannot survive a switch to a volume feed and be snapped as one', () => {
-    // The reported hole: pick an intake at the breast, switch the open sheet to
-    // a bottle, toggle units, and the level snapped as if it were millilitres.
-    useAppStore.setState({ unitSystem: 'metric' });
-    s().openSheet('feeding');
-    s().setTE({ feedType: 'breast', method: 'left', amount: 3 });
-    s().setTE({ feedType: 'formula' }); // crosses into the volume branch
-    expect(s().te.amount).toBeUndefined();
-
+    expect(s().te.amount).toBe(137);
     s().toggleUnitSystem();
-    expect(s().te.amount).toBeUndefined();
-  });
-
-  it('does snap a bottle feed, whose amount IS a volume', () => {
-    useAppStore.setState({
-      unitSystem: 'imperial',
-      entries: [
-        {
-          id: 'f2',
-          childId: 'c1',
-          type: 'feeding',
-          start: NOW - 30 * M,
-          end: NOW - 10 * M,
-          feedType: 'formula',
-          method: 'bottle',
-          amount: 90,
-          tags: [],
-        },
-      ],
-    });
-    s().openEdit('f2');
-    expect(s().te.amount).toBe(88.7205);
-  });
-
-  it('leaves the solid amount of a diaper alone (no stepper, no unit)', () => {
-    useAppStore.setState({
-      unitSystem: 'imperial',
-      entries: [
-        { id: 'd1', childId: 'c1', type: 'diaper', time: NOW - M, wet: false, solid: true, color: 'yellow', amount: 3, tags: [] },
-      ],
-    });
-    s().openEdit('d1');
-    expect(s().te.amount).toBe(3);
+    expect(s().te.amount).toBe(137);
   });
 });
 
@@ -7039,17 +6925,17 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     s().setUnitSystem('imperial');
     expect(s().unitSystem).toBe('imperial');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
   });
 
   it('toggleUnitSystem flips metric <-> imperial and persists each direction', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     s().toggleUnitSystem();
     expect(s().unitSystem).toBe('imperial');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
     s().toggleUnitSystem();
     expect(s().unitSystem).toBe('metric');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric', unitsLabelOnlyAck: true });
   });
 
   it('hydrate applies a persisted unitSystem', async () => {
@@ -7066,6 +6952,42 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     await s().hydrate();
     expect(s().unitSystem).toBe('metric');
+  });
+});
+
+// TEMPORARY: goes with src/features/unitsNotice.
+describe('label-only units notice', () => {
+  beforeEach(() => useUnitsNotice.setState({ visible: false }));
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  const hydrateWith = async (prefs: Record<string, unknown>) => {
+    h.prefs = prefs;
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+  };
+
+  it('shows once for a user who had imperial selected before the update', async () => {
+    await hydrateWith({ unitSystem: 'imperial' });
+    expect(useUnitsNotice.getState().visible).toBe(true);
+  });
+
+  it('stays hidden once acknowledged', async () => {
+    await hydrateWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
+    expect(useUnitsNotice.getState().visible).toBe(false);
+  });
+
+  it('never shows for metric or a fresh install', async () => {
+    await hydrateWith({ unitSystem: 'metric' });
+    expect(useUnitsNotice.getState().visible).toBe(false);
+    await hydrateWith({});
+    expect(useUnitsNotice.getState().visible).toBe(false);
+  });
+
+  it('choosing units in Settings hides it and records the ack', async () => {
+    await hydrateWith({ unitSystem: 'imperial' });
+    s().setUnitSystem('imperial');
+    expect(useUnitsNotice.getState().visible).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
   });
 });
 
