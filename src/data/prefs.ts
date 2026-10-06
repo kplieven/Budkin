@@ -13,6 +13,8 @@ export interface Prefs {
   /** The units the family records in Baby Buddy, which stores bare numbers. Picks
    *  labels only, never converts (default 'metric'). */
   unitSystem: UnitSystem;
+  /** TEMPORARY, see src/features/unitsNotice: the label-only units notice was seen. */
+  unitsLabelOnlyAck: boolean;
   tutorialSeen: boolean;
   dueDateReminders: boolean;
   staleTimerReminders: boolean;

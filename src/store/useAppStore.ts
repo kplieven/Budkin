@@ -118,6 +118,7 @@ import {
   washDueState,
 } from '@/store/selectors';
 import { treatmentCooldownLabel } from '@/features/treatments/treatmentLabels';
+import { hideUnitsNotice, initUnitsNotice } from '@/features/unitsNotice/unitsNotice'; // UNITS NOTICE
 import type { ThemeMode } from '@/theme/tokens';
 import type {
   ActivityType,
@@ -1394,7 +1395,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
   setUnitSystem: (system) => {
     set({ unitSystem: system });
-    void savePrefs({ unitSystem: system });
+    // UNITS NOTICE: a choice made now is made under the label-only meaning, so it
+    // acks the notice too. One write, since concurrent `savePrefs` merges race.
+    hideUnitsNotice();
+    void savePrefs({ unitSystem: system, unitsLabelOnlyAck: true });
   },
   toggleUnitSystem: () => {
     get().setUnitSystem(get().unitSystem === 'metric' ? 'imperial' : 'metric');
@@ -1507,6 +1511,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     const prefs = await loadPrefs();
     if (prefs.themeMode) set({ themeMode: prefs.themeMode });
     if (prefs.unitSystem) set({ unitSystem: prefs.unitSystem });
+    initUnitsNotice(prefs); // UNITS NOTICE
     if (prefs.showGrowthReference != null) set({ showGrowthReference: prefs.showGrowthReference });
     if (prefs.tutorialSeen) set({ tutorialSeen: true });
     if (prefs.dueDateReminders != null) set({ dueDateReminders: prefs.dueDateReminders });

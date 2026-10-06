@@ -13,6 +13,7 @@ import {
   visibleTags,
 } from '@/store/useAppStore';
 import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, LAST_FEED_DEFAULT, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
+import { useUnitsNotice } from '@/features/unitsNotice/unitsNotice';
 import { CHILD_COLORS } from '@/lib/color';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
@@ -6924,17 +6925,17 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     s().setUnitSystem('imperial');
     expect(s().unitSystem).toBe('imperial');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
   });
 
   it('toggleUnitSystem flips metric <-> imperial and persists each direction', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     s().toggleUnitSystem();
     expect(s().unitSystem).toBe('imperial');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
     s().toggleUnitSystem();
     expect(s().unitSystem).toBe('metric');
-    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric' });
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'metric', unitsLabelOnlyAck: true });
   });
 
   it('hydrate applies a persisted unitSystem', async () => {
@@ -6951,6 +6952,42 @@ describe('unit-system persistence', () => {
     useAppStore.setState({ unitSystem: 'metric' });
     await s().hydrate();
     expect(s().unitSystem).toBe('metric');
+  });
+});
+
+// TEMPORARY: goes with src/features/unitsNotice.
+describe('label-only units notice', () => {
+  beforeEach(() => useUnitsNotice.setState({ visible: false }));
+  afterEach(() => useAppStore.setState({ unitSystem: 'metric' }));
+
+  const hydrateWith = async (prefs: Record<string, unknown>) => {
+    h.prefs = prefs;
+    vi.mocked(loadConnection).mockResolvedValueOnce(null);
+    await s().hydrate();
+  };
+
+  it('shows once for a user who had imperial selected before the update', async () => {
+    await hydrateWith({ unitSystem: 'imperial' });
+    expect(useUnitsNotice.getState().visible).toBe(true);
+  });
+
+  it('stays hidden once acknowledged', async () => {
+    await hydrateWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
+    expect(useUnitsNotice.getState().visible).toBe(false);
+  });
+
+  it('never shows for metric or a fresh install', async () => {
+    await hydrateWith({ unitSystem: 'metric' });
+    expect(useUnitsNotice.getState().visible).toBe(false);
+    await hydrateWith({});
+    expect(useUnitsNotice.getState().visible).toBe(false);
+  });
+
+  it('choosing units in Settings hides it and records the ack', async () => {
+    await hydrateWith({ unitSystem: 'imperial' });
+    s().setUnitSystem('imperial');
+    expect(useUnitsNotice.getState().visible).toBe(false);
+    expect(savePrefs).toHaveBeenCalledWith({ unitSystem: 'imperial', unitsLabelOnlyAck: true });
   });
 });
 
