@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiaperSeries, buildSleepHeatmap, buildTrend, liveSleepMsInWindow, noonWindowStart, sleepMsInWindow, windowStart } from './compute';
+import { buildDiaperSeries, buildSleepHeatmap, buildTrend, liveSleepMsInWindow, nextWindowStart, noonWindowStart, sleepMsInWindow, windowStart } from './compute';
 import type { Entry, Timer } from '@/types/models';
 
 const at = (y: number, mo: number, d: number, h: number, mi = 0) => new Date(y, mo, d, h, mi).getTime();
 const sleep = (start: number, end: number, nap: boolean): Entry => ({
   id: `s-${start}`, childId: 'c1', type: 'sleep', start, end, nap, tags: [],
+});
+const feeding = (start: number): Entry => ({
+  id: `f-${start}`, childId: 'c1', type: 'feeding', start, end: start + 900000,
+  feedType: 'breast', method: 'left', amount: null, tags: [],
 });
 /** A running sleep timer (no `end` exists on a Timer — it runs until stopped). */
 const timer = (start: number): Timer => ({
@@ -77,9 +81,82 @@ it('windowStart anchors the 24h window at the given origin hour', () => {
   expect(windowStart(at(2026, 6, 5, 3), 12)).toBe(noonWindowStart(at(2026, 6, 5, 3)));
 });
 
-const feeding = (start: number): Entry => ({
-  id: `f-${start}`, childId: 'c1', type: 'feeding', start, end: start + 900000,
-  feedType: 'breast', method: 'left', amount: null, tags: [],
+it('splits sleep and feeding at local midnight across the autumn clock change', () => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = 'Europe/Amsterdam';
+  try {
+    const firstMidnight = at(2026, 9, 25, 0);
+    const secondMidnight = at(2026, 9, 26, 0);
+    const lateSleep = sleep(at(2026, 9, 25, 22, 30), at(2026, 9, 26, 0, 30), false);
+    const lateFeed = feeding(at(2026, 9, 25, 23, 15));
+    const entries = [lateSleep, lateFeed];
+    const now = at(2026, 9, 26, 10);
+
+    expect(secondMidnight - firstMidnight).toBe(25 * 3600000);
+    expect(nextWindowStart(firstMidnight, 0)).toBe(secondMidnight);
+    expect(windowStart(at(2026, 9, 25, 23, 30), 0)).toBe(firstMidnight);
+    expect(windowStart(at(2026, 9, 25, 0, 30), 7)).toBe(at(2026, 9, 24, 7));
+
+    const rows = buildSleepHeatmap(entries, now, 28, 0);
+    expect(rows.map((row) => row.offsetFromToday)).toEqual([1, 0]);
+    expect(rows[0].segments[0].x1).toBe(1);
+    expect(rows[0].feeds).toHaveLength(1);
+    expect(rows[1].segments[0].x0).toBe(0);
+    expect(buildTrend(entries, 'totalSleep', now, 30, 0)).toEqual([
+      { t: firstMidnight, value: 1.5 },
+      { t: secondMidnight, value: 0.5 },
+    ]);
+    expect(sleepMsInWindow(entries, firstMidnight)).toBe(1.5 * 3600000);
+    expect(liveSleepMsInWindow([], [timer(at(2026, 9, 25, 23, 45))], firstMidnight, at(2026, 9, 26, 0, 30))).toBe(15 * 60000);
+  } finally {
+    if (previousTimezone == null) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
+});
+
+it('processes entries entirely within the last hour of the autumn clock change', () => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = 'Europe/Amsterdam';
+  try {
+    const midnight = at(2026, 9, 25, 0);
+    const lateSleep = sleep(at(2026, 9, 25, 23, 10), at(2026, 9, 25, 23, 25), false);
+    const lateFeed = feeding(at(2026, 9, 25, 23, 30));
+    const lateDiaper: Entry = {
+      id: 'late-diaper', childId: 'c1', type: 'diaper', time: at(2026, 9, 25, 23, 30),
+      wet: true, solid: false, color: null, tags: [],
+    };
+    const now = at(2026, 9, 26, 10);
+    const rows = buildSleepHeatmap([lateSleep, lateFeed, lateDiaper], now, 28, 0);
+
+    expect(rows[0].segments).toHaveLength(1);
+    expect(rows[0].feeds).toHaveLength(1);
+    expect(rows[0].diapers[0]).toBeCloseTo(24.5 / 25);
+    expect(buildTrend([lateSleep], 'totalSleep', now, 30, 0)).toEqual([
+      { t: midnight, value: 0.25 },
+    ]);
+  } finally {
+    if (previousTimezone == null) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
+});
+
+it('splits sleep at local midnight across the spring clock change', () => {
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = 'Europe/Amsterdam';
+  try {
+    const firstMidnight = at(2026, 2, 29, 0);
+    const secondMidnight = at(2026, 2, 30, 0);
+    const lateSleep = sleep(at(2026, 2, 29, 22, 30), at(2026, 2, 30, 0, 30), false);
+
+    expect(secondMidnight - firstMidnight).toBe(23 * 3600000);
+    expect(buildTrend([lateSleep], 'totalSleep', at(2026, 2, 30, 10), 30, 0)).toEqual([
+      { t: firstMidnight, value: 1.5 },
+      { t: secondMidnight, value: 0.5 },
+    ]);
+  } finally {
+    if (previousTimezone == null) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
 });
 
 describe('buildTrend', () => {
