@@ -44,6 +44,7 @@ import { reconcileTimers } from '@/data/serverTimers';
 import { matchServerChild, uploadUnsynced, type UploadDeps } from '@/data/sync';
 import { ApiError, isHiddenTag, normalizeServerUrl } from '@/api/client';
 import { nextChildColor } from '@/lib/color';
+import { olderHistorySince, recentHistorySince } from '@/lib/historyRange';
 import { DEMO_TAGS } from '@/data/seed';
 import { clearAdoptTarget, loadAdoptTarget, saveAdoptTarget } from '@/data/adoptTarget';
 import {
@@ -139,6 +140,7 @@ import type {
   Tag,
   Timer,
 } from '@/types/models';
+import { entryTimestamp } from '@/types/models';
 import type { TimeEntryState } from '@/types/timeEntry';
 
 interface AppState {
@@ -237,6 +239,11 @@ interface AppState {
   answeredMilestonePrompts: Record<string, string[]>;
   children: Child[];
   entries: Entry[];
+  /** Oldest fully fetched calendar day in server mode. Null until a server answer. */
+  historySinceMs: number | null;
+  historyHasOlder: boolean;
+  historyLoadingOlder: boolean;
+  historyOlderError: boolean;
   timers: Timer[];
   measurements: Measurement[];
   /** Per-child medication regimens, synced to Baby Buddy as `treatment`-tagged notes.
@@ -311,7 +318,8 @@ interface AppActions {
   /** Pull server state, then push whatever is pending. `push: false` takes the pull
    *  alone — for callers that must not write, namely the Android background reminder
    *  worker, whose headless context can be torn down mid-flush. */
-  refresh: (opts?: { push?: boolean }) => Promise<void>;
+  refresh: (opts?: { push?: boolean; historySinceMs?: number }) => Promise<void>;
+  loadOlderHistory: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
   /** `opts.uploadAnyway` overrides the non-empty-server guard, attaching to matching
    *  server children instead of duplicating them. Safe to call again after a `partial`. */
@@ -693,6 +701,12 @@ function mergeBathRhythms(
  *  replays it verbatim forever. */
 function childServerIdFor(children: Child[], childId: string): number | null {
   return children.find((c) => c.id === childId)?.serverId ?? null;
+}
+
+function cachedHistorySince(entries: Entry[], now: number): number {
+  let since = recentHistorySince(now);
+  for (const entry of entries) since = Math.min(since, startOfDay(entryTimestamp(entry)));
+  return since;
 }
 
 // 90-day insights history for a child: local rows in local mode, the server history
@@ -1361,6 +1375,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectedChildId: '',
   children: [],
   entries: [],
+  historySinceMs: null,
+  historyHasOlder: false,
+  historyLoadingOlder: false,
+  historyOlderError: false,
   timers: [],
   measurements: [],
   treatments: [],
@@ -1602,6 +1620,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // NOT `offline: true`: nothing has failed yet, and the refresh below owns that.
       children: saved?.children ?? [],
       entries: [...queueOnly, ...localEntries],
+      // Recover the fetched span from durable rows after a restart. An empty
+      // downloaded range can be scanned again; populated older days stay cached.
+      historySinceMs: localEntries.length ? cachedHistorySince(localEntries, Date.now()) : null,
+      historyHasOlder: true,
       measurements: saved?.measurements ?? [],
       // Restore the selection alongside `children`: a present-but-unselected child falls
       // through Home's expecting branch to the activity tiles, and a write against it
@@ -1656,7 +1678,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
       try {
         // Every child's records come back, not just the selected one's. The id passed here
         // does not steer the fetch, it only nominates the answer's `selectedChildId`.
-        const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
+        const data = await loadFromServer(
+          conn,
+          childServerIdFor(s.children, s.selectedChildId),
+          opts?.historySinceMs ?? get().historySinceMs ?? recentHistorySince(Date.now()),
+        );
         // This reload replaces `entries` wholesale, and an entry that has not flushed yet is
         // not in the server data. Read AFTER the fetch so an entry logged mid-request is
         // included; `flushQueue` drops one from the file the moment the server accepts it,
@@ -1686,7 +1712,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             legacyRhythm: cur.legacyRhythm,
             q,
           },
-          { connected: true, offline: false, networkOnline: true },
+          { connected: true, offline: false, networkOnline: true, historyOlderError: false },
         );
         // Seeding is a WRITE, so it rides `push` too. Skipping a round costs nothing:
         // it only seeds children the server has no rhythm note for, and hydrate,
@@ -1724,11 +1750,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // every flush re-checks.
     if (push && !get().offline) pushPending(get);
   },
+  loadOlderHistory: async () => {
+    const initial = get();
+    if (initial.historyLoadingOlder || !initial.historyHasOlder || initial.historySinceMs == null || initial.connection?.mode !== 'server') return;
+    set({ historyLoadingOlder: true, historyOlderError: false });
+    try {
+      // A foreground pull may have started before the scroll event. Join it first,
+      // then request the next complete block using its latest cutoff.
+      if (refreshInFlight) await refreshInFlight;
+      const current = get();
+      if (current.historySinceMs == null || !current.historyHasOlder || current.connection?.mode !== 'server') return;
+      const before = current.historySinceMs;
+      await current.refresh({ push: false, historySinceMs: olderHistorySince(before) });
+      if (get().historySinceMs === before || get().offline) set({ historyOlderError: true });
+    } catch {
+      set({ historyOlderError: true });
+    } finally {
+      set({ historyLoadingOlder: false });
+    }
+  },
   connect: async (serverUrl, token) => {
     set({ connecting: true, connectError: null });
     const conn: Connection = { mode: 'server', serverUrl, token };
     try {
-      const data = await loadFromServer(conn);
+      const sameOrigin = (await loadEntityOrigin()) === normalizeServerUrl(serverUrl);
+      const before = get();
+      const saved = sameOrigin && before.children.length === 0 ? await loadEntities() : null;
+      const previousEntries = before.children.length > 0 ? before.entries : (saved?.entries ?? []);
+      const since = sameOrigin ? cachedHistorySince(previousEntries, Date.now()) : recentHistorySince(Date.now());
+      const data = await loadFromServer(conn, undefined, since);
       const savedServers = upsertServer(get().savedServers, {
         serverUrl,
         token,
@@ -1744,8 +1794,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // safe when the local data came from this server. The origin label lives with the
       // DATA, so it survives the 401 gap that clears the connection.
       const s = get();
-      const sameOrigin = (await loadEntityOrigin()) === normalizeServerUrl(serverUrl);
-      const saved = sameOrigin && s.children.length === 0 ? await loadEntities() : null;
       const local = !sameOrigin
         ? { children: [], entries: [], measurements: [], selectedChildId: '', lastFeed: {} }
         : s.children.length > 0
@@ -1788,6 +1836,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connected: true,
           connecting: false,
           savedServers,
+          ...(sameOrigin ? {} : { historySinceMs: null, historyHasOlder: false }),
           // The only place the pre-map feeding fallback can reach state on a cold start
           // parked at the reconnect screen, since `hydrate`'s no-connection branch reads
           // no entity store.
@@ -1856,7 +1905,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     if (hasData && opts?.uploadAnyway) {
       // Dedup: attach each unsynced local child to a server child matching by name and
       // birth date, instead of duplicating it.
-      const data = await loadFromServer(conn);
+      const data = await loadFromServer(conn, undefined, cachedHistorySince(state.entries, Date.now()));
       const serverChildren = data.children;
       state = {
         ...state,
@@ -1907,7 +1956,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // from one the server changed.
     const childrenBefore = get().children;
     const measurementsBefore = get().measurements;
-    const data = await loadFromServer(conn);
+    const data = await loadFromServer(conn, undefined, cachedHistorySince(result.entries, Date.now()));
     // Read AFTER the fetch, like `connect` and `refresh`. That window is real, not
     // theoretical: `BottomSheet`'s scrim has no busy gate, so a tap outside dismisses
     // the adopt sheet mid-flight and leaves the user on a fully interactive app.
@@ -1981,6 +2030,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       connectError: null,
       children: e?.children ?? [],
       entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
+      historySinceMs: null,
+      historyHasOlder: false,
+      historyOlderError: false,
       measurements: e?.measurements ?? [],
       selectedChildId: e?.selectedChildId ?? '',
       lastFeed: e?.lastFeed ?? {},
@@ -2015,6 +2067,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
       connectError: null,
       children: [],
       entries: [],
+      historySinceMs: null,
+      historyHasOlder: false,
+      historyOlderError: false,
       timers: [],
       measurements: [],
       selectedChildId: '',

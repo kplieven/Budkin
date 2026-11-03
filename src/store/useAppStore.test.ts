@@ -15,6 +15,7 @@ import {
 import { BATH_RHYTHM_DEFAULT, entriesForChild, isActive, LAST_FEED_DEFAULT, selectPendingCount, teDurationMin, teEnd, teStart } from '@/store/selectors';
 import { useUnitsNotice } from '@/features/unitsNotice/unitsNotice';
 import { CHILD_COLORS } from '@/lib/color';
+import { olderHistorySince } from '@/lib/historyRange';
 import { ApiError } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { loadConnection, saveConnection } from '@/data/storage';
@@ -518,6 +519,10 @@ beforeEach(() => {
     selectedChildId: 'c1',
     children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
     entries: [],
+    historySinceMs: null,
+    historyHasOlder: false,
+    historyLoadingOlder: false,
+    historyOlderError: false,
     timers: [],
     measurements: [],
     treatments: [],
@@ -1394,6 +1399,38 @@ describe('refresh({ push: false })', () => {
 
     expect(h.pushed).toHaveLength(1);
     expect(h.q).toHaveLength(0);
+  });
+});
+
+describe('loading older History days', () => {
+  it('advances by complete calendar days and keeps that range on refresh', async () => {
+    const since = NOW;
+    const older = olderHistorySince(since);
+    const oldEntry: Entry = {
+      id: 'old-diaper', childId: 'c1', type: 'diaper', time: older + 3600000,
+      wet: true, solid: false, color: null, tags: [],
+    };
+    useAppStore.setState({
+      connection: { mode: 'server', serverUrl: 'http://x', token: 't' },
+      children: [SYNCED_C1], selectedChildId: 'c1',
+      historySinceMs: since, historyHasOlder: true,
+    });
+    const answer = {
+      children: [SYNCED_C1], entries: [oldEntry], measurements: [], treatments: [],
+      selectedChildId: 'c1', lastFeed: {}, timers: [],
+      historySinceMs: older, historyHasOlder: false,
+    };
+    vi.mocked(loadFromServer).mockResolvedValueOnce(answer).mockResolvedValueOnce(answer);
+
+    await s().loadOlderHistory();
+    expect(loadFromServer).toHaveBeenCalledWith(s().connection, 501, older);
+    expect(s().entries.map((e) => e.id)).toContain('old-diaper');
+    expect(s().historySinceMs).toBe(older);
+    expect(s().historyHasOlder).toBe(false);
+
+    await s().refresh({ push: false });
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[2]).toBe(older);
+    expect(s().entries.map((e) => e.id)).toContain('old-diaper');
   });
 });
 
@@ -7766,7 +7803,11 @@ describe('adopt (push a local-mode user\'s data up to a Baby Buddy server)', () 
     expect(uploaded.children).toEqual([localChild]);
     expect(s().connection).toEqual({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     expect(s().connected).toBe(true);
-    expect(loadFromServer).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
+    expect(loadFromServer).toHaveBeenCalledWith(
+      { mode: 'server', serverUrl: 'https://new.lan', token: 'tok' },
+      undefined,
+      expect.any(Number),
+    );
     expect(saveConnection).toHaveBeenCalledWith({ mode: 'server', serverUrl: 'https://new.lan', token: 'tok' });
     // The adopted entities now belong to this server: the origin is stamped
     // alongside the connection, licensing a later reconnect through connect()

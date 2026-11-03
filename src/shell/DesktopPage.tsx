@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 
 import { useTheme } from '@/theme/useTheme';
 
@@ -8,10 +8,16 @@ import { useTheme } from '@/theme/useTheme';
  * sidebar and top bar already supply the chrome, so screens drop their own phone
  * header and safe-area padding. Widths follow the handoff (Settings 560, rest 760).
  */
-export function DesktopPage({ maxWidth = 760, children }: { maxWidth?: number; children: ReactNode }) {
+export function DesktopPage({ maxWidth = 760, children, onScroll }: {
+  maxWidth?: number;
+  children: ReactNode;
+  onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+}) {
   const t = useTheme();
   return (
     <ScrollView
+      onScroll={onScroll}
+      scrollEventThrottle={onScroll ? 200 : undefined}
       style={{ flex: 1, backgroundColor: t.bg }}
       contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 36, alignItems: 'center' }}
     >

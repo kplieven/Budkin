@@ -4,6 +4,7 @@
 import { ApiError, BabybuddyClient } from '@/api/client';
 import { DEMO_TAGS } from '@/data/seed';
 import { encodeTimerName, serverTimerToTimer } from '@/data/serverTimers';
+import { recentHistorySince } from '@/lib/historyRange';
 import {
   entryTimestamp,
   type ActivityType,
@@ -62,6 +63,53 @@ export interface LoadResult {
    *  endpoint cannot freeze a child's whole history. FAILS CLOSED: any new
    *  per-type fetch MUST route its catch through `orEmpty`. */
   incompleteSlices?: Record<string, LoadSlice[]>;
+  /** Complete local-calendar days loaded into `entries`, and whether an older page
+   *  exists on the server. Kept with the answer so refresh can replace the same span. */
+  historySinceMs?: number;
+  historyHasOlder?: boolean;
+}
+
+const HISTORY_PAGE_SIZE = 100;
+
+/** The API orders intervals by start, even though the timeline places them at end. */
+function sortTime(entry: Entry): number {
+  return 'start' in entry ? entry.start : entry.time;
+}
+
+interface EntryPage<T extends Entry> {
+  entries: T[];
+  pageCount: number;
+  oldestTime?: number;
+}
+
+/** Follow limit/offset pages until the whole cutoff day has been read. An endpoint
+ *  failure rejects the slice so the caller's partial-load guard preserves old data. */
+async function loadEntryDays<T extends Entry>(
+  sinceMs: number,
+  fetchPage: (limit: number, offset: number) => Promise<EntryPage<T>>,
+): Promise<{ entries: T[]; hasOlder: boolean }> {
+  const entries: T[] = [];
+  let previousLastId: string | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const batch = await fetchPage(HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE);
+    entries.push(...batch.entries);
+    const last = batch.entries[batch.entries.length - 1];
+    const oldest = batch.oldestTime ?? (last ? sortTime(last) : undefined);
+    if (oldest != null && oldest < sinceMs) {
+      return { entries: entries.filter((e) => entryTimestamp(e) >= sinceMs), hasOlder: true };
+    }
+    if (batch.pageCount < HISTORY_PAGE_SIZE) {
+      return { entries: entries.filter((e) => entryTimestamp(e) >= sinceMs), hasOlder: false };
+    }
+    // A server that ignores offset must not spin forever or silently truncate.
+    if (last && last.id === previousLastId) throw new Error('History pagination did not advance');
+    previousLastId = last?.id;
+  }
+  throw new Error('History pagination exceeded 1000 pages');
+}
+
+function mappedPage<T extends Entry>(entries: T[]): EntryPage<T> {
+  return { entries, pageCount: entries.length };
 }
 
 /** Fixed concatenation order for `LoadResult.entries`, independent of timing. */
@@ -104,6 +152,8 @@ interface ChildLoad {
   measurements: Partial<Record<MeasurementKind, Measurement[]>>;
   treatments: Treatment[];
   degraded: LoadSlice[];
+  hasOlder: boolean;
+  latestFeeding?: Extract<Entry, { type: 'feeding' }>;
 }
 
 /** Validate the connection and load EVERY child's recent records, not just the
@@ -114,6 +164,7 @@ interface ChildLoad {
 export async function loadFromServer(
   conn: Connection,
   preferredChildServerId?: number | null,
+  sinceMs = recentHistorySince(Date.now()),
 ): Promise<LoadResult> {
   // Only ever called with a server connection; the guard just narrows the union.
   if (conn.mode !== 'server') {
@@ -150,7 +201,7 @@ export async function loadFromServer(
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
   const loads = new Map<string, ChildLoad>();
-  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [] });
+  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [], hasOlder: false });
 
   /** The degrade-to-empty catch every per-type call shares. Takes the slices and
    *  the child explicitly, because one request can cover several slices and
@@ -169,23 +220,39 @@ export async function loadFromServer(
   const tasks = children.flatMap((c) => {
     const load = loads.get(c.id)!;
     const id = c.id;
+    const read = async <T extends Entry>(fetchPage: (limit: number, offset: number) => Promise<EntryPage<T>>) => {
+      const result = await loadEntryDays(sinceMs, fetchPage);
+      load.hasOlder ||= result.hasOlder;
+      return result.entries;
+    };
     return [
-      async () => void (load.entries.feeding = await client.listFeedings(id).catch(orEmpty(load, [], 'feeding'))),
-      async () => void (load.entries.sleep = await client.listSleep(id).catch(orEmpty(load, [], 'sleep'))),
-      async () => void (load.entries.diaper = await client.listChanges(id).catch(orEmpty(load, [], 'diaper'))),
-      async () => void (load.entries.pumping = await client.listPumping(id).catch(orEmpty(load, [], 'pumping'))),
-      async () => void (load.entries.tummy = await client.listTummy(id).catch(orEmpty(load, [], 'tummy'))),
+      async () => void (load.entries.feeding = await read(async (l, o) => {
+        const entries = await client.listFeedings(id, l, o);
+        for (const entry of entries) {
+          if (!load.latestFeeding || entry.start > load.latestFeeding.start) load.latestFeeding = entry;
+        }
+        return mappedPage(entries);
+      }).catch(orEmpty(load, [], 'feeding'))),
+      async () => void (load.entries.sleep = await read(async (l, o) => mappedPage(await client.listSleep(id, l, o))).catch(orEmpty(load, [], 'sleep'))),
+      async () => void (load.entries.diaper = await read(async (l, o) => mappedPage(await client.listChanges(id, l, o))).catch(orEmpty(load, [], 'diaper'))),
+      async () => void (load.entries.pumping = await read(async (l, o) => mappedPage(await client.listPumping(id, l, o))).catch(orEmpty(load, [], 'pumping'))),
+      async () => void (load.entries.tummy = await read(async (l, o) => mappedPage(await client.listTummy(id, l, o))).catch(orEmpty(load, [], 'tummy'))),
       // ONE /api/notes/ request: a failure empties bath, milestone and note at once.
       async () => {
-        const notesData = await client
-          .listChildNotes(id)
-          .catch(orEmpty(load, { baths: [], milestones: [], notes: [] }, 'bath', 'milestone', 'note'));
-        load.entries.bath = notesData.baths;
-        load.entries.milestone = notesData.milestones;
-        load.entries.note = notesData.notes;
+        const notes = await read(async (l, o) => {
+          const page = await client.listChildNotes(id, l, o);
+          return {
+            entries: [...page.baths, ...page.milestones, ...page.notes],
+            pageCount: page.pageCount ?? page.baths.length + page.milestones.length + page.notes.length,
+            oldestTime: page.oldestTime,
+          };
+        }).catch(orEmpty(load, [] as Entry[], 'bath', 'milestone', 'note'));
+        load.entries.bath = notes.filter((e) => e.type === 'bath');
+        load.entries.milestone = notes.filter((e) => e.type === 'milestone');
+        load.entries.note = notes.filter((e) => e.type === 'note');
       },
-      async () => void (load.entries.temperature = await client.listTemperature(id).catch(orEmpty(load, [], 'temperature'))),
-      async () => void (load.entries.medication = await client.listMedication(id).catch(orEmpty(load, [], 'medication'))),
+      async () => void (load.entries.temperature = await read(async (l, o) => mappedPage(await client.listTemperature(id, l, o))).catch(orEmpty(load, [], 'temperature'))),
+      async () => void (load.entries.medication = await read(async (l, o) => mappedPage(await client.listMedication(id, l, o))).catch(orEmpty(load, [], 'medication'))),
       // A SECOND /api/notes/ request filtered by the `treatment` tag: those notes
       // are dated at the regimen's start, outside the recent-notes window above.
       async () => void (load.treatments = await client.listChildTreatments(id).catch(orEmpty(load, [] as Treatment[], 'treatment'))),
@@ -209,12 +276,12 @@ export async function loadFromServer(
     for (const kind of MEASUREMENT_KINDS) measurements.push(...(load.measurements[kind] ?? []));
     treatments.push(...load.treatments);
     if (load.degraded.length > 0) incompleteSlices[c.id] = load.degraded;
-    // Sort rather than trust the server's `-start` ordering. A degraded feeding
-    // slice leaves the list empty, so the child's existing prefill survives.
-    const lastFeeding = [...(load.entries.feeding ?? [])]
-      .filter((e): e is Extract<Entry, { type: 'feeding' }> => e.type === 'feeding')
-      .sort((a, b) => b.start - a.start)[0];
-    if (lastFeeding) lastFeed[c.id] = { feedType: lastFeeding.feedType, method: lastFeeding.method };
+    // Read the newest feeding across fetched pages rather than trusting API order.
+    // A degraded slice has no opinion, so the existing prefill survives.
+    const lastFeeding = load.latestFeeding;
+    if (lastFeeding && !load.degraded.includes('feeding')) {
+      lastFeed[c.id] = { feedType: lastFeeding.feedType, method: lastFeeding.method };
+    }
   }
 
   // Map each timer's child FK back to a local child id, and degrade to null
@@ -233,6 +300,9 @@ export async function loadFromServer(
     timers = null;
   }
 
+  const historyIncomplete = Object.values(incompleteSlices).some((slices) =>
+    slices.some((slice) => ENTRY_SLICES.includes(slice as ActivityType)),
+  );
   return {
     children,
     entries,
@@ -243,6 +313,8 @@ export async function loadFromServer(
     treatments,
     bathRhythms,
     incompleteSlices,
+    ...(historyIncomplete ? {} : { historySinceMs: sinceMs }),
+    historyHasOlder: historyIncomplete || [...loads.values()].some((load) => load.hasOlder),
   };
 }
 

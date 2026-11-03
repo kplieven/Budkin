@@ -5,15 +5,20 @@ import { entryTimestamp, type ActivityType, type MeasurementKind, type Timer } f
 
 import {
   deleteTimerFromServer,
-  loadFromServer,
+  loadFromServer as loadFromServerActual,
   loadInsightsHistory,
   loadProfileFromServer,
   pushTimerToServer,
   serverHasData,
   updateTimerOnServer,
 } from './repository';
+import { recentHistorySince } from '@/lib/historyRange';
 
 const DAY = 86400000;
+// Existing fan-out/reconciliation fixtures use epoch timestamps; their cutoff is
+// explicit so those tests continue to cover fetch behavior independently of dates.
+const loadFromServer = (conn: Parameters<typeof loadFromServerActual>[0], preferred?: number | null) =>
+  loadFromServerActual(conn, preferred, 0);
 
 // Mock the client so no network is touched.
 const listSleep = vi.fn();
@@ -25,7 +30,9 @@ const listPumping = vi.fn(async () => []);
 const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
 const listMedication = vi.fn(async () => []);
-const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
+const listChildNotes = vi.fn(async (_id: string, _limit = 100, _offset = 0): Promise<{
+  baths: any[]; milestones: any[]; notes: any[]; pageCount?: number; oldestTime?: number;
+}> => ({ baths: [], milestones: [], notes: [] }));
 const listChildTreatments = vi.fn(async () => [] as any[]);
 const listGenders = vi.fn(async () => new Map<number, string>());
 const setChildGender = vi.fn(async () => undefined);
@@ -67,6 +74,73 @@ vi.mock('@/api/client', async (importOriginal) => ({
 }));
 
 const sleepEntry = (start: number) => ({ id: `s-${start}`, type: 'sleep', childId: 'c1', start, end: start + 3600000, nap: false, tags: [] });
+
+describe('date-based timeline loading', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const feed = (start: number) => ({
+    id: `f-${start}`, type: 'feeding' as const, childId: '7', start, end: start + 1000,
+    feedType: 'breast' as const, method: 'left' as const, amount: null, tags: [],
+  });
+
+  const reset = () => {
+    listChildren.mockReset().mockResolvedValue([{ id: '7', serverId: 7, first: 'Mira', birth: 0 }]);
+    for (const fn of [listSleep, listFeedings, listChanges, listPumping, listTummy, listTemperature, listMedication, listChildTreatments, listMeasurements]) {
+      fn.mockReset().mockResolvedValue([]);
+    }
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [], pageCount: 0 });
+    listTimers.mockReset().mockResolvedValue([]);
+  };
+
+  it('finishes the cutoff day across pages for busy activity types', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    const first = Array.from({ length: 100 }, (_, i) => feed(Date.now() - i * 60_000));
+    listFeedings.mockImplementation(async (_id: string, _limit: number, offset: number) =>
+      offset === 0 ? first : [feed(cutoff + 3600000), feed(cutoff - 3600000)],
+    );
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+
+    expect(result.entries.filter((e) => e.type === 'feeding')).toHaveLength(101);
+    expect(result.entries.some((e) => e.id === `f-${cutoff - 3600000}`)).toBe(false);
+    expect(listFeedings).toHaveBeenCalledWith('7', 100, 100);
+    expect(result.historySinceMs).toBe(cutoff);
+    expect(result.historyHasOlder).toBe(true);
+  });
+
+  it('uses raw note page size when excluded metadata notes fill a page', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    listChildNotes.mockImplementation(async (_id: string, _limit: number, offset: number) =>
+      offset === 0
+        ? { baths: [], milestones: [], notes: [], pageCount: 100, oldestTime: cutoff + 1 }
+        : { baths: [], milestones: [], notes: [], pageCount: 1, oldestTime: cutoff - 1 },
+    );
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+    expect(listChildNotes).toHaveBeenCalledWith('7', 100, 100);
+    expect(result.historyHasOlder).toBe(true);
+  });
+
+  it('keeps the last feeding prefill when the newest feeding predates the visible range', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    listFeedings.mockResolvedValueOnce([feed(cutoff - DAY)]);
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+    expect(result.entries).toEqual([]);
+    expect(result.lastFeed['7']).toEqual({ feedType: 'breast', method: 'left' });
+    expect(result.historyHasOlder).toBe(true);
+  });
+
+  it('does not advance the complete-day boundary when a later page fails', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    const first = Array.from({ length: 100 }, (_, i) => feed(Date.now() - i * 60_000));
+    listFeedings.mockResolvedValueOnce(first).mockRejectedValueOnce(new Error('second page failed'));
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+    expect(result.incompleteSlices?.['7']).toContain('feeding');
+    expect(result.historySinceMs).toBeUndefined();
+    expect(result.historyHasOlder).toBe(true);
+  });
+});
 
 describe('loadInsightsHistory', () => {
   it('pages until entries fall before the cutoff and trims them', async () => {
@@ -157,14 +231,14 @@ describe('loadFromServer fans out to every child', () => {
     await loadFromServer(conn, 9);
 
     for (const id of ['7', '9']) {
-      expect(listFeedings).toHaveBeenCalledWith(id);
-      expect(listSleep).toHaveBeenCalledWith(id);
-      expect(listChanges).toHaveBeenCalledWith(id);
-      expect(listPumping).toHaveBeenCalledWith(id);
-      expect(listTummy).toHaveBeenCalledWith(id);
-      expect(listChildNotes).toHaveBeenCalledWith(id);
-      expect(listTemperature).toHaveBeenCalledWith(id);
-      expect(listMedication).toHaveBeenCalledWith(id);
+      expect(listFeedings).toHaveBeenCalledWith(id, 100, 0);
+      expect(listSleep).toHaveBeenCalledWith(id, 100, 0);
+      expect(listChanges).toHaveBeenCalledWith(id, 100, 0);
+      expect(listPumping).toHaveBeenCalledWith(id, 100, 0);
+      expect(listTummy).toHaveBeenCalledWith(id, 100, 0);
+      expect(listChildNotes).toHaveBeenCalledWith(id, 100, 0);
+      expect(listTemperature).toHaveBeenCalledWith(id, 100, 0);
+      expect(listMedication).toHaveBeenCalledWith(id, 100, 0);
       expect(listChildTreatments).toHaveBeenCalledWith(id);
       for (const kind of ['weight', 'height', 'head', 'bmi']) expect(listMeasurements).toHaveBeenCalledWith(kind, id);
     }

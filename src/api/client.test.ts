@@ -1816,9 +1816,12 @@ describe('bath rhythm <-> note serialization', () => {
       }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const res = await new BabybuddyClient('https://example.com', 'tok').listChildNotes('5');
+    const res = await new BabybuddyClient('https://example.com', 'tok').listChildNotes('5', 2, 2);
     expect(res.notes.map((n) => n.text)).toEqual(['plain note']);
     expect(res.baths).toEqual([]);
+    expect(res.pageCount).toBe(2);
+    expect(res.oldestTime).toBe(Date.parse('2026-03-04T10:00:00.000Z'));
+    expect(fetchMock.mock.calls[0][0]).toContain('limit=2&offset=2');
   });
 
   it('listBathRhythms keys the whole account by child server id in one request', async () => {

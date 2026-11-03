@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -47,6 +47,11 @@ export default function History() {
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
   const refresh = useAppStore((s) => s.refresh);
+  const loadOlderHistory = useAppStore((s) => s.loadOlderHistory);
+  const historySinceMs = useAppStore((s) => s.historySinceMs);
+  const historyHasOlder = useAppStore((s) => s.historyHasOlder);
+  const historyLoadingOlder = useAppStore((s) => s.historyLoadingOlder);
+  const historyOlderError = useAppStore((s) => s.historyOlderError);
   // Raw array, never a Set built inside a selector, for the same zustand reason.
   const queuedIds = useAppStore((s) => s.queuedIds);
   const connection = useAppStore((s) => s.connection);
@@ -103,6 +108,14 @@ export default function History() {
   const activityChoices = activityOptions(filterItems(items, { day: filter.day, types: [] }));
   const visible = filterItems(items, filter);
   const groups = groupByDay(visible, now);
+  const canLoadOlder = serverMode && historySinceMs != null && historyHasOlder && !filter.day;
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!canLoadOlder || historyLoadingOlder || historyOlderError) return;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    if (contentOffset.y > 0 && contentOffset.y + layoutMeasurement.height >= contentSize.height - 360) {
+      void loadOlderHistory();
+    }
+  }, [canLoadOlder, historyLoadingOlder, historyOlderError, loadOlderHistory]);
 
   // A running timer counts as logged, so the empty state stays away while one is going.
   const empty = items.length === 0;
@@ -132,12 +145,16 @@ export default function History() {
             <Icon name="list" color={t.faint} size={34} />
           </View>
           <Txt weight={700} size={18}>
-            {showHousehold ? 'Nothing logged yet' : `Nothing logged for ${child?.first ?? 'this child'}`}
+            {canLoadOlder
+              ? 'No recent entries'
+              : showHousehold ? 'Nothing logged yet' : `Nothing logged for ${child?.first ?? 'this child'}`}
           </Txt>
           {/* A parent who has just added a second child would otherwise read this as
               "the app has nothing" rather than "this child has nothing". */}
           <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 240, lineHeight: 20 }}>
-            {!showHousehold && canShowHousehold
+            {canLoadOlder
+              ? 'Load older entries below to keep looking through the timeline.'
+              : !showHousehold && canShowHousehold
               ? 'Switch to Everyone above to see the rest of the household, or tap a big button on Home to log something.'
               : 'Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.'}
           </Txt>
@@ -199,9 +216,26 @@ export default function History() {
             </View>
           ))
         )}
-      </>
-        )}
-      </>
+        </>
+      )}
+      {canLoadOlder && (
+        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+          {historyLoadingOlder ? (
+            <ActivityIndicator color={t.dim} accessibilityLabel="Loading older entries" />
+          ) : (
+            <Tappable
+              onPress={() => void loadOlderHistory()}
+              accessibilityRole="button"
+              style={{ paddingVertical: 10, paddingHorizontal: 18, cursor: 'pointer' }}
+            >
+              <Txt weight={600} size={14} color={t.primary}>
+                {historyOlderError ? 'Retry loading older entries' : 'Load older entries'}
+              </Txt>
+            </Tappable>
+          )}
+        </View>
+      )}
+    </>
   );
 
   // A sibling of the scroll container on both layouts, never inside it: a sheet positions
@@ -221,7 +255,7 @@ export default function History() {
   if (desktop)
     return (
       <View style={{ flex: 1 }}>
-        <DesktopPage maxWidth={600}>{body}</DesktopPage>
+        <DesktopPage maxWidth={600} onScroll={onScroll}>{body}</DesktopPage>
         {filterSheets}
       </View>
     );
@@ -262,6 +296,8 @@ export default function History() {
 
       <ScrollView
         ref={scrollRef}
+        onScroll={onScroll}
+        scrollEventThrottle={200}
         style={{ flex: 1, backgroundColor: t.bg }}
         refreshControl={
           canPullToRefresh ? (

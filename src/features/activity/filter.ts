@@ -49,8 +49,7 @@ export function activityOptions(items: TimelineItem[]): ActivityType[] {
 
 /**
  * Built from the items rather than from a calendar, so the picker can only offer a day
- * that has records: History holds roughly the last 50 per activity type, so most calendar
- * dates have nothing behind them. Pass items the other filters have already been applied
+ * that has loaded records. Pass items the other filters have already been applied
  * to and the day list narrows with them.
  */
 export function dayOptions(items: TimelineItem[], now: number): DayOption[] {

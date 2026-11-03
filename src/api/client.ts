@@ -870,9 +870,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listTemperature(childId: string, limit = 50): Promise<TemperatureEntry[]> {
+  async listTemperature(childId: string, limit = 50, offset = 0): Promise<TemperatureEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/temperature/?child=${childId}&ordering=-time&limit=${limit}`,
+      `/temperature/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((r) => ({
       id: `temperature-${r.id}`,
@@ -886,9 +886,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listMedication(childId: string, limit = 50): Promise<MedicationEntry[]> {
+  async listMedication(childId: string, limit = 50, offset = 0): Promise<MedicationEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/medication/?child=${childId}&ordering=-time&limit=${limit}`,
+      `/medication/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((r) => ({
       id: `medication-${r.id}`,
@@ -906,9 +906,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listPumping(childId: string, limit = 50): Promise<PumpingEntry[]> {
+  async listPumping(childId: string, limit = 50, offset = 0): Promise<PumpingEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/pumping/?child=${childId}&ordering=-start&limit=${limit}`,
+      `/pumping/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((p) => ({
       id: `pumping-${p.id}`,
@@ -923,9 +923,9 @@ export class BabybuddyClient {
     }));
   }
 
-  async listTummy(childId: string, limit = 50): Promise<TummyEntry[]> {
+  async listTummy(childId: string, limit = 50, offset = 0): Promise<TummyEntry[]> {
     const data = await this.request<Paginated<any>>(
-      `/tummy-times/?child=${childId}&ordering=-start&limit=${limit}`,
+      `/tummy-times/?child=${childId}&ordering=-start&limit=${limit}&offset=${offset}`,
     );
     return data.results.map((t) => ({
       id: `tummy-${t.id}`,
@@ -949,9 +949,10 @@ export class BabybuddyClient {
   async listChildNotes(
     childId: string,
     limit = 100,
-  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[] }> {
+    offset = 0,
+  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[]; pageCount: number; oldestTime?: number }> {
     const data = await this.request<Paginated<any>>(
-      `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
+      `/notes/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
     const baths: BathEntry[] = [];
     const milestones: MilestoneEntry[] = [];
@@ -962,7 +963,13 @@ export class BabybuddyClient {
       else if (isTreatmentNote(n) || isGenderNote(n) || isBathRhythmNote(n)) continue;
       else notes.push(noteToNoteEntry(n, childId));
     }
-    return { baths, milestones, notes };
+    return {
+      baths, milestones, notes,
+      // The raw page can include treatment/gender/rhythm notes that do not become
+      // timeline rows. Pagination must count them anyway or it stops too early.
+      pageCount: data.results.length,
+      oldestTime: data.results.length ? fromISO(data.results[data.results.length - 1].time) : undefined,
+    };
   }
 
   /** Filtered server-side by tag (`NoteFilter` extends `TagsFieldFilter`) rather than
