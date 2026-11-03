@@ -23,7 +23,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "BUDKIN_VERSION": "1.5.2"
+        "BUDKIN_VERSION": "1.5.3"
       },
       "buildArtifactPaths": ["android/app/build/outputs/mapping/release/mapping.txt"]
     }
