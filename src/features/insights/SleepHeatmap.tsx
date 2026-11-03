@@ -8,7 +8,7 @@ import { Txt } from '@/components/Txt';
 import { hexA } from '@/lib/color';
 import { fontFamily } from '@/theme/fonts';
 import { useTheme } from '@/theme/useTheme';
-import { DAY, windowStart, type HeatRow } from './compute';
+import { nextWindowStart, windowStart, type HeatRow } from './compute';
 
 const DAY_LABELS: Record<number, string> = { 0: 'Today', 7: '1w', 14: '2w', 21: '3w', 27: '4w' };
 const TICK_HS = [0, 6, 12, 18, 24];
@@ -78,16 +78,17 @@ export function SleepHeatmap({ rows, width, now, runningSince, runningFeedSince,
   const midnightH = (24 - (originHour % 24)) % 24;
   const midnightOnTick = midnightH % 6 === 0;
   // The remainder of the Today row has not happened yet, so it is dimmed.
-  const todayFrac = Math.min(1, Math.max(0, (now - windowStart(now, originHour)) / DAY));
+  const win = windowStart(now, originHour);
+  const winDuration = nextWindowStart(win, originHour) - win;
+  const todayFrac = Math.min(1, Math.max(0, (now - win) / winDuration));
   const future = hexA('#000000', t.dark ? 0.32 : 0.08);
 
   // Each spans its timer's start, clamped to the window origin so it never spills onto
   // the previous row, up to now.
-  const win = windowStart(now, originHour);
   const todayIdx = rows.findIndex((r) => r.offsetFromToday === 0);
   const liveGeom = (since: number | null | undefined) => {
     if (since == null || since >= now || todayIdx < 0) return null;
-    const x0 = Math.min(1, Math.max(0, (Math.max(win, since) - win) / DAY));
+    const x0 = Math.min(1, Math.max(0, (Math.max(win, since) - win) / winDuration));
     if (todayFrac <= x0) return null;
     return { x0, x1: todayFrac };
   };

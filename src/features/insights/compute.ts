@@ -9,7 +9,7 @@ export function dayStart(ms: number): number {
 }
 
 /**
- * Start (ms) of the 24h window anchored at `originHour` that contains `ms`. 12 is the
+ * Start (ms) of the local-day window anchored at `originHour` that contains `ms`. 12 is the
  * classic noon-to-noon window, where a normal night lands as one contiguous block in the
  * middle; 0 gives calendar days. The tab's single day boundary, so the heatmap and the
  * per-window trend bucketing agree.
@@ -17,7 +17,12 @@ export function dayStart(ms: number): number {
 export function windowStart(ms: number, originHour: number): number {
   const d = new Date(ms);
   const origin = new Date(d.getFullYear(), d.getMonth(), d.getDate(), originHour).getTime();
-  return ms >= origin ? origin : origin - DAY;
+  return ms >= origin ? origin : new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1, originHour).getTime();
+}
+
+export function nextWindowStart(winStart: number, originHour = new Date(winStart).getHours()): number {
+  const d = new Date(winStart);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, originHour).getTime();
 }
 
 export function noonWindowStart(ms: number): number {
@@ -56,11 +61,12 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
     const end = e.end;
     while (start < end) {
       const win = windowStart(start, originHour);
-      const segEnd = Math.min(end, win + DAY);
+      const winEnd = nextWindowStart(win, originHour);
+      const segEnd = Math.min(end, winEnd);
       const offset = Math.round((todayWin - win) / DAY);
       if (offset >= 0 && offset < days) {
-        const x0 = (start - win) / DAY;
-        const x1 = (segEnd - win) / DAY;
+        const x0 = (start - win) / (winEnd - win);
+        const x1 = (segEnd - win) / (winEnd - win);
         if (x1 - x0 > 0.001) {
           const arr = rows.get(offset) ?? [];
           arr.push({ x0, x1, nap: e.nap });
@@ -83,11 +89,12 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
       const end = e.end;
       while (start < end) {
         const win = windowStart(start, originHour);
-        const segEnd = Math.min(end, win + DAY);
+        const winEnd = nextWindowStart(win, originHour);
+        const segEnd = Math.min(end, winEnd);
         const offset = Math.round((todayWin - win) / DAY);
         if (offset >= 0 && offset <= oldest) {
-          const x0 = (start - win) / DAY;
-          const x1 = (segEnd - win) / DAY;
+          const x0 = (start - win) / (winEnd - win);
+          const x1 = (segEnd - win) / (winEnd - win);
           if (x1 - x0 > 0.001) (feedsByOffset.get(offset) ?? feedsByOffset.set(offset, []).get(offset)!).push({ x0, x1 });
         }
         start = segEnd;
@@ -96,7 +103,9 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
       const win = windowStart(e.time, originHour);
       const offset = Math.round((todayWin - win) / DAY);
       if (offset < 0 || offset > oldest) continue;
-      (diapersByOffset.get(offset) ?? diapersByOffset.set(offset, []).get(offset)!).push((e.time - win) / DAY);
+      (diapersByOffset.get(offset) ?? diapersByOffset.set(offset, []).get(offset)!).push(
+        (e.time - win) / (nextWindowStart(win, originHour) - win),
+      );
     }
   }
 
@@ -117,7 +126,7 @@ export function buildSleepHeatmap(entries: Entry[], now: number, days = 28, orig
  * sleeps are ignored.
  */
 export function sleepMsInWindow(entries: Entry[], winStart: number): number {
-  const winEnd = winStart + DAY;
+  const winEnd = nextWindowStart(winStart);
   let ms = 0;
   for (const e of entries) {
     if (e.type !== 'sleep' || e.end == null) continue;
@@ -140,7 +149,7 @@ export function sleepMsInWindow(entries: Entry[], winStart: number): number {
  * completed sleeps either, so the number is the same before and after they stop.
  */
 export function liveSleepMsInWindow(entries: Entry[], timers: Timer[], winStart: number, now: number): number {
-  const winEnd = winStart + DAY;
+  const winEnd = nextWindowStart(winStart);
   let ms = sleepMsInWindow(entries, winStart);
   for (const tm of timers) {
     if (tm.saveAs !== 'sleep') continue;
@@ -200,7 +209,7 @@ export function buildTrend(entries: Entry[], metric: TrendMetric, now: number, r
       const end = e.end;
       while (start < end) {
         const win = windowStart(start, originHour);
-        const segEnd = Math.min(end, win + DAY);
+        const segEnd = Math.min(end, nextWindowStart(win, originHour));
         msByWin.set(win, (msByWin.get(win) ?? 0) + (segEnd - start));
         start = segEnd;
       }
