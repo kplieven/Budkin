@@ -34,7 +34,9 @@ export default function Home() {
   const insets = useSafeAreaInsets();
   const desktop = useDesktopShell();
   const { width } = useWindowDimensions();
-  const now = useAppStore((s) => s.now);
+  // The header only displays age in days, so it need not redraw the whole Home
+  // screen on every second of the global clock.
+  const now = useAppStore((s) => Math.floor(s.now / 60000) * 60000);
   const offline = useAppStore((s) => s.offline);
   const tutorialSeen = useAppStore((s) => s.tutorialSeen);
   const pending = useAppStore(selectPendingCount);

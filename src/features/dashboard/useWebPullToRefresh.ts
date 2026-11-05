@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from 'react';
-import { Platform, type ScrollView } from 'react-native';
+import { Platform } from 'react-native';
 import { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import {
@@ -48,7 +48,7 @@ const isTouchWeb =
  * false, so the four callers that have no competing gesture pass nothing.
  */
 export function useWebPullToRefresh(
-  scrollRef: RefObject<ScrollView | null>,
+  scrollRef: RefObject<{ getScrollableNode: () => unknown } | null>,
   onRefresh: () => Promise<void> | void,
   suppressed: boolean = false,
 ) {

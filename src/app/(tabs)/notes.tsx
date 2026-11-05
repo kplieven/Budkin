@@ -93,7 +93,9 @@ export default function Notes() {
   // Notes are the one kind an expecting child can genuinely own.
   const notes = entriesForChild(entries, selectedChildId).filter((e): e is NoteEntry => e.type === 'note')
     .sort((a, b) => entryTimestamp(b) - entryTimestamp(a));
-  const now = useAppStore((s) => s.now);
+  // Paged notes can grow well past the first screen. Relative labels only change
+  // by the minute, so keep a visited tab off the one-second render loop.
+  const now = useAppStore((s) => Math.floor(s.now / 60000) * 60000);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openSheet = useAppStore((s) => s.openSheet);

@@ -5,11 +5,13 @@ import { Pressable, ScrollView, View } from 'react-native';
 import { isHovered } from '@/components/hover';
 import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
-import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import { groupByDay, isTimer, timelineTimestamp } from '@/features/activity/groupByDay';
 import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { entriesForChild, selectServerMode, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+
+const RECENT_ITEMS = 20;
 
 /**
  * Desktop dashboard's right-hand timeline rail (fixed 372px): day-grouped recent
@@ -22,7 +24,7 @@ export function TimelineRail() {
   const timers = useAppStore((s) => s.timers);
   // Primitive selector, so no new reference per render (zustand v5).
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  const now = useAppStore((s) => s.now);
+  const now = useAppStore((s) => Math.floor(s.now / 60000) * 60000);
   const openEdit = useAppStore((s) => s.openEdit);
   const openTimerEdit = useAppStore((s) => s.openTimerEdit);
   // The queued markers, on exactly the terms History uses: same helper, same
@@ -35,16 +37,17 @@ export function TimelineRail() {
   const serverMode = selectServerMode({ connection });
   const queued = useMemo(() => queuedIdSet(queuedIds, serverMode), [queuedIds, serverMode]);
 
-  // Scoped to the selected child, like History: `entries` holds every child's
-  // records. Notes have their own dedicated tab, so keep them out of the rail.
-  const activityEntries = entriesForChild(entries, selectedChildId).filter(
-    (e) => e.type !== 'note' && e.type !== 'milestone',
-  );
-  // Running timers show here as well, on the same terms as on History: desktop
-  // and mobile run the identical pipeline and must not disagree about whether
-  // an unfinished activity exists.
-  const items = [...activityEntries, ...timersForChild(timers, selectedChildId)];
-  const groups = groupByDay(items, now);
+  // `entries` holds every child's records, so scope it. Notes have their own
+  // dedicated tab, so keep them out of the rail. Running timers belong here too.
+  const items = useMemo(() => {
+    const activityEntries = entriesForChild(entries, selectedChildId).filter(
+      (e) => e.type !== 'note' && e.type !== 'milestone',
+    );
+    return [...activityEntries, ...timersForChild(timers, selectedChildId)]
+      .sort((a, b) => timelineTimestamp(b) - timelineTimestamp(a))
+      .slice(0, RECENT_ITEMS);
+  }, [entries, timers, selectedChildId]);
+  const groups = useMemo(() => groupByDay(items, now), [items, now]);
 
   return (
     <View
