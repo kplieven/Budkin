@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, RefreshControl, ScrollView, View } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -16,6 +16,7 @@ import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { entriesForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
+import { NOTES_PAGE_SIZE } from '@/data/repository';
 import { useTheme } from '@/theme/useTheme';
 import { entryTimestamp, type NoteEntry } from '@/types/models';
 
@@ -88,13 +89,33 @@ export default function Notes() {
   // Scoped to the selected child: `entries` holds every child's records, so
   // without this the previous child's notes stay on screen after a switch.
   // Notes are the one kind an expecting child can genuinely own.
-  const notes = entriesForChild(entries, selectedChildId).filter((e): e is NoteEntry => e.type === 'note');
+  const notes = entriesForChild(entries, selectedChildId)
+    .filter((e): e is NoteEntry => e.type === 'note')
+    .sort((a, b) => entryTimestamp(b) - entryTimestamp(a));
   const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
   const openSwitcher = useAppStore((s) => s.openSwitcher);
   const openSheet = useAppStore((s) => s.openSheet);
   const openEdit = useAppStore((s) => s.openEdit);
   const refresh = useAppStore((s) => s.refresh);
+  const connection = useAppStore((s) => s.connection);
+  const notesVisibleCounts = useAppStore((s) => s.notesVisibleCounts);
+  const notesHasOlder = useAppStore((s) => s.notesHasOlder);
+  const notesLoadingOlder = useAppStore((s) => s.notesLoadingOlder);
+  const notesOlderError = useAppStore((s) => s.notesOlderError);
+  const loadMoreNotes = useAppStore((s) => s.loadMoreNotes);
+  const key = child?.serverId != null ? String(child.serverId) : '';
+  const serverNotes = connection?.mode === 'server' && !!key;
+  const visibleCount = serverNotes ? (notesVisibleCounts[key] ?? NOTES_PAGE_SIZE) : notes.length;
+  const visibleNotes = notes.slice(0, visibleCount);
+  const canLoadMore = serverNotes && (notes.length > visibleCount || notesHasOlder[key]);
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (!canLoadMore || notesLoadingOlder || notesOlderError) return;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    if (contentOffset.y > 0 && contentOffset.y + layoutMeasurement.height >= contentSize.height - 360) {
+      void loadMoreNotes();
+    }
+  }, [canLoadMore, notesLoadingOlder, notesOlderError, loadMoreNotes]);
 
   // Native uses RefreshControl, touch-web a custom gesture, mouse-web nothing.
   const canPullToRefresh = Platform.OS !== 'web';
@@ -106,7 +127,7 @@ export default function Notes() {
   const scrollRef = useRef<ScrollView | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
-  const groups = groupByDay(notes, now);
+  const groups = groupByDay(visibleNotes, now);
 
   const addButton = (
     <Tappable
@@ -141,7 +162,7 @@ export default function Notes() {
   const body = (
     <>
       {addButton}
-      {notes.length === 0 ? (
+      {visibleNotes.length === 0 ? (
         <View style={{ alignItems: 'center', paddingVertical: 56, paddingHorizontal: 24, gap: 14 }}>
           <View style={{ width: 72, height: 72, borderRadius: 22, backgroundColor: t.chip, alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="note" color={t.faint} size={34} />
@@ -168,10 +189,27 @@ export default function Notes() {
           </View>
         ))
       )}
+      {canLoadMore && (
+        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+          {notesLoadingOlder ? (
+            <ActivityIndicator color={t.dim} accessibilityLabel="Loading more notes" />
+          ) : (
+            <Tappable
+              onPress={() => void loadMoreNotes()}
+              accessibilityRole="button"
+              style={{ paddingVertical: 10, paddingHorizontal: 18, cursor: 'pointer' }}
+            >
+              <Txt weight={600} size={14} color={t.primary}>
+                {notesOlderError ? 'Retry loading notes' : 'Load more notes'}
+              </Txt>
+            </Tappable>
+          )}
+        </View>
+      )}
     </>
   );
 
-  if (desktop) return <DesktopPage maxWidth={600}>{body}</DesktopPage>;
+  if (desktop) return <DesktopPage maxWidth={600} onScroll={onScroll}>{body}</DesktopPage>;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -209,6 +247,8 @@ export default function Notes() {
 
       <ScrollView
         ref={scrollRef}
+        onScroll={onScroll}
+        scrollEventThrottle={200}
         style={{ flex: 1, backgroundColor: t.bg }}
         refreshControl={
           canPullToRefresh ? (

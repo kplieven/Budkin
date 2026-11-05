@@ -31,8 +31,11 @@ const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
 const listMedication = vi.fn(async () => []);
 const listChildNotes = vi.fn(async (_id: string, _limit = 100, _offset = 0): Promise<{
-  baths: any[]; milestones: any[]; notes: any[]; pageCount?: number; oldestTime?: number;
+  baths: any[]; milestones: any[]; notes: any[]; pageCount?: number; oldestTime?: number; lastId?: number;
 }> => ({ baths: [], milestones: [], notes: [] }));
+const listChildMilestones = vi.fn(async (_id: string, _limit = 100, _offset = 0): Promise<{
+  milestones: any[]; pageCount: number; lastId?: number;
+}> => ({ milestones: [], pageCount: 0 }));
 const listChildTreatments = vi.fn(async () => [] as any[]);
 const listGenders = vi.fn(async () => new Map<number, string>());
 const setChildGender = vi.fn(async () => undefined);
@@ -59,6 +62,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
     listTemperature,
     listMedication,
     listChildNotes,
+    listChildMilestones,
     listChildTreatments,
     listGenders,
     setChildGender,
@@ -88,6 +92,7 @@ describe('date-based timeline loading', () => {
       fn.mockReset().mockResolvedValue([]);
     }
     listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [], pageCount: 0 });
+    listChildMilestones.mockReset().mockResolvedValue({ milestones: [], pageCount: 0 });
     listTimers.mockReset().mockResolvedValue([]);
   };
 
@@ -118,6 +123,41 @@ describe('date-based timeline loading', () => {
     const result = await loadFromServerActual(conn, undefined, cutoff);
     expect(listChildNotes).toHaveBeenCalledWith('7', 100, 100);
     expect(result.historyHasOlder).toBe(true);
+  });
+
+  it('loads milestones older than the history window and scans raw notes until an ordinary page is full', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    const oldMilestone = { id: 'milestone-1', type: 'milestone', childId: '7', time: cutoff - DAY, key: 'smile', tags: [] };
+    listChildMilestones.mockResolvedValueOnce({ milestones: [oldMilestone], pageCount: 1 });
+    listChildNotes.mockImplementation(async (_id: string, _limit: number, offset: number) =>
+      offset === 0
+        ? { baths: [], milestones: [], notes: [], pageCount: 100, oldestTime: cutoff - 1, lastId: 100 }
+        : { baths: [], milestones: [], notes: Array.from({ length: 20 }, (_, i) => ({
+            id: `note-${i}`, type: 'note', childId: '7', time: cutoff - DAY - i, text: 'old', tags: [],
+          })), pageCount: 20, oldestTime: cutoff - DAY, lastId: 120 },
+    );
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+    expect(result.entries).toContainEqual(oldMilestone);
+    expect(result.entries.filter((e) => e.type === 'note')).toHaveLength(20);
+    expect(listChildNotes).toHaveBeenCalledWith('7', 100, 100);
+    expect(result.notesHasOlder?.['7']).toBe(false);
+  });
+
+  it('follows every filtered milestone page regardless of age', async () => {
+    reset();
+    const cutoff = recentHistorySince(Date.now());
+    const milestone = (i: number) => ({
+      id: `milestone-${i}`, type: 'milestone', childId: '7', time: cutoff - (i + 1) * DAY, key: `key-${i}`, tags: [],
+    });
+    listChildMilestones.mockImplementation(async (_id: string, _limit: number, offset: number) =>
+      offset === 0
+        ? { milestones: Array.from({ length: 100 }, (_, i) => milestone(i)), pageCount: 100, lastId: 100 }
+        : { milestones: [milestone(100)], pageCount: 1, lastId: 101 },
+    );
+    const result = await loadFromServerActual(conn, undefined, cutoff);
+    expect(result.entries.filter((e) => e.type === 'milestone')).toHaveLength(101);
+    expect(listChildMilestones).toHaveBeenCalledWith('7', 100, 100);
   });
 
   it('keeps the last feeding prefill when the newest feeding predates the visible range', async () => {
@@ -214,6 +254,7 @@ describe('loadFromServer fans out to every child', () => {
     listPumping.mockReset().mockResolvedValue([]);
     listTummy.mockReset().mockResolvedValue([]);
     listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listChildMilestones.mockReset().mockResolvedValue({ milestones: [], pageCount: 0 });
     listTemperature.mockReset().mockResolvedValue([]);
     listMedication.mockReset().mockResolvedValue([]);
     listChildTreatments.mockReset().mockResolvedValue([]);
@@ -326,7 +367,7 @@ describe('loadFromServer fans out to every child', () => {
 
     const result = await loadFromServer(conn, 9);
 
-    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'note'] });
   });
 
   it('holds concurrency at 8 across the whole load, not 8 per child', async () => {
@@ -353,17 +394,21 @@ describe('loadFromServer fans out to every child', () => {
       await gate();
       return { baths: [], milestones: [], notes: [] };
     }) as any);
+    listChildMilestones.mockImplementation((async () => {
+      await gate();
+      return { milestones: [], pageCount: 0 };
+    }) as any);
 
     await loadFromServer(conn);
 
     expect(peak).toBe(8);
-    // And it really did run all of them: 13 requests per child, 3 children.
+    // And it really did run all of them: 14 requests per child, 3 children.
     expect(
-      [listFeedings, listSleep, listChanges, listPumping, listTummy, listChildNotes, listTemperature, listMedication, listChildTreatments].reduce(
+      [listFeedings, listSleep, listChanges, listPumping, listTummy, listChildNotes, listChildMilestones, listTemperature, listMedication, listChildTreatments].reduce(
         (n, m) => n + m.mock.calls.length,
         0,
       ) + listMeasurements.mock.calls.length,
-    ).toBe(39);
+    ).toBe(42);
 
     // Put the shared mocks back to plain answers: the describes below reuse them
     // without resetting every one, so a timer-backed implementation would leak in.
@@ -385,6 +430,7 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     listPumping.mockReset().mockResolvedValue([]);
     listTummy.mockReset().mockResolvedValue([]);
     listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listChildMilestones.mockReset().mockResolvedValue({ milestones: [], pageCount: 0 });
     listTemperature.mockReset().mockResolvedValue([]);
     listMedication.mockReset().mockResolvedValue([]);
     listChildTreatments.mockReset().mockResolvedValue([]);
@@ -402,8 +448,8 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
 
   it('names the slices one failed request emptied, while the rest still loads', async () => {
     answerEverything();
-    // One timed-out /api/notes/ takes every note, bath and milestone out of
-    // `entries` with nothing in the answer saying so. ONE request, three slices.
+    // A timed-out raw notes scan affects bath and ordinary notes. The separate
+    // milestone scan can still answer.
     listChildNotes.mockRejectedValueOnce(new Error('timeout'));
     listFeedings.mockResolvedValueOnce([
       { id: 'f-1', type: 'feeding', childId: '7', start: 1000, end: 2000, feedType: 'breast', method: 'left', tags: [] },
@@ -411,7 +457,7 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
 
     const result = await loadFromServer(conn);
 
-    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'note'] });
     expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
   });
 
@@ -477,6 +523,7 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     listPumping.mockRejectedValueOnce(new Error('down'));
     listTummy.mockRejectedValueOnce(new Error('down'));
     listChildNotes.mockRejectedValueOnce(new Error('down'));
+    listChildMilestones.mockRejectedValueOnce(new Error('down'));
     listTemperature.mockRejectedValueOnce(new Error('down'));
     listMedication.mockRejectedValueOnce(new Error('down'));
     listChildTreatments.mockRejectedValueOnce(new Error('down'));

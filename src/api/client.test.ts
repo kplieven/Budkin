@@ -1292,6 +1292,21 @@ describe('listChildNotes three-way partition', () => {
     expect(milestones).toHaveLength(1);
     expect(baths).toHaveLength(0);
   });
+
+  it('requests milestone-tagged pages and checks the returned tags locally', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      count: 2, next: null, previous: null,
+      results: [
+        { id: 9, time: '2026-03-04T18:30:00.000Z', note: '🎉 First bath', tags: ['milestone', 'mk:first-bath'] },
+        { id: 10, time: '2026-03-04T17:00:00.000Z', note: 'plain note', tags: [] },
+      ],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await new BabybuddyClient('https://example.com', 'tok').listChildMilestones('5', 100, 100);
+    expect(fetchMock.mock.calls[0][0]).toContain('/notes/?child=5&tags=milestone&ordering=-time&limit=100&offset=100');
+    expect(result.milestones.map((m) => m.key)).toEqual(['first-bath']);
+    expect(result.pageCount).toBe(2);
+  });
 });
 
 describe('timers', () => {

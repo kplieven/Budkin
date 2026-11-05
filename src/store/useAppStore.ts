@@ -21,6 +21,8 @@ import {
   deleteMeasurementFromServer,
   deleteTimerFromServer,
   loadFromServer,
+  loadNotesForChild,
+  NOTES_PAGE_SIZE,
   loadInsightsHistory,
   loadProfileFromServer,
   type LoadResult,
@@ -244,6 +246,11 @@ interface AppState {
   historyHasOlder: boolean;
   historyLoadingOlder: boolean;
   historyOlderError: boolean;
+  /** Counts and page availability use SERVER child ids, surviving local-id remapping. */
+  notesVisibleCounts: Record<string, number>;
+  notesHasOlder: Record<string, boolean>;
+  notesLoadingOlder: boolean;
+  notesOlderError: boolean;
   timers: Timer[];
   measurements: Measurement[];
   /** Per-child medication regimens, synced to Baby Buddy as `treatment`-tagged notes.
@@ -320,6 +327,7 @@ interface AppActions {
    *  worker, whose headless context can be torn down mid-flush. */
   refresh: (opts?: { push?: boolean; historySinceMs?: number }) => Promise<void>;
   loadOlderHistory: () => Promise<void>;
+  loadMoreNotes: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
   /** `opts.uploadAnyway` overrides the non-empty-server guard, attaching to matching
    *  server children instead of duplicating them. Safe to call again after a `partial`. */
@@ -705,7 +713,12 @@ function childServerIdFor(children: Child[], childId: string): number | null {
 
 function cachedHistorySince(entries: Entry[], now: number): number {
   let since = recentHistorySince(now);
-  for (const entry of entries) since = Math.min(since, startOfDay(entryTimestamp(entry)));
+  // Older notes and all-time milestones must not widen the activity window.
+  for (const entry of entries) {
+    if (entry.type !== 'note' && entry.type !== 'milestone') {
+      since = Math.min(since, startOfDay(entryTimestamp(entry)));
+    }
+  }
   return since;
 }
 
@@ -891,6 +904,7 @@ function applyServerLoad(
     bathRhythms: Record<string, BathRhythm>;
     legacyRhythm: BathRhythm;
     q: Entry[];
+    notesHasOlder?: Record<string, boolean>;
     /** Pre-fetch snapshots, which only `refresh` has: what tells a record created
      *  mid-request apart from one deleted server-side. */
     childrenBefore?: Child[];
@@ -906,8 +920,14 @@ function applyServerLoad(
   // `incompleteSlices` is not an `AppState` key and must not ride the spread below.
   // `bathRhythms` is one, but it is nullable and PARTIAL on the wire, so it is merged
   // below instead: spread as-is it would put a null (or a half-rhythm) into state.
-  const { incompleteSlices, bathRhythms: _bathRhythms, ...applied } = data;
+  const { incompleteSlices, bathRhythms: _bathRhythms, notesHasOlder: loadedNotesHasOlder, ...applied } = data;
   const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
+  const notesHasOlder = { ...local.notesHasOlder, ...loadedNotesHasOlder };
+  for (const child of reconciledChildren) {
+    if (child.serverId != null && degradedSlices.get(child.id)?.has('note')) {
+      notesHasOlder[String(child.serverId)] = local.notesHasOlder?.[String(child.serverId)] ?? true;
+    }
+  }
   // Checked against the RECONCILED list, not just the server's, so a local child kept
   // visible by reconcileChildren above doesn't get silently deselected.
   const selectedChildId = reconciledChildren.some((c) => c.id === local.selectedChildId)
@@ -917,6 +937,7 @@ function applyServerLoad(
     ...extra,
     ...applied,
     children: reconciledChildren,
+    notesHasOlder,
     // Merging the local unsynced measurements back in keeps a wholesale reload from
     // dropping them before `flushUnsynced` pushes them. Entries are excluded from that
     // merge: the queue merge below is their only source.
@@ -1379,6 +1400,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   historyHasOlder: false,
   historyLoadingOlder: false,
   historyOlderError: false,
+  notesVisibleCounts: {},
+  notesHasOlder: {},
+  notesLoadingOlder: false,
+  notesOlderError: false,
   timers: [],
   measurements: [],
   treatments: [],
@@ -1682,6 +1707,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           conn,
           childServerIdFor(s.children, s.selectedChildId),
           opts?.historySinceMs ?? get().historySinceMs ?? recentHistorySince(Date.now()),
+          get().notesVisibleCounts,
         );
         // This reload replaces `entries` wholesale, and an entry that has not flushed yet is
         // not in the server data. Read AFTER the fetch so an entry logged mid-request is
@@ -1711,6 +1737,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
             bathRhythms: cur.bathRhythms,
             legacyRhythm: cur.legacyRhythm,
             q,
+            notesHasOlder: cur.notesHasOlder,
           },
           { connected: true, offline: false, networkOnline: true, historyOlderError: false },
         );
@@ -1767,6 +1794,46 @@ export const useAppStore = create<AppStore>((set, get) => ({
       set({ historyOlderError: true });
     } finally {
       set({ historyLoadingOlder: false });
+    }
+  },
+  loadMoreNotes: async () => {
+    const initial = get();
+    const child = initial.children.find((c) => c.id === initial.selectedChildId);
+    if (initial.notesLoadingOlder || initial.connection?.mode !== 'server' || child?.serverId == null) return;
+    const key = String(child.serverId);
+    const currentCount = initial.notesVisibleCounts[key] ?? NOTES_PAGE_SIZE;
+    const nextCount = currentCount + NOTES_PAGE_SIZE;
+    const available = initial.entries.filter((e) => e.type === 'note' && e.childId === child.id).length;
+    if (available >= nextCount || !initial.notesHasOlder[key]) {
+      set({ notesVisibleCounts: { ...initial.notesVisibleCounts, [key]: nextCount } });
+      return;
+    }
+    set({ notesLoadingOlder: true, notesOlderError: false });
+    try {
+      if (refreshInFlight) await refreshInFlight;
+      const current = get();
+      const selected = current.children.find((c) => c.id === current.selectedChildId);
+      if (selected?.serverId !== child.serverId || current.connection?.mode !== 'server') return;
+      const result = await loadNotesForChild(current.connection, child.serverId, nextCount);
+      const latest = get();
+      // A child/server switch during the request must not insert the old server's rows.
+      if (latest.connection?.mode !== 'server' || latest.connection.serverUrl !== current.connection.serverUrl ||
+          latest.connection.token !== current.connection.token ||
+          latest.children.find((c) => c.id === latest.selectedChildId)?.serverId !== child.serverId) return;
+      const localId = latest.selectedChildId;
+      const serverNotes = result.notes.map((e) => ({ ...e, childId: localId }));
+      const otherEntries = latest.entries.filter((e) =>
+        e.type !== 'note' || e.childId !== localId || e.serverId == null || e.heldBack,
+      );
+      set({
+        entries: [...otherEntries, ...serverNotes],
+        notesVisibleCounts: { ...latest.notesVisibleCounts, [key]: nextCount },
+        notesHasOlder: { ...latest.notesHasOlder, [key]: result.hasMore },
+      });
+    } catch {
+      set({ notesOlderError: true });
+    } finally {
+      set({ notesLoadingOlder: false });
     }
   },
   connect: async (serverUrl, token) => {
@@ -1830,6 +1897,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           bathRhythms: s.bathRhythms,
           legacyRhythm: s.legacyRhythm,
           q,
+          notesHasOlder: sameOrigin ? s.notesHasOlder : {},
         },
         {
           connection: conn,
@@ -1837,6 +1905,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           connecting: false,
           savedServers,
           ...(sameOrigin ? {} : { historySinceMs: null, historyHasOlder: false }),
+          ...(sameOrigin ? {} : { notesVisibleCounts: {}, notesHasOlder: {} }),
           // The only place the pre-map feeding fallback can reach state on a cold start
           // parked at the reconnect screen, since `hydrate`'s no-connection branch reads
           // no entity store.
@@ -2033,6 +2102,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       historySinceMs: null,
       historyHasOlder: false,
       historyOlderError: false,
+      notesVisibleCounts: {},
+      notesHasOlder: {},
       measurements: e?.measurements ?? [],
       selectedChildId: e?.selectedChildId ?? '',
       lastFeed: e?.lastFeed ?? {},
@@ -2070,6 +2141,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       historySinceMs: null,
       historyHasOlder: false,
       historyOlderError: false,
+      notesVisibleCounts: {},
+      notesHasOlder: {},
       timers: [],
       measurements: [],
       selectedChildId: '',

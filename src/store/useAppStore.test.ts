@@ -22,6 +22,7 @@ import { loadConnection, saveConnection } from '@/data/storage';
 import {
   deleteEntryFromServer,
   loadFromServer,
+  loadNotesForChild,
   loadInsightsHistory,
   loadProfileFromServer,
   loadTagsFromServer,
@@ -223,6 +224,8 @@ vi.mock('@/data/bathRhythm', () => ({
 }));
 
 vi.mock('@/data/repository', () => ({
+  NOTES_PAGE_SIZE: 20,
+  loadNotesForChild: vi.fn(async () => ({ notes: [], hasMore: false })),
   loadFromServer: vi.fn(async () => ({
     children: [],
     entries: [],
@@ -495,6 +498,7 @@ beforeEach(() => {
   // silently shifting every subsequent queued value by one. Reset restores the module
   // mock's own implementation (Vitest 3), so the shared default survives.
   vi.mocked(loadFromServer).mockReset();
+  vi.mocked(loadNotesForChild).mockReset();
   vi.mocked(enqueueEntry).mockClear();
   vi.mocked(enqueueEntries).mockClear();
   vi.mocked(loadProfileFromServer).mockClear();
@@ -523,6 +527,10 @@ beforeEach(() => {
     historyHasOlder: false,
     historyLoadingOlder: false,
     historyOlderError: false,
+    notesVisibleCounts: {},
+    notesHasOlder: {},
+    notesLoadingOlder: false,
+    notesOlderError: false,
     timers: [],
     measurements: [],
     treatments: [],
@@ -1423,7 +1431,7 @@ describe('loading older History days', () => {
     vi.mocked(loadFromServer).mockResolvedValueOnce(answer).mockResolvedValueOnce(answer);
 
     await s().loadOlderHistory();
-    expect(loadFromServer).toHaveBeenCalledWith(s().connection, 501, older);
+    expect(loadFromServer).toHaveBeenCalledWith(s().connection, 501, older, {});
     expect(s().entries.map((e) => e.id)).toContain('old-diaper');
     expect(s().historySinceMs).toBe(older);
     expect(s().historyHasOlder).toBe(false);
@@ -1431,6 +1439,37 @@ describe('loading older History days', () => {
     await s().refresh({ push: false });
     expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[2]).toBe(older);
     expect(s().entries.map((e) => e.id)).toContain('old-diaper');
+  });
+});
+
+describe('loading more Notes', () => {
+  it('fetches another ordinary-notes page without dropping other entries or local notes', async () => {
+    const existingNotes: Entry[] = Array.from({ length: 20 }, (_, i) => ({
+      id: `note-${i}`, serverId: i + 1, childId: 'c1', type: 'note', time: NOW - i, text: `note ${i}`, tags: [],
+    }));
+    const localNote: Entry = { id: 'local-note', childId: 'c1', type: 'note', time: NOW, text: 'queued', tags: [] };
+    const diaper: Entry = { id: 'diaper-1', childId: 'c1', type: 'diaper', time: NOW, wet: true, solid: false, color: null, tags: [] };
+    useAppStore.setState({
+      children: [SYNCED_C1], selectedChildId: 'c1',
+      entries: [...existingNotes, localNote, diaper],
+      notesHasOlder: { '501': true },
+    });
+    const nextNotes: Entry[] = Array.from({ length: 40 }, (_, i) => ({
+      id: `note-${i}`, serverId: i + 1, childId: '501', type: 'note', time: NOW - i, text: `note ${i}`, tags: [],
+    }));
+    vi.mocked(loadNotesForChild).mockResolvedValueOnce({ notes: nextNotes, hasMore: false });
+
+    await s().loadMoreNotes();
+
+    expect(loadNotesForChild).toHaveBeenCalledWith(s().connection, 501, 40);
+    expect(s().entries.filter((e) => e.type === 'note')).toHaveLength(41);
+    expect(s().entries).toContainEqual(diaper);
+    expect(s().entries).toContainEqual(localNote);
+    expect(s().notesVisibleCounts['501']).toBe(40);
+    expect(s().notesHasOlder['501']).toBe(false);
+
+    await s().refresh({ push: false });
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[3]).toEqual({ '501': 40 });
   });
 });
 
@@ -2687,6 +2726,19 @@ describe('offline-created children/measurements survive a cold hydrate (server m
 describe('cache-first hydrate (server mode)', () => {
   const storedChild: Child = { id: 'c1', serverId: 501, first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' };
   const storedEntry: Entry = { id: 'stored-1', childId: 'c1', type: 'note', time: NOW - 60 * M, text: 'from the entity store', tags: [] };
+
+  it('does not extend the activity cutoff to an old cached note or milestone', async () => {
+    useAppStore.setState({ hydrating: true, connection: null, connected: false, children: [], entries: [] });
+    vi.mocked(loadConnection).mockResolvedValueOnce({ mode: 'server', serverUrl: 'http://x', token: 't' });
+    vi.mocked(loadEntities).mockResolvedValueOnce({
+      children: [storedChild],
+      entries: [storedEntry, { id: 'old-milestone', childId: 'c1', type: 'milestone', time: NOW - 30 * 86400000, key: 'smile', text: 'Smiled', tags: [] }],
+      measurements: [], selectedChildId: 'c1', lastFeed: {}, legacyLastFeed: null,
+    });
+    await s().hydrate();
+    await flush();
+    expect(vi.mocked(loadFromServer).mock.calls.at(-1)?.[2]).toBeGreaterThan(NOW);
+  });
 
   it('finishes hydrating on cached data BEFORE the server load settles, then merges the refresh result', async () => {
     let resolveLoad!: (data: unknown) => void;

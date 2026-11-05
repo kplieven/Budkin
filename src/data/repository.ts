@@ -58,8 +58,8 @@ export interface LoadResult {
   /** SERVER child id -> the record slices whose fetch DEGRADED to [] for that
    *  child. Nothing else in the shape says so, which makes a listed slice a FLOOR
    *  and not an answer: consumers must keep the rows they already hold instead of
-   *  reading the gap as a delete, or one timed-out /api/notes/ takes every note,
-   *  bath and milestone this device had. Per SLICE, so one structurally broken
+   *  reading the gap as a delete. The raw notes scan covers baths and ordinary
+   *  notes; the tagged milestone scan is tracked separately. Per SLICE, so one structurally broken
    *  endpoint cannot freeze a child's whole history. FAILS CLOSED: any new
    *  per-type fetch MUST route its catch through `orEmpty`. */
   incompleteSlices?: Record<string, LoadSlice[]>;
@@ -67,9 +67,12 @@ export interface LoadResult {
    *  exists on the server. Kept with the answer so refresh can replace the same span. */
   historySinceMs?: number;
   historyHasOlder?: boolean;
+  /** SERVER child id -> whether another raw notes page may exist. */
+  notesHasOlder?: Record<string, boolean>;
 }
 
 const HISTORY_PAGE_SIZE = 100;
+export const NOTES_PAGE_SIZE = 20;
 
 /** The API orders intervals by start, even though the timeline places them at end. */
 function sortTime(entry: Entry): number {
@@ -112,6 +115,58 @@ function mappedPage<T extends Entry>(entries: T[]): EntryPage<T> {
   return { entries, pageCount: entries.length };
 }
 
+/** Raw notes pages contain baths, milestones, and metadata. Count only ordinary
+ *  notes toward the requested page, but keep scanning through the history cutoff
+ *  so baths in the timeline are complete as well. */
+async function loadNoteWindow(
+  client: BabybuddyClient,
+  childId: string,
+  target: number,
+  sinceMs?: number,
+): Promise<{ baths: Entry[]; notes: Entry[]; hasOlderHistory: boolean; hasMoreNotes: boolean }> {
+  const baths: Entry[] = [];
+  const notes: Entry[] = [];
+  let hasOlderHistory = false;
+  let previousLastId: number | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const batch = await client.listChildNotes(childId, HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE);
+    notes.push(...batch.notes);
+    baths.push(...batch.baths.filter((e) => sinceMs == null || entryTimestamp(e) >= sinceMs));
+    if (sinceMs != null && batch.oldestTime != null && batch.oldestTime < sinceMs) hasOlderHistory = true;
+    const hasMore = batch.pageCount === HISTORY_PAGE_SIZE;
+    if (!hasMore || (notes.length >= target && (sinceMs == null || hasOlderHistory))) {
+      return { baths, notes, hasOlderHistory, hasMoreNotes: hasMore };
+    }
+    if (batch.lastId != null && batch.lastId === previousLastId) throw new Error('Notes pagination did not advance');
+    previousLastId = batch.lastId;
+  }
+  throw new Error('Notes pagination exceeded 1000 pages');
+}
+
+async function loadAllMilestones(client: BabybuddyClient, childId: string): Promise<Entry[]> {
+  const milestones: Entry[] = [];
+  let previousLastId: number | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const batch = await client.listChildMilestones(childId, HISTORY_PAGE_SIZE, page * HISTORY_PAGE_SIZE);
+    milestones.push(...batch.milestones);
+    if (batch.pageCount < HISTORY_PAGE_SIZE) return milestones;
+    if (batch.lastId != null && batch.lastId === previousLastId) throw new Error('Milestone pagination did not advance');
+    previousLastId = batch.lastId;
+  }
+  throw new Error('Milestone pagination exceeded 1000 pages');
+}
+
+/** Used by the Notes tab when it needs more than the initial page. */
+export async function loadNotesForChild(
+  conn: Connection,
+  childServerId: number,
+  target: number,
+): Promise<{ notes: Entry[]; hasMore: boolean }> {
+  if (conn.mode !== 'server') return { notes: [], hasMore: false };
+  const page = await loadNoteWindow(new BabybuddyClient(conn.serverUrl, conn.token), String(childServerId), target);
+  return { notes: page.notes, hasMore: page.hasMoreNotes };
+}
+
 /** Fixed concatenation order for `LoadResult.entries`, independent of timing. */
 const ENTRY_SLICES = [
   'feeding',
@@ -129,7 +184,7 @@ const ENTRY_SLICES = [
 const MEASUREMENT_KINDS = ['weight', 'height', 'head', 'bmi'] as const satisfies readonly MeasurementKind[];
 
 /** Cap on requests in flight across the WHOLE load, siblings included. A load
- *  costs 4 account-wide requests plus 13 per child, so a per-child `Promise.all`
+ *  costs 4 account-wide requests plus 14 per child, so a per-child `Promise.all`
  *  would peak at 13N, and peak concurrency is what kills a self-hosted instance:
  *  gunicorn defaults to `2*cores+1` workers, so a Pi serves 9 at a time. */
 const FETCH_CONCURRENCY = 8;
@@ -153,6 +208,7 @@ interface ChildLoad {
   treatments: Treatment[];
   degraded: LoadSlice[];
   hasOlder: boolean;
+  notesHasOlder: boolean;
   latestFeeding?: Extract<Entry, { type: 'feeding' }>;
 }
 
@@ -165,6 +221,7 @@ export async function loadFromServer(
   conn: Connection,
   preferredChildServerId?: number | null,
   sinceMs = recentHistorySince(Date.now()),
+  notesTargets: Record<string, number> = {},
 ): Promise<LoadResult> {
   // Only ever called with a server connection; the guard just narrows the union.
   if (conn.mode !== 'server') {
@@ -201,7 +258,7 @@ export async function loadFromServer(
   const selectedChildId = preferred ?? children[0]?.id ?? '';
 
   const loads = new Map<string, ChildLoad>();
-  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [], hasOlder: false });
+  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [], hasOlder: false, notesHasOlder: false });
 
   /** The degrade-to-empty catch every per-type call shares. Takes the slices and
    *  the child explicitly, because one request can cover several slices and
@@ -237,23 +294,22 @@ export async function loadFromServer(
       async () => void (load.entries.diaper = await read(async (l, o) => mappedPage(await client.listChanges(id, l, o))).catch(orEmpty(load, [], 'diaper'))),
       async () => void (load.entries.pumping = await read(async (l, o) => mappedPage(await client.listPumping(id, l, o))).catch(orEmpty(load, [], 'pumping'))),
       async () => void (load.entries.tummy = await read(async (l, o) => mappedPage(await client.listTummy(id, l, o))).catch(orEmpty(load, [], 'tummy'))),
-      // ONE /api/notes/ request: a failure empties bath, milestone and note at once.
+      // The raw notes scan fills an ordinary-notes page as well as the history
+      // window. Milestones get a separate all-time tagged scan below.
       async () => {
-        const notes = await read(async (l, o) => {
-          const page = await client.listChildNotes(id, l, o);
-          return {
-            entries: [...page.baths, ...page.milestones, ...page.notes],
-            pageCount: page.pageCount ?? page.baths.length + page.milestones.length + page.notes.length,
-            oldestTime: page.oldestTime,
-          };
-        }).catch(orEmpty(load, [] as Entry[], 'bath', 'milestone', 'note'));
-        load.entries.bath = notes.filter((e) => e.type === 'bath');
-        load.entries.milestone = notes.filter((e) => e.type === 'milestone');
-        load.entries.note = notes.filter((e) => e.type === 'note');
+        const window = await loadNoteWindow(client, id, Math.max(NOTES_PAGE_SIZE, notesTargets[id] ?? 0), sinceMs)
+          .catch(orEmpty(load, null, 'bath', 'note'));
+        load.entries.bath = window?.baths ?? [];
+        load.entries.note = window?.notes ?? [];
+        if (window) {
+          load.hasOlder ||= window.hasOlderHistory;
+          load.notesHasOlder = window.hasMoreNotes;
+        }
       },
+      async () => void (load.entries.milestone = await loadAllMilestones(client, id).catch(orEmpty(load, [], 'milestone'))),
       async () => void (load.entries.temperature = await read(async (l, o) => mappedPage(await client.listTemperature(id, l, o))).catch(orEmpty(load, [], 'temperature'))),
       async () => void (load.entries.medication = await read(async (l, o) => mappedPage(await client.listMedication(id, l, o))).catch(orEmpty(load, [], 'medication'))),
-      // A SECOND /api/notes/ request filtered by the `treatment` tag: those notes
+      // A filtered /api/notes/ request for the `treatment` tag: those notes
       // are dated at the regimen's start, outside the recent-notes window above.
       async () => void (load.treatments = await client.listChildTreatments(id).catch(orEmpty(load, [] as Treatment[], 'treatment'))),
       ...MEASUREMENT_KINDS.map(
@@ -268,6 +324,7 @@ export async function loadFromServer(
   const measurements: Measurement[] = [];
   const treatments: Treatment[] = [];
   const incompleteSlices: Record<string, LoadSlice[]> = {};
+  const notesHasOlder: Record<string, boolean> = {};
   // No feeds means no opinion, NOT a default.
   const lastFeed: Record<string, LastFeed> = {};
   for (const c of children) {
@@ -276,6 +333,7 @@ export async function loadFromServer(
     for (const kind of MEASUREMENT_KINDS) measurements.push(...(load.measurements[kind] ?? []));
     treatments.push(...load.treatments);
     if (load.degraded.length > 0) incompleteSlices[c.id] = load.degraded;
+    notesHasOlder[c.id] = load.notesHasOlder;
     // Read the newest feeding across fetched pages rather than trusting API order.
     // A degraded slice has no opinion, so the existing prefill survives.
     const lastFeeding = load.latestFeeding;
@@ -313,6 +371,7 @@ export async function loadFromServer(
     treatments,
     bathRhythms,
     incompleteSlices,
+    notesHasOlder,
     ...(historyIncomplete ? {} : { historySinceMs: sinceMs }),
     historyHasOlder: historyIncomplete || [...loads.values()].some((load) => load.hasOlder),
   };

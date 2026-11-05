@@ -950,7 +950,7 @@ export class BabybuddyClient {
     childId: string,
     limit = 100,
     offset = 0,
-  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[]; pageCount: number; oldestTime?: number }> {
+  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[]; pageCount: number; oldestTime?: number; lastId?: number }> {
     const data = await this.request<Paginated<any>>(
       `/notes/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
@@ -969,6 +969,24 @@ export class BabybuddyClient {
       // timeline rows. Pagination must count them anyway or it stops too early.
       pageCount: data.results.length,
       oldestTime: data.results.length ? fromISO(data.results[data.results.length - 1].time) : undefined,
+      lastId: data.results[data.results.length - 1]?.id,
+    };
+  }
+
+  /** Milestones must outlive the short history window. The tag filter keeps the
+   *  scan small on Baby Buddy; re-check each row for servers that ignore filters. */
+  async listChildMilestones(
+    childId: string,
+    limit = 100,
+    offset = 0,
+  ): Promise<{ milestones: MilestoneEntry[]; pageCount: number; lastId?: number }> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?child=${childId}&tags=milestone&ordering=-time&limit=${limit}&offset=${offset}`,
+    );
+    return {
+      milestones: data.results.filter(isMilestoneNote).map((n) => noteToMilestoneEntry(n, childId)),
+      pageCount: data.results.length,
+      lastId: data.results[data.results.length - 1]?.id,
     };
   }
 
