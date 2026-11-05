@@ -6,6 +6,7 @@ import { entryTimestamp, type ActivityType, type MeasurementKind, type Timer } f
 import {
   deleteTimerFromServer,
   loadFromServer,
+  loadNotesForChild,
   loadInsightsHistory,
   loadProfileFromServer,
   pushTimerToServer,
@@ -25,7 +26,8 @@ const listPumping = vi.fn(async () => []);
 const listTummy = vi.fn(async () => []);
 const listTemperature = vi.fn(async () => []);
 const listMedication = vi.fn(async () => []);
-const listChildNotes = vi.fn(async () => ({ baths: [], milestones: [], notes: [] }));
+const listChildNotes = vi.fn(async (): Promise<any> => ({ baths: [], milestones: [], notes: [], pageCount: 0 }));
+const listChildMilestones = vi.fn(async (): Promise<any> => ({ milestones: [], pageCount: 0 }));
 const listChildTreatments = vi.fn(async () => [] as any[]);
 const listGenders = vi.fn(async () => new Map<number, string>());
 const setChildGender = vi.fn(async () => undefined);
@@ -50,6 +52,7 @@ vi.mock('@/api/client', async (importOriginal) => ({
     listTemperature,
     listMedication,
     listChildNotes,
+    listChildMilestones,
     listChildTreatments,
     listGenders,
     setChildGender,
@@ -135,7 +138,8 @@ describe('loadFromServer fans out to every child', () => {
     listChanges.mockReset().mockResolvedValue([]);
     listPumping.mockReset().mockResolvedValue([]);
     listTummy.mockReset().mockResolvedValue([]);
-    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [], pageCount: 0 });
+    listChildMilestones.mockReset().mockResolvedValue({ milestones: [], pageCount: 0 });
     listTemperature.mockReset().mockResolvedValue([]);
     listMedication.mockReset().mockResolvedValue([]);
     listChildTreatments.mockReset().mockResolvedValue([]);
@@ -160,7 +164,8 @@ describe('loadFromServer fans out to every child', () => {
       expect(listChanges).toHaveBeenCalledWith(id);
       expect(listPumping).toHaveBeenCalledWith(id);
       expect(listTummy).toHaveBeenCalledWith(id);
-      expect(listChildNotes).toHaveBeenCalledWith(id);
+      expect(listChildNotes).toHaveBeenCalledWith(id, 100, 0);
+      expect(listChildMilestones).toHaveBeenCalledWith(id, 100, 0);
       expect(listTemperature).toHaveBeenCalledWith(id);
       expect(listMedication).toHaveBeenCalledWith(id);
       expect(listChildTreatments).toHaveBeenCalledWith(id);
@@ -247,11 +252,11 @@ describe('loadFromServer fans out to every child', () => {
     listChildren.mockReset().mockResolvedValueOnce(serverChildren);
     resetLists();
     listChildNotes.mockImplementation((async (id: string) =>
-      id === '7' ? Promise.reject(new Error('timeout')) : { baths: [], milestones: [], notes: [] }) as any);
+      id === '7' ? Promise.reject(new Error('timeout')) : { baths: [], milestones: [], notes: [], pageCount: 0 }) as any);
 
     const result = await loadFromServer(conn, 9);
 
-    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'note'] });
   });
 
   it('holds concurrency at 8 across the whole load, not 8 per child', async () => {
@@ -277,7 +282,11 @@ describe('loadFromServer fans out to every child', () => {
     }
     listChildNotes.mockImplementation((async () => {
       await gate();
-      return { baths: [], milestones: [], notes: [] };
+      return { baths: [], milestones: [], notes: [], pageCount: 0 };
+    }) as any);
+    listChildMilestones.mockImplementation((async () => {
+      await gate();
+      return { milestones: [], pageCount: 0 };
     }) as any);
 
     await loadFromServer(conn);
@@ -285,11 +294,11 @@ describe('loadFromServer fans out to every child', () => {
     expect(peak).toBe(8);
     // And it really did run all of them: 13 requests per child, 3 children.
     expect(
-      [listFeedings, listSleep, listChanges, listPumping, listTummy, listChildNotes, listTemperature, listMedication, listChildTreatments].reduce(
+      [listFeedings, listSleep, listChanges, listPumping, listTummy, listChildNotes, listChildMilestones, listTemperature, listMedication, listChildTreatments].reduce(
         (n, m) => n + m.mock.calls.length,
         0,
       ) + listMeasurements.mock.calls.length,
-    ).toBe(39);
+    ).toBe(42);
 
     // Put the shared mocks back to plain answers: the describes below reuse them
     // without resetting every one, and a lingering timer-backed implementation
@@ -311,7 +320,8 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     listChanges.mockReset().mockResolvedValue([]);
     listPumping.mockReset().mockResolvedValue([]);
     listTummy.mockReset().mockResolvedValue([]);
-    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [] });
+    listChildNotes.mockReset().mockResolvedValue({ baths: [], milestones: [], notes: [], pageCount: 0 });
+    listChildMilestones.mockReset().mockResolvedValue({ milestones: [], pageCount: 0 });
     listTemperature.mockReset().mockResolvedValue([]);
     listMedication.mockReset().mockResolvedValue([]);
     listChildTreatments.mockReset().mockResolvedValue([]);
@@ -339,7 +349,7 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
 
     const result = await loadFromServer(conn);
 
-    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'milestone', 'note'] });
+    expect(result.incompleteSlices).toEqual({ '7': ['bath', 'note'] });
     expect(result.entries).toContainEqual(expect.objectContaining({ type: 'feeding' }));
   });
 
@@ -407,6 +417,7 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     listPumping.mockRejectedValueOnce(new Error('down'));
     listTummy.mockRejectedValueOnce(new Error('down'));
     listChildNotes.mockRejectedValueOnce(new Error('down'));
+    listChildMilestones.mockRejectedValueOnce(new Error('down'));
     listTemperature.mockRejectedValueOnce(new Error('down'));
     listMedication.mockRejectedValueOnce(new Error('down'));
     listChildTreatments.mockRejectedValueOnce(new Error('down'));
@@ -428,6 +439,47 @@ describe('loadFromServer incompleteSlices (partial-load signal)', () => {
     const result = await loadFromServer(conn);
 
     expect(result.incompleteSlices).toEqual({});
+  });
+});
+
+describe('notes pagination', () => {
+  const conn = { mode: 'server', serverUrl: 'x', token: 'y' } as const;
+  const child = { id: '7', serverId: 7, first: 'Mira', last: '', birth: 0, color: '#fff' };
+  const note = (id: number) => ({ id: `note-${id}`, serverId: id, type: 'note', childId: '7', time: id, text: `Note ${id}`, tags: [] });
+  const bath = (id: number) => ({ id: `bath-${id}`, serverId: id, type: 'bath', childId: '7', time: id, tags: [] });
+  const milestone = (id: number) => ({ id: `milestone-${id}`, serverId: id, type: 'milestone', childId: '7', time: id, tags: [] });
+
+  it('scans every milestone page and enough raw pages to fill the ordinary notes page', async () => {
+    listChildren.mockReset().mockResolvedValueOnce([child]);
+    for (const mock of [listFeedings, listSleep, listChanges, listPumping, listTummy, listTemperature, listMedication, listChildTreatments, listMeasurements, listTimers]) {
+      mock.mockReset().mockResolvedValue([]);
+    }
+    listChildNotes.mockReset()
+      .mockResolvedValueOnce({ baths: Array.from({ length: 95 }, (_, i) => bath(i)), notes: Array.from({ length: 5 }, (_, i) => note(i)), milestones: [], pageCount: 100, lastId: 100 })
+      .mockResolvedValueOnce({ baths: [], notes: Array.from({ length: 20 }, (_, i) => note(i + 5)), milestones: [], pageCount: 20, lastId: 120 });
+    listChildMilestones.mockReset()
+      .mockResolvedValueOnce({ milestones: Array.from({ length: 100 }, (_, i) => milestone(i)), pageCount: 100, lastId: 100 })
+      .mockResolvedValueOnce({ milestones: [milestone(100)], pageCount: 1, lastId: 101 });
+
+    const result = await loadFromServer(conn);
+
+    expect(result.entries.filter((e) => e.type === 'milestone')).toHaveLength(101);
+    expect(result.entries.filter((e) => e.type === 'note')).toHaveLength(25);
+    expect(result.notesHasOlder).toEqual({ '7': false });
+    expect(listChildNotes.mock.calls.map((c) => c.slice(1))).toEqual([[100, 0], [100, 100]]);
+    expect(listChildMilestones.mock.calls.map((c) => c.slice(1))).toEqual([[100, 0], [100, 100]]);
+  });
+
+  it('loads more ordinary notes through intervening metadata pages', async () => {
+    listChildNotes.mockReset()
+      .mockResolvedValueOnce({ baths: [], notes: Array.from({ length: 10 }, (_, i) => note(i)), milestones: [], pageCount: 100, lastId: 100 })
+      .mockResolvedValueOnce({ baths: [], notes: Array.from({ length: 30 }, (_, i) => note(i + 10)), milestones: [], pageCount: 30, lastId: 130 });
+
+    const result = await loadNotesForChild(conn, 7, 40);
+
+    expect(result.notes).toHaveLength(40);
+    expect(result.hasMore).toBe(false);
+    expect(listChildNotes.mock.calls.map((c) => c.slice(1))).toEqual([[100, 0], [100, 100]]);
   });
 });
 

@@ -21,6 +21,7 @@ import { loadConnection, saveConnection } from '@/data/storage';
 import {
   deleteEntryFromServer,
   loadFromServer,
+  loadNotesForChild,
   loadInsightsHistory,
   loadProfileFromServer,
   loadTagsFromServer,
@@ -230,6 +231,8 @@ vi.mock('@/data/bathRhythm', () => ({
 }));
 
 vi.mock('@/data/repository', () => ({
+  NOTES_PAGE_SIZE: 20,
+  loadNotesForChild: vi.fn(async () => ({ notes: [], hasMore: false })),
   loadFromServer: vi.fn(async () => ({
     children: [],
     entries: [],
@@ -477,6 +480,10 @@ beforeEach(() => {
     selectedChildId: 'c1',
     children: [{ id: 'c1', first: 'Mira', last: 'O', birth: NOW - 90 * 86400000, color: '#fff' }],
     entries: [],
+    notesVisibleCounts: {},
+    notesHasOlder: {},
+    notesLoadingOlder: false,
+    notesOlderError: false,
     timers: [],
     measurements: [],
     treatments: [],
@@ -1231,6 +1238,29 @@ describe('treatments (medication regimens)', () => {
 });
 
 describe('general notes', () => {
+  it('reveals cached notes without a request, then loads the next page for the selected child', async () => {
+    const notes = Array.from({ length: 45 }, (_, i) => ({
+      id: `note-${i}`, serverId: i + 1, childId: 'c1', type: 'note' as const,
+      time: NOW - i * M, text: `Note ${i}`, tags: [],
+    }));
+    useAppStore.setState({ children: [SYNCED_C1], entries: notes, notesHasOlder: { [String(SYNCED_C1.serverId)]: true } });
+    const key = String(SYNCED_C1.serverId);
+    vi.mocked(loadNotesForChild).mockClear();
+    await s().loadMoreNotes();
+    expect(s().notesVisibleCounts[key]).toBe(40);
+    expect(loadNotesForChild).not.toHaveBeenCalled();
+
+    vi.mocked(loadNotesForChild).mockResolvedValueOnce({
+      notes: Array.from({ length: 45 }, (_, i) => ({ ...notes[0], id: `server-${i}`, serverId: i + 100, childId: key })),
+      hasMore: false,
+    });
+    await s().loadMoreNotes();
+    expect(loadNotesForChild).toHaveBeenCalledWith(s().connection, SYNCED_C1.serverId, 60);
+    expect(s().notesVisibleCounts[key]).toBe(60);
+    expect(s().notesHasOlder[key]).toBe(false);
+    expect(s().entries.filter((e) => e.type === 'note')).toHaveLength(45);
+  });
+
   it('openSheet: point shape, empty note body', () => {
     s().openSheet('note');
     const te = s().te;

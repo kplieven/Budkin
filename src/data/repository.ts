@@ -65,8 +65,8 @@ export interface LoadResult {
    *  `entries`/`measurements`/`treatments` with nothing else in the shape
    *  saying so, which makes it a FLOOR, not an answer: consumers must keep the
    *  rows they already hold for it instead of reading the gap as a delete, or
-   *  one timed-out /api/notes/ takes every note, bath and milestone this device
-   *  had. Exactly the `timers: null` distinction, per child and per slice.
+   *  one timed-out /api/notes/ takes the notes and baths this device had.
+   *  Milestones have their own filtered scan and failure signal.
    *
    *  Optional, and absent (like an empty map) means every slice of every
    *  fetched child came back whole: `loadFromServer` is the only construction
@@ -103,6 +103,45 @@ export interface LoadResult {
    *  than part of any child's record slice, it is merged onto `children` rather
    *  than into a slice, and it re-reads on the next good refresh. */
   incompleteSlices?: Record<string, LoadSlice[]>;
+  notesHasOlder?: Record<string, boolean>;
+}
+
+export const NOTES_PAGE_SIZE = 20;
+const NOTES_FETCH_SIZE = 100;
+
+async function loadNoteWindow(client: BabybuddyClient, childId: string, target: number) {
+  const baths: Entry[] = [];
+  const notes: Entry[] = [];
+  let previousLastId: number | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const batch = await client.listChildNotes(childId, NOTES_FETCH_SIZE, page * NOTES_FETCH_SIZE);
+    baths.push(...batch.baths);
+    notes.push(...batch.notes);
+    const hasMore = batch.pageCount === NOTES_FETCH_SIZE;
+    if (!hasMore || notes.length >= target) return { baths, notes, hasMore };
+    if (batch.lastId != null && batch.lastId === previousLastId) throw new Error('Notes pagination did not advance');
+    previousLastId = batch.lastId;
+  }
+  throw new Error('Notes pagination exceeded 1000 pages');
+}
+
+async function loadAllMilestones(client: BabybuddyClient, childId: string): Promise<Entry[]> {
+  const milestones: Entry[] = [];
+  let previousLastId: number | undefined;
+  for (let page = 0; page < 1000; page++) {
+    const batch = await client.listChildMilestones(childId, NOTES_FETCH_SIZE, page * NOTES_FETCH_SIZE);
+    milestones.push(...batch.milestones);
+    if (batch.pageCount < NOTES_FETCH_SIZE) return milestones;
+    if (batch.lastId != null && batch.lastId === previousLastId) throw new Error('Milestone pagination did not advance');
+    previousLastId = batch.lastId;
+  }
+  throw new Error('Milestone pagination exceeded 1000 pages');
+}
+
+export async function loadNotesForChild(conn: Connection, childServerId: number, target: number) {
+  if (conn.mode !== 'server') return { notes: [] as Entry[], hasMore: false };
+  const page = await loadNoteWindow(new BabybuddyClient(conn.serverUrl, conn.token), String(childServerId), target);
+  return { notes: page.notes, hasMore: page.hasMore };
 }
 
 /** The per-child record slices in the order they are concatenated into
@@ -128,8 +167,8 @@ const MEASUREMENT_KINDS = ['weight', 'height', 'head', 'bmi'] as const satisfies
  *  included.
  *
  *  Eight rather than "one child at a time" or "all children at once". A load
- *  costs 3 account-wide requests plus 13 per child, and the naive
- *  `Promise.all(children.map(...))` would take peak concurrency to 13N. Peak
+ *  costs 3 account-wide requests plus at least 14 per child, and the naive
+ *  `Promise.all(children.map(...))` would take peak concurrency to 14N. Peak
  *  concurrency is what kills a self-hosted instance: gunicorn defaults to
  *  `2*cores+1` workers, so a Raspberry Pi serves 9 at a time and the rest queue
  *  behind them. Eight holds a five-child load at or below the burst a
@@ -163,6 +202,7 @@ interface ChildLoad {
   measurements: Partial<Record<MeasurementKind, Measurement[]>>;
   treatments: Treatment[];
   degraded: LoadSlice[];
+  notesHasOlder: boolean;
 }
 
 /** Validate the connection and load EVERY child's recent records from the
@@ -172,7 +212,7 @@ interface ChildLoad {
  *  always held. Fetching only the selection made a sibling's History empty until
  *  a refresh landed, made every child switch a network round trip, and (through
  *  `applyServerLoad`, which replaces `entries` wholesale) deleted the previous
- *  child's month chunks from disk on each switch. Cost is `3 + 13N` requests,
+ *  child's month chunks from disk on each switch. Cost starts at `3 + 14N` requests,
  *  bounded in CONCURRENCY rather than in count by `FETCH_CONCURRENCY`.
  *
  *  `preferredChildServerId` is the SERVER id (`Child.serverId`) of the child the
@@ -185,6 +225,7 @@ interface ChildLoad {
 export async function loadFromServer(
   conn: Connection,
   preferredChildServerId?: number | null,
+  notesTargets: Record<string, number> = {},
 ): Promise<LoadResult> {
   // Dead default: this is only ever called with a real server connection, but
   // the union needs a guard here to narrow `conn` for the `serverUrl`/`token`
@@ -223,12 +264,12 @@ export async function loadFromServer(
   // One accumulator per child, filled in place by the tasks below and drained
   // in child order afterwards.
   const loads = new Map<string, ChildLoad>();
-  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [] });
+  for (const c of children) loads.set(c.id, { entries: {}, measurements: {}, treatments: [], degraded: [], notesHasOlder: false });
 
   /** The degrade-to-empty catch every per-type call shares, recording WHICH
    *  child's slices it emptied rather than swallowing the failure silently.
    *  Takes the slices explicitly because one request can cover several
-   *  (`listChildNotes` answers for baths, milestones and notes at once), and the
+   *  (the raw notes scan answers for baths and notes at once), and the
    *  child explicitly because siblings' requests interleave: a failure has to be
    *  filed against the child whose request it was, not against whichever one is
    *  selected.
@@ -257,16 +298,14 @@ export async function loadFromServer(
       async () => void (load.entries.diaper = await client.listChanges(id).catch(orEmpty(load, [], 'diaper'))),
       async () => void (load.entries.pumping = await client.listPumping(id).catch(orEmpty(load, [], 'pumping'))),
       async () => void (load.entries.tummy = await client.listTummy(id).catch(orEmpty(load, [], 'tummy'))),
-      // ONE /api/notes/ request, partitioned into milestones + baths + general notes,
-      // so one failure empties all three of those slices at once.
       async () => {
-        const notesData = await client
-          .listChildNotes(id)
-          .catch(orEmpty(load, { baths: [], milestones: [], notes: [] }, 'bath', 'milestone', 'note'));
-        load.entries.bath = notesData.baths;
-        load.entries.milestone = notesData.milestones;
-        load.entries.note = notesData.notes;
+        const notesData = await loadNoteWindow(client, id, Math.max(NOTES_PAGE_SIZE, notesTargets[id] ?? 0))
+          .catch(orEmpty(load, null, 'bath', 'note'));
+        load.entries.bath = notesData?.baths ?? [];
+        load.entries.note = notesData?.notes ?? [];
+        if (notesData) load.notesHasOlder = notesData.hasMore;
       },
+      async () => void (load.entries.milestone = await loadAllMilestones(client, id).catch(orEmpty(load, [], 'milestone'))),
       async () => void (load.entries.temperature = await client.listTemperature(id).catch(orEmpty(load, [], 'temperature'))),
       async () => void (load.entries.medication = await client.listMedication(id).catch(orEmpty(load, [], 'medication'))),
       // Treatments come from a SECOND /api/notes/ request filtered by the `treatment` tag,
@@ -287,6 +326,7 @@ export async function loadFromServer(
   const measurements: Measurement[] = [];
   const treatments: Treatment[] = [];
   const incompleteSlices: Record<string, LoadSlice[]> = {};
+  const notesHasOlder: Record<string, boolean> = {};
   // No feeds means no opinion, NOT a default: a child absent from `lastFeed`
   // leaves whatever the device already knew about them standing.
   const lastFeed: Record<string, LastFeed> = {};
@@ -295,6 +335,7 @@ export async function loadFromServer(
     for (const slice of ENTRY_SLICES) entries.push(...(load.entries[slice] ?? []));
     for (const kind of MEASUREMENT_KINDS) measurements.push(...(load.measurements[kind] ?? []));
     treatments.push(...load.treatments);
+    if (c.serverId != null && !load.degraded.includes('note')) notesHasOlder[String(c.serverId)] = load.notesHasOlder;
     if (load.degraded.length > 0) incompleteSlices[c.id] = load.degraded;
     // `listFeedings` orders by `-start` server-side, but sort anyway rather than
     // trusting that ordering to be the local one: `start` is what the prefill is
@@ -339,6 +380,7 @@ export async function loadFromServer(
     // degraded (see `LoadResult.incompleteSlices`). An account with no children
     // fetched nothing, so it names nothing.
     incompleteSlices,
+    notesHasOlder,
   };
 }
 

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 
 import { useTheme } from '@/theme/useTheme';
 
@@ -9,10 +9,12 @@ import { useTheme } from '@/theme/useTheme';
  * phone header and safe-area padding and render their body through this. Width
  * caps follow the web handoff (Settings 560, History/Timers 760).
  */
-export function DesktopPage({ maxWidth = 760, children }: { maxWidth?: number; children: ReactNode }) {
+export function DesktopPage({ maxWidth = 760, children, onScroll }: { maxWidth?: number; children: ReactNode; onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void }) {
   const t = useTheme();
   return (
     <ScrollView
+      onScroll={onScroll}
+      scrollEventThrottle={160}
       style={{ flex: 1, backgroundColor: t.bg }}
       contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 32, paddingBottom: 36, alignItems: 'center' }}
     >

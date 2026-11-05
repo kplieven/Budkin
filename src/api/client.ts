@@ -1034,10 +1034,10 @@ export class BabybuddyClient {
   }
 
   /**
-   * Read the child's recent `/api/notes/` ONCE and partition it three ways:
+   * Read one raw `/api/notes/` page and partition it three ways:
    * `milestone`-tagged notes become `MilestoneEntry`s, `bath`-tagged notes become
    * `BathEntry`s, and everything else becomes general `NoteEntry`s. All three
-   * share this one endpoint, so a single fetch feeds them all — no double-fetch.
+   * share this endpoint. The repository requests more raw pages as needed.
    * Milestone is checked first, so a note carrying both marker tags is a milestone.
    *
    * `treatment`-tagged notes are DROPPED here rather than returned: they are treatment
@@ -1048,9 +1048,10 @@ export class BabybuddyClient {
   async listChildNotes(
     childId: string,
     limit = 100,
-  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[] }> {
+    offset = 0,
+  ): Promise<{ baths: BathEntry[]; milestones: MilestoneEntry[]; notes: NoteEntry[]; pageCount: number; lastId?: number }> {
     const data = await this.request<Paginated<any>>(
-      `/notes/?child=${childId}&ordering=-time&limit=${limit}`,
+      `/notes/?child=${childId}&ordering=-time&limit=${limit}&offset=${offset}`,
     );
     const baths: BathEntry[] = [];
     const milestones: MilestoneEntry[] = [];
@@ -1061,7 +1062,23 @@ export class BabybuddyClient {
       else if (isTreatmentNote(n) || isGenderNote(n)) continue;
       else notes.push(noteToNoteEntry(n, childId));
     }
-    return { baths, milestones, notes };
+    return { baths, milestones, notes, pageCount: data.results.length, lastId: data.results.at(-1)?.id };
+  }
+
+  /** Read all milestone-tagged notes independently of the ordinary-notes page. */
+  async listChildMilestones(
+    childId: string,
+    limit = 100,
+    offset = 0,
+  ): Promise<{ milestones: MilestoneEntry[]; pageCount: number; lastId?: number }> {
+    const data = await this.request<Paginated<any>>(
+      `/notes/?child=${childId}&tags=milestone&ordering=-time&limit=${limit}&offset=${offset}`,
+    );
+    return {
+      milestones: data.results.filter(isMilestoneNote).map((n) => noteToMilestoneEntry(n, childId)),
+      pageCount: data.results.length,
+      lastId: data.results.at(-1)?.id,
+    };
   }
 
   /**

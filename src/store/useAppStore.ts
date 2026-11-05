@@ -22,6 +22,8 @@ import {
   deleteMeasurementFromServer,
   deleteTimerFromServer,
   loadFromServer,
+  loadNotesForChild,
+  NOTES_PAGE_SIZE,
   loadInsightsHistory,
   loadProfileFromServer,
   type LoadResult,
@@ -274,6 +276,10 @@ interface AppState {
   answeredMilestonePrompts: Record<string, string[]>;
   children: Child[];
   entries: Entry[];
+  notesVisibleCounts: Record<string, number>;
+  notesHasOlder: Record<string, boolean>;
+  notesLoadingOlder: boolean;
+  notesOlderError: boolean;
   timers: Timer[];
   measurements: Measurement[];
   /** Per-child medication regimens ("treatments"). Synced to Baby Buddy as
@@ -365,6 +371,7 @@ interface AppActions {
   hydrate: () => Promise<void>;
   /** Re-check the server and reload data (on foreground / pull-to-refresh). */
   refresh: () => Promise<void>;
+  loadMoreNotes: () => Promise<void>;
   connect: (serverUrl: string, token: string) => Promise<void>;
   /** Push a local-mode user's data up to a Baby Buddy server and switch to
    *  server mode. `opts.uploadAnyway` overrides the non-empty-server guard,
@@ -1167,6 +1174,7 @@ function applyServerLoad(
     timers: Timer[];
     lastFeed: Record<string, LastFeed>;
     q: Entry[];
+    notesHasOlder?: Record<string, boolean>;
     /** The caller's child list as it was when the fetch went out, when that
      *  differs from `children` above. Only `refresh` has one: it is the only
      *  caller that snapshots before fetching. See `reconcileChildren`. */
@@ -1189,10 +1197,16 @@ function applyServerLoad(
   // `LoadResult.incompleteSlices`); `applied` is the rest of the load, which
   // the spread below lands in state. Destructured apart because that metadata
   // is not an `AppState` key and must not ride the spread into the store.
-  const { incompleteSlices, ...applied } = data;
+  const { incompleteSlices, notesHasOlder: loadedNotesHasOlder, ...applied } = data;
   // Each of the three record merges below keeps the device's own rows for a
   // degraded slice instead of taking the floor the load returned.
   const degradedSlices = degradedSlicesByChild(incompleteSlices, reconciledChildren);
+  const notesHasOlder = { ...local.notesHasOlder, ...loadedNotesHasOlder };
+  for (const child of reconciledChildren) {
+    if (child.serverId != null && degradedSlices.get(child.id)?.has('note')) {
+      notesHasOlder[String(child.serverId)] = local.notesHasOlder?.[String(child.serverId)] ?? true;
+    }
+  }
   // Keep the caller's current selection if it's still visible, checked
   // against the RECONCILED list (not just the server's) so a local child kept
   // visible by reconcileChildren above doesn't get silently deselected;
@@ -1204,6 +1218,7 @@ function applyServerLoad(
   set({
     ...extra,
     ...applied,
+    notesHasOlder,
     children: reconciledChildren,
     // Measurements created offline are pushed by `flushUnsynced`; until that
     // flush lands, merging the local unsynced ones back in is what keeps a
@@ -1819,6 +1834,10 @@ export const useAppStore = create<AppStore>((set, get) => ({
   selectedChildId: '',
   children: [],
   entries: [],
+  notesVisibleCounts: {},
+  notesHasOlder: {},
+  notesLoadingOlder: false,
+  notesOlderError: false,
   timers: [],
   measurements: [],
   treatments: [],
@@ -2143,7 +2162,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // for a child that was never pushed, which keeps the old children[0]
       // fallback. `applyServerLoad` prefers the caller's own selection over it
       // anyway whenever that child is still visible.
-      const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId));
+      const data = await loadFromServer(conn, childServerIdFor(s.children, s.selectedChildId), s.notesVisibleCounts);
       // Read the write queue for the same reason `hydrate` does: this reload
       // replaces `entries` wholesale with server data, and an entry that has
       // not flushed yet is not in that data, so without merging it back the
@@ -2188,6 +2207,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
           timers: localTimers,
           lastFeed: cur.lastFeed,
           q,
+          notesHasOlder: cur.notesHasOlder,
         },
         { connected: true, offline: false, networkOnline: true },
       );
@@ -2217,6 +2237,41 @@ export const useAppStore = create<AppStore>((set, get) => ({
       }
     } finally {
       refreshInFlight = false;
+    }
+  },
+  loadMoreNotes: async () => {
+    const initial = get();
+    const child = initial.children.find((c) => c.id === initial.selectedChildId);
+    if (initial.notesLoadingOlder || refreshInFlight || initial.connection?.mode !== 'server' || child?.serverId == null) return;
+    const key = String(child.serverId);
+    const currentCount = initial.notesVisibleCounts[key] ?? NOTES_PAGE_SIZE;
+    const nextCount = currentCount + NOTES_PAGE_SIZE;
+    const available = initial.entries.filter((e) => e.type === 'note' && e.childId === child.id).length;
+    if (available >= nextCount || !initial.notesHasOlder[key]) {
+      set({ notesVisibleCounts: { ...initial.notesVisibleCounts, [key]: nextCount } });
+      return;
+    }
+    set({ notesLoadingOlder: true, notesOlderError: false });
+    try {
+      const result = await loadNotesForChild(initial.connection, child.serverId, nextCount);
+      const latest = get();
+      if (latest.connection?.mode !== 'server' || latest.connection.serverUrl !== initial.connection.serverUrl ||
+          latest.connection.token !== initial.connection.token ||
+          latest.children.find((c) => c.id === latest.selectedChildId)?.serverId !== child.serverId) return;
+      const localId = latest.selectedChildId;
+      const serverNotes = result.notes.map((e) => ({ ...e, childId: localId }));
+      const otherEntries = latest.entries.filter((e) =>
+        e.type !== 'note' || e.childId !== localId || e.serverId == null || e.heldBack,
+      );
+      set({
+        entries: [...otherEntries, ...serverNotes],
+        notesVisibleCounts: { ...latest.notesVisibleCounts, [key]: nextCount },
+        notesHasOlder: { ...latest.notesHasOlder, [key]: result.hasMore },
+      });
+    } catch {
+      set({ notesOlderError: true });
+    } finally {
+      set({ notesLoadingOlder: false });
     }
   },
   connect: async (serverUrl, token) => {
@@ -2306,12 +2361,14 @@ export const useAppStore = create<AppStore>((set, get) => ({
           // wholesale path always did.
           timers: sameOrigin || data.timers == null ? localTimers : [],
           q,
+          notesHasOlder: sameOrigin ? s.notesHasOlder : {},
         },
         {
           connection: conn,
           connected: true,
           connecting: false,
           savedServers,
+          ...(sameOrigin ? {} : { notesVisibleCounts: {}, notesHasOlder: {} }),
           // The pre-map feeding fallback travels with the entities it belongs
           // to. This is the only place it can reach state on a cold start
           // parked at the reconnect screen: `hydrate`'s no-connection branch
@@ -2547,6 +2604,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       connectError: null,
       children: e?.children ?? [],
       entries: backfillHeldBack(e?.entries ?? [], e?.children ?? []),
+      notesVisibleCounts: {},
+      notesHasOlder: {},
       measurements: e?.measurements ?? [],
       selectedChildId: e?.selectedChildId ?? '',
       lastFeed: e?.lastFeed ?? {},
@@ -2575,6 +2634,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
       connectError: null,
       children: [],
       entries: [],
+      notesVisibleCounts: {},
+      notesHasOlder: {},
       timers: [],
       measurements: [],
       selectedChildId: '',
