@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { View } from 'react-native';
 
 import { isHovered } from '@/components/hover';
@@ -19,19 +20,23 @@ const EMPTY: string[] = [];
  * passed and that is not yet logged or already answered. Any action retires the prompt
  * for good (persisted per child).
  */
-export function MilestoneNudge() {
+export const MilestoneNudge = memo(function MilestoneNudge() {
   const t = useTheme();
   // Select raw, derive in render (never return a fresh ref from a selector).
   const entries = useAppStore((s) => s.entries);
-  const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  // The prompt changes only when whole-month age changes. Avoid scanning all entries
+  // and re-rendering the home card on every one-second global clock tick.
+  const months = useAppStore((s) => {
+    const selected = s.children.find((c) => c.id === s.selectedChildId);
+    return selected ? ageMonths(selected.birth, s.now) : null;
+  });
   const answeredMap = useAppStore((s) => s.answeredMilestonePrompts);
   const openMilestone = useAppStore((s) => s.openMilestone);
   const answerMilestonePrompt = useAppStore((s) => s.answerMilestonePrompt);
 
   const answered = child ? (answeredMap[child.id] ?? EMPTY) : EMPTY;
   const reached = reachedForChild(entries, child?.id);
-  const months = child ? ageMonths(child.birth, now) : null;
   const overdue = overdueUnlogged(months, reached, answered);
 
   if (!child || overdue.length === 0) return null;
@@ -136,4 +141,4 @@ export function MilestoneNudge() {
       ) : null}
     </View>
   );
-}
+});

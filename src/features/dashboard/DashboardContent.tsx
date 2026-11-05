@@ -54,7 +54,9 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
   const t = useTheme();
   const entries = useAppStore((s) => s.entries);
   const timers = useAppStore((s) => s.timers);
-  const now = useAppStore((s) => s.now);
+  // Every visible duration is rounded to minutes. Keep the history-wide status
+  // calculations off the one-second clock, especially after older days are loaded.
+  const now = useAppStore((s) => Math.floor(s.now / 60000) * 60000);
   // The client-wide day boundary (set in Settings); "today's sleep" below counts
   // over this window, not calendar midnight.
   const originHour = useAppStore((s) => s.rhythmOriginHour);
@@ -103,8 +105,8 @@ export function DashboardContent({ layout }: { layout: 'phone' | 'desktop' }) {
 
   const dayStartMs = windowStart(now, originHour);
   // Sleep so far in today's window: logged sleep plus the elapsed part of a nap
-  // that is still running, so the number keeps counting up (`now` ticks every
-  // second, so this ticks too). Everything is apportioned at the window boundary:
+  // that is still running, so the number keeps counting up each minute. Everything
+  // is apportioned at the window boundary:
   // a sleep straddling it counts here only for its in-window part, the rest lands
   // in the neighbouring day. windowStart rebuilds from calendar fields, so the
   // boundary stays correct across DST.

@@ -1,5 +1,5 @@
 import { type RefObject, useEffect, useRef, useState } from 'react';
-import { Platform, type ScrollView } from 'react-native';
+import { Platform } from 'react-native';
 import { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import {
@@ -31,7 +31,7 @@ const isTouchWeb =
  * `e.target`, so without it a scrub drifting downward at the top of the page reloads.
  */
 export function useWebPullToRefresh(
-  scrollRef: RefObject<ScrollView | null>,
+  scrollRef: RefObject<{ getScrollableNode: () => unknown } | null>,
   onRefresh: () => Promise<void> | void,
   suppressed: boolean = false,
 ) {

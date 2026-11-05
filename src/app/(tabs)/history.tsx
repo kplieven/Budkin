@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, RefreshControl, ScrollView, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { ActivityIndicator, Platform, RefreshControl, SectionList, View, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,7 +11,7 @@ import { Txt } from '@/components/Txt';
 import { TimelineEntry } from '@/features/activity/TimelineEntry';
 import { childAttribution } from '@/features/activity/childAttribution';
 import { activityOptions, dayOptions, filterItems, type TimelineFilter } from '@/features/activity/filter';
-import { groupByDay, isTimer } from '@/features/activity/groupByDay';
+import { groupByDay, isTimer, type TimelineItem } from '@/features/activity/groupByDay';
 import {
   HistoryFilterChips,
   HistoryFilterSheets,
@@ -20,11 +20,12 @@ import {
 import { isItemQueued, queuedIdSet } from '@/features/activity/queuedMarker';
 import { useWebPullToRefresh } from '@/features/dashboard/useWebPullToRefresh';
 import { eligibleTargetChildren } from '@/lib/logTargets';
-import { DesktopPage } from '@/shell/DesktopPage';
 import { useDesktopShell } from '@/shell/useDesktopShell';
 import { entriesForChild, selectServerMode, timersForChild } from '@/store/selectors';
 import { useAppStore } from '@/store/useAppStore';
 import { useTheme } from '@/theme/useTheme';
+
+const isActivity = (e: { type: string }) => e.type !== 'note' && e.type !== 'milestone';
 
 export default function History() {
   const t = useTheme();
@@ -33,10 +34,8 @@ export default function History() {
   const entries = useAppStore((s) => s.entries);
   const timers = useAppStore((s) => s.timers);
   const selectedChildId = useAppStore((s) => s.selectedChildId);
-  // Quantized INSIDE the selector, not with a useMemo: every change re-runs the pipeline
-  // below over the child's whole timeline and re-renders every mounted row, and quantizing
-  // here is what makes the subscription go quiet for a whole minute. A visited tab screen
-  // stays mounted, so the cost was being paid from other tabs too.
+  // A visited tab stays mounted. Relative labels only change by the minute;
+  // selecting that minute here keeps the list off the one-second render loop.
   const nowMinute = useAppStore((s) => Math.floor(s.now / 60000));
   const now = nowMinute * 60000;
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
@@ -67,14 +66,14 @@ export default function History() {
     setRefreshing(true);
     refresh().finally(() => setRefreshing(false));
   }, [refresh]);
-  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollRef = useRef<SectionList<TimelineItem, { label: string }> | null>(null);
   const webPull = useWebPullToRefresh(scrollRef, refresh);
 
   // The household view is session-local, like the filters below: a way to read the list
   // you are looking at now, not a preference to carry into the next launch. Offered only
   // from two children who can OWN activity, since counting an expecting child would offer
   // a toggle that adds no rows.
-  const householdChildren = eligibleTargetChildren(children);
+  const householdChildren = useMemo(() => eligibleTargetChildren(children), [children]);
   const canShowHousehold = householdChildren.length > 1;
   const [household, setHousehold] = useState(false);
   // Gated rather than reset, so deleting a sibling falls back to the single-child view
@@ -84,7 +83,6 @@ export default function History() {
 
   // General notes live in the same shared array, for queue/undo/sync reuse, but have
   // their own tab.
-  const isActivity = (e: { type: string }) => e.type !== 'note' && e.type !== 'milestone';
   // Running timers belong here too. Marking a logged entry "still ongoing" converts it
   // into a timer, so without this the row would vanish from the list it was marked in.
   //
@@ -93,9 +91,12 @@ export default function History() {
   // `timersForChild` refuses an unowned timer, which here would draw a chipless row in an
   // attributed list, and `entriesForChild` refuses an entry whose child it cannot
   // resolve. `groupByDay` sorts, so assembling child by child costs no ordering.
-  const items = showHousehold
-    ? householdChildren.flatMap((c) => [...entriesForChild(entries, c.id).filter(isActivity), ...timersForChild(timers, c.id)])
-    : [...entriesForChild(entries, selectedChildId).filter(isActivity), ...timersForChild(timers, selectedChildId)];
+  const items = useMemo(
+    () => showHousehold
+      ? householdChildren.flatMap((c) => [...entriesForChild(entries, c.id).filter(isActivity), ...timersForChild(timers, c.id)])
+      : [...entriesForChild(entries, selectedChildId).filter(isActivity), ...timersForChild(timers, selectedChildId)],
+    [showHousehold, householdChildren, entries, timers, selectedChildId],
+  );
 
   // Each option list is narrowed by the OTHER half of the filter, so no combination
   // reachable from the UI can come back empty. One can still empty out under the user,
@@ -104,10 +105,10 @@ export default function History() {
   // Lives here, not in the chip row, because the two sheets have to be mounted outside
   // the scroll container the chips sit in.
   const [filterSheet, setFilterSheet] = useState<OpenFilterSheet>(null);
-  const dayChoices = dayOptions(filterItems(items, { day: null, types: filter.types }), now);
-  const activityChoices = activityOptions(filterItems(items, { day: filter.day, types: [] }));
-  const visible = filterItems(items, filter);
-  const groups = groupByDay(visible, now);
+  const dayChoices = useMemo(() => dayOptions(filterItems(items, { day: null, types: filter.types }), now), [items, filter.types, now]);
+  const activityChoices = useMemo(() => activityOptions(filterItems(items, { day: filter.day, types: [] })), [items, filter.day]);
+  const visible = useMemo(() => filterItems(items, filter), [items, filter]);
+  const sections = useMemo(() => groupByDay(visible, now).map((g) => ({ label: g.label, data: g.items })), [visible, now]);
   const canLoadOlder = serverMode && historySinceMs != null && historyHasOlder && !filter.day;
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!canLoadOlder || historyLoadingOlder || historyOlderError) return;
@@ -119,8 +120,21 @@ export default function History() {
 
   // A running timer counts as logged, so the empty state stays away while one is going.
   const empty = items.length === 0;
-  const body = (
-    <>
+  const listHeader = (
+    <View style={{ width: '100%', maxWidth: desktop ? 600 : undefined, alignSelf: 'center' }}>
+      {!desktop && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 }}>
+          <Txt weight={800} size={27} tracking={-0.6}>History</Txt>
+          <Tappable
+            onPress={openSwitcher}
+            accessibilityRole="button"
+            accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
+            style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
+          >
+            <Avatar child={child} size={38} radius={12} fontSize={16} />
+          </Tappable>
+        </View>
+      )}
       {/* Rendered whenever there is either something to filter or a household to switch
           to: a child with nothing logged is precisely when someone wants to see the rest
           of the household. `showFilters` then hides the day and activity chips, which
@@ -159,65 +173,39 @@ export default function History() {
               : 'Your timeline fills up as you log feedings, sleep and diapers. Tap a big button on Home to start.'}
           </Txt>
         </View>
-      ) : (
-        <>
-          {visible.length === 0 ? (
-          <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
-            <Txt weight={700} size={16}>
-              Nothing to show here
+      ) : visible.length === 0 ? (
+        <View style={{ alignItems: 'center', paddingVertical: 48, paddingHorizontal: 24, gap: 12 }}>
+          <Txt weight={700} size={16}>
+            Nothing to show here
+          </Txt>
+          {/* Not spelled out per filter: the only way to reach this state is the data
+              moving underneath a selection, since the two option lists narrow
+              symmetrically and cannot offer an empty combination. */}
+          <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
+            Nothing here matches the current filter.
+          </Txt>
+          <Tappable
+            // Spelled out in full, as the twin literal in `HistoryFilterChips` is, so
+            // neither touches the household toggle: clearing a day and an activity must
+            // not also throw the user back to one child. That is why the toggle is not
+            // part of `TimelineFilter`.
+            onPress={() => setFilter({ day: null, types: [] })}
+            accessibilityRole="button"
+            style={(s) => [
+              { marginTop: 2, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22, cursor: 'pointer' },
+              isHovered(s) && { boxShadow: t.shadow },
+            ]}
+          >
+            <Txt unselectable weight={700} size={14} color={t.onPrimary}>
+              Clear filters
             </Txt>
-            {/* Not spelled out per filter: the only way to reach this state is the data
-                moving underneath a selection, since the two option lists narrow
-                symmetrically and cannot offer an empty combination. */}
-            <Txt weight={500} size={14} color={t.dim} style={{ textAlign: 'center', maxWidth: 260, lineHeight: 20 }}>
-              Nothing here matches the current filter.
-            </Txt>
-            <Tappable
-              // Spelled out in full, as the twin literal in `HistoryFilterChips` is, so
-              // neither touches the household toggle: clearing a day and an activity must
-              // not also throw the user back to one child. That is why the toggle is not
-              // part of `TimelineFilter`.
-              onPress={() => setFilter({ day: null, types: [] })}
-              accessibilityRole="button"
-              style={(s) => [
-                { marginTop: 2, backgroundColor: t.primary, borderRadius: 14, paddingVertical: 11, paddingHorizontal: 22, cursor: 'pointer' },
-                isHovered(s) && { boxShadow: t.shadow },
-              ]}
-            >
-              <Txt unselectable weight={700} size={14} color={t.onPrimary}>
-                Clear filters
-              </Txt>
-            </Tappable>
-          </View>
-        ) : (
-          groups.map((g) => (
-            <View key={g.label} style={{ marginBottom: 14 }}>
-              <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 22, marginBottom: 6, textTransform: 'uppercase' }}>
-                {g.label}
-              </Txt>
-              {/* A timer row opens the running-timer editor: `openEdit` looks the id up
-                  in `entries` and returns early on a miss, so sending a timer there
-                  would make the row silently dead. */}
-              <View>
-                {g.items.map((e, i) => (
-                  <TimelineEntry
-                    key={isTimer(e) ? `timer:${e.id}` : e.id}
-                    item={e}
-                    now={now}
-                    onPress={() => (isTimer(e) ? openTimerEdit(e.id) : openEdit(e.id))}
-                    isFirst={i === 0}
-                    isLast={i === g.items.length - 1}
-                    queued={isItemQueued(e, queued)}
-                    // The ROW's own child, never the selected one.
-                    child={showHousehold ? childAttribution(e.childId, children) : undefined}
-                  />
-                ))}
-              </View>
-            </View>
-          ))
-        )}
-        </>
-      )}
+          </Tappable>
+        </View>
+      ) : null}
+    </View>
+  );
+  const listFooter = (
+    <View style={{ width: '100%', maxWidth: desktop ? 600 : undefined, alignSelf: 'center' }}>
       {canLoadOlder && (
         <View style={{ alignItems: 'center', paddingVertical: 20 }}>
           {historyLoadingOlder ? (
@@ -235,7 +223,7 @@ export default function History() {
           )}
         </View>
       )}
-    </>
+    </View>
   );
 
   // A sibling of the scroll container on both layouts, never inside it: a sheet positions
@@ -252,13 +240,56 @@ export default function History() {
     />
   );
 
-  if (desktop)
-    return (
-      <View style={{ flex: 1 }}>
-        <DesktopPage maxWidth={600} onScroll={onScroll}>{body}</DesktopPage>
-        {filterSheets}
-      </View>
-    );
+  const list = (
+    <SectionList
+      ref={desktop ? undefined : scrollRef}
+      sections={sections}
+      keyExtractor={(item) => isTimer(item) ? `timer:${item.id}` : item.id}
+      stickySectionHeadersEnabled={false}
+      initialNumToRender={12}
+      maxToRenderPerBatch={12}
+      windowSize={5}
+      onScroll={onScroll}
+      scrollEventThrottle={200}
+      style={{ flex: 1, backgroundColor: t.bg }}
+      contentContainerStyle={{ paddingTop: desktop ? 6 : insets.top + 8, paddingBottom: desktop ? 36 : 24, paddingHorizontal: desktop ? 32 : 0 }}
+      refreshControl={!desktop && canPullToRefresh ? (
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={t.dim}
+          colors={['#E2B554']}
+          progressViewOffset={insets.top}
+        />
+      ) : undefined}
+      ListHeaderComponent={listHeader}
+      ListFooterComponent={listFooter}
+      renderSectionHeader={({ section }) => (
+        <View style={{ width: '100%', maxWidth: desktop ? 600 : undefined, alignSelf: 'center' }}>
+          <Txt weight={700} size={12.5} color={t.faint} tracking={0.8} style={{ marginHorizontal: 22, marginBottom: 6, textTransform: 'uppercase' }}>
+            {section.label}
+          </Txt>
+        </View>
+      )}
+      renderSectionFooter={() => <View style={{ height: 14 }} />}
+      renderItem={({ item, index, section }) => (
+        <View style={{ width: '100%', maxWidth: desktop ? 600 : undefined, alignSelf: 'center' }}>
+          {/* A timer needs the running-timer editor; openEdit only searches entries. */}
+          <TimelineEntry
+            item={item}
+            now={now}
+            onPress={() => (isTimer(item) ? openTimerEdit(item.id) : openEdit(item.id))}
+            isFirst={index === 0}
+            isLast={index === section.data.length - 1}
+            queued={isItemQueued(item, queued)}
+            child={showHousehold ? childAttribution(item.childId, children) : undefined}
+          />
+        </View>
+      )}
+    />
+  );
+
+  if (desktop) return <View style={{ flex: 1 }}>{list}{filterSheets}</View>;
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
@@ -294,39 +325,7 @@ export default function History() {
         </Animated.View>
       )}
 
-      <ScrollView
-        ref={scrollRef}
-        onScroll={onScroll}
-        scrollEventThrottle={200}
-        style={{ flex: 1, backgroundColor: t.bg }}
-        refreshControl={
-          canPullToRefresh ? (
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={t.dim}
-              colors={['#E2B554']}
-              progressViewOffset={insets.top}
-            />
-          ) : undefined
-        }
-        contentContainerStyle={{ paddingTop: insets.top + 8, paddingBottom: 24 }}
-      >
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 4, paddingBottom: 16 }}>
-          <Txt weight={800} size={27} tracking={-0.6}>
-            History
-          </Txt>
-          <Tappable
-            onPress={openSwitcher}
-            accessibilityRole="button"
-            accessibilityLabel={child ? `${child.first}, switch child` : 'Switch child'}
-            style={(s) => [{ cursor: 'pointer' }, isHovered(s) && { opacity: 0.85 }]}
-          >
-            <Avatar child={child} size={38} radius={12} fontSize={16} />
-          </Tappable>
-        </View>
-        {body}
-      </ScrollView>
+      {list}
 
       {filterSheets}
     </View>

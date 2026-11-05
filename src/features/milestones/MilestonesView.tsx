@@ -23,15 +23,19 @@ export function MilestonesView() {
   const t = useTheme();
   // Select raw, derive in render (never return a fresh ref from a selector).
   const entries = useAppStore((s) => s.entries);
-  const now = useAppStore((s) => s.now);
   const child = useAppStore((s) => s.children.find((c) => c.id === s.selectedChildId));
+  // The grid changes only when the child's whole-month age changes. Subscribing to
+  // `now` directly redraws every row every second, even after leaving this tab.
+  const months = useAppStore((s) => {
+    const selected = s.children.find((c) => c.id === s.selectedChildId);
+    return selected ? ageMonths(selected.birth, s.now) : null;
+  });
   const openMilestone = useAppStore((s) => s.openMilestone);
   const openEditMilestone = useAppStore((s) => s.openEditMilestone);
 
   // Scoped to the selected child so one child's logged milestones do not count as
   // reached for another (in local mode `entries` holds every child's history).
   const reached = reachedForChild(entries, child?.id);
-  const months = child ? ageMonths(child.birth, now) : null;
   const upcoming = aroundNow(months, reached);
   const groups = groupByCategory(MILESTONES);
 
